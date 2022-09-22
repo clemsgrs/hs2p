@@ -1,0 +1,43 @@
+data_dir: 'data'
+slide_list: 'data/failure.txt'
+save_dir: 'output'
+step_size: 256
+patch_size: 256
+patch_level: 0
+process_list:
+
+flags:
+  seg: True
+  patch: True
+  stitch: True
+  no_auto_skip: False
+
+seg_params:
+  seg_level: -1
+  sthresh: 8
+  mthresh: 7
+  close: 4
+  use_otsu: False
+  keep_ids:
+  exclude_ids:
+  save_mask: True
+
+filter_params:
+  a_t: 10
+  a_h: 4
+  max_n_holes: 8
+
+vis_params:
+  vis_level: -1
+  line_thickness: 100
+
+patch_params:
+  white_thresh: 5
+  black_thresh: 40
+  use_padding: True
+  contour_fn: 'four_pt'
+  draw_grid: True
+  bg_color:
+    - 214
+    - 233
+    - 238
