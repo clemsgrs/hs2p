@@ -475,25 +475,19 @@ class WholeSlideImage(object):
         print('Extracted {} coordinates'.format(len(results)))
 
         if len(results)>1:
-            asset_dict = {'coords' :          results}
-            
-            # attr = {'coords':
-            #     {'patch_size' :            patch_size, # To be considered...
-            #     'patch_level' :           patch_level,
-            #     'downsample':             self.level_downsamples[patch_level],
-            #     'downsampled_level_dim' : tuple(np.array(self.level_dim[patch_level])),
-            #     'level_dim':              self.level_dim[patch_level],
-            #     'wsi_name':               self.name,
-            #     'save_path':              save_path},
-            # }
+            asset_dict = {
+                'coords': results,
+            }
 
-            attr = {'patch_size' :            patch_size, # To be considered...
-                    'patch_level' :           patch_level,
-                    'downsample':             self.level_downsamples[patch_level],
-                    'downsampled_level_dim' : tuple(np.array(self.level_dim[patch_level])),
-                    'level_dim':              self.level_dim[patch_level],
-                    'wsi_name':               self.name,
-                    'save_path':              save_path}
+            attr = {
+                'patch_size': patch_size,
+                'patch_level': patch_level,
+                'downsample': self.level_downsamples[patch_level],
+                'downsampled_level_dim': tuple(np.array(self.level_dim[patch_level])),
+                'level_dim': self.level_dim[patch_level],
+                'wsi_name': self.name,
+                'save_path': save_path,
+            }
 
             attr_dict = {'coords': attr}
             return asset_dict, attr_dict

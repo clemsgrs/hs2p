@@ -33,11 +33,17 @@ def segment(WSI_object, seg_params = None, filter_params = None, mask_file = Non
 	return WSI_object, seg_time_elapsed
 
 
-def patching(WSI_object, **kwargs):
+def patching_old(WSI_object, **kwargs):
 	start_time = time.time()
 	file_path = WSI_object.createPatches_bag_hdf5(**kwargs, save_coord=True)
 	patch_time_elapsed = time.time() - start_time
 	return file_path, patch_time_elapsed
+ 
+ def patching(WSI_object, **kwargs):
+    start_time = time.time()
+    file_path = WSI_object.process_contours(**kwargs)
+    patch_time_elapsed = time.time() - start_time
+    return file_path, patch_time_elapsed
 
 
 def seg_and_patch(
@@ -198,8 +204,9 @@ def seg_and_patch(
 		if patch:
 			current_patch_params.update({'patch_level': patch_level, 'patch_size': patch_size, 'step_size': step_size, 
 										 'save_path': str(patch_save_dir)})
-			file_path, patch_time_elapsed = patching(WSI_object=WSI_object,  **current_patch_params,)
-		
+            file_path, patch_time_elapsed = patching(WSI_object=WSI_object,  **current_patch_params,)
+#            file_path, patch_time_elapsed = patching_old(WSI_object=WSI_object,  **current_patch_params,)
+
 		stitch_time_elapsed = -1
 		if stitch:
 			file_path = Path(patch_save_dir, slide_id+'.h5')
