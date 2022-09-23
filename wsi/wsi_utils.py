@@ -253,10 +253,6 @@ def StitchCoords(hdf5_file_path, wsi_object, downscale=16, draw_grid=False, bg_c
     imgs_dset = file['imgs']
     w, h = wsi.level_dimensions[0]
 
-    for k in coords_dset.attrs.keys():
-        print(f'coords_dset key: {k}')
-    for k in imgs_dset.attrs.keys():
-        print(f'imgs_dset key: {k}')
     print('start stitching {}'.format(imgs_dset.attrs['wsi_name']))
     print('original size: {} x {}'.format(w, h))
 
