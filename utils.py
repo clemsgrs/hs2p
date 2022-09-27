@@ -39,7 +39,7 @@ def patching_old(WSI_object, **kwargs):
 	patch_time_elapsed = time.time() - start_time
 	return file_path, patch_time_elapsed
  
- def patching(WSI_object, **kwargs):
+def patching(WSI_object, **kwargs):
     start_time = time.time()
     file_path = WSI_object.process_contours(**kwargs)
     patch_time_elapsed = time.time() - start_time
@@ -202,10 +202,16 @@ def seg_and_patch(
 
 		patch_time_elapsed = -1 # Default time
 		if patch:
-			current_patch_params.update({'patch_level': patch_level, 'patch_size': patch_size, 'step_size': step_size, 
-										 'save_path': str(patch_save_dir)})
-            file_path, patch_time_elapsed = patching(WSI_object=WSI_object,  **current_patch_params,)
-#            file_path, patch_time_elapsed = patching_old(WSI_object=WSI_object,  **current_patch_params,)
+			current_patch_params.update(
+				{
+					'patch_level': patch_level,
+					'patch_size': patch_size,
+					'step_size': step_size,
+					'save_path': str(patch_save_dir)
+				},
+			)
+			file_path, patch_time_elapsed = patching(WSI_object=WSI_object, **current_patch_params,)
+			# file_path, patch_time_elapsed = patching_old(WSI_object=WSI_object,  **current_patch_params,)
 
 		stitch_time_elapsed = -1
 		if stitch:

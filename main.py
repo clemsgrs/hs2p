@@ -47,5 +47,5 @@ def main(cfg):
 
 if __name__ == '__main__':
 	
-    # python3 main.py
+    # python3 main.py --config-name 'panda'
     main()

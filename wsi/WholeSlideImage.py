@@ -20,14 +20,14 @@ from wsi.util_classes import isInContourV1, isInContourV2, isInContourV3_Easy, i
 Image.MAX_IMAGE_PIXELS = 933120000
 
 class WholeSlideImage(object):
-    def __init__(self, path):
+    def __init__(self, path: Path):
 
         """
         Args:
-            path (str): fullpath to WSI file
+            path (Path): fullpath to WSI file
         """
 
-        self.name = path.name
+        self.name = path.stem
         self.wsi = openslide.open_slide(str(path))
         self.level_downsamples = self._assertLevelDownsamples()
         self.level_dim = self.wsi.level_dimensions
