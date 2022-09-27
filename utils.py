@@ -23,7 +23,7 @@ def stitching(file_path, wsi_object, downscale=64, bg_color=(255,255,255), draw_
 	return heatmap, total_time
 
 
-def segment(WSI_object, seg_params = None, filter_params = None, mask_file = None):
+def segment(WSI_object, seg_params=None, filter_params=None, mask_file=None):
 	start_time = time.time()
 	if mask_file is not None:
 		WSI_object.initSegmentation(mask_file)

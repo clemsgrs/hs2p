@@ -90,7 +90,7 @@ class WholeSlideImage(object):
         with open(mask_file,'wb') as f:
 	        pickle.dump(asset_dict, f)
 
-    def segmentTissue(self, seg_level=0, sthresh=20, sthresh_up = 255, mthresh=7, close = 0, use_otsu=False, 
+    def segmentTissue(self, seg_level=0, sthresh=20, sthresh_up=255, mthresh=7, close=0, use_otsu=False, 
                             filter_params={'a_t':100}, ref_patch_size=512, exclude_ids=[], keep_ids=[]):
         """
             Segment the tissue via HSV -> Median thresholding -> Binary threshold
