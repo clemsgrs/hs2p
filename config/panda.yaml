@@ -35,7 +35,9 @@ patch_params:
   white_thresh: 5
   black_thresh: 40
   use_padding: True
-  contour_fn: 'four_pt'
+  contour_fn: 'pct'
+  tissue_thresh: 0.1
+  save_png_to_disk: True
   draw_grid: True
   bg_color:
     - 214

@@ -69,10 +69,12 @@ class isInContourV2(Contour_Checking_fn):
 
 # Easy version of 4pt contour checking function - 1 of 4 points need to be in the contour for test to pass
 class isInContourV3_Easy(Contour_Checking_fn):
+	
 	def __init__(self, contour, patch_size, center_shift=0.5):
 		self.cont = contour
 		self.patch_size = patch_size
 		self.shift = int(patch_size//2*center_shift)
+	
 	def __call__(self, pt): 
 		center = (pt[0]+self.patch_size//2, pt[1]+self.patch_size//2)
 		if self.shift > 0:
@@ -112,5 +114,30 @@ class isInContourV3_Hard(Contour_Checking_fn):
 		return 1
 
 
+class isInContour_pct(Contour_Checking_fn):
+	
+	def __init__(self, tissue_mask, patch_size, downsample_factor, pct=0.01):
+		self.binary_mask = tissue_mask // 255
+		self.patch_size = patch_size
+		self.downsample = downsample_factor
+		self.pct = pct
+	
+	def __call__(self, pt):
 
+		# work on downsampled image to compute tissue percentage
+		downsampled_patch_size = int(self.patch_size * 1 / self.downsample)
+		downsampled_pt = pt * 1 / self.downsample
+		x_patch, y_patch = downsampled_pt
+		x_patch, y_patch = int(x_patch), int(y_patch)
+
+		# x,y axis inversed
+		sub_mask = self.binary_mask[y_patch:y_patch+downsampled_patch_size, x_patch:x_patch+downsampled_patch_size]
+
+		patch_area = downsampled_patch_size ** 2
+		tissue_area = np.sum(sub_mask)
+		tissue_pct = tissue_area / patch_area
 		
+		if tissue_pct >= self.pct:
+			return 1
+		else:
+			return 0

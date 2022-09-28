@@ -8,6 +8,8 @@ from pathlib import Path
 import math
 import cv2
 
+import tqdm
+
 def isWhitePatch(patch, satThresh=5):
     patch_hsv = cv2.cvtColor(patch, cv2.COLOR_RGB2HSV)
     return True if np.mean(patch_hsv[:,:,1]) < satThresh else False
@@ -72,6 +74,25 @@ def save_hdf5(output_path, asset_dict, attr_dict=None, mode='a'):
             dset[-data_shape[0]:] = val
     file.close()
     return output_path
+
+def save_png(wsi, save_dir, asset_dict, attr_dict=None):
+    coords = asset_dict['coords']
+    patch_size = attr_dict['coords']['patch_size']
+    patch_level = attr_dict['coords']['patch_level']
+    wsi_name = attr_dict['coords']['wsi_name']
+    
+    with tqdm.tqdm(
+        coords,
+        desc=(f'{wsi_name}'),
+        unit=' patch',
+        ncols=100,
+    ) as t:
+
+        for coord in t:
+            pil_patch = wsi.read_region(tuple(coord), patch_level, (patch_size,patch_size)).convert("RGB")
+            save_path = Path(save_dir, f'{coord[0]}_{coord[1]}.png')
+            pil_patch.save(save_path)
+        
 
 def initialize_hdf5_bag(first_patch, save_coord=False):
     x, y, cont_idx, patch_size, patch_level, downsample, downsampled_level_dim, level_dim, img_patch, name, save_path = tuple(first_patch.values())

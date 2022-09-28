@@ -39,9 +39,32 @@ def patching_old(WSI_object, **kwargs):
 	patch_time_elapsed = time.time() - start_time
 	return file_path, patch_time_elapsed
  
-def patching(WSI_object, **kwargs):
+def patching(
+	WSI_object,
+	save_dir,
+	patch_level,
+	patch_size,
+	step_size,
+	contour_fn,
+	tissue_thresh,
+	use_padding,
+	save_png_to_disk,
+	top_left: Optional[List[int]] = None,
+	bot_right: Optional[List[int]] = None,
+	):
     start_time = time.time()
-    file_path = WSI_object.process_contours(**kwargs)
+    file_path = WSI_object.process_contours(
+		save_dir=save_dir,
+		patch_level=patch_level,
+		patch_size=patch_size,
+		step_size=step_size,
+		contour_fn=contour_fn,
+		tissue_thresh=tissue_thresh,
+		use_padding=use_padding,
+		save_png_to_disk=save_png_to_disk,
+		top_left=top_left,
+		bot_right=bot_right,
+	)
     patch_time_elapsed = time.time() - start_time
     return file_path, patch_time_elapsed
 
@@ -86,15 +109,6 @@ def seg_and_patch(
 
 	total = len(process_stack)
 
-	legacy_support = 'a' in df.keys()
-	if legacy_support:
-		print('detected legacy segmentation csv file, legacy support enabled')
-		df = df.assign(**{'a_t': np.full((len(df)), int(filter_params['a_t']), dtype=np.uint32),
-		'a_h': np.full((len(df)), int(filter_params['a_h']), dtype=np.uint32),
-		'max_n_holes': np.full((len(df)), int(filter_params['max_n_holes']), dtype=np.uint32),
-		'line_thickness': np.full((len(df)), int(vis_params['line_thickness']), dtype=np.uint32),
-		'contour_fn': np.full((len(df)), patch_params['contour_fn'])})
-
 	seg_times = 0.
 	patch_times = 0.
 	stitch_times = 0.
@@ -121,33 +135,16 @@ def seg_and_patch(
 		current_vis_params = {}
 		current_filter_params = {}
 		current_seg_params = {}
-		current_patch_params = {}
-
 
 		for key in vis_params.keys():
-			if legacy_support and key == 'vis_level':
-				df.loc[idx, key] = -1
 			current_vis_params.update({key: df.loc[idx, key]})
 
 		for key in filter_params.keys():
-			if legacy_support and key == 'a_t':
-				old_area = df.loc[idx, 'a']
-				seg_level = df.loc[idx, 'seg_level']
-				scale = WSI_object.level_downsamples[seg_level]
-				adjusted_area = int(old_area * (scale[0] * scale[1]) / (512 * 512))
-				current_filter_params.update({key: adjusted_area})
-				df.loc[idx, key] = adjusted_area
 			current_filter_params.update({key: df.loc[idx, key]})
 
 		for key in seg_params.keys():
-			if legacy_support and key == 'seg_level':
-				df.loc[idx, key] = -1
 			if key in df.columns:
 				current_seg_params.update({key: df.loc[idx, key]})
-
-		for key in patch_params.keys():
-			if key in df.columns:
-				current_patch_params.update({key: df.loc[idx, key]})
 
 		if current_vis_params['vis_level'] < 0:
 			if len(WSI_object.level_dim) == 1:
@@ -202,20 +199,24 @@ def seg_and_patch(
 
 		patch_time_elapsed = -1 # Default time
 		if patch:
-			current_patch_params.update(
-				{
-					'patch_level': patch_level,
-					'patch_size': patch_size,
-					'step_size': step_size,
-					'save_path': str(patch_save_dir)
-				},
-			)
-			file_path, patch_time_elapsed = patching(WSI_object=WSI_object, **current_patch_params,)
-			# file_path, patch_time_elapsed = patching_old(WSI_object=WSI_object,  **current_patch_params,)
+			slide_save_dir = Path(patch_save_dir, slide_id, str(patch_size))
+			slide_save_dir.mkdir(parents=True, exist_ok=True)
+			file_path, patch_time_elapsed = patching(
+				WSI_object=WSI_object,
+				save_dir=slide_save_dir, 
+				patch_level=patch_level,
+				patch_size=patch_size,
+				step_size=step_size,
+				contour_fn=patch_params.contour_fn,
+				tissue_thresh=patch_params.tissue_thresh,
+				use_padding=patch_params.use_padding,
+				save_png_to_disk=patch_params.save_png_to_disk,
+				)
+			# file_path, patch_time_elapsed = patching_old(WSI_object=WSI_object,  **current_patch_params)
 
 		stitch_time_elapsed = -1
 		if stitch:
-			file_path = Path(patch_save_dir, slide_id+'.h5')
+			file_path = Path(patch_save_dir, slide_id, str(patch_size), f'{slide_id}.h5')
 			if file_path.is_file():
 				heatmap, stitch_time_elapsed = stitching(
 					file_path,
@@ -224,7 +225,9 @@ def seg_and_patch(
 					bg_color=tuple(patch_params.bg_color),
 					draw_grid=patch_params.draw_grid,
 				)
-				stitch_path = Path(stitch_save_dir, slide_id+'.jpg')
+				stitch_dir = Path(stitch_save_dir, slide_id)
+				stitch_dir.mkdir(parents=True, exist_ok=True)
+				stitch_path = Path(stitch_dir, f'{slide_id}_{patch_size}.jpg')
 				heatmap.save(stitch_path)
 
 		print("segmentation took {} seconds".format(seg_time_elapsed))
