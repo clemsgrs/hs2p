@@ -403,15 +403,15 @@ class WholeSlideImage(object):
     ):
         save_path_hdf5 = Path(save_dir, f'{self.name}.h5')
         # self.hdf5_file = save_path_hdf5
-        print("Creating patches for: ", self.name, "...",)
+        print(f'Creating patches for {self.name}...')
         elapsed = time.time()
         n_contours = len(self.contours_tissue)
-        print("Total number of contours to process: ", n_contours)
+        print(f'Total number of contours to process: {n_contours}')
         fp_chunk_size = math.ceil(n_contours * 0.05)
         init = True
         for idx, cont in enumerate(self.contours_tissue):
             if (idx + 1) % fp_chunk_size == fp_chunk_size:
-                print('Processing contour {}/{}'.format(idx, n_contours))
+                print(f'Processing contour {idx}/{n_contours}')
             
             asset_dict, attr_dict = self.process_contour(
                 cont, 
@@ -431,7 +431,9 @@ class WholeSlideImage(object):
                 else:
                     save_hdf5(save_path_hdf5, asset_dict, mode='a')
                 if save_png_to_disk:
-                    save_png(self.wsi, save_dir, asset_dict, attr_dict)
+                    png_save_dir = Path(save_dir, 'imgs')
+                    png_save_dir.mkdir(parents=True, exist_ok=True)
+                    save_png(self.wsi, png_save_dir, asset_dict, attr_dict)
 
         return self.hdf5_file
 
@@ -463,8 +465,8 @@ class WholeSlideImage(object):
             stop_y = min(start_y+h, img_h-patch_size+1)
             stop_x = min(start_x+w, img_w-patch_size+1)
         
-        print("Bounding Box:", start_x, start_y, w, h)
-        print("Contour Area:", cv2.contourArea(cont))
+        print(f'Bounding Box: {start_x}, {start_y}, {w}, {h}')
+        print(f'Contour Area: {cv2.contourArea(cont)}')
 
         if bot_right is not None:
             stop_y = min(bot_right[1], stop_y)
@@ -476,10 +478,10 @@ class WholeSlideImage(object):
         if bot_right is not None or top_left is not None:
             w, h = stop_x - start_x, stop_y - start_y
             if w <= 0 or h <= 0:
-                print("Contour is not in specified ROI, skip")
+                print('Contour is not in specified ROI, skip')
                 return {}, {}
             else:
-                print("Adjusted Bounding Box:", start_x, start_y, w, h)
+                print(f'Adjusted Bounding Box: {start_x}, {start_y}, {w}, {h}')
     
         if isinstance(contour_fn, str):
             if contour_fn == 'four_pt':
@@ -514,7 +516,7 @@ class WholeSlideImage(object):
         pool.close()
         results = np.array([result for result in results if result is not None])
         
-        print('Extracted {} coordinates'.format(len(results)))
+        print(f'Extracted {len(results)} patches')
 
         if len(results)>1:
             asset_dict = {

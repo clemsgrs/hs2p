@@ -80,7 +80,7 @@ def save_png(wsi, save_dir, asset_dict, attr_dict=None):
     patch_size = attr_dict['coords']['patch_size']
     patch_level = attr_dict['coords']['patch_level']
     wsi_name = attr_dict['coords']['wsi_name']
-    
+    print('Saving extracted patches to disk...')
     with tqdm.tqdm(
         coords,
         desc=(f'{wsi_name}'),
@@ -189,12 +189,12 @@ def DrawMap(canvas, patch_dset, coords, patch_size, indices=None, verbose=1, dra
     total = len(indices)
     if verbose > 0:
         ten_percent_chunk = math.ceil(total * 0.1)
-        print('start stitching {}'.format(patch_dset.attrs['wsi_name']))
+        print(f'start stitching {patch_dset.attrs["wsi_name"]}')
     
     for idx in range(total):
         if verbose > 0:
             if idx % ten_percent_chunk == 0:
-                print('progress: {}/{} stitched'.format(idx, total))
+                print(f'progress: {idx+1}/{total} stitched')
         
         patch_id = indices[idx]
         patch = patch_dset[patch_id]
@@ -216,12 +216,12 @@ def DrawMapFromCoords(canvas, wsi_object, coords, patch_size, vis_level, indices
         ten_percent_chunk = math.ceil(total * 0.1)
         
     patch_size = tuple(np.ceil((np.array(patch_size)/np.array(downsamples))).astype(np.int32))
-    print('downscaled patch size: {}x{}'.format(patch_size[0], patch_size[1]))
+    print(f'downscaled patch size: {patch_size[0]}x{patch_size[1]}')
     
     for idx in range(total):
         if verbose > 0:
             if idx % ten_percent_chunk == 0:
-                print('progress: {}/{} stitched'.format(idx, total))
+                print(f'progress: {idx+1}/{total} stitched')
         
         patch_id = indices[idx]
         coord = coords[patch_id]
@@ -242,14 +242,14 @@ def StitchPatches(hdf5_file_path, downscale=16, draw_grid=False, bg_color=(0,0,0
         w, h = dset.attrs['downsampled_level_dim']
     else:
         w, h = dset.attrs['level_dim']
-    print('original size: {} x {}'.format(w, h))
+    print(f'original size: {w} x {h}')
     w = w // downscale
     h = h //downscale
     coords = (coords / downscale).astype(np.int32)
-    print('downscaled size for stiching: {} x {}'.format(w, h))
-    print('number of patches: {}'.format(len(dset)))
+    print(f'downscaled size for stiching: {w} x {h}')
+    print(f'number of patches: {len(dset)}')
     img_shape = dset[0].shape
-    print('patch shape: {}'.format(img_shape))
+    print(f'patch shape: {img_shape}')
     downscaled_shape = (img_shape[1] // downscale, img_shape[0] // downscale)
 
     if w*h > Image.MAX_IMAGE_PIXELS: 
@@ -274,19 +274,19 @@ def StitchCoords(hdf5_file_path, wsi_object, downscale=16, draw_grid=False, bg_c
     coords = dset[:]
     w, h = wsi.level_dimensions[0]
     
-    print('start stitching {}'.format(dset.attrs['wsi_name']))
-    print('original size: {} x {}'.format(w, h))
+    print(f'start stitching {dset.attrs["wsi_name"]}')
+    print(f'original size: {w} x {h}')
 
     w, h = wsi.level_dimensions[vis_level]
 
-    print('downscaled size for stiching: {} x {}'.format(w, h))
-    print('number of patches: {}'.format(len(coords)))
+    print(f'downscaled size for stiching: {w} x {h}')
+    print(f'number of patches: {len(coords)}')
     
     patch_size = dset.attrs['patch_size']
     patch_level = dset.attrs['patch_level']
-    print('patch size: {}x{} patch level: {}'.format(patch_size, patch_size, patch_level))
+    print(f'patch size: {patch_size}x{patch_size} patch level: {patch_level}')
     patch_size = tuple((np.array((patch_size, patch_size)) * wsi.level_downsamples[patch_level]).astype(np.int32))
-    print('ref patch size: {}x{}'.format(patch_size, patch_size))
+    print(f'ref patch size: {patch_size}x{patch_size}')
 
     if w*h > Image.MAX_IMAGE_PIXELS: 
         raise Image.DecompressionBombError("Visualization Downscale %d is too large" % downscale)
@@ -312,8 +312,8 @@ def SamplePatches(coords_file_path, save_file_path, wsi_object,
     h5_patch_level = dset.attrs['patch_level']
     
     if verbose>0:
-        print('in .h5 file: total number of patches: {}'.format(len(coords)))
-        print('in .h5 file: patch size: {}x{} patch level: {}'.format(h5_patch_size, h5_patch_size, h5_patch_level))
+        print(f'in .h5 file: total number of patches: {len(coords)}')
+        print(f'in .h5 file: patch size: {h5_patch_size}x{h5_patch_size} patch level: {h5_patch_level}')
 
     if patch_level < 0:
         patch_level = h5_patch_level

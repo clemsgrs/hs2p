@@ -37,7 +37,7 @@ patch_params:
   use_padding: True
   contour_fn: 'pct'
   tissue_thresh: 0.1
-  save_png_to_disk: False
+  save_png_to_disk: True
   draw_grid: True
   bg_color:
     - 214

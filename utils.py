@@ -117,14 +117,14 @@ def seg_and_patch(
 		df.to_csv(Path(save_dir, 'process_list_autogen.csv'), index=False)
 		idx = process_stack.index[i]
 		slide = process_stack.loc[idx, 'slide_id']
-		print("\n\nprogress: {:.2f}, {}/{}".format(i+1/total, i+1, total))
-		print('processing {}'.format(slide))
+		print(f'\nProgress: {i+1}/{total}')
+		print(f'processing {slide}')
 		
 		df.loc[idx, 'process'] = 0
 		slide_id = Path(slide).stem
 
 		if auto_skip and Path(patch_save_dir, slide_id + '.h5').is_file():
-			print('{} already exist in destination location, skipped'.format(slide_id))
+			print(f'{slide_id} already exist in destination location, skipped')
 			df.loc[idx, 'status'] = 'already_exist'
 			continue
 
@@ -180,7 +180,7 @@ def seg_and_patch(
 
 		w, h = WSI_object.level_dim[current_seg_params['seg_level']] 
 		if w * h > 1e8:
-			print('level_dim {} x {} is likely too large for successful segmentation, aborting'.format(w, h))
+			print(f'level_dim {w} x {h} is likely too large for successful segmentation, aborting')
 			df.loc[idx, 'status'] = 'failed_seg'
 			continue
 
@@ -230,9 +230,9 @@ def seg_and_patch(
 				stitch_path = Path(stitch_dir, f'{slide_id}_{patch_size}.jpg')
 				heatmap.save(stitch_path)
 
-		print("segmentation took {} seconds".format(seg_time_elapsed))
-		print("patching took {} seconds".format(patch_time_elapsed))
-		print("stitching took {} seconds".format(stitch_time_elapsed))
+		print(f'segmentation took {seg_time_elapsed:.2f}s')
+		print(f'patching took {patch_time_elapsed:.2f}s')
+		print(f'stitching took {stitch_time_elapsed:.2f}s')
 		df.loc[idx, 'status'] = 'processed'
 
 		seg_times += seg_time_elapsed
@@ -244,8 +244,8 @@ def seg_and_patch(
 	stitch_times /= total
 
 	df.to_csv(Path(save_dir, 'process_list_autogen.csv'), index=False)
-	print("average segmentation time in s per slide: {}".format(seg_times))
-	print("average patching time in s per slide: {}".format(patch_times))
-	print("average stiching time in s per slide: {}".format(stitch_times))
+	print(f'average segmentation time per slide: {seg_times:.2f}s')
+	print(f'average patching time per slide: {patch_times:.2f}s')
+	print(f'average stiching time per slide: {stitch_times:.2f}s')
 		
 	return seg_times, patch_times
