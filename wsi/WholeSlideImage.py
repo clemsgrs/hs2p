@@ -30,6 +30,7 @@ class WholeSlideImage(object):
             path (Path): fullpath to WSI file
         """
 
+        self.path = path
         self.name = path.stem
         self.wsi = openslide.open_slide(str(path))
         self.level_downsamples = self._assertLevelDownsamples()
@@ -433,6 +434,7 @@ class WholeSlideImage(object):
                 if save_png_to_disk:
                     png_save_dir = Path(save_dir, 'imgs')
                     png_save_dir.mkdir(parents=True, exist_ok=True)
+                    print('Saving extracted patches to disk...')
                     save_png(self.wsi, png_save_dir, asset_dict, attr_dict)
 
         return self.hdf5_file
