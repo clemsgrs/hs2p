@@ -29,7 +29,7 @@ def segment(WSI_object, seg_params=None, filter_params=None, mask_file=None):
 		WSI_object.initSegmentation(mask_file)
 	else:
 		WSI_object.segmentTissue(**seg_params, filter_params=filter_params)
-	seg_time_elapsed = time.time() - start_time   
+	seg_time_elapsed = time.time() - start_time
 	return WSI_object, seg_time_elapsed
 
 
@@ -38,7 +38,8 @@ def patching_old(WSI_object, **kwargs):
 	file_path = WSI_object.createPatches_bag_hdf5(**kwargs, save_coord=True)
 	patch_time_elapsed = time.time() - start_time
 	return file_path, patch_time_elapsed
- 
+
+
 def patching(
 	WSI_object,
 	save_dir,
@@ -71,7 +72,7 @@ def patching(
 
 def seg_and_patch(
 	data_dir: Path,
-	save_dir: Path,
+	output_dir: Path,
 	patch_save_dir: Path,
 	mask_save_dir: Path,
 	stitch_save_dir: Path,
@@ -84,20 +85,20 @@ def seg_and_patch(
 	step_size: int = 256,
 	patch_level: int = 0,
 	seg: bool = False,
-	stitch: bool = False, 
+	stitch: bool = False,
 	patch: bool = False,
 	auto_skip: bool = True,
 	process_list: str = None,
 	supported_fmts: List[str] = ['.tiff', '.tif', '.svs']
 	):
-	
+
 	if slide_list is not None:
 		with open(slide_list, 'r') as f:
 			slides = sorted([s.strip() for s in f])
 	else:
 		slides = sorted([d for d in data_dir.iterdir()])
 		slides = [slide.name for slide in slides if slide.is_file() and slide.suffix in supported_fmts]
-	
+
 	if process_list is None:
 		df = initialize_df(slides, seg_params, filter_params, vis_params, patch_params)
 	else:
@@ -114,12 +115,12 @@ def seg_and_patch(
 	stitch_times = 0.
 
 	for i in range(total):
-		df.to_csv(Path(save_dir, 'process_list_autogen.csv'), index=False)
+		df.to_csv(Path(output_dir, 'process_list_autogen.csv'), index=False)
 		idx = process_stack.index[i]
 		slide = process_stack.loc[idx, 'slide_id']
 		print(f'\nProgress: {i+1}/{total}')
 		print(f'processing {slide}')
-		
+
 		df.loc[idx, 'process'] = 0
 		slide_id = Path(slide).stem
 
@@ -149,8 +150,8 @@ def seg_and_patch(
 		if current_vis_params['vis_level'] < 0:
 			if len(WSI_object.level_dim) == 1:
 				current_vis_params['vis_level'] = 0
-			
-			else:	
+
+			else:
 				wsi = WSI_object.getOpenSlide()
 				best_level = wsi.get_best_level_for_downsample(64)
 				current_vis_params['vis_level'] = best_level
@@ -158,7 +159,7 @@ def seg_and_patch(
 		if current_seg_params['seg_level'] < 0:
 			if len(WSI_object.level_dim) == 1:
 				current_seg_params['seg_level'] = 0
-			
+
 			else:
 				wsi = WSI_object.getOpenSlide()
 				best_level = wsi.get_best_level_for_downsample(64)
@@ -203,7 +204,7 @@ def seg_and_patch(
 			slide_save_dir.mkdir(parents=True, exist_ok=True)
 			file_path, patch_time_elapsed = patching(
 				WSI_object=WSI_object,
-				save_dir=slide_save_dir, 
+				save_dir=slide_save_dir,
 				patch_level=patch_level,
 				patch_size=patch_size,
 				step_size=step_size,
@@ -243,9 +244,9 @@ def seg_and_patch(
 	patch_times /= total
 	stitch_times /= total
 
-	df.to_csv(Path(save_dir, 'process_list_autogen.csv'), index=False)
+	df.to_csv(Path(output_dir, 'process_list_autogen.csv'), index=False)
 	print(f'average segmentation time per slide: {seg_times:.2f}s')
 	print(f'average patching time per slide: {patch_times:.2f}s')
 	print(f'average stiching time per slide: {stitch_times:.2f}s')
-		
+
 	return seg_times, patch_times

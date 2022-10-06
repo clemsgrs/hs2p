@@ -1,6 +1,8 @@
 data_dir: 'data'
-slide_list: 'data/failure.txt'
-save_dir: 'output'
+output_dir: 'output'
+
+dataset_name: panda
+
 step_size: 256
 patch_size: 256
 patch_level: 0

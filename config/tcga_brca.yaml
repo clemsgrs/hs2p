@@ -1,10 +1,10 @@
 data_dir: 'data'
 output_dir: 'output'
 
-dataset_name: panda
+dataset_name: tcga_brca
 
-step_size: 256
-patch_size: 256
+step_size: 4096
+patch_size: 4096
 patch_level: 0
 process_list:
 
@@ -25,8 +25,8 @@ seg_params:
   save_mask: True
 
 filter_params:
-  a_t: 100
-  a_h: 16
+  a_t: 10
+  a_h: 4
   max_n_holes: 8
 
 vis_params:
@@ -37,9 +37,11 @@ patch_params:
   white_thresh: 5
   black_thresh: 40
   use_padding: True
-  contour_fn: 'four_pt'
+  contour_fn: 'pct'
+  tissue_thresh: 0.1
+  save_png_to_disk: True
   draw_grid: True
   bg_color:
-    - 255
-    - 255
-    - 255
+    - 214
+    - 233
+    - 238

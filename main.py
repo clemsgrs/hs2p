@@ -7,29 +7,34 @@ from utils import seg_and_patch
 @hydra.main(version_base='1.2.0', config_path='config', config_name='default')
 def main(cfg):
 
-    patch_save_dir = Path(cfg.save_dir, 'patches')
-    mask_save_dir = Path(cfg.save_dir, 'masks')
-    stitch_save_dir = Path(cfg.save_dir, 'stitches')
+    output_dir = Path(cfg.output_dir, cfg.dataset_name)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    patch_save_dir = Path(output_dir, 'patches')
+    mask_save_dir = Path(output_dir, 'masks')
+    stitch_save_dir = Path(output_dir, 'stitches')
 
     if cfg.process_list:
         process_list = Path(cfg.save_dir, cfg.process_list)
 
     directories = {
-        'data_dir': Path(cfg.data_dir), 
-        'save_dir': Path(cfg.save_dir),
-        'patch_save_dir': patch_save_dir, 
-        'mask_save_dir' : mask_save_dir, 
+        'data_dir': Path(cfg.data_dir, cfg.dataset_name, 'slides'),
+        'output_dir': Path(cfg.output_dir),
+        'patch_save_dir': patch_save_dir,
+        'mask_save_dir' : mask_save_dir,
         'stitch_save_dir': stitch_save_dir,
-    } 
+    }
 
     for dirname, dirpath in directories.items():
         if dirname not in ['data_dir']:
             dirpath = Path(dirpath)
             dirpath.mkdir(parents=False, exist_ok=True)
 
+    slide_list = Path(cfg.data_dir, f'{cfg.dataset_name}.txt')
+
     seg_times, patch_times = seg_and_patch(
         **directories,
-        slide_list=cfg.slide_list,
+        slide_list=slide_list,
         seg=cfg.flags.seg,
         patch=cfg.flags.patch,
         stitch=cfg.flags.stitch,
@@ -39,13 +44,13 @@ def main(cfg):
         vis_params=cfg.vis_params,
         patch_params=cfg.patch_params,
         patch_size=cfg.patch_size,
-        step_size=cfg.step_size, 
+        step_size=cfg.step_size,
         patch_level=cfg.patch_level,
         process_list=cfg.process_list,
     )
 
 
 if __name__ == '__main__':
-	
+
     # python3 main.py --config-name 'panda'
     main()
