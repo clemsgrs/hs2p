@@ -16,7 +16,7 @@ class Mosaic_Canvas(object):
 			canvas = Image.new(size=(w,h), mode="RGB", color=bg_color)
 		else:
 			canvas = Image.new(size=(w,h), mode="RGBA", color=bg_color + (int(255 * alpha),))
-		
+
 		self.canvas = canvas
 		self.dimensions = np.array([w, h])
 		self.reset_coord()
@@ -30,9 +30,9 @@ class Mosaic_Canvas(object):
 		if self.coord[0] + self.downscaled_patch_size <=self.dimensions[0] - self.downscaled_patch_size:
 			self.coord[0]+=self.downscaled_patch_size
 		else:
-			self.coord[0] = 0 
+			self.coord[0] = 0
 			self.coord[1]+=self.downscaled_patch_size
-		
+
 
 	def save(self, save_path, **kwargs):
 		self.canvas.save(save_path, **kwargs)
@@ -47,15 +47,15 @@ class Mosaic_Canvas(object):
 		return self.canvas
 
 class Contour_Checking_fn(object):
-	# Defining __call__ method 
-	def __call__(self, pt): 
+	# Defining __call__ method
+	def __call__(self, pt):
 		raise NotImplementedError
 
 class isInContourV1(Contour_Checking_fn):
 	def __init__(self, contour):
 		self.cont = contour
 
-	def __call__(self, pt): 
+	def __call__(self, pt):
 		return 1 if cv2.pointPolygonTest(self.cont, tuple(np.array(pt).astype(float)), False) >= 0 else 0
 
 class isInContourV2(Contour_Checking_fn):
@@ -63,19 +63,18 @@ class isInContourV2(Contour_Checking_fn):
 		self.cont = contour
 		self.patch_size = patch_size
 
-	def __call__(self, pt): 
+	def __call__(self, pt):
 		pt = np.array((pt[0]+self.patch_size//2, pt[1]+self.patch_size//2)).astype(float)
 		return 1 if cv2.pointPolygonTest(self.cont, tuple(np.array(pt).astype(float)), False) >= 0 else 0
 
 # Easy version of 4pt contour checking function - 1 of 4 points need to be in the contour for test to pass
 class isInContourV3_Easy(Contour_Checking_fn):
-	
+
 	def __init__(self, contour, patch_size, center_shift=0.5):
 		self.cont = contour
 		self.patch_size = patch_size
 		self.shift = int(patch_size//2*center_shift)
-	
-	def __call__(self, pt): 
+	def __call__(self, pt):
 		center = (pt[0]+self.patch_size//2, pt[1]+self.patch_size//2)
 		if self.shift > 0:
 			all_points = [(center[0]-self.shift, center[1]-self.shift),
@@ -85,7 +84,7 @@ class isInContourV3_Easy(Contour_Checking_fn):
 						  ]
 		else:
 			all_points = [center]
-		
+
 		for points in all_points:
 			if cv2.pointPolygonTest(self.cont, tuple(np.array(points).astype(float)), False) >= 0:
 				return 1
@@ -97,7 +96,7 @@ class isInContourV3_Hard(Contour_Checking_fn):
 		self.cont = contour
 		self.patch_size = patch_size
 		self.shift = int(patch_size//2*center_shift)
-	def __call__(self, pt): 
+	def __call__(self, pt):
 		center = (pt[0]+self.patch_size//2, pt[1]+self.patch_size//2)
 		if self.shift > 0:
 			all_points = [(center[0]-self.shift, center[1]-self.shift),
@@ -107,7 +106,7 @@ class isInContourV3_Hard(Contour_Checking_fn):
 						  ]
 		else:
 			all_points = [center]
-		
+
 		for points in all_points:
 			if cv2.pointPolygonTest(self.cont, tuple(np.array(points).astype(float)), False) < 0:
 				return 0
@@ -115,13 +114,13 @@ class isInContourV3_Hard(Contour_Checking_fn):
 
 
 class isInContour_pct(Contour_Checking_fn):
-	
+
 	def __init__(self, tissue_mask, patch_size, downsample_factor, pct=0.01):
 		self.binary_mask = tissue_mask // 255
 		self.patch_size = patch_size
 		self.downsample = downsample_factor
 		self.pct = pct
-	
+
 	def __call__(self, pt):
 
 		# work on downsampled image to compute tissue percentage
@@ -136,7 +135,7 @@ class isInContour_pct(Contour_Checking_fn):
 		patch_area = downsampled_patch_size ** 2
 		tissue_area = np.sum(sub_mask)
 		tissue_pct = tissue_area / patch_area
-		
+
 		if tissue_pct >= self.pct:
 			return 1
 		else:

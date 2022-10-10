@@ -31,7 +31,7 @@ filter_params:
 
 vis_params:
   vis_level: -1
-  line_thickness: 100
+  line_thickness: 200
 
 patch_params:
   white_thresh: 5
@@ -39,7 +39,7 @@ patch_params:
   use_padding: True
   contour_fn: 'pct'
   tissue_thresh: 0.1
-  save_png_to_disk: True
+  save_png_to_disk: False
   draw_grid: True
   bg_color:
     - 214

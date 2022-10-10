@@ -2,14 +2,20 @@ import time
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from wsi.WholeSlideImage import WholeSlideImage
 from wsi.wsi_utils import StitchCoords
 from wsi.batch_process_utils import initialize_df
 
 
-def stitching(file_path, wsi_object, downscale=64, bg_color=(255,255,255), draw_grid=False):
+def stitching(
+	file_path: Path,
+	wsi_object: WholeSlideImage,
+	downscale: int = 64,
+	bg_color: Tuple[int,int,int] = (255,255,255),
+	draw_grid: bool = False,
+	):
 	start = time.time()
 	heatmap = StitchCoords(
 		file_path,
@@ -41,21 +47,23 @@ def patching_old(WSI_object, **kwargs):
 
 
 def patching(
-	WSI_object,
-	save_dir,
-	patch_level,
-	patch_size,
-	step_size,
-	contour_fn,
-	tissue_thresh,
-	use_padding,
-	save_png_to_disk,
+	WSI_object: WholeSlideImage,
+	save_dir: Path,
+	seg_level: int,
+	patch_level: int,
+	patch_size: int,
+	step_size: int,
+	contour_fn: str,
+	tissue_thresh: float,
+	use_padding: bool,
+	save_png_to_disk: bool,
 	top_left: Optional[List[int]] = None,
 	bot_right: Optional[List[int]] = None,
 	):
     start_time = time.time()
     file_path = WSI_object.process_contours(
 		save_dir=save_dir,
+		seg_level=seg_level,
 		patch_level=patch_level,
 		patch_size=patch_size,
 		step_size=step_size,
@@ -179,7 +187,7 @@ def seg_and_patch(
 		else:
 			current_seg_params['exclude_ids'] = []
 
-		w, h = WSI_object.level_dim[current_seg_params['seg_level']] 
+		w, h = WSI_object.level_dim[current_seg_params['seg_level']]
 		if w * h > 1e8:
 			print(f'level_dim {w} x {h} is likely too large for successful segmentation, aborting')
 			df.loc[idx, 'status'] = 'failed_seg'
@@ -191,7 +199,11 @@ def seg_and_patch(
 
 		seg_time_elapsed = -1
 		if seg:
-			WSI_object, seg_time_elapsed = segment(WSI_object, current_seg_params, current_filter_params) 
+			WSI_object, seg_time_elapsed = segment(
+				WSI_object,
+				current_seg_params,
+				current_filter_params,
+			)
 
 		if seg_params.save_mask:
 			mask = WSI_object.visWSI(**current_vis_params)
@@ -205,6 +217,7 @@ def seg_and_patch(
 			file_path, patch_time_elapsed = patching(
 				WSI_object=WSI_object,
 				save_dir=slide_save_dir,
+				seg_level=current_seg_params['seg_level'],
 				patch_level=patch_level,
 				patch_size=patch_size,
 				step_size=step_size,
@@ -212,7 +225,7 @@ def seg_and_patch(
 				tissue_thresh=patch_params.tissue_thresh,
 				use_padding=patch_params.use_padding,
 				save_png_to_disk=patch_params.save_png_to_disk,
-				)
+			)
 			# file_path, patch_time_elapsed = patching_old(WSI_object=WSI_object,  **current_patch_params)
 
 		stitch_time_elapsed = -1
@@ -226,9 +239,7 @@ def seg_and_patch(
 					bg_color=tuple(patch_params.bg_color),
 					draw_grid=patch_params.draw_grid,
 				)
-				stitch_dir = Path(stitch_save_dir, slide_id)
-				stitch_dir.mkdir(parents=True, exist_ok=True)
-				stitch_path = Path(stitch_dir, f'{slide_id}_{patch_size}.jpg')
+				stitch_path = Path(stitch_save_dir, f'{slide_id}_{patch_size}.jpg')
 				heatmap.save(stitch_path)
 
 		print(f'segmentation took {seg_time_elapsed:.2f}s')

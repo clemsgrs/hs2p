@@ -30,7 +30,7 @@ def main(cfg):
             dirpath = Path(dirpath)
             dirpath.mkdir(parents=False, exist_ok=True)
 
-    slide_list = Path(cfg.data_dir, f'{cfg.dataset_name}.txt')
+    slide_list = Path(cfg.data_dir, cfg.dataset_name, 'slide_list.txt')
 
     seg_times, patch_times = seg_and_patch(
         **directories,
