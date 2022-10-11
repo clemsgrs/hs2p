@@ -1,24 +1,21 @@
-import math
-import os
-import time
-import xml.etree.ElementTree as ET
-from xml.dom import minidom
-import multiprocessing as mp
 import cv2
-import matplotlib.pyplot as plt
-import numpy as np
-import openslide
-from PIL import Image
-
-import pdb
+import time
+import tqdm
 import h5py
 import math
+import openslide
+import numpy as np
+import multiprocessing as mp
+import matplotlib.pyplot as plt
+
+from PIL import Image
+from pathlib import Path
+from xml.dom import minidom
+from typing import List, Optional
+
 from wsi.wsi_utils import savePatchIter_bag_hdf5, initialize_hdf5_bag, coord_generator, save_hdf5, save_png, sample_indices, screen_coords, isBlackPatch, isWhitePatch, to_percentiles
-import itertools
 from wsi.util_classes import isInContourV1, isInContourV2, isInContourV3_Easy, isInContourV3_Hard, isInContour_pct, Contour_Checking_fn
 
-from pathlib import Path
-from typing import List, Optional
 
 Image.MAX_IMAGE_PIXELS = 933120000
 
@@ -94,7 +91,7 @@ class WholeSlideImage(object):
         with open(mask_file,'wb') as f:
 	        pickle.dump(asset_dict, f)
 
-    def segmentTissue(self, seg_level=0, sthresh=20, sthresh_up=255, mthresh=7, close=0, use_otsu=False, 
+    def segmentTissue(self, seg_level=0, sthresh=20, sthresh_up=255, mthresh=7, close=0, use_otsu=False,
                             filter_params={'a_t':100}, ref_patch_size=512, exclude_ids=[], keep_ids=[]):
         """
             Segment the tissue via HSV -> Median thresholding -> Binary threshold
@@ -249,12 +246,11 @@ class WholeSlideImage(object):
 
         return img
 
-
     def createPatches_bag_hdf5(self, save_path, patch_level=0, patch_size=256, step_size=256, save_coord=True, **kwargs):
         contours = self.contours_tissue
         contour_holes = self.holes_tissue
 
-        print("Creating patches for: ", self.name, "...",)
+        # print(f'Start patching {self.name}...')
         elapsed = time.time()
         for idx, cont in enumerate(contours):
             patch_gen = self._getPatchGenerator(cont, idx, patch_level, save_path, patch_size, step_size, **kwargs)
@@ -274,7 +270,6 @@ class WholeSlideImage(object):
                 savePatchIter_bag_hdf5(patch)
 
         return self.hdf5_file
-
 
     def _getPatchGenerator(self, cont, cont_idx, patch_level, save_path, patch_size=256, step_size=256, custom_downsample=1,
         white_black=True, white_thresh=15, black_thresh=50, contour_fn='four_pt', use_padding=True):
@@ -363,9 +358,9 @@ class WholeSlideImage(object):
         return 0
 
     @staticmethod
-    def isInContours(cont_check_fn, pt, holes=None, patch_size=256):
+    def isInContours(cont_check_fn, pt, holes=None, drop_holes=True, patch_size=256):
         if cont_check_fn(pt):
-            if holes is not None:
+            if holes is not None and drop_holes:
                 return not WholeSlideImage.isInHoles(holes, pt, patch_size)
             else:
                 return 1
@@ -397,47 +392,60 @@ class WholeSlideImage(object):
         patch_size: int = 256,
         step_size: int = 256,
         contour_fn: str = 'pct',
+        drop_holes: bool = True,
         tissue_thresh: float = 0.01,
         use_padding: bool = True,
         save_png_to_disk: bool = False,
         top_left: Optional[List[int]] = None,
         bot_right: Optional[List[int]] = None,
+        position: int = -1,
+        verbose: bool = False,
     ):
         save_path_hdf5 = Path(save_dir, f'{self.name}.h5')
         # self.hdf5_file = save_path_hdf5
-        print(f'Creating patches for {self.name}...')
         elapsed = time.time()
         n_contours = len(self.contours_tissue)
-        print(f'Total number of contours to process: {n_contours}')
+        if verbose:
+            print(f'Total number of contours to process: {n_contours}')
         fp_chunk_size = math.ceil(n_contours * 0.05)
         init = True
-        for idx, cont in enumerate(self.contours_tissue):
-            if (idx + 1) % fp_chunk_size == fp_chunk_size:
-                print(f'Processing contour {idx}/{n_contours}')
 
-            asset_dict, attr_dict = self.process_contour(
-                cont,
-                self.holes_tissue[idx],
-                seg_level,
-                patch_level,
-                save_dir,
-                patch_size,
-                step_size,
-                contour_fn,
-                tissue_thresh,
-                use_padding,
-            )
-            if len(asset_dict) > 0:
-                if init:
-                    save_hdf5(save_path_hdf5, asset_dict, attr_dict, mode='w')
-                    init = False
-                else:
-                    save_hdf5(save_path_hdf5, asset_dict, mode='a')
-                if save_png_to_disk:
-                    png_save_dir = Path(save_dir, 'imgs')
-                    png_save_dir.mkdir(parents=True, exist_ok=True)
-                    print('Saving extracted patches to disk...')
-                    save_png(self.wsi, png_save_dir, asset_dict, attr_dict)
+        with tqdm.tqdm(
+            self.contours_tissue,
+            desc=(f'Patching'),
+            unit=' contour',
+            ncols=80,
+            position=position,
+            leave=True,
+        ) as t:
+
+            for i, cont in enumerate(t):
+
+                asset_dict, attr_dict = self.process_contour(
+                    cont,
+                    self.holes_tissue[i],
+                    seg_level,
+                    patch_level,
+                    save_dir,
+                    patch_size,
+                    step_size,
+                    contour_fn,
+                    drop_holes,
+                    tissue_thresh,
+                    use_padding,
+                    verbose=verbose,
+                )
+                if len(asset_dict) > 0:
+                    if init:
+                        save_hdf5(save_path_hdf5, asset_dict, attr_dict, mode='w')
+                        init = False
+                    else:
+                        save_hdf5(save_path_hdf5, asset_dict, mode='a')
+                    if save_png_to_disk:
+                        png_save_dir = Path(save_dir, 'imgs')
+                        png_save_dir.mkdir(parents=True, exist_ok=True)
+                        print('Saving extracted patches to disk...')
+                        save_png(self.wsi, png_save_dir, asset_dict, attr_dict)
 
         return self.hdf5_file
 
@@ -451,10 +459,12 @@ class WholeSlideImage(object):
         patch_size: int = 256,
         step_size: int = 256,
         contour_fn: str = 'pct',
+        drop_holes: bool = True,
         tissue_thresh: float = 0.01,
         use_padding: bool = True,
         top_left: Optional[List[int]] = None,
         bot_right: Optional[List[int]] = None,
+        verbose: bool = False,
     ):
 
         if cont is not None:
@@ -470,8 +480,9 @@ class WholeSlideImage(object):
             stop_y = min(start_y+h, img_h-patch_size+1)
             stop_x = min(start_x+w, img_w-patch_size+1)
 
-        print(f'Bounding Box: {start_x}, {start_y}, {w}, {h}')
-        print(f'Contour Area: {cv2.contourArea(cont)}')
+        if verbose:
+            print(f'Bounding Box: {start_x}, {start_y}, {w}, {h}')
+            print(f'Contour Area: {cv2.contourArea(cont)}')
 
         if bot_right is not None:
             stop_y = min(bot_right[1], stop_y)
@@ -498,8 +509,9 @@ class WholeSlideImage(object):
             elif contour_fn == 'basic':
                 cont_check_fn = isInContourV1(contour=cont)
             elif contour_fn == 'pct':
-                downsample_factor = self.level_downsamples[seg_level][0]
-                cont_check_fn = isInContour_pct(tissue_mask=self.binary_mask, patch_size=patch_size, downsample_factor=downsample_factor, pct=tissue_thresh)
+                scale = self.level_downsamples[seg_level]
+                cont = self.scaleContourDim([cont],  (1./scale[0], 1./scale[1]))[0]
+                cont_check_fn = isInContour_pct(contour=cont, tissue_mask=self.binary_mask, patch_size=patch_size, scale=scale, pct=tissue_thresh)
             else:
                 raise NotImplementedError
         else:
@@ -516,12 +528,13 @@ class WholeSlideImage(object):
             num_workers = 4
         pool = mp.Pool(num_workers)
 
-        iterable = [(coord, contour_holes, patch_size, cont_check_fn) for coord in coord_candidates]
+        iterable = [(coord, contour_holes, patch_size, cont_check_fn, drop_holes) for coord in coord_candidates]
         results = pool.starmap(WholeSlideImage.process_coord_candidate, iterable)
         pool.close()
         results = np.array([result for result in results if result is not None])
 
-        print(f'Extracted {len(results)} patches')
+        if verbose:
+            print(f'Extracted {len(results)} patches')
 
         if len(results)>1:
             asset_dict = {
@@ -545,8 +558,8 @@ class WholeSlideImage(object):
             return {}, {}
 
     @staticmethod
-    def process_coord_candidate(coord, contour_holes, patch_size, cont_check_fn):
-        if WholeSlideImage.isInContours(cont_check_fn, coord, contour_holes, patch_size):
+    def process_coord_candidate(coord, contour_holes, patch_size, cont_check_fn, drop_holes):
+        if WholeSlideImage.isInContours(cont_check_fn, coord, contour_holes, drop_holes, patch_size):
             return coord
         else:
             return None
@@ -668,7 +681,7 @@ class WholeSlideImage(object):
             overlay[~zero_mask] = overlay[~zero_mask] / counter[~zero_mask]
         del counter
         if blur:
-            overlay = cv2.GaussianBlur(overlay,tuple((patch_size * (1-overlap)).astype(int) * 2 +1),0)  
+            overlay = cv2.GaussianBlur(overlay,tuple((patch_size * (1-overlap)).astype(int) * 2 +1),0)
 
         if segment:
             tissue_mask = self.get_seg_mask(region_size, scale, use_holes=use_holes, offset=tuple(top_left))
@@ -679,7 +692,7 @@ class WholeSlideImage(object):
             img = np.array(self.wsi.read_region(top_left, vis_level, region_size).convert("RGB"))
         else:
             # use blank canvas
-            img = np.array(Image.new(size=region_size, mode="RGB", color=(255,255,255))) 
+            img = np.array(Image.new(size=region_size, mode="RGB", color=(255,255,255)))
 
         #return Image.fromarray(img) #raw image
 

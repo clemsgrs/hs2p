@@ -115,22 +115,30 @@ class isInContourV3_Hard(Contour_Checking_fn):
 
 class isInContour_pct(Contour_Checking_fn):
 
-	def __init__(self, tissue_mask, patch_size, downsample_factor, pct=0.01):
-		self.binary_mask = tissue_mask // 255
+	def __init__(self, contour, tissue_mask, patch_size, scale, pct=0.01):
+		self.cont = contour
+		self.mask = tissue_mask // 255
 		self.patch_size = patch_size
-		self.downsample = downsample_factor
+		self.scale = scale
 		self.pct = pct
 
 	def __call__(self, pt):
 
 		# work on downsampled image to compute tissue percentage
-		downsampled_patch_size = int(self.patch_size * 1 / self.downsample)
-		downsampled_pt = pt * 1 / self.downsample
+		downsampled_patch_size = int(self.patch_size * 1 / self.scale[0])
+		downsampled_pt = pt * 1 / self.scale[0]
 		x_patch, y_patch = downsampled_pt
 		x_patch, y_patch = int(x_patch), int(y_patch)
 
+		# draw filled contour on black background
+		contour_mask = np.zeros_like(self.mask)
+		cv2.drawContours(contour_mask, [self.cont], 0, (255,255,255), -1)
+
+		# apply mask to input image
+		new_mask = cv2.bitwise_and(self.mask, contour_mask)
+
 		# x,y axis inversed
-		sub_mask = self.binary_mask[y_patch:y_patch+downsampled_patch_size, x_patch:x_patch+downsampled_patch_size]
+		sub_mask = new_mask[y_patch:y_patch+downsampled_patch_size, x_patch:x_patch+downsampled_patch_size]
 
 		patch_area = downsampled_patch_size ** 2
 		tissue_area = np.sum(sub_mask)

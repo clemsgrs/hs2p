@@ -32,6 +32,8 @@ def main(cfg):
 
     slide_list = Path(cfg.data_dir, cfg.dataset_name, 'slide_list.txt')
 
+    print()
+
     seg_times, patch_times = seg_and_patch(
         **directories,
         slide_list=slide_list,
@@ -47,6 +49,7 @@ def main(cfg):
         step_size=cfg.step_size,
         patch_level=cfg.patch_level,
         process_list=cfg.process_list,
+        verbose=cfg.flags.verbose,
     )
 
 
