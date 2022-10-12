@@ -2,6 +2,7 @@ data_dir: 'data'
 output_dir: 'output'
 
 dataset_name: tcga_brca
+slide_list: 'data/tcga_brca/toy_list.txt'
 
 step_size: 4096
 patch_size: 4096
@@ -10,14 +11,14 @@ process_list:
 
 flags:
   seg: True
-  patch: True
-  stitch: True
+  patch: False
+  stitch: False
   no_auto_skip: False
   verbose: False
 
 seg_params:
   seg_level: -1
-  sthresh: 8
+  sthresh: 32
   mthresh: 7
   close: 4
   use_otsu: False
@@ -41,7 +42,8 @@ patch_params:
   contour_fn: 'pct'
   drop_holes: False
   tissue_thresh: 0.1
-  save_png_to_disk: False
+  save_patches_to_disk: False
+  format: 'png'
   draw_grid: True
   bg_color:
     - 214

@@ -30,7 +30,7 @@ def main(cfg):
             dirpath = Path(dirpath)
             dirpath.mkdir(parents=False, exist_ok=True)
 
-    slide_list = Path(cfg.data_dir, cfg.dataset_name, 'slide_list.txt')
+    slide_list = Path(cfg.slide_list)
 
     print()
 

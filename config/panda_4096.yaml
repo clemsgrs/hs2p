@@ -2,6 +2,7 @@ data_dir: 'data'
 output_dir: 'output'
 
 dataset_name: panda
+slide_list: 'data/panda/slide_list.txt'
 
 step_size: 4096
 patch_size: 4096
@@ -13,6 +14,7 @@ flags:
   patch: True
   stitch: True
   no_auto_skip: False
+  verbose: False
 
 seg_params:
   seg_level: -1
@@ -39,7 +41,8 @@ patch_params:
   use_padding: True
   contour_fn: 'pct'
   tissue_thresh: 0.1
-  save_png_to_disk: True
+  save_patches_to_disk: True
+  format: 'png'
   draw_grid: True
   bg_color:
     - 214

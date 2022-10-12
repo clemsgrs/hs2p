@@ -1,48 +1,39 @@
+import cv2
+import math
+import tqdm
 import h5py
+import openslide
 import numpy as np
-import os
-import pdb
-from wsi.util_classes import Mosaic_Canvas
+
 from PIL import Image
 from pathlib import Path
-import math
-import cv2
-
-import tqdm
-import openslide
 
 
 def isWhitePatch(patch, satThresh=5):
     patch_hsv = cv2.cvtColor(patch, cv2.COLOR_RGB2HSV)
     return True if np.mean(patch_hsv[:,:,1]) < satThresh else False
 
+
 def isBlackPatch(patch, rgbThresh=40):
     return True if np.all(np.mean(patch, axis = (0,1)) < rgbThresh) else False
+
 
 def isBlackPatch_S(patch, rgbThresh=20, percentage=0.05):
     num_pixels = patch.size[0] * patch.size[1]
     return True if np.all(np.array(patch) < rgbThresh, axis=(2)).sum() > num_pixels * percentage else False
 
+
 def isWhitePatch_S(patch, rgbThresh=220, percentage=0.2):
     num_pixels = patch.size[0] * patch.size[1]
     return True if np.all(np.array(patch) > rgbThresh, axis=(2)).sum() > num_pixels * percentage else False
 
-def coord_generator(x_start, x_end, x_step, y_start, y_end, y_step, args_dict=None):
-    for x in range(x_start, x_end, x_step):
-        for y in range(y_start, y_end, y_step):
-            if args_dict is not None:
-                process_dict = args_dict.copy()
-                process_dict.update({'pt':(x,y)})
-                yield process_dict
-            else:
-                yield (x,y)
 
 def savePatchIter_bag_hdf5(patch):
     x, y, cont_idx, patch_size, patch_level, downsample, downsampled_level_dim, level_dim, img_patch, name, save_path= tuple(patch.values())
     img_patch = np.array(img_patch)[np.newaxis,...]
     img_shape = img_patch.shape
 
-    file_path = os.path.join(save_path, name)+'.h5'
+    file_path = Path(save_path, f'{name}.h5')
     file = h5py.File(file_path, "a")
 
     dset = file['imgs']
@@ -55,6 +46,7 @@ def savePatchIter_bag_hdf5(patch):
         coord_dset[-img_shape[0]:] = (x,y)
 
     file.close()
+
 
 def save_hdf5(output_path, asset_dict, attr_dict=None, mode='a'):
     file = h5py.File(output_path, mode)
@@ -77,7 +69,8 @@ def save_hdf5(output_path, asset_dict, attr_dict=None, mode='a'):
     file.close()
     return output_path
 
-def save_png(wsi, save_dir, asset_dict, attr_dict=None):
+
+def save_patch(wsi, save_dir, asset_dict, attr_dict=None, fmt='png'):
     coords = asset_dict['coords']
     patch_size = attr_dict['coords']['patch_size']
     patch_level = attr_dict['coords']['patch_level']
@@ -93,7 +86,7 @@ def save_png(wsi, save_dir, asset_dict, attr_dict=None):
 
         for coord in t:
             pil_patch = wsi.read_region(tuple(coord), patch_level, (patch_size, patch_size)).convert("RGB")
-            save_path = Path(save_dir, f'{coord[0]}_{coord[1]}.png')
+            save_path = Path(save_dir, f'{coord[0]}_{coord[1]}.{fmt}')
             pil_patch.save(save_path)
 
 
@@ -124,67 +117,11 @@ def initialize_hdf5_bag(first_patch, save_coord=False):
     file.close()
     return file_path
 
-def sample_indices(scores, k, start=0.48, end=0.52, convert_to_percentile=False, seed=1):
-    np.random.seed(seed)
-    if convert_to_percentile:
-        end_value = np.quantile(scores, end)
-        start_value = np.quantile(scores, start)
-    else:
-        end_value = end
-        start_value = start
-    score_window = np.logical_and(scores >= start_value, scores <= end_value)
-    indices = np.where(score_window)[0]
-    if len(indices) < 1:
-        return -1
-    else:
-        return np.random.choice(indices, min(k, len(indices)), replace=False)
-
-def top_k(scores, k, invert=False):
-    if invert:
-        top_k_ids=scores.argsort()[:k]
-    else:
-        top_k_ids=scores.argsort()[::-1][:k]
-    return top_k_ids
-
-def to_percentiles(scores):
-    from scipy.stats import rankdata
-    scores = rankdata(scores, 'average')/len(scores) * 100
-    return scores
-
-def screen_coords(scores, coords, top_left, bot_right):
-    bot_right = np.array(bot_right)
-    top_left = np.array(top_left)
-    mask = np.logical_and(np.all(coords >= top_left, axis=1), np.all(coords <= bot_right, axis=1))
-    scores = scores[mask]
-    coords = coords[mask]
-    return scores, coords
-
-def sample_rois(scores, coords, k=5, mode='range_sample', seed=1, score_start=0.45, score_end=0.55, top_left=None, bot_right=None):
-
-    if len(scores.shape) == 2:
-        scores = scores.flatten()
-
-    scores = to_percentiles(scores)
-    if top_left is not None and bot_right is not None:
-        scores, coords = screen_coords(scores, coords, top_left, bot_right)
-
-    if mode == 'range_sample':
-        sampled_ids = sample_indices(scores, start=score_start, end=score_end, k=k, convert_to_percentile=False, seed=seed)
-    elif mode == 'topk':
-        sampled_ids = top_k(scores, k, invert=False)
-    elif mode == 'reverse_topk':
-        sampled_ids = top_k(scores, k, invert=True)
-    else:
-        raise NotImplementedError
-    coords = coords[sampled_ids]
-    scores = scores[sampled_ids]
-
-    asset = {'sampled_coords': coords, 'sampled_scores': scores}
-    return asset
 
 def DrawGrid(img, coord, shape, thickness=2, color=(0,0,0,255)):
     cv2.rectangle(img, tuple(np.maximum([0, 0], coord-thickness//2)), tuple(coord - thickness//2 + np.array(shape)), (0, 0, 0, 255), thickness=thickness)
     return img
+
 
 def DrawMap(canvas, patch_dset, coords, patch_size, indices=None, verbose=False, draw_grid=True):
     if indices is None:
@@ -215,6 +152,7 @@ def DrawMap(canvas, patch_dset, coords, patch_size, indices=None, verbose=False,
                 DrawGrid(canvas, coord, patch_size)
 
     return Image.fromarray(canvas)
+
 
 def DrawMapFromCoords(canvas, wsi_object, coords, patch_size, vis_level, indices=None, draw_grid=True, position=-1, verbose=False):
     downsamples = wsi_object.wsi.level_downsamples[vis_level]
@@ -248,6 +186,7 @@ def DrawMapFromCoords(canvas, wsi_object, coords, patch_size, vis_level, indices
 
     return Image.fromarray(canvas)
 
+
 def StitchPatches(hdf5_file_path, downscale=16, draw_grid=False, bg_color=(0,0,0), alpha=-1):
     file = h5py.File(hdf5_file_path, 'r')
     dset = file['imgs']
@@ -279,6 +218,7 @@ def StitchPatches(hdf5_file_path, downscale=16, draw_grid=False, bg_color=(0,0,0
 
     file.close()
     return heatmap
+
 
 def StitchCoords(hdf5_file_path, wsi_object, downscale=16, draw_grid=False, bg_color=(0,0,0), alpha=-1, position=-1, verbose=False):
     wsi = wsi_object.getOpenSlide()
@@ -320,53 +260,3 @@ def StitchCoords(hdf5_file_path, wsi_object, downscale=16, draw_grid=False, bg_c
     file.close()
     # print('Done!')
     return heatmap
-
-def SamplePatches(coords_file_path, save_file_path, wsi_object,
-    patch_level=0, custom_downsample=1, patch_size=256, sample_num=100, seed=1, stitch=True, verbose=1, mode='w'):
-    file = h5py.File(coords_file_path, 'r')
-    dset = file['coords']
-    coords = dset[:]
-
-    h5_patch_size = dset.attrs['patch_size']
-    h5_patch_level = dset.attrs['patch_level']
-
-    if verbose>0:
-        print(f'in .h5 file: total number of patches: {len(coords)}')
-        print(f'in .h5 file: patch size: {h5_patch_size}x{h5_patch_size} patch level: {h5_patch_level}')
-
-    if patch_level < 0:
-        patch_level = h5_patch_level
-
-    if patch_size < 0:
-        patch_size = h5_patch_size
-
-    np.random.seed(seed)
-    indices = np.random.choice(np.arange(len(coords)), min(len(coords), sample_num), replace=False)
-
-    target_patch_size = np.array([patch_size, patch_size])
-
-    if custom_downsample > 1:
-        target_patch_size = (np.array([patch_size, patch_size]) / custom_downsample).astype(np.int32)
-
-    if stitch:
-        canvas = Mosaic_Canvas(patch_size=target_patch_size[0], n=sample_num, downscale=4, n_per_row=10, bg_color=(0,0,0), alpha=-1)
-    else:
-        canvas = None
-
-    for idx in indices:
-        coord = coords[idx]
-        patch = wsi_object.wsi.read_region(coord, patch_level, tuple([patch_size, patch_size])).convert('RGB')
-        if custom_downsample > 1:
-            patch = patch.resize(tuple(target_patch_size))
-
-        # if isBlackPatch_S(patch, rgbThresh=20, percentage=0.05) or isWhitePatch_S(patch, rgbThresh=220, percentage=0.25):
-        #     continue
-
-        if stitch:
-            canvas.paste_patch(patch)
-
-        asset_dict = {'imgs': np.array(patch)[np.newaxis,...], 'coords': coord}
-        save_hdf5(save_file_path, asset_dict, mode=mode)
-        mode='a'
-
-    return canvas, len(coords), len(indices)
