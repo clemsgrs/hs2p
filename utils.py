@@ -115,7 +115,6 @@ def seg_and_patch(
 	stitch: bool = False,
 	patch: bool = False,
 	auto_skip: bool = True,
-	process_list: str = None,
 	verbose: bool = False,
 	supported_fmts: List[str] = ['.tiff', '.tif', '.svs']
 	):
@@ -127,15 +126,10 @@ def seg_and_patch(
 		slides = sorted([d for d in data_dir.iterdir()])
 		slides = [slide.name for slide in slides if slide.is_file() and slide.suffix in supported_fmts]
 
-	if process_list is None:
-		df = initialize_df(slides, seg_params, filter_params, vis_params, patch_params)
-	else:
-		df = pd.read_csv(process_list)
-		df = initialize_df(df, seg_params, filter_params, vis_params, patch_params)
+	df = initialize_df(slides, seg_params, filter_params, vis_params, patch_params)
 
 	mask = df['process'] == 1
 	process_stack = df[mask]
-
 	total = len(process_stack)
 
 	seg_times = 0.

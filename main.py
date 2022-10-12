@@ -48,7 +48,6 @@ def main(cfg):
         patch_size=cfg.patch_size,
         step_size=cfg.step_size,
         patch_level=cfg.patch_level,
-        process_list=cfg.process_list,
         verbose=cfg.flags.verbose,
     )
 
