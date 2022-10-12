@@ -1,11 +1,12 @@
 import hydra
 from pathlib import Path
+from omegaconf import DictConfig
 
 from utils import seg_and_patch
 
 
 @hydra.main(version_base='1.2.0', config_path='config', config_name='default')
-def main(cfg):
+def main(cfg: DictConfig):
 
     output_dir = Path(cfg.output_dir, cfg.dataset_name)
     output_dir.mkdir(parents=True, exist_ok=True)

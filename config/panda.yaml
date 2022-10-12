@@ -6,7 +6,6 @@ slide_list: 'data/panda/slide_list.txt'
 
 step_size: 256
 patch_size: 256
-patch_level: 0
 
 flags:
   seg: True
@@ -21,8 +20,6 @@ seg_params:
   mthresh: 7
   close: 4
   use_otsu: False
-  keep_ids:
-  exclude_ids:
   save_mask: True
 
 filter_params:
@@ -35,6 +32,7 @@ vis_params:
   line_thickness: 100
 
 patch_params:
+  patch_level: 0
   white_thresh: 5
   black_thresh: 40
   use_padding: True

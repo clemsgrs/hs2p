@@ -1,20 +1,20 @@
 import pandas as pd
 import numpy as np
 import pdb
-	
+
 '''
 initiate a pandas df describing a list of slides to process
 args:
-	slides (df or array-like): 
+	slides (df or array-like):
 		array-like structure containing list of slide ids, if df, these ids assumed to be
 		stored under the 'slide_id' column
-	seg_params (dict): segmentation paramters 
+	seg_params (dict): segmentation paramters
 	filter_params (dict): filter parameters
 	vis_params (dict): visualization paramters
 	patch_params (dict): patching paramters
 	use_heatmap_args (bool): whether to include heatmap arguments such as ROI coordinates
 '''
-def initialize_df(slides, seg_params, filter_params, vis_params, patch_params, 
+def initialize_df(slides, seg_params, filter_params, vis_params, patch_params,
 	use_heatmap_args=False, save_patches=False):
 
 	total = len(slides)
@@ -27,7 +27,7 @@ def initialize_df(slides, seg_params, filter_params, vis_params, patch_params,
 	# initiate empty labels in case not provided
 	if use_heatmap_args:
 		default_df_dict.update({'label': np.full((total), -1)})
-	
+
 	default_df_dict.update({
 		'status': np.full((total), 'tbp'),
 		# seg params
@@ -36,9 +36,7 @@ def initialize_df(slides, seg_params, filter_params, vis_params, patch_params,
 		'mthresh': np.full((total), int(seg_params['mthresh']), dtype=np.uint8),
 		'close': np.full((total), int(seg_params['close']), dtype=np.uint32),
 		'use_otsu': np.full((total), bool(seg_params['use_otsu']), dtype=bool),
-		'keep_ids': np.full((total), seg_params['keep_ids']),
-		'exclude_ids': np.full((total), seg_params['exclude_ids']),
-		
+
 		# filter params
 		'a_t': np.full((total), int(filter_params['a_t']), dtype=np.float32),
 		'a_h': np.full((total), int(filter_params['a_h']), dtype=np.float32),
@@ -61,9 +59,9 @@ def initialize_df(slides, seg_params, filter_params, vis_params, patch_params,
 
 	if use_heatmap_args:
 		# initiate empty x,y coordinates in case not provided
-		default_df_dict.update({'x1': np.empty((total)).fill(np.NaN), 
-			'x2': np.empty((total)).fill(np.NaN), 
-			'y1': np.empty((total)).fill(np.NaN), 
+		default_df_dict.update({'x1': np.empty((total)).fill(np.NaN),
+			'x2': np.empty((total)).fill(np.NaN),
+			'y1': np.empty((total)).fill(np.NaN),
 			'y2': np.empty((total)).fill(np.NaN)})
 
 
@@ -71,7 +69,7 @@ def initialize_df(slides, seg_params, filter_params, vis_params, patch_params,
 		temp_copy = pd.DataFrame(default_df_dict) # temporary dataframe w/ default params
 		# find key in provided df
 		# if exist, fill empty fields w/ default values, else, insert the default values as a new column
-		for key in default_df_dict.keys(): 
+		for key in default_df_dict.keys():
 			if key in slides.columns:
 				mask = slides[key].isna()
 				slides.loc[mask, key] = temp_copy.loc[mask, key]
@@ -79,5 +77,5 @@ def initialize_df(slides, seg_params, filter_params, vis_params, patch_params,
 				slides.insert(len(slides.columns), key, default_df_dict[key])
 	else:
 		slides = pd.DataFrame(default_df_dict)
-	
+
 	return slides

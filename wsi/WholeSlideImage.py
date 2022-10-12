@@ -39,7 +39,7 @@ class WholeSlideImage(object):
     def getOpenSlide(self):
         return self.wsi
 
-    def initSegmentation(self, mask_file):
+    def initSegmentation(self, mask_file: Path):
         # load segmentation results from pickle file
         import pickle
         with open(mask_file,'rb') as f:
@@ -54,8 +54,17 @@ class WholeSlideImage(object):
         with open(mask_file,'wb') as f:
 	        pickle.dump(asset_dict, f)
 
-    def segmentTissue(self, seg_level=0, sthresh=20, sthresh_up=255, mthresh=7, close=0, use_otsu=False,
-                            filter_params={'a_t':100}, ref_patch_size=512, exclude_ids=[], keep_ids=[]):
+    def segmentTissue(
+        self,
+        seg_level=0,
+        sthresh=20,
+        sthresh_up=255,
+        mthresh=7,
+        close=0,
+        use_otsu=False,
+        filter_params={'a_t':100},
+        ref_patch_size=512,
+        ):
         """
             Segment the tissue via HSV -> Median thresholding -> Binary threshold
         """
@@ -142,15 +151,6 @@ class WholeSlideImage(object):
 
         self.contours_tissue = self.scaleContourDim(foreground_contours, scale)
         self.holes_tissue = self.scaleHolesDim(hole_contours, scale)
-
-        #exclude_ids = [0,7,9]
-        if len(keep_ids) > 0:
-            contour_ids = set(keep_ids) - set(exclude_ids)
-        else:
-            contour_ids = set(np.arange(len(self.contours_tissue))) - set(exclude_ids)
-
-        self.contours_tissue = [self.contours_tissue[i] for i in contour_ids]
-        self.holes_tissue = [self.holes_tissue[i] for i in contour_ids]
 
     def visWSI(self, vis_level=0, color = (0,255,0), hole_color = (0,0,255), annot_color=(255,0,0),
                     line_thickness=250, max_size=None, top_left=None, bot_right=None, custom_downsample=1, view_slide_only=False,
@@ -359,7 +359,7 @@ class WholeSlideImage(object):
         tissue_thresh: float = 0.01,
         use_padding: bool = True,
         save_patches_to_disk: bool = False,
-        patch_format: str = 'png'
+        patch_format: str = 'png',
         top_left: Optional[List[int]] = None,
         bot_right: Optional[List[int]] = None,
         position: int = -1,

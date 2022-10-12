@@ -4,6 +4,7 @@ import tqdm
 import numpy as np
 import pandas as pd
 from pathlib import Path
+from omegaconf import DictConfig
 from typing import List, Optional, Tuple, Dict
 
 from wsi.WholeSlideImage import WholeSlideImage
@@ -13,15 +14,22 @@ from wsi.batch_process_utils import initialize_df
 
 def segment(
 	WSI_object: WholeSlideImage,
-	seg_params: Optional[Dict] = None,
-	filter_params: Optional[Dict] = None,
-	mask_file=None
+	seg_params: DictConfig,
+	filter_params: DictConfig,
+	mask_file: Optional[Path] = None,
 	):
 	start_time = time.time()
 	if mask_file is not None:
 		WSI_object.initSegmentation(mask_file)
 	else:
-		WSI_object.segmentTissue(**seg_params, filter_params=filter_params)
+		WSI_object.segmentTissue(
+			seg_level=seg_params.seg_level,
+			sthresh=seg_params.sthresh,
+			mthresh=seg_params.mthresh,
+			close=seg_params.close,
+			use_otsu=seg_params.use_otsu,
+			filter_params=filter_params,
+		)
 	seg_time_elapsed = time.time() - start_time
 	return WSI_object, seg_time_elapsed
 
@@ -45,7 +53,7 @@ def patching(
 	tissue_thresh: float,
 	use_padding: bool,
 	save_patches_to_disk: bool,
-	patch_format: str = 'png'
+	patch_format: str = 'png',
 	top_left: Optional[List[int]] = None,
 	bot_right: Optional[List[int]] = None,
 	position: int = -1,
@@ -164,84 +172,53 @@ def seg_and_patch(
 			full_path = Path(data_dir, slide)
 			WSI_object = WholeSlideImage(full_path)
 
-			current_vis_params = {}
-			current_filter_params = {}
-			current_seg_params = {}
-
-			for key in vis_params.keys():
-				current_vis_params.update({key: df.loc[idx, key]})
-
-			for key in filter_params.keys():
-				current_filter_params.update({key: df.loc[idx, key]})
-
-			for key in seg_params.keys():
-				if key in df.columns:
-					current_seg_params.update({key: df.loc[idx, key]})
-
-			if current_vis_params['vis_level'] < 0:
+			if vis_params.vis_level < 0:
 				if len(WSI_object.level_dim) == 1:
-					current_vis_params['vis_level'] = 0
-
+					vis_params.vis_level = 0
 				else:
 					wsi = WSI_object.getOpenSlide()
 					best_level = wsi.get_best_level_for_downsample(64)
-					current_vis_params['vis_level'] = best_level
+					vis_params.vis_level = best_level
 
-			if current_seg_params['seg_level'] < 0:
+			if seg_params.seg_level < 0:
 				if len(WSI_object.level_dim) == 1:
-					current_seg_params['seg_level'] = 0
-
+					seg_params.seg_level = 0
 				else:
 					wsi = WSI_object.getOpenSlide()
 					best_level = wsi.get_best_level_for_downsample(64)
-					current_seg_params['seg_level'] = best_level
+					seg_params.seg_level = best_level
 
-			keep_ids = current_seg_params['keep_ids']
-			if keep_ids is not None and len(keep_ids) > 0:
-				str_ids = current_seg_params['keep_ids']
-				current_seg_params['keep_ids'] = np.array(str_ids.split(',')).astype(int)
-			else:
-				current_seg_params['keep_ids'] = []
-
-			exclude_ids = current_seg_params['exclude_ids']
-			if exclude_ids is not None and len(exclude_ids) > 0:
-				str_ids = current_seg_params['exclude_ids']
-				current_seg_params['exclude_ids'] = np.array(str_ids.split(',')).astype(int)
-			else:
-				current_seg_params['exclude_ids'] = []
-
-			w, h = WSI_object.level_dim[current_seg_params['seg_level']]
+			w, h = WSI_object.level_dim[seg_params.seg_level]
 			if w * h > 1e8:
 				print(f'level_dim {w} x {h} is likely too large for successful segmentation, aborting')
 				df.loc[idx, 'status'] = 'failed_seg'
 				continue
 
-			df.loc[idx, 'vis_level'] = current_vis_params['vis_level']
-			df.loc[idx, 'seg_level'] = current_seg_params['seg_level']
-
+			df.loc[idx, 'vis_level'] = vis_params.vis_level
+			df.loc[idx, 'seg_level'] = seg_params.seg_level
 
 			seg_time_elapsed = -1
 			if seg:
 				WSI_object, seg_time_elapsed = segment(
 					WSI_object,
-					current_seg_params,
-					current_filter_params,
+					seg_params,
+					filter_params,
 				)
 
 			if seg_params.save_mask:
-				mask = WSI_object.visWSI(**current_vis_params)
-				mask_path = Path(mask_save_dir, slide_id+'.jpg')
+				mask = WSI_object.visWSI(vis_params)
+				mask_path = Path(mask_save_dir, f'{slide_id}.jpg')
 				mask.save(mask_path)
 
-			patch_time_elapsed = -1 # Default time
+			patch_time_elapsed = -1
 			if patch:
 				slide_save_dir = Path(patch_save_dir, slide_id, str(patch_size))
 				slide_save_dir.mkdir(parents=True, exist_ok=True)
 				file_path, patch_time_elapsed = patching(
 					WSI_object=WSI_object,
 					save_dir=slide_save_dir,
-					seg_level=current_seg_params['seg_level'],
-					patch_level=patch_level,
+					seg_level=seg_params.seg_level,
+					patch_level=patch_params.patch_level,
 					patch_size=patch_size,
 					step_size=step_size,
 					contour_fn=patch_params.contour_fn,
@@ -253,7 +230,7 @@ def seg_and_patch(
 					position=7*i+3,
 					verbose=verbose,
 				)
-				# file_path, patch_time_elapsed = patching_old(WSI_object=WSI_object,  **current_patch_params)
+				# file_path, patch_time_elapsed = patching_old(WSI_object=WSI_object,  **patch_params)
 
 			stitch_time_elapsed = -1
 			if stitch:
