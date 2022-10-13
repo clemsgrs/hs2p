@@ -59,8 +59,9 @@ def patching(
 	position: int = -1,
 	verbose: bool = False,
 	):
-    start_time = time.time()
-    file_path = WSI_object.process_contours(
+
+	start_time = time.time()
+	file_path, pos = WSI_object.process_contours(
 		save_dir=save_dir,
 		seg_level=seg_level,
 		patch_level=patch_level,
@@ -77,8 +78,8 @@ def patching(
 		position=position,
 		verbose=verbose,
 	)
-    patch_time_elapsed = time.time() - start_time
-    return file_path, patch_time_elapsed
+	patch_time_elapsed = time.time() - start_time
+	return file_path, patch_time_elapsed, pos
 
 
 def stitching(
@@ -91,7 +92,7 @@ def stitching(
 	verbose: bool = False,
 	):
 	start = time.time()
-	heatmap = StitchCoords(
+	heatmap, pos = StitchCoords(
 		file_path,
 		wsi_object,
 		downscale=downscale,
@@ -102,7 +103,7 @@ def stitching(
 		verbose=verbose,
 	)
 	total_time = time.time() - start
-	return heatmap, total_time
+	return heatmap, total_time, pos
 
 
 def seg_and_patch(
@@ -116,9 +117,6 @@ def seg_and_patch(
 	vis_params,
 	patch_params,
 	slide_list: Optional[List[str]] = None,
-	patch_size: int = 256,
-	step_size: int = 256,
-	patch_level: int = 0,
 	seg: bool = False,
 	stitch: bool = False,
 	patch: bool = False,
@@ -144,6 +142,8 @@ def seg_and_patch(
 	patch_times = 0.
 	stitch_times = 0.
 
+	pos = 0
+
 	with tqdm.tqdm(
         range(total),
         desc=(f'Seg&Patch'),
@@ -158,7 +158,7 @@ def seg_and_patch(
 			df.to_csv(Path(output_dir, 'process_list_autogen.csv'), index=False)
 			idx = process_stack.index[i]
 			slide = process_stack.loc[idx, 'slide_id']
-			t.display(f'Processing {slide}', pos=7*i+2)
+			t.display(f'Processing {slide}', pos=pos+2)
 
 			df.loc[idx, 'process'] = 0
 			slide_id = Path(slide).stem
@@ -206,52 +206,54 @@ def seg_and_patch(
 				)
 
 			if seg_params.save_mask:
-				mask = WSI_object.visWSI(vis_params)
+				mask = WSI_object.visWSI(**vis_params)
 				mask_path = Path(mask_save_dir, f'{slide_id}.jpg')
 				mask.save(mask_path)
 
 			patch_time_elapsed = -1
 			if patch:
-				slide_save_dir = Path(patch_save_dir, slide_id, str(patch_size))
+				slide_save_dir = Path(patch_save_dir, slide_id, f'{patch_params.patch_size}')
 				slide_save_dir.mkdir(parents=True, exist_ok=True)
-				file_path, patch_time_elapsed = patching(
+				file_path, patch_time_elapsed, pos = patching(
 					WSI_object=WSI_object,
 					save_dir=slide_save_dir,
 					seg_level=seg_params.seg_level,
 					patch_level=patch_params.patch_level,
-					patch_size=patch_size,
-					step_size=step_size,
+					patch_size=patch_params.patch_size,
+					step_size=patch_params.step_size,
 					contour_fn=patch_params.contour_fn,
 					drop_holes=patch_params.drop_holes,
 					tissue_thresh=patch_params.tissue_thresh,
 					use_padding=patch_params.use_padding,
 					save_patches_to_disk=patch_params.save_patches_to_disk,
 					patch_format=patch_params.format,
-					position=7*i+3,
+					position=pos+3,
 					verbose=verbose,
 				)
 				# file_path, patch_time_elapsed = patching_old(WSI_object=WSI_object,  **patch_params)
 
 			stitch_time_elapsed = -1
 			if stitch:
-				file_path = Path(patch_save_dir, slide_id, str(patch_size), f'{slide_id}.h5')
+				file_path = Path(patch_save_dir, slide_id, f'{patch_params.patch_size}', f'{slide_id}.h5')
 				if file_path.is_file():
-					heatmap, stitch_time_elapsed = stitching(
+					heatmap, stitch_time_elapsed, pos = stitching(
 						file_path,
 						WSI_object,
 						downscale=64,
 						bg_color=tuple(patch_params.bg_color),
 						draw_grid=patch_params.draw_grid,
-						position=7*i+4,
+						position=pos+1,
 						verbose=verbose,
 					)
-					stitch_path = Path(stitch_save_dir, f'{slide_id}_{patch_size}.jpg')
+					stitch_path = Path(stitch_save_dir, f'{slide_id}_{patch_params.patch_size}.jpg')
 					heatmap.save(stitch_path)
 
-			t.display(f'segmentation took {seg_time_elapsed:.2f}s', pos=7*i+5)
-			t.display(f'patching took {patch_time_elapsed:.2f}s', pos=7*i+6)
-			t.display(f'stitching took {stitch_time_elapsed:.2f}s', pos=7*i+7)
+			t.display(f'segmentation took {seg_time_elapsed:.2f}s', pos=pos+1)
+			t.display(f'patching took {patch_time_elapsed:.2f}s', pos=pos+2)
+			t.display(f'stitching took {stitch_time_elapsed:.2f}s', pos=pos+3)
 			df.loc[idx, 'status'] = 'processed'
+
+			pos += 3
 
 			seg_times += seg_time_elapsed
 			patch_times += patch_time_elapsed
@@ -262,7 +264,7 @@ def seg_and_patch(
 	stitch_times /= total
 
 	df.to_csv(Path(output_dir, 'process_list_autogen.csv'), index=False)
-	print(f'\n'*(7*total))
+	print(f'\n'*(pos+1))
 	print('-'*7, 'summary', '-'*7,)
 	print(f'average segmentation time per slide: \t{seg_times:.2f}s')
 	print(f'average patching time per slide: \t{patch_times:.2f}s')

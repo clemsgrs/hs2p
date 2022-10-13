@@ -15,12 +15,9 @@ def main(cfg: DictConfig):
     mask_save_dir = Path(output_dir, 'masks')
     stitch_save_dir = Path(output_dir, 'stitches')
 
-    if cfg.process_list:
-        process_list = Path(cfg.save_dir, cfg.process_list)
-
     directories = {
         'data_dir': Path(cfg.data_dir, cfg.dataset_name, 'slides'),
-        'output_dir': Path(cfg.output_dir),
+        'output_dir': output_dir,
         'patch_save_dir': patch_save_dir,
         'mask_save_dir' : mask_save_dir,
         'stitch_save_dir': stitch_save_dir,
@@ -41,14 +38,11 @@ def main(cfg: DictConfig):
         seg=cfg.flags.seg,
         patch=cfg.flags.patch,
         stitch=cfg.flags.stitch,
-        auto_skip=cfg.flags.no_auto_skip,
+        auto_skip=cfg.flags.auto_skip,
         seg_params=cfg.seg_params,
         filter_params=cfg.filter_params,
         vis_params=cfg.vis_params,
         patch_params=cfg.patch_params,
-        patch_size=cfg.patch_size,
-        step_size=cfg.step_size,
-        patch_level=cfg.patch_level,
         verbose=cfg.flags.verbose,
     )
 

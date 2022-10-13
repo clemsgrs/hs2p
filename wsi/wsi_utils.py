@@ -1,12 +1,20 @@
 import cv2
 import math
 import tqdm
+import time
 import h5py
 import openslide
 import numpy as np
 
 from PIL import Image
 from pathlib import Path
+
+
+def compute_time(start_time, end_time):
+    elapsed_time = end_time - start_time
+    elapsed_mins = int(elapsed_time / 60)
+    elapsed_secs = int(elapsed_time - (elapsed_mins * 60))
+    return elapsed_mins, elapsed_secs
 
 
 def isWhitePatch(patch, satThresh=5):
@@ -70,17 +78,21 @@ def save_hdf5(output_path, asset_dict, attr_dict=None, mode='a'):
     return output_path
 
 
-def save_patch(wsi, save_dir, asset_dict, attr_dict=None, fmt='png'):
+def save_patch(cont_idx, n_contours, wsi, save_dir, asset_dict, attr_dict=None, position=-1, fmt='png'):
     coords = asset_dict['coords']
     patch_size = attr_dict['coords']['patch_size']
     patch_level = attr_dict['coords']['patch_level']
     wsi_name = attr_dict['coords']['wsi_name']
+
+    npatch = len(coords)
+    start_time = time.time()
+
     with tqdm.tqdm(
         coords,
-        desc=(f'{wsi_name}'),
+        desc=(f'\tContour {cont_idx}/{n_contours}'),
         unit=' patch',
         ncols=100,
-        position=1,
+        position=position,
         leave=True,
     ) as t:
 
@@ -88,6 +100,11 @@ def save_patch(wsi, save_dir, asset_dict, attr_dict=None, fmt='png'):
             pil_patch = wsi.read_region(tuple(coord), patch_level, (patch_size, patch_size)).convert("RGB")
             save_path = Path(save_dir, f'{coord[0]}_{coord[1]}.{fmt}')
             pil_patch.save(save_path)
+
+    end_time = time.time()
+    patch_saving_mins, patch_saving_secs = compute_time(start_time, end_time)
+    return npatch, patch_saving_mins, patch_saving_secs
+
 
 
 def initialize_hdf5_bag(first_patch, save_coord=False):
@@ -154,7 +171,18 @@ def DrawMap(canvas, patch_dset, coords, patch_size, indices=None, verbose=False,
     return Image.fromarray(canvas)
 
 
-def DrawMapFromCoords(canvas, wsi_object, coords, patch_size, vis_level, indices=None, draw_grid=True, position=-1, verbose=False):
+def DrawMapFromCoords(
+    canvas,
+    wsi_object,
+    coords,
+    patch_size,
+    vis_level,
+    indices=None,
+    draw_grid=True,
+    position=-1,
+    verbose=False,
+    ):
+
     downsamples = wsi_object.wsi.level_downsamples[vis_level]
     if indices is None:
         indices = np.arange(len(coords))
@@ -184,7 +212,7 @@ def DrawMapFromCoords(canvas, wsi_object, coords, patch_size, vis_level, indices
             if draw_grid:
                 DrawGrid(canvas, coord, patch_size)
 
-    return Image.fromarray(canvas)
+    return Image.fromarray(canvas), position+1
 
 
 def StitchPatches(hdf5_file_path, downscale=16, draw_grid=False, bg_color=(0,0,0), alpha=-1):
@@ -255,8 +283,8 @@ def StitchCoords(hdf5_file_path, wsi_object, downscale=16, draw_grid=False, bg_c
         heatmap = Image.new(size=(w,h), mode="RGBA", color=bg_color + (int(255 * alpha),))
 
     heatmap = np.array(heatmap)
-    heatmap = DrawMapFromCoords(heatmap, wsi_object, coords, patch_size, vis_level, indices=None, draw_grid=draw_grid, position=position, verbose=verbose)
+    heatmap, updated_position = DrawMapFromCoords(heatmap, wsi_object, coords, patch_size, vis_level, indices=None, draw_grid=draw_grid, position=position, verbose=verbose)
 
     file.close()
     # print('Done!')
-    return heatmap
+    return heatmap, updated_position

@@ -152,9 +152,22 @@ class WholeSlideImage(object):
         self.contours_tissue = self.scaleContourDim(foreground_contours, scale)
         self.holes_tissue = self.scaleHolesDim(hole_contours, scale)
 
-    def visWSI(self, vis_level=0, color = (0,255,0), hole_color = (0,0,255), annot_color=(255,0,0),
-                    line_thickness=250, max_size=None, top_left=None, bot_right=None, custom_downsample=1, view_slide_only=False,
-                    number_contours=False, seg_display=True, annot_display=True):
+    def visWSI(
+        self,
+        vis_level=0,
+        color = (0,255,0),
+        hole_color = (0,0,255),
+        annot_color=(255,0,0),
+        line_thickness=250,
+        max_size=None,
+        top_left=None,
+        bot_right=None,
+        custom_downsample=1,
+        view_slide_only=False,
+        number_contours=False,
+        seg_display=True,
+        annot_display=True,
+        ):
 
         downsample = self.level_downsamples[vis_level]
         scale = [1/downsample[0], 1/downsample[1]]
@@ -367,12 +380,14 @@ class WholeSlideImage(object):
     ):
         save_path_hdf5 = Path(save_dir, f'{self.name}.h5')
         # self.hdf5_file = save_path_hdf5
-        elapsed = time.time()
+        start_time = time.time()
         n_contours = len(self.contours_tissue)
         if verbose:
             print(f'Total number of contours to process: {n_contours}')
         fp_chunk_size = math.ceil(n_contours * 0.05)
         init = True
+        updated_pos = 0
+        updated_pos += position
 
         with tqdm.tqdm(
             self.contours_tissue,
@@ -406,12 +421,21 @@ class WholeSlideImage(object):
                     else:
                         save_hdf5(save_path_hdf5, asset_dict, mode='a')
                     if save_patches_to_disk:
-                        png_save_dir = Path(save_dir, 'imgs')
+                        png_save_dir = Path(save_dir, patch_format)
                         png_save_dir.mkdir(parents=True, exist_ok=True)
-                        print('Saving extracted patches to disk...')
-                        save_patch(self.wsi, png_save_dir, asset_dict, attr_dict, fmt=patch_format)
+                        npatch, mins, secs = save_patch(i+1, n_contours, self.wsi, png_save_dir, asset_dict, attr_dict, position=updated_pos+1, fmt=patch_format)
+                        t.display(f'\tContour {i+1}/{n_contours}: {npatch} patch \t Time taken: {mins}m {secs}s', pos=updated_pos+2)
+                        updated_pos += 2
+                else:
+                    t.display(f'\tContour {i+1}/{n_contours}: 0 patch', pos=updated_pos+1)
+                    updated_pos += 1
 
-        return self.hdf5_file
+        end_time = time.time()
+        patch_saving_mins, patch_saving_secs = compute_time(start_time, end_time)
+        t.display(f'Total time taken: {mins}m {secs}s', pos=updated_pos+1)
+        updated_pos += 1
+
+        return self.hdf5_file, updated_pos
 
     def process_contour(
         self,
