@@ -89,7 +89,7 @@ def save_patch(cont_idx, n_contours, wsi, save_dir, asset_dict, attr_dict=None, 
 
     with tqdm.tqdm(
         coords,
-        desc=(f'\tContour {cont_idx}/{n_contours}'),
+        desc=(f'\tSaving {npatch} patch for contour {cont_idx}/{n_contours}'),
         unit=' patch',
         ncols=100,
         position=position,

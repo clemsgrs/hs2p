@@ -1,2 +1,2 @@
-hydra-core==1.2.0
 tqdm==4.33.0
+hydra-core==1.2.0

@@ -71,8 +71,9 @@ class isInContourV3_Hard(Contour_Checking_fn):
 
 class isInContour_pct(Contour_Checking_fn):
 
-	def __init__(self, contour, tissue_mask, patch_size, scale, pct=0.01):
+	def __init__(self, contour, contour_holes, tissue_mask, patch_size, scale, pct=0.01):
 		self.cont = contour
+		self.holes = contour_holes
 		self.mask = tissue_mask // 255
 		self.patch_size = patch_size
 		self.scale = scale
@@ -86,15 +87,18 @@ class isInContour_pct(Contour_Checking_fn):
 		x_patch, y_patch = downsampled_pt
 		x_patch, y_patch = int(x_patch), int(y_patch)
 
-		# draw filled contour on black background
+		# draw white filled contour on black background
 		contour_mask = np.zeros_like(self.mask)
 		cv2.drawContours(contour_mask, [self.cont], 0, (255,255,255), -1)
 
+		# draw black filled holes on white filled contour
+		cv2.drawContours(contour_mask, self.holes, 0, (0,0,0), -1)
+
 		# apply mask to input image
-		new_mask = cv2.bitwise_and(self.mask, contour_mask)
+		mask = cv2.bitwise_and(self.mask, contour_mask)
 
 		# x,y axis inversed
-		sub_mask = new_mask[y_patch:y_patch+downsampled_patch_size, x_patch:x_patch+downsampled_patch_size]
+		sub_mask = mask[y_patch:y_patch+downsampled_patch_size, x_patch:x_patch+downsampled_patch_size]
 
 		patch_area = downsampled_patch_size ** 2
 		tissue_area = np.sum(sub_mask)

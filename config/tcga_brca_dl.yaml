@@ -1,26 +1,23 @@
 data_dir: 'data'
 output_dir: 'output'
 
-dataset_name: panda
-slide_list: 'data/panda/slide_list.txt'
+dataset_name: tcga_brca
+slide_list: 'data/tcga_brca/toy_list.txt'
 
 step_size: 4096
 patch_size: 4096
 
 flags:
   seg: True
-  patch: True
-  stitch: True
-  no_auto_skip: False
+  patch: False
+  stitch: False
+  auto_skip: False
   verbose: False
 
 seg_params:
   seg_level: -1
-  sthresh: 8
-  mthresh: 7
-  close: 4
-  use_otsu: False
   save_mask: True
+  model_path: '/data/pathology/users/johnmelle/playground/tissue_seg/logging/playground_soft-cloud-137_best_model.pt'
 
 filter_params:
   a_t: 10
@@ -29,7 +26,7 @@ filter_params:
 
 vis_params:
   vis_level: -1
-  line_thickness: 100
+  line_thickness: 200
 
 patch_params:
   patch_level: 0
@@ -37,8 +34,9 @@ patch_params:
   black_thresh: 40
   use_padding: True
   contour_fn: 'pct'
+  drop_holes: False
   tissue_thresh: 0.1
-  save_patches_to_disk: True
+  save_patches_to_disk: False
   format: 'png'
   draw_grid: True
   bg_color:

@@ -20,7 +20,7 @@ seg_params:
   save_mask: True
 
 filter_params:
-  a_t: 10
+  a_t: 16
   a_h: 4
   max_n_holes: 8
 
@@ -33,13 +33,13 @@ patch_params:
   patch_size: 4096
   step_size: 4096
   white_thresh: 5
-  black_thresh: 40
+  black_thresh: 50
   use_padding: True
   contour_fn: 'pct'
   drop_holes: False
   tissue_thresh: 0.1
-  save_patches_to_disk: True
-  format: 'png'
+  save_patches_to_disk: False
+  format: 'jpg'
   draw_grid: True
   bg_color:
     - 214

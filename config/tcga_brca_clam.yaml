@@ -1,8 +1,8 @@
 data_dir: 'data'
 output_dir: 'output'
 
-dataset_name: panda
-slide_list: 'data/panda/slide_list.txt'
+dataset_name: tcga_brca
+slide_list: 'data/tcga_brca/toy_list.txt'
 
 flags:
   seg: True
@@ -16,7 +16,7 @@ seg_params:
   sthresh: 8
   mthresh: 7
   close: 4
-  use_otsu: True
+  use_otsu: False
   save_mask: True
 
 filter_params:
@@ -35,8 +35,8 @@ patch_params:
   white_thresh: 5
   black_thresh: 50
   use_padding: True
-  contour_fn: 'pct'
-  drop_holes: False
+  contour_fn: 'four_pt'
+  drop_holes: True
   tissue_thresh: 0.1
   save_patches_to_disk: False
   format: 'jpg'

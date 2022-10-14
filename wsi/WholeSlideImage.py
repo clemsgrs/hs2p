@@ -3,6 +3,7 @@ import time
 import tqdm
 import h5py
 import math
+import shutil
 import openslide
 import numpy as np
 import multiprocessing as mp
@@ -11,7 +12,7 @@ from PIL import Image
 from pathlib import Path
 from typing import List, Optional
 
-from wsi.wsi_utils import savePatchIter_bag_hdf5, initialize_hdf5_bag, save_hdf5, save_patch, isBlackPatch, isWhitePatch
+from wsi.wsi_utils import savePatchIter_bag_hdf5, initialize_hdf5_bag, save_hdf5, save_patch, isBlackPatch, isWhitePatch, compute_time
 from wsi.util_classes import Contour_Checking_fn, isInContourV1, isInContourV2, isInContourV3_Easy, isInContourV3_Hard, isInContour_pct
 
 Image.MAX_IMAGE_PIXELS = 933120000
@@ -422,17 +423,17 @@ class WholeSlideImage(object):
                         save_hdf5(save_path_hdf5, asset_dict, mode='a')
                     if save_patches_to_disk:
                         png_save_dir = Path(save_dir, patch_format)
-                        png_save_dir.mkdir(parents=True, exist_ok=True)
+                        try:
+                            png_save_dir.mkdir(parents=True)
+                        except:
+                            shutil.rmtree(png_save_dir)
+                            png_save_dir.mkdir(parents=True)
                         npatch, mins, secs = save_patch(i+1, n_contours, self.wsi, png_save_dir, asset_dict, attr_dict, position=updated_pos+1, fmt=patch_format)
-                        t.display(f'\tContour {i+1}/{n_contours}: {npatch} patch \t Time taken: {mins}m {secs}s', pos=updated_pos+2)
-                        updated_pos += 2
-                else:
-                    t.display(f'\tContour {i+1}/{n_contours}: 0 patch', pos=updated_pos+1)
-                    updated_pos += 1
+                        updated_pos += 1
 
         end_time = time.time()
         patch_saving_mins, patch_saving_secs = compute_time(start_time, end_time)
-        t.display(f'Total time taken: {mins}m {secs}s', pos=updated_pos+1)
+        t.display(f'Total time taken: {patch_saving_mins}m {patch_saving_secs}s', pos=updated_pos+1)
         updated_pos += 1
 
         return self.hdf5_file, updated_pos
@@ -499,7 +500,7 @@ class WholeSlideImage(object):
             elif contour_fn == 'pct':
                 scale = self.level_downsamples[seg_level]
                 cont = self.scaleContourDim([cont],  (1./scale[0], 1./scale[1]))[0]
-                cont_check_fn = isInContour_pct(contour=cont, tissue_mask=self.binary_mask, patch_size=patch_size, scale=scale, pct=tissue_thresh)
+                cont_check_fn = isInContour_pct(contour=cont, contour_holes=contour_holes, tissue_mask=self.binary_mask, patch_size=patch_size, scale=scale, pct=tissue_thresh)
             else:
                 raise NotImplementedError
         else:
