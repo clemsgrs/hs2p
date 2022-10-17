@@ -1,6 +1,9 @@
 import os
+import sys
 import time
 import tqdm
+import wandb
+import subprocess
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -10,6 +13,12 @@ from typing import List, Optional, Tuple, Dict
 from wsi.WholeSlideImage import WholeSlideImage
 from wsi.wsi_utils import StitchCoords
 from wsi.batch_process_utils import initialize_df
+
+
+def initialize_wandb(project, exp_name, entity, key=''):
+    command = f'wandb login {key}'
+    subprocess.call(command, shell=True)
+    wandb.init(project=project, entity=entity, name=exp_name)
 
 
 def segment(
@@ -264,11 +273,11 @@ def seg_and_patch(
 	stitch_times /= total
 
 	df.to_csv(Path(output_dir, 'process_list_autogen.csv'), index=False)
-	print(f'\n'*(pos+1))
-	print('-'*7, 'summary', '-'*7,)
-	print(f'average segmentation time per slide: \t{seg_times:.2f}s')
-	print(f'average patching time per slide: \t{patch_times:.2f}s')
-	print(f'average stiching time per slide: \t{stitch_times:.2f}s')
-	print('-'*7, ' '*len('summary'), '-'*7,)
+	print(f'\n'*(pos+1), file=sys.stderr)
+	print('-'*7, 'summary', '-'*7, file=sys.stderr)
+	print(f'average segmentation time per slide: \t{seg_times:.2f}s', file=sys.stderr)
+	print(f'average patching time per slide: \t{patch_times:.2f}s', file=sys.stderr)
+	print(f'average stiching time per slide: \t{stitch_times:.2f}s', file=sys.stderr)
+	print('-'*7, '-'*(len('summary')+2), '-'*7, sep='', file=sys.stderr)
 
 	return seg_times, patch_times

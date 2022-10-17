@@ -4,6 +4,11 @@ output_dir: 'output'
 dataset_name: tcga_brca
 slide_list: 'data/tcga_brca/toy_list.txt'
 
+wandb:
+  project: 'hs2p'
+  exp_name: ''
+  username: 'clemsg'
+
 flags:
   seg: True
   patch: True

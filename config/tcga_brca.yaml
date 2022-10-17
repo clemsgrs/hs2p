@@ -2,7 +2,12 @@ data_dir: 'data'
 output_dir: 'output'
 
 dataset_name: tcga_brca
-slide_list: 'data/tcga_brca/toy_list.txt'
+slide_list: 'data/tcga_brca/slide_list.txt'
+
+wandb:
+  project: 'hs2p'
+  exp_name: 'tcga_brca'
+  username: 'clemsg'
 
 flags:
   seg: True
@@ -38,7 +43,7 @@ patch_params:
   contour_fn: 'pct'
   drop_holes: False
   tissue_thresh: 0.1
-  save_patches_to_disk: False
+  save_patches_to_disk: True
   format: 'jpg'
   draw_grid: True
   bg_color:
