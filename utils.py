@@ -11,7 +11,7 @@ from omegaconf import DictConfig
 from typing import List, Optional, Tuple, Dict
 
 from wsi.WholeSlideImage import WholeSlideImage
-from wsi.wsi_utils import StitchCoords
+from wsi.wsi_utils import StitchCoords, compute_time
 from wsi.batch_process_utils import initialize_df
 
 
@@ -134,6 +134,7 @@ def seg_and_patch(
 	supported_fmts: List[str] = ['.tiff', '.tif', '.svs']
 	):
 
+	start_time = time.time()
 	if slide_list is not None:
 		with open(slide_list, 'r') as f:
 			slides = sorted([s.strip() for s in f])
@@ -268,6 +269,9 @@ def seg_and_patch(
 			patch_times += patch_time_elapsed
 			stitch_times += stitch_time_elapsed
 
+	end_time = time.time()
+	mins, secs = compute_time(start_time, end_time)
+
 	seg_times /= total
 	patch_times /= total
 	stitch_times /= total
@@ -275,6 +279,7 @@ def seg_and_patch(
 	df.to_csv(Path(output_dir, 'process_list_autogen.csv'), index=False)
 	print(f'\n'*(pos+1), file=sys.stderr)
 	print('-'*7, 'summary', '-'*7, file=sys.stderr)
+	print(f'total time taken: \t{mins}m{secs}s', file=sys.stderr)
 	print(f'average segmentation time per slide: \t{seg_times:.2f}s', file=sys.stderr)
 	print(f'average patching time per slide: \t{patch_times:.2f}s', file=sys.stderr)
 	print(f'average stiching time per slide: \t{stitch_times:.2f}s', file=sys.stderr)

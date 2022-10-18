@@ -1,7 +1,7 @@
 data_dir: 'data'
 output_dir: 'output'
 
-dataset_name: tcga_brca
+dataset_name: 'tcga_brca'
 slide_list: 'data/tcga_brca/slide_list.txt'
 
 wandb:
