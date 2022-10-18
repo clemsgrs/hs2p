@@ -70,7 +70,7 @@ def patching(
 	):
 
 	start_time = time.time()
-	file_path, pos = WSI_object.process_contours(
+	file_path = WSI_object.process_contours(
 		save_dir=save_dir,
 		seg_level=seg_level,
 		patch_level=patch_level,
@@ -88,7 +88,7 @@ def patching(
 		verbose=verbose,
 	)
 	patch_time_elapsed = time.time() - start_time
-	return file_path, patch_time_elapsed, pos
+	return file_path, patch_time_elapsed
 
 
 def stitching(
@@ -101,7 +101,7 @@ def stitching(
 	verbose: bool = False,
 	):
 	start = time.time()
-	heatmap, pos = StitchCoords(
+	heatmap = StitchCoords(
 		file_path,
 		wsi_object,
 		downscale=downscale,
@@ -112,7 +112,7 @@ def stitching(
 		verbose=verbose,
 	)
 	total_time = time.time() - start
-	return heatmap, total_time, pos
+	return heatmap, total_time
 
 
 def seg_and_patch(
@@ -152,8 +152,6 @@ def seg_and_patch(
 	patch_times = 0.
 	stitch_times = 0.
 
-	pos = 0
-
 	with tqdm.tqdm(
         range(total),
         desc=(f'Seg&Patch'),
@@ -168,7 +166,7 @@ def seg_and_patch(
 			df.to_csv(Path(output_dir, 'process_list_autogen.csv'), index=False)
 			idx = process_stack.index[i]
 			slide = process_stack.loc[idx, 'slide_id']
-			t.display(f'Processing {slide}', pos=pos+2)
+			t.display(f'Processing {slide}', pos=2)
 
 			df.loc[idx, 'process'] = 0
 			slide_id = Path(slide).stem
@@ -224,7 +222,7 @@ def seg_and_patch(
 			if patch:
 				slide_save_dir = Path(patch_save_dir, slide_id, f'{patch_params.patch_size}')
 				slide_save_dir.mkdir(parents=True, exist_ok=True)
-				file_path, patch_time_elapsed, pos = patching(
+				file_path, patch_time_elapsed = patching(
 					WSI_object=WSI_object,
 					save_dir=slide_save_dir,
 					seg_level=seg_params.seg_level,
@@ -237,7 +235,7 @@ def seg_and_patch(
 					use_padding=patch_params.use_padding,
 					save_patches_to_disk=patch_params.save_patches_to_disk,
 					patch_format=patch_params.format,
-					position=pos+3,
+					position=3,
 					verbose=verbose,
 				)
 				# file_path, patch_time_elapsed = patching_old(WSI_object=WSI_object,  **patch_params)
@@ -246,24 +244,19 @@ def seg_and_patch(
 			if stitch:
 				file_path = Path(patch_save_dir, slide_id, f'{patch_params.patch_size}', f'{slide_id}.h5')
 				if file_path.is_file():
-					heatmap, stitch_time_elapsed, pos = stitching(
+					heatmap, stitch_time_elapsed = stitching(
 						file_path,
 						WSI_object,
 						downscale=64,
 						bg_color=tuple(patch_params.bg_color),
 						draw_grid=patch_params.draw_grid,
-						position=pos+1,
+						position=3,
 						verbose=verbose,
 					)
 					stitch_path = Path(stitch_save_dir, f'{slide_id}_{patch_params.patch_size}.jpg')
 					heatmap.save(stitch_path)
 
-			t.display(f'segmentation took {seg_time_elapsed:.2f}s', pos=pos+1)
-			t.display(f'patching took {patch_time_elapsed:.2f}s', pos=pos+2)
-			t.display(f'stitching took {stitch_time_elapsed:.2f}s', pos=pos+3)
 			df.loc[idx, 'status'] = 'processed'
-
-			pos += 3
 
 			seg_times += seg_time_elapsed
 			patch_times += patch_time_elapsed

@@ -93,7 +93,7 @@ def save_patch(cont_idx, n_contours, wsi, save_dir, asset_dict, attr_dict=None, 
         unit=' patch',
         ncols=100,
         position=position,
-        leave=True,
+        leave=False,
     ) as t:
 
         for coord in t:
@@ -198,7 +198,7 @@ def DrawMapFromCoords(
         unit=' patch',
         ncols=80,
         position=position,
-        leave=True,
+        leave=False,
     ) as t:
 
         for idx in t:
@@ -212,7 +212,7 @@ def DrawMapFromCoords(
             if draw_grid:
                 DrawGrid(canvas, coord, patch_size)
 
-    return Image.fromarray(canvas), position+1
+    return Image.fromarray(canvas)
 
 
 def StitchPatches(hdf5_file_path, downscale=16, draw_grid=False, bg_color=(0,0,0), alpha=-1):
@@ -283,8 +283,8 @@ def StitchCoords(hdf5_file_path, wsi_object, downscale=16, draw_grid=False, bg_c
         heatmap = Image.new(size=(w,h), mode="RGBA", color=bg_color + (int(255 * alpha),))
 
     heatmap = np.array(heatmap)
-    heatmap, updated_position = DrawMapFromCoords(heatmap, wsi_object, coords, patch_size, vis_level, indices=None, draw_grid=draw_grid, position=position, verbose=verbose)
+    heatmap = DrawMapFromCoords(heatmap, wsi_object, coords, patch_size, vis_level, indices=None, draw_grid=draw_grid, position=position, verbose=verbose)
 
     file.close()
     # print('Done!')
-    return heatmap, updated_position
+    return heatmap

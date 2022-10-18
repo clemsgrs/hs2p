@@ -387,8 +387,6 @@ class WholeSlideImage(object):
             print(f'Total number of contours to process: {n_contours}')
         fp_chunk_size = math.ceil(n_contours * 0.05)
         init = True
-        updated_pos = 0
-        updated_pos += position
 
         with tqdm.tqdm(
             self.contours_tissue,
@@ -396,7 +394,7 @@ class WholeSlideImage(object):
             unit=' contour',
             ncols=80,
             position=position,
-            leave=True,
+            leave=False,
         ) as t:
 
             for i, cont in enumerate(t):
@@ -428,15 +426,12 @@ class WholeSlideImage(object):
                         except:
                             shutil.rmtree(png_save_dir)
                             png_save_dir.mkdir(parents=True)
-                        npatch, mins, secs = save_patch(i+1, n_contours, self.wsi, png_save_dir, asset_dict, attr_dict, position=updated_pos+1, fmt=patch_format)
-                        updated_pos += 1
+                        npatch, mins, secs = save_patch(i+1, n_contours, self.wsi, png_save_dir, asset_dict, attr_dict, position=position+1, fmt=patch_format)
 
         end_time = time.time()
         patch_saving_mins, patch_saving_secs = compute_time(start_time, end_time)
-        t.display(f'Total time taken: {patch_saving_mins}m {patch_saving_secs}s', pos=updated_pos+1)
-        updated_pos += 1
 
-        return self.hdf5_file, updated_pos
+        return self.hdf5_file
 
     def process_contour(
         self,
