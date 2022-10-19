@@ -3,6 +3,7 @@ output_dir: 'output'
 
 dataset_name: 'panda'
 slide_list: 'data/panda/slide_list.txt'
+resume: True
 
 wandb:
   project: 'hs2p'

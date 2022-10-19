@@ -1,9 +1,10 @@
+import io
+import sys
 import cv2
 import time
 import tqdm
 import h5py
 import math
-import shutil
 import openslide
 import numpy as np
 import multiprocessing as mp
@@ -376,7 +377,8 @@ class WholeSlideImage(object):
         patch_format: str = 'png',
         top_left: Optional[List[int]] = None,
         bot_right: Optional[List[int]] = None,
-        position: int = -1,
+        tqdm_position: int = -1,
+        tqdm_output_fp: Optional[Path] = None,
         verbose: bool = False,
     ):
         save_path_hdf5 = Path(save_dir, f'{self.name}.h5')
@@ -388,12 +390,15 @@ class WholeSlideImage(object):
         fp_chunk_size = math.ceil(n_contours * 0.05)
         init = True
 
+        tqdm_file = open(tqdm_output_fp, 'a') if tqdm_output_fp is not None else sys.stderr
+
         with tqdm.tqdm(
             self.contours_tissue,
             desc=(f'Patching'),
             unit=' contour',
             ncols=80,
-            position=position,
+            position=tqdm_position,
+            file=tqdm_file,
             leave=False,
         ) as t:
 
@@ -420,16 +425,13 @@ class WholeSlideImage(object):
                     else:
                         save_hdf5(save_path_hdf5, asset_dict, mode='a')
                     if save_patches_to_disk:
-                        png_save_dir = Path(save_dir, patch_format)
-                        try:
-                            png_save_dir.mkdir(parents=True)
-                        except:
-                            shutil.rmtree(png_save_dir)
-                            png_save_dir.mkdir(parents=True)
-                        npatch, mins, secs = save_patch(i+1, n_contours, self.wsi, png_save_dir, asset_dict, attr_dict, position=position+1, fmt=patch_format)
+                        patch_save_dir = Path(save_dir, patch_format)
+                        patch_save_dir.mkdir(parents=True, exist_ok=True)
+                        npatch, mins, secs = save_patch(i+1, n_contours, self.wsi, patch_save_dir, asset_dict, attr_dict, tqdm_position=tqdm_position+1, tqdm_output_fp=tqdm_output_fp, fmt=patch_format)
 
         end_time = time.time()
         patch_saving_mins, patch_saving_secs = compute_time(start_time, end_time)
+        tqdm_file.close()
 
         return self.hdf5_file
 

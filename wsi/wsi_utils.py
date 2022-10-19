@@ -1,4 +1,5 @@
 import cv2
+import sys
 import math
 import tqdm
 import time
@@ -78,7 +79,7 @@ def save_hdf5(output_path, asset_dict, attr_dict=None, mode='a'):
     return output_path
 
 
-def save_patch(cont_idx, n_contours, wsi, save_dir, asset_dict, attr_dict=None, position=-1, fmt='png'):
+def save_patch(cont_idx, n_contours, wsi, save_dir, asset_dict, attr_dict=None, tqdm_position=-1, tqdm_output_fp=None, fmt='png'):
     coords = asset_dict['coords']
     patch_size = attr_dict['coords']['patch_size']
     patch_level = attr_dict['coords']['patch_level']
@@ -87,12 +88,15 @@ def save_patch(cont_idx, n_contours, wsi, save_dir, asset_dict, attr_dict=None, 
     npatch = len(coords)
     start_time = time.time()
 
+    tqdm_file = open(tqdm_output_fp, 'a') if tqdm_output_fp is not None else sys.stderr
+
     with tqdm.tqdm(
         coords,
         desc=(f'\tSaving {npatch} patch for contour {cont_idx}/{n_contours}'),
         unit=' patch',
         ncols=100,
-        position=position,
+        position=tqdm_position,
+        file=tqdm_file,
         leave=False,
     ) as t:
 
@@ -103,8 +107,8 @@ def save_patch(cont_idx, n_contours, wsi, save_dir, asset_dict, attr_dict=None, 
 
     end_time = time.time()
     patch_saving_mins, patch_saving_secs = compute_time(start_time, end_time)
+    tqdm_file.close()
     return npatch, patch_saving_mins, patch_saving_secs
-
 
 
 def initialize_hdf5_bag(first_patch, save_coord=False):
@@ -179,7 +183,8 @@ def DrawMapFromCoords(
     vis_level,
     indices=None,
     draw_grid=True,
-    position=-1,
+    tqdm_position=-1,
+    tqdm_output_fp=None,
     verbose=False,
     ):
 
@@ -192,12 +197,15 @@ def DrawMapFromCoords(
     if verbose:
         print(f'downscaled patch size: {patch_size}')
 
+    tqdm_file = open(tqdm_output_fp, 'a') if tqdm_output_fp is not None else sys.stderr
+
     with tqdm.tqdm(
         range(total),
         desc=(f'Stitching'),
         unit=' patch',
         ncols=80,
-        position=position,
+        position=tqdm_position,
+        file=tqdm_file,
         leave=False,
     ) as t:
 
@@ -211,6 +219,8 @@ def DrawMapFromCoords(
             canvas[coord[1]:coord[1]+patch_size[1], coord[0]:coord[0]+patch_size[0], :3] = patch[:canvas_crop_shape[0], :canvas_crop_shape[1], :]
             if draw_grid:
                 DrawGrid(canvas, coord, patch_size)
+
+    tqdm_file.close()
 
     return Image.fromarray(canvas)
 
@@ -248,7 +258,7 @@ def StitchPatches(hdf5_file_path, downscale=16, draw_grid=False, bg_color=(0,0,0
     return heatmap
 
 
-def StitchCoords(hdf5_file_path, wsi_object, downscale=16, draw_grid=False, bg_color=(0,0,0), alpha=-1, position=-1, verbose=False):
+def StitchCoords(hdf5_file_path, wsi_object, downscale=16, draw_grid=False, bg_color=(0,0,0), alpha=-1, tqdm_position=-1, tqdm_output_fp=None, verbose=False):
     wsi = wsi_object.getOpenSlide()
     vis_level = wsi.get_best_level_for_downsample(downscale)
     file = h5py.File(hdf5_file_path, 'r')
@@ -283,7 +293,7 @@ def StitchCoords(hdf5_file_path, wsi_object, downscale=16, draw_grid=False, bg_c
         heatmap = Image.new(size=(w,h), mode="RGBA", color=bg_color + (int(255 * alpha),))
 
     heatmap = np.array(heatmap)
-    heatmap = DrawMapFromCoords(heatmap, wsi_object, coords, patch_size, vis_level, indices=None, draw_grid=draw_grid, position=position, verbose=verbose)
+    heatmap = DrawMapFromCoords(heatmap, wsi_object, coords, patch_size, vis_level, indices=None, draw_grid=draw_grid, tqdm_position=tqdm_position, tqdm_output_fp=tqdm_output_fp, verbose=verbose)
 
     file.close()
     # print('Done!')

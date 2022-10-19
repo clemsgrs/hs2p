@@ -1,5 +1,6 @@
 import os
 import hydra
+import shutil
 from pathlib import Path
 from omegaconf import DictConfig
 
@@ -10,6 +11,10 @@ def main(cfg: DictConfig):
 
     output_dir = Path(cfg.output_dir, cfg.dataset_name)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    key = os.environ.get('WANDB_API_KEY')
+    wandb_run = initialize_wandb(project=cfg.wandb.project, exp_name=cfg.wandb.exp_name, entity=cfg.wandb.username, key=key)
+    wandb_run.define_metric('processed', summary='max')
 
     patch_save_dir = Path(output_dir, 'patches')
     mask_save_dir = Path(output_dir, 'masks')
@@ -25,12 +30,24 @@ def main(cfg: DictConfig):
 
     for dirname, dirpath in directories.items():
         if dirname not in ['data_dir']:
-            dirpath = Path(dirpath)
-            dirpath.mkdir(parents=False, exist_ok=True)
+            if not cfg.resume:
+                if dirpath.exists():
+                    shutil.rmtree(dirpath)
+                dirpath.mkdir(parents=False)
+            else:
+                dirpath.mkdir(parents=False, exist_ok=True)
 
     slide_list = Path(cfg.slide_list)
 
+    process_list_fp = None
+    if Path(output_dir, 'process_list.csv').is_file() and cfg.resume:
+        assert cfg.resume
+        process_list_fp = Path(output_dir, 'process_list.csv')
+
     print()
+
+    tqdm_output_fp = Path('tqdm.log')
+    tqdm_output_fp.unlink(missing_ok=True)
 
     seg_times, patch_times = seg_and_patch(
         **directories,
@@ -39,10 +56,12 @@ def main(cfg: DictConfig):
         patch=cfg.flags.patch,
         stitch=cfg.flags.stitch,
         auto_skip=cfg.flags.auto_skip,
+        process_list=process_list_fp,
         seg_params=cfg.seg_params,
         filter_params=cfg.filter_params,
         vis_params=cfg.vis_params,
         patch_params=cfg.patch_params,
+        tqdm_output_fp=tqdm_output_fp,
         verbose=cfg.flags.verbose,
     )
 

@@ -16,9 +16,10 @@ from wsi.batch_process_utils import initialize_df
 
 
 def initialize_wandb(project, exp_name, entity, key=''):
-    command = f'wandb login {key}'
-    subprocess.call(command, shell=True)
-    wandb.init(project=project, entity=entity, name=exp_name)
+	command = f'wandb login {key}'
+	subprocess.call(command, shell=True)
+	run = wandb.init(project=project, entity=entity, name=exp_name)
+	return run
 
 
 def segment(
@@ -65,7 +66,8 @@ def patching(
 	patch_format: str = 'png',
 	top_left: Optional[List[int]] = None,
 	bot_right: Optional[List[int]] = None,
-	position: int = -1,
+	tqdm_position: int = -1,
+	tqdm_output_fp: Optional[Path] = None,
 	verbose: bool = False,
 	):
 
@@ -84,7 +86,8 @@ def patching(
 		patch_format=patch_format,
 		top_left=top_left,
 		bot_right=bot_right,
-		position=position,
+		tqdm_position=tqdm_position,
+		tqdm_output_fp=tqdm_output_fp,
 		verbose=verbose,
 	)
 	patch_time_elapsed = time.time() - start_time
@@ -97,7 +100,8 @@ def stitching(
 	downscale: int = 64,
 	bg_color: Tuple[int,int,int] = (255,255,255),
 	draw_grid: bool = False,
-	position: int = -1,
+	tqdm_position: int = -1,
+	tqdm_output_fp: Optional[Path] = None,
 	verbose: bool = False,
 	):
 	start = time.time()
@@ -108,7 +112,8 @@ def stitching(
 		bg_color=bg_color,
 		alpha=-1,
 		draw_grid=draw_grid,
-		position=position,
+		tqdm_position=tqdm_position,
+		tqdm_output_fp=tqdm_output_fp,
 		verbose=verbose,
 	)
 	total_time = time.time() - start
@@ -130,9 +135,13 @@ def seg_and_patch(
 	stitch: bool = False,
 	patch: bool = False,
 	auto_skip: bool = True,
+	process_list: Optional[Path] = None,
+	tqdm_output_fp: Optional[Path] = None,
 	verbose: bool = False,
 	supported_fmts: List[str] = ['.tiff', '.tif', '.svs']
 	):
+
+	tqdm_file = open(tqdm_output_fp, 'a+') if tqdm_output_fp is not None else sys.stderr
 
 	start_time = time.time()
 	if slide_list is not None:
@@ -142,11 +151,16 @@ def seg_and_patch(
 		slides = sorted([d for d in data_dir.iterdir()])
 		slides = [slide.name for slide in slides if slide.is_file() and slide.suffix in supported_fmts]
 
-	df = initialize_df(slides, seg_params, filter_params, vis_params, patch_params)
+	if process_list is None:
+		df = initialize_df(slides, seg_params, filter_params, vis_params, patch_params)
+	else:
+		df = pd.read_csv(process_list)
+		df = initialize_df(df, seg_params, filter_params, vis_params, patch_params)
 
 	mask = df['process'] == 1
 	process_stack = df[mask]
 	total = len(process_stack)
+	already_processed = len(df)-total
 
 	seg_times = 0.
 	patch_times = 0.
@@ -157,18 +171,20 @@ def seg_and_patch(
         desc=(f'Seg&Patch'),
         unit=' slide',
         ncols=100,
+		initial=already_processed,
+		total=total+already_processed,
 		position=0,
 		leave=True,
+		file=tqdm_file,
     ) as t:
 
 		for i in t:
 
-			df.to_csv(Path(output_dir, 'process_list_autogen.csv'), index=False)
+			df.to_csv(Path(output_dir, 'process_list.csv'), index=False)
 			idx = process_stack.index[i]
 			slide = process_stack.loc[idx, 'slide_id']
 			t.display(f'Processing {slide}', pos=2)
 
-			df.loc[idx, 'process'] = 0
 			slide_id = Path(slide).stem
 
 			if auto_skip and Path(patch_save_dir, slide_id + '.h5').is_file():
@@ -235,7 +251,8 @@ def seg_and_patch(
 					use_padding=patch_params.use_padding,
 					save_patches_to_disk=patch_params.save_patches_to_disk,
 					patch_format=patch_params.format,
-					position=3,
+					tqdm_position=3,
+					tqdm_output_fp=tqdm_output_fp,
 					verbose=verbose,
 				)
 				# file_path, patch_time_elapsed = patching_old(WSI_object=WSI_object,  **patch_params)
@@ -250,32 +267,38 @@ def seg_and_patch(
 						downscale=64,
 						bg_color=tuple(patch_params.bg_color),
 						draw_grid=patch_params.draw_grid,
-						position=3,
+						tqdm_position=3,
+						tqdm_output_fp=tqdm_output_fp,
 						verbose=verbose,
 					)
 					stitch_path = Path(stitch_save_dir, f'{slide_id}_{patch_params.patch_size}.jpg')
 					heatmap.save(stitch_path)
 
+			df.loc[idx, 'process'] = 0
 			df.loc[idx, 'status'] = 'processed'
 
 			seg_times += seg_time_elapsed
 			patch_times += patch_time_elapsed
 			stitch_times += stitch_time_elapsed
 
+			wandb.log({'processed': already_processed+i+1})
+
 	end_time = time.time()
 	mins, secs = compute_time(start_time, end_time)
 
-	seg_times /= total
-	patch_times /= total
-	stitch_times /= total
+	seg_times /= (total+1e-5)
+	patch_times /= (total+1e-5)
+	stitch_times /= (total+1e-5)
 
-	df.to_csv(Path(output_dir, 'process_list_autogen.csv'), index=False)
-	print(f'\n'*(pos+1), file=sys.stderr)
-	print('-'*7, 'summary', '-'*7, file=sys.stderr)
-	print(f'total time taken: \t{mins}m{secs}s', file=sys.stderr)
-	print(f'average segmentation time per slide: \t{seg_times:.2f}s', file=sys.stderr)
-	print(f'average patching time per slide: \t{patch_times:.2f}s', file=sys.stderr)
-	print(f'average stiching time per slide: \t{stitch_times:.2f}s', file=sys.stderr)
-	print('-'*7, '-'*(len('summary')+2), '-'*7, sep='', file=sys.stderr)
+	tqdm_file.close()
+
+	df.to_csv(Path(output_dir, 'process_list.csv'), index=False)
+	print(f'\n'*4)
+	print('-'*7, 'summary', '-'*7)
+	print(f'total time taken: \t{mins}m{secs}s')
+	print(f'average segmentation time per slide: \t{seg_times:.2f}s')
+	print(f'average patching time per slide: \t{patch_times:.2f}s')
+	print(f'average stiching time per slide: \t{stitch_times:.2f}s')
+	print('-'*7, '-'*(len('summary')+2), '-'*7, sep='')
 
 	return seg_times, patch_times
