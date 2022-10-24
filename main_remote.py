@@ -9,8 +9,6 @@ from utils import initialize_wandb, seg_and_patch
 @hydra.main(version_base='1.2.0', config_path='config', config_name='default')
 def main(cfg: DictConfig):
 
-    os.chdir('code/git/clemsgrs/hs2p')
-
     # set up wandb
     key = os.environ.get('WANDB_API_KEY')
     wandb_run = initialize_wandb(project=cfg.wandb.project, exp_name=cfg.wandb.exp_name, entity=cfg.wandb.username, key=key)
