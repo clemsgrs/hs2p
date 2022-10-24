@@ -44,7 +44,6 @@ def main(cfg: DictConfig):
 
     process_list_fp = None
     if Path(output_dir, 'process_list.csv').is_file() and cfg.resume:
-        assert cfg.resume
         process_list_fp = Path(output_dir, 'process_list.csv')
 
     print()
