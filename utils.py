@@ -15,11 +15,13 @@ from wsi.wsi_utils import StitchCoords, compute_time
 from wsi.batch_process_utils import initialize_df
 
 
-def initialize_wandb(project, exp_name, entity, key=''):
-	command = f'wandb login {key}'
-	subprocess.call(command, shell=True)
-	run = wandb.init(project=project, entity=entity, name=exp_name)
-	return run
+def initialize_wandb(project, exp_name, entity, config={}, tags=None, key=''):
+    command = f'wandb login {key}'
+    subprocess.call(command, shell=True)
+    if tags == None:
+        tags=[]
+    run = wandb.init(project=project, entity=entity, name=exp_name, config=config, tags=tags)
+    return run
 
 
 def segment(

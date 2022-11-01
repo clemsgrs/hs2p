@@ -2,11 +2,13 @@ data_dir: 'data'
 output_dir: 'output'
 
 dataset_name: tcga_brca
-slide_list: 'data/tcga_brca/toy_list.txt'
+slide_list: 'data/tcga_brca/slide_list.txt'
+resume: True
+experiment_name: 'clam'
 
 wandb:
   project: 'hs2p'
-  exp_name: ''
+  exp_name: 'tcga_brca_clam'
   username: 'clemsg'
 
 flags:

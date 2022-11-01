@@ -49,13 +49,6 @@ class WholeSlideImage(object):
             self.holes_tissue = asset_dict['holes']
             self.contours_tissue = asset_dict['tissue']
 
-    def saveSegmentation(self, mask_file):
-        # save segmentation results using pickle
-        asset_dict = {'holes': self.holes_tissue, 'tissue': self.contours_tissue}
-        import pickle
-        with open(mask_file,'wb') as f:
-	        pickle.dump(asset_dict, f)
-
     def segmentTissue(
         self,
         seg_level=0,

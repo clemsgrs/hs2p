@@ -1,8 +1,14 @@
 data_dir: 'data'
 output_dir: 'output'
 
-dataset_name: tcga_brca
-slide_list: 'data/tcga_brca/toy_list.txt'
+dataset_name: 'tmp'
+slide_list: 'data/tmp/tmp.txt'
+resume: False
+
+wandb:
+  project: 'hs2p'
+  exp_name: 'tmp'
+  username: 'clemsg'
 
 flags:
   seg: True
