@@ -3,8 +3,8 @@ output_dir: 'output'
 
 dataset_name: tcga_brca
 slide_list: 'data/tcga_brca/slide_list.txt'
-resume: True
-experiment_name: 'clam'
+resume: False
+experiment_name: 'clam_spacing'
 
 wandb:
   project: 'hs2p'
@@ -36,7 +36,7 @@ vis_params:
   line_thickness: 200
 
 patch_params:
-  patch_level: 0
+  spacing: 0.5
   patch_size: 4096
   step_size: 4096
   white_thresh: 5

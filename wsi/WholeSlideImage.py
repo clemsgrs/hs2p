@@ -217,109 +217,6 @@ class WholeSlideImage(object):
 
         return img
 
-    def createPatches_bag_hdf5(self, save_path, patch_level=0, patch_size=256, step_size=256, save_coord=True, **kwargs):
-        contours = self.contours_tissue
-        contour_holes = self.holes_tissue
-
-        # print(f'Start patching {self.name}...')
-        elapsed = time.time()
-        for idx, cont in enumerate(contours):
-            patch_gen = self._getPatchGenerator(cont, idx, patch_level, save_path, patch_size, step_size, **kwargs)
-
-            if self.hdf5_file is None:
-                try:
-                    first_patch = next(patch_gen)
-
-                # empty contour, continue
-                except StopIteration:
-                    continue
-
-                file_path = initialize_hdf5_bag(first_patch, save_coord=save_coord)
-                self.hdf5_file = file_path
-
-            for patch in patch_gen:
-                savePatchIter_bag_hdf5(patch)
-
-        return self.hdf5_file
-
-    def _getPatchGenerator(self, cont, cont_idx, patch_level, save_path, patch_size=256, step_size=256, custom_downsample=1,
-        white_black=True, white_thresh=15, black_thresh=50, contour_fn='four_pt', use_padding=True):
-        start_x, start_y, w, h = cv2.boundingRect(cont) if cont is not None else (0, 0, self.level_dim[patch_level][0], self.level_dim[patch_level][1])
-        print("Bounding Box:", start_x, start_y, w, h)
-        print("Contour Area:", cv2.contourArea(cont))
-
-        if custom_downsample > 1:
-            assert custom_downsample == 2
-            target_patch_size = patch_size
-            patch_size = target_patch_size * 2
-            step_size = step_size * 2
-            print("Custom Downsample: {}, Patching at {} x {}, But Final Patch Size is {} x {}".format(custom_downsample, patch_size, patch_size,
-                target_patch_size, target_patch_size))
-
-        patch_downsample = (int(self.level_downsamples[patch_level][0]), int(self.level_downsamples[patch_level][1]))
-        ref_patch_size = (patch_size*patch_downsample[0], patch_size*patch_downsample[1])
-
-        step_size_x = step_size * patch_downsample[0]
-        step_size_y = step_size * patch_downsample[1]
-
-        if isinstance(contour_fn, str):
-            if contour_fn == 'four_pt':
-                cont_check_fn = isInContourV3_Easy(contour=cont, patch_size=ref_patch_size[0], center_shift=0.5)
-            elif contour_fn == 'four_pt_hard':
-                cont_check_fn = isInContourV3_Hard(contour=cont, patch_size=ref_patch_size[0], center_shift=0.5)
-            elif contour_fn == 'center':
-                cont_check_fn = isInContourV2(contour=cont, patch_size=ref_patch_size[0])
-            elif contour_fn == 'basic':
-                cont_check_fn = isInContourV1(contour=cont)
-            else:
-                raise NotImplementedError
-        else:
-            assert isinstance(contour_fn, Contour_Checking_fn)
-            cont_check_fn = contour_fn
-
-        img_w, img_h = self.level_dim[0]
-        if use_padding:
-            stop_y = start_y+h
-            stop_x = start_x+w
-        else:
-            stop_y = min(start_y+h, img_h-ref_patch_size[1])
-            stop_x = min(start_x+w, img_w-ref_patch_size[0])
-
-        count = 0
-        for y in range(start_y, stop_y, step_size_y):
-            for x in range(start_x, stop_x, step_size_x):
-
-                if not self.isInContours(cont_check_fn, (x,y), self.holes_tissue[cont_idx], ref_patch_size[0]): #point not inside contour and its associated holes
-                    continue
-
-                count+=1
-                patch_PIL = self.wsi.read_region((x,y), patch_level, (patch_size, patch_size)).convert('RGB')
-                if custom_downsample > 1:
-                    patch_PIL = patch_PIL.resize((target_patch_size, target_patch_size))
-
-                if white_black:
-                    if isBlackPatch(np.array(patch_PIL), rgbThresh=black_thresh) or isWhitePatch(np.array(patch_PIL), satThresh=white_thresh):
-                        continue
-
-                patch_info = {
-                    'x': x // (patch_downsample[0] * custom_downsample),
-                    'y': y // (patch_downsample[1] * custom_downsample),
-                    'cont_idx': cont_idx,
-                    'patch_size': patch_size,
-                    'patch_level': patch_level,
-                    'downsample': self.level_downsamples[patch_level],
-                    'downsampled_level_dim': tuple(np.array(self.level_dim[patch_level])//custom_downsample),
-                    'level_dim': self.level_dim[patch_level],
-                    'patch_PIL': patch_PIL,
-                    'wsi_name': self.name,
-                    'save_path': save_path,
-                }
-
-                yield patch_info
-
-
-        print("patches extracted: {}".format(count))
-
     @staticmethod
     def isInHoles(holes, pt, patch_size):
         for hole in holes:
@@ -355,11 +252,27 @@ class WholeSlideImage(object):
 
         return level_downsamples
 
+    def get_best_level_for_spacing(self, spacing: float):
+        # OpenSlide gives the resolution in centimeters so we convert this to microns
+        x_res = float(self.wsi.properties['tiff.XResolution']) / 10000
+        y_res = float(self.wsi.properties['tiff.YResolution']) / 10000
+        x_spacing, y_spacing = 1 / x_res, 1 / y_res
+        downsample_x, downsample_y = spacing / x_spacing, spacing / y_spacing
+        # get_best_level_for_downsample just chooses the largest level with a downsample less than user's downsample
+        # see https://github.com/openslide/openslide/issues/274
+        # so I made my own version of get_best_level_for_downsample
+        assert self.get_best_level_for_downsample_custom(downsample_x) == self.get_best_level_for_downsample_custom(downsample_y)
+        level = self.get_best_level_for_downsample_custom(downsample_x)
+        return level
+
+    def get_best_level_for_downsample_custom(self, downsample):
+        return np.argmin([abs(x-downsample) for x in self.wsi.level_downsamples])
+
     def process_contours(
         self,
         save_dir,
         seg_level: int = -1,
-        patch_level: int = 0,
+        spacing: float = 0.5,
         patch_size: int = 256,
         step_size: int = 256,
         contour_fn: str = 'pct',
@@ -401,7 +314,7 @@ class WholeSlideImage(object):
                     cont,
                     self.holes_tissue[i],
                     seg_level,
-                    patch_level,
+                    spacing,
                     save_dir,
                     patch_size,
                     step_size,
@@ -433,7 +346,7 @@ class WholeSlideImage(object):
         cont,
         contour_holes,
         seg_level: int,
-        patch_level: int,
+        spacing: float,
         save_dir: Path,
         patch_size: int = 256,
         step_size: int = 256,
@@ -446,6 +359,7 @@ class WholeSlideImage(object):
         verbose: bool = False,
     ):
 
+        patch_level = self.get_best_level_for_spacing(spacing)
         if cont is not None:
             start_x, start_y, w, h = cv2.boundingRect(cont)
         else:
@@ -522,6 +436,7 @@ class WholeSlideImage(object):
 
             attr = {
                 'patch_size': patch_size,
+                'spacing': spacing,
                 'patch_level': patch_level,
                 'downsample': self.level_downsamples[patch_level],
                 'downsampled_level_dim': tuple(np.array(self.level_dim[patch_level])),

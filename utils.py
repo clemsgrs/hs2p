@@ -46,18 +46,11 @@ def segment(
 	return WSI_object, seg_time_elapsed
 
 
-def patching_old(WSI_object, **kwargs):
-	start_time = time.time()
-	file_path = WSI_object.createPatches_bag_hdf5(**kwargs, save_coord=True)
-	patch_time_elapsed = time.time() - start_time
-	return file_path, patch_time_elapsed
-
-
 def patching(
 	WSI_object: WholeSlideImage,
 	save_dir: Path,
 	seg_level: int,
-	patch_level: int,
+	spacing: float,
 	patch_size: int,
 	step_size: int,
 	contour_fn: str,
@@ -77,7 +70,7 @@ def patching(
 	file_path = WSI_object.process_contours(
 		save_dir=save_dir,
 		seg_level=seg_level,
-		patch_level=patch_level,
+		spacing=spacing,
 		patch_size=patch_size,
 		step_size=step_size,
 		contour_fn=contour_fn,
@@ -198,6 +191,7 @@ def seg_and_patch(
 			full_path = Path(data_dir, slide)
 			WSI_object = WholeSlideImage(full_path)
 
+			vis_level = vis_params.vis_level
 			if vis_params.vis_level < 0:
 				if len(WSI_object.level_dim) == 1:
 					vis_params.vis_level = 0
@@ -206,6 +200,7 @@ def seg_and_patch(
 					best_level = wsi.get_best_level_for_downsample(64)
 					vis_params.vis_level = best_level
 
+			seg_level = seg_params.seg_level
 			if seg_params.seg_level < 0:
 				if len(WSI_object.level_dim) == 1:
 					seg_params.seg_level = 0
@@ -244,7 +239,7 @@ def seg_and_patch(
 					WSI_object=WSI_object,
 					save_dir=slide_save_dir,
 					seg_level=seg_params.seg_level,
-					patch_level=patch_params.patch_level,
+					spacing=patch_params.spacing,
 					patch_size=patch_params.patch_size,
 					step_size=patch_params.step_size,
 					contour_fn=patch_params.contour_fn,
@@ -284,6 +279,10 @@ def seg_and_patch(
 			stitch_times += stitch_time_elapsed
 
 			wandb.log({'processed': already_processed+i+1})
+
+			# restore original values
+			vis_params.vis_level = vis_level
+			seg_params.seg_level = seg_level
 
 	end_time = time.time()
 	mins, secs = compute_time(start_time, end_time)
