@@ -198,6 +198,7 @@ def seg_and_patch(
 			full_path = Path(data_dir, slide)
 			WSI_object = WholeSlideImage(full_path)
 
+			vis_level = vis_params.vis_level
 			if vis_params.vis_level < 0:
 				if len(WSI_object.level_dim) == 1:
 					vis_params.vis_level = 0
@@ -206,6 +207,7 @@ def seg_and_patch(
 					best_level = wsi.get_best_level_for_downsample(64)
 					vis_params.vis_level = best_level
 
+			seg_level = seg_params.seg_level
 			if seg_params.seg_level < 0:
 				if len(WSI_object.level_dim) == 1:
 					seg_params.seg_level = 0
@@ -284,6 +286,10 @@ def seg_and_patch(
 			stitch_times += stitch_time_elapsed
 
 			wandb.log({'processed': already_processed+i+1})
+
+			# restore original values
+			vis_params.vis_level = vis_level
+			seg_params.seg_level = seg_level
 
 	end_time = time.time()
 	mins, secs = compute_time(start_time, end_time)
