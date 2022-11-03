@@ -175,7 +175,6 @@ def seg_and_patch(
 
 		for i in t:
 
-			df.to_csv(Path(output_dir, 'process_list.csv'), index=False)
 			idx = process_stack.index[i]
 			slide = process_stack.loc[idx, 'slide_id']
 			t.display(f'Processing {slide}', pos=2)
@@ -192,7 +191,7 @@ def seg_and_patch(
 			WSI_object = WholeSlideImage(full_path)
 
 			vis_level = vis_params.vis_level
-			if vis_params.vis_level < 0:
+			if vis_level < 0:
 				if len(WSI_object.level_dim) == 1:
 					vis_params.vis_level = 0
 				else:
@@ -201,7 +200,7 @@ def seg_and_patch(
 					vis_params.vis_level = best_level
 
 			seg_level = seg_params.seg_level
-			if seg_params.seg_level < 0:
+			if seg_level < 0:
 				if len(WSI_object.level_dim) == 1:
 					seg_params.seg_level = 0
 				else:
@@ -252,7 +251,6 @@ def seg_and_patch(
 					tqdm_output_fp=tqdm_output_fp,
 					verbose=verbose,
 				)
-				# file_path, patch_time_elapsed = patching_old(WSI_object=WSI_object,  **patch_params)
 
 			stitch_time_elapsed = -1
 			if stitch:
@@ -273,6 +271,7 @@ def seg_and_patch(
 
 			df.loc[idx, 'process'] = 0
 			df.loc[idx, 'status'] = 'processed'
+			df.to_csv(Path(output_dir, 'process_list.csv'), index=False)
 
 			seg_times += seg_time_elapsed
 			patch_times += patch_time_elapsed

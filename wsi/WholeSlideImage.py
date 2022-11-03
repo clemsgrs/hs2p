@@ -293,7 +293,6 @@ class WholeSlideImage(object):
         n_contours = len(self.contours_tissue)
         if verbose:
             print(f'Total number of contours to process: {n_contours}')
-        fp_chunk_size = math.ceil(n_contours * 0.05)
         init = True
 
         tqdm_file = open(tqdm_output_fp, 'a') if tqdm_output_fp is not None else sys.stderr
@@ -365,13 +364,18 @@ class WholeSlideImage(object):
         else:
             start_x, start_y, w, h = (0, 0, self.level_dim[patch_level][0], self.level_dim[patch_level][1])
 
+        # 256x256 patches at 20x are equivalent to 512x512 patches at 40x
+        # ref_patch_size capture the patch size at the lowest level
+        patch_downsample = (int(self.level_downsamples[patch_level][0]), int(self.level_downsamples[patch_level][1]))
+        ref_patch_size = (patch_size*patch_downsample[0], patch_size*patch_downsample[1])
+
         img_w, img_h = self.level_dim[0]
         if use_padding:
             stop_y = start_y+h
             stop_x = start_x+w
         else:
-            stop_y = min(start_y+h, img_h-patch_size+1)
-            stop_x = min(start_x+w, img_w-patch_size+1)
+            stop_y = min(start_y+h, img_h-ref_patch_size[1]+1)
+            stop_x = min(start_x+w, img_w-ref_patch_size[0]+1)
 
         if verbose:
             print(f'Bounding Box: {start_x}, {start_y}, {w}, {h}')
@@ -392,19 +396,20 @@ class WholeSlideImage(object):
             else:
                 print(f'Adjusted Bounding Box: {start_x}, {start_y}, {w}, {h}')
 
+        #TODO: work with the ref_patch_size tuple instead of using ref_patch_size[0] to account for difference along x & y axes
         if isinstance(contour_fn, str):
             if contour_fn == 'four_pt':
-                cont_check_fn = isInContourV3_Easy(contour=cont, patch_size=patch_size, center_shift=0.5)
+                cont_check_fn = isInContourV3_Easy(contour=cont, patch_size=ref_patch_size[0], center_shift=0.5)
             elif contour_fn == 'four_pt_hard':
-                cont_check_fn = isInContourV3_Hard(contour=cont, patch_size=patch_size, center_shift=0.5)
+                cont_check_fn = isInContourV3_Hard(contour=cont, patch_size=ref_patch_size[0], center_shift=0.5)
             elif contour_fn == 'center':
-                cont_check_fn = isInContourV2(contour=cont, patch_size=patch_size)
+                cont_check_fn = isInContourV2(contour=cont, patch_size=ref_patch_size[0])
             elif contour_fn == 'basic':
                 cont_check_fn = isInContourV1(contour=cont)
             elif contour_fn == 'pct':
                 scale = self.level_downsamples[seg_level]
                 cont = self.scaleContourDim([cont],  (1./scale[0], 1./scale[1]))[0]
-                cont_check_fn = isInContour_pct(contour=cont, contour_holes=contour_holes, tissue_mask=self.binary_mask, patch_size=patch_size, scale=scale, pct=tissue_thresh)
+                cont_check_fn = isInContour_pct(contour=cont, contour_holes=contour_holes, tissue_mask=self.binary_mask, patch_size=ref_patch_size[0], scale=scale, pct=tissue_thresh)
             else:
                 raise NotImplementedError
         else:
@@ -421,7 +426,7 @@ class WholeSlideImage(object):
             num_workers = 4
         pool = mp.Pool(num_workers)
 
-        iterable = [(coord, contour_holes, patch_size, cont_check_fn, drop_holes) for coord in coord_candidates]
+        iterable = [(coord, contour_holes, ref_patch_size[0], cont_check_fn, drop_holes) for coord in coord_candidates]
         results = pool.starmap(WholeSlideImage.process_coord_candidate, iterable)
         pool.close()
         results = np.array([result for result in results if result is not None])
@@ -438,6 +443,7 @@ class WholeSlideImage(object):
                 'patch_size': patch_size,
                 'spacing': spacing,
                 'patch_level': patch_level,
+                'ref_patch_size': ref_patch_size[0],
                 'downsample': self.level_downsamples[patch_level],
                 'downsampled_level_dim': tuple(np.array(self.level_dim[patch_level])),
                 'level_dim': self.level_dim[patch_level],

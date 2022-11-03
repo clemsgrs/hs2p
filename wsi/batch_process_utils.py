@@ -14,8 +14,15 @@ args:
 	patch_params (dict): patching paramters
 	use_heatmap_args (bool): whether to include heatmap arguments such as ROI coordinates
 '''
-def initialize_df(slides, seg_params, filter_params, vis_params, patch_params,
-	use_heatmap_args=False, save_patches=False):
+def initialize_df(
+	slides,
+	seg_params,
+	filter_params,
+	vis_params,
+	patch_params,
+	use_heatmap_args=False,
+	save_patches=False,
+	):
 
 	total = len(slides)
 	if isinstance(slides, pd.DataFrame):
