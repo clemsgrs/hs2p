@@ -4,7 +4,7 @@ output_dir: 'output'
 dataset_name: 'tcga_brca'
 slide_list: 'data/tcga_brca/slide_list.txt'
 resume: False
-experiment_name: 'otsu_spacing'
+experiment_name: 'otsu'
 
 wandb:
   project: 'hs2p'

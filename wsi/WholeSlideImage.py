@@ -416,8 +416,11 @@ class WholeSlideImage(object):
             assert isinstance(contour_fn, Contour_Checking_fn)
             cont_check_fn = contour_fn
 
-        x_range = np.arange(start_x, stop_x, step=step_size)
-        y_range = np.arange(start_y, stop_y, step=step_size)
+        ref_step_size_x = step_size * patch_downsample[0]
+        ref_step_size_y = step_size * patch_downsample[1]
+
+        x_range = np.arange(start_x, stop_x, step=ref_step_size_x)
+        y_range = np.arange(start_y, stop_y, step=ref_step_size_y)
         x_coords, y_coords = np.meshgrid(x_range, y_range, indexing='ij')
         coord_candidates = np.array([x_coords.flatten(), y_coords.flatten()]).transpose()
 
@@ -434,7 +437,7 @@ class WholeSlideImage(object):
         if verbose:
             print(f'Extracted {len(results)} patches')
 
-        if len(results)>1:
+        if len(results)>0:
             asset_dict = {
                 'coords': results,
             }
