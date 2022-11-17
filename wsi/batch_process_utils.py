@@ -37,6 +37,7 @@ def initialize_df(
 
 	default_df_dict.update({
 		'status': np.full((total), 'tbp'),
+		'has_patches': np.full((total), 'tbd'),
 		# seg params
 		'seg_level': np.full((total), int(seg_params['seg_level']), dtype=np.int8),
 		'sthresh': np.full((total), int(seg_params['sthresh']), dtype=np.uint8),

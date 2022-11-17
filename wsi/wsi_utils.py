@@ -149,7 +149,6 @@ def DrawMap(canvas, patch_dset, coords, patch_size, indices=None, verbose=False,
         indices = np.arange(len(coords))
     total = len(indices)
     if verbose:
-        ten_percent_chunk = math.ceil(total * 0.1)
         print(f'Start stitching {patch_dset.attrs["wsi_name"]}...')
 
     with tqdm.tqdm(
@@ -260,7 +259,8 @@ def StitchPatches(hdf5_file_path, downscale=16, draw_grid=False, bg_color=(0,0,0
 
 def StitchCoords(hdf5_file_path, wsi_object, downscale=16, draw_grid=False, bg_color=(0,0,0), alpha=-1, tqdm_position=-1, tqdm_output_fp=None, verbose=False):
     wsi = wsi_object.getOpenSlide()
-    vis_level = wsi.get_best_level_for_downsample(downscale)
+    # vis_level = wsi.get_best_level_for_downsample(downscale)
+    vis_level = wsi_object.get_best_level_for_downsample_custom(downscale)
     file = h5py.File(hdf5_file_path, 'r')
     dset = file['coords']
     coords = dset[:]

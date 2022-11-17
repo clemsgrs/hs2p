@@ -1,13 +1,14 @@
 data_dir: 'data'
 output_dir: 'output'
 
-dataset_name: 'tmp'
-slide_list: 'data/tmp/tmp.txt'
+dataset_name: 'toy'
+slide_list: '${data_dir}/${dataset_name}/panda_radboud.txt'
 resume: False
+experiment_name: 'toy'
 
 wandb:
   project: 'hs2p'
-  exp_name: 'tmp'
+  exp_name: 'toy'
   username: 'clemsg'
 
 flags:
@@ -19,6 +20,7 @@ flags:
 
 seg_params:
   seg_level: -1
+  downsample: 64
   sthresh: 8
   mthresh: 7
   close: 4
@@ -32,10 +34,12 @@ filter_params:
 
 vis_params:
   vis_level: -1
+  downsample: 64
+  downscale: 64
   line_thickness: 200
 
 patch_params:
-  patch_level: 0
+  spacing: 0.5
   patch_size: 4096
   step_size: 4096
   white_thresh: 5
@@ -44,7 +48,7 @@ patch_params:
   contour_fn: 'pct'
   drop_holes: False
   tissue_thresh: 0.1
-  save_patches_to_disk: False
+  save_patches_to_disk: True
   format: 'jpg'
   draw_grid: True
   bg_color:

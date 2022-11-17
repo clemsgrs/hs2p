@@ -20,6 +20,7 @@ flags:
 
 seg_params:
   seg_level: -1
+  downsample: 64
   sthresh: 8
   mthresh: 7
   close: 4
@@ -33,6 +34,8 @@ filter_params:
 
 vis_params:
   vis_level: -1
+  downsample: 64
+  downscale: 64
   line_thickness: 200
 
 patch_params:

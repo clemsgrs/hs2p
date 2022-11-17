@@ -195,8 +195,7 @@ def seg_and_patch(
 				if len(WSI_object.level_dim) == 1:
 					vis_params.vis_level = 0
 				else:
-					wsi = WSI_object.getOpenSlide()
-					best_level = wsi.get_best_level_for_downsample(64)
+					best_level = WSI_object.get_best_level_for_downsample_custom(vis_params.downsample)
 					vis_params.vis_level = best_level
 
 			seg_level = seg_params.seg_level
@@ -204,8 +203,7 @@ def seg_and_patch(
 				if len(WSI_object.level_dim) == 1:
 					seg_params.seg_level = 0
 				else:
-					wsi = WSI_object.getOpenSlide()
-					best_level = wsi.get_best_level_for_downsample(64)
+					best_level = WSI_object.get_best_level_for_downsample_custom(seg_params.downsample)
 					seg_params.seg_level = best_level
 
 			w, h = WSI_object.level_dim[seg_params.seg_level]
@@ -226,7 +224,10 @@ def seg_and_patch(
 				)
 
 			if seg_params.save_mask:
-				mask = WSI_object.visWSI(**vis_params)
+				mask = WSI_object.visWSI(
+					vis_level=vis_params.vis_level,
+					line_thickness=vis_params.line_thickness,
+				)
 				mask_path = Path(mask_save_dir, f'{slide_id}.jpg')
 				mask.save(mask_path)
 
@@ -254,12 +255,12 @@ def seg_and_patch(
 
 			stitch_time_elapsed = -1
 			if stitch:
-				file_path = Path(patch_save_dir, slide_id, f'{patch_params.patch_size}', f'{slide_id}.h5')
+				# if file_path exists, patches were extracted
 				if file_path.is_file():
 					heatmap, stitch_time_elapsed = stitching(
 						file_path,
 						WSI_object,
-						downscale=64,
+						downscale=vis_params.downscale,
 						bg_color=tuple(patch_params.bg_color),
 						draw_grid=patch_params.draw_grid,
 						tqdm_position=3,
@@ -268,6 +269,9 @@ def seg_and_patch(
 					)
 					stitch_path = Path(stitch_save_dir, f'{slide_id}_{patch_params.patch_size}.jpg')
 					heatmap.save(stitch_path)
+					df.loc[idx, 'has_patches'] = 'yes'
+				else:
+					df.loc[idx, 'has_patches'] = 'no'
 
 			df.loc[idx, 'process'] = 0
 			df.loc[idx, 'status'] = 'processed'

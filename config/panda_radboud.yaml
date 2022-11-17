@@ -1,13 +1,14 @@
 data_dir: 'data'
 output_dir: 'output'
 
-dataset_name: 'panda'
-slide_list: 'data/panda/slide_list.txt'
-resume: True
+dataset_name: 'panda_radboud'
+slide_list: '${data_dir}/${dataset_name}/slide_list.txt'
+resume: False
+experiment_name: 'clam'
 
 wandb:
   project: 'hs2p'
-  exp_name: 'panda'
+  exp_name: 'panda_radboud'
   username: 'clemsg'
 
 flags:
@@ -19,23 +20,26 @@ flags:
 
 seg_params:
   seg_level: -1
+  downsample: 64
   sthresh: 8
   mthresh: 7
-  close: 4
-  use_otsu: True
+  close: 12
+  use_otsu: False
   save_mask: True
 
 filter_params:
-  a_t: 16
-  a_h: 4
+  a_t: 1
+  a_h: 2
   max_n_holes: 8
 
 vis_params:
   vis_level: -1
-  line_thickness: 200
+  downsample: 64
+  downscale: 64
+  line_thickness: 150
 
 patch_params:
-  patch_level: 0
+  spacing: 0.5
   patch_size: 4096
   step_size: 4096
   white_thresh: 5
@@ -44,7 +48,7 @@ patch_params:
   contour_fn: 'pct'
   drop_holes: False
   tissue_thresh: 0.1
-  save_patches_to_disk: True
+  save_patches_to_disk: False
   format: 'jpg'
   draw_grid: True
   bg_color:

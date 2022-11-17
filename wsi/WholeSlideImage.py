@@ -11,7 +11,7 @@ import multiprocessing as mp
 
 from PIL import Image
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Tuple, Optional
 
 from wsi.wsi_utils import savePatchIter_bag_hdf5, initialize_hdf5_bag, save_hdf5, save_patch, isBlackPatch, isWhitePatch, compute_time
 from wsi.util_classes import Contour_Checking_fn, isInContourV1, isInContourV2, isInContourV3_Easy, isInContourV3_Hard, isInContour_pct
@@ -36,7 +36,6 @@ class WholeSlideImage(object):
 
         self.contours_tissue = None
         self.contours_tumor = None
-        self.hdf5_file = None
 
     def getOpenSlide(self):
         return self.wsi
@@ -149,19 +148,19 @@ class WholeSlideImage(object):
 
     def visWSI(
         self,
-        vis_level=0,
-        color = (0,255,0),
-        hole_color = (0,0,255),
-        annot_color=(255,0,0),
-        line_thickness=250,
-        max_size=None,
-        top_left=None,
-        bot_right=None,
-        custom_downsample=1,
-        view_slide_only=False,
-        number_contours=False,
-        seg_display=True,
-        annot_display=True,
+        vis_level: int = 0,
+        color: Tuple[int] = (0,255,0),
+        hole_color: Tuple[int] = (0,0,255),
+        annot_color: Tuple[int] = (255,0,0),
+        line_thickness: int = 250,
+        max_size: Optional[int] = None,
+        top_left: Optional[Tuple[int]] = None,
+        bot_right: Optional[Tuple[int]] = None,
+        custom_downsample: int = 1,
+        view_slide_only: bool = False,
+        number_contours: bool = False,
+        seg_display: bool = True,
+        annot_display: bool = True,
         ):
 
         downsample = self.level_downsamples[vis_level]
@@ -266,7 +265,7 @@ class WholeSlideImage(object):
         return level
 
     def get_best_level_for_downsample_custom(self, downsample):
-        return np.argmin([abs(x-downsample) for x in self.wsi.level_downsamples])
+        return int(np.argmin([abs(x-downsample) for x in self.wsi.level_downsamples]))
 
     def process_contours(
         self,
@@ -288,7 +287,6 @@ class WholeSlideImage(object):
         verbose: bool = False,
     ):
         save_path_hdf5 = Path(save_dir, f'{self.name}.h5')
-        # self.hdf5_file = save_path_hdf5
         start_time = time.time()
         n_contours = len(self.contours_tissue)
         if verbose:
@@ -321,6 +319,8 @@ class WholeSlideImage(object):
                     drop_holes,
                     tissue_thresh,
                     use_padding,
+                    top_left,
+                    bot_right,
                     verbose=verbose,
                 )
                 if len(asset_dict) > 0:
@@ -338,7 +338,7 @@ class WholeSlideImage(object):
         patch_saving_mins, patch_saving_secs = compute_time(start_time, end_time)
         tqdm_file.close()
 
-        return self.hdf5_file
+        return save_path_hdf5
 
     def process_contour(
         self,
