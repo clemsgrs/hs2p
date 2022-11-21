@@ -23,7 +23,7 @@ seg_params:
   downsample: 64
   sthresh: 8
   mthresh: 7
-  close: 12
+  close: 10
   use_otsu: False
   save_mask: True
 
@@ -48,7 +48,7 @@ patch_params:
   contour_fn: 'pct'
   drop_holes: False
   tissue_thresh: 0.1
-  save_patches_to_disk: False
+  save_patches_to_disk: True
   format: 'jpg'
   draw_grid: True
   bg_color:

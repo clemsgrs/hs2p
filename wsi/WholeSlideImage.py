@@ -325,6 +325,7 @@ class WholeSlideImage(object):
                 )
                 if len(asset_dict) > 0:
                     if init:
+                        save_dir.mkdir(parents=True, exist_ok=True)
                         save_hdf5(save_path_hdf5, asset_dict, attr_dict, mode='w')
                         init = False
                     else:
