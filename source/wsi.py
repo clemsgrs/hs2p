@@ -1,9 +1,7 @@
-import io
 import sys
 import cv2
 import time
 import tqdm
-import h5py
 import math
 import openslide
 import numpy as np
@@ -13,7 +11,7 @@ from PIL import Image
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
-from source.wsi_utils import save_hdf5, save_patch, compute_time
+from source.utils import save_hdf5, save_patch, compute_time
 from source.util_classes import Contour_Checking_fn, isInContourV1, isInContourV2, isInContourV3_Easy, isInContourV3_Hard, isInContour_pct
 
 Image.MAX_IMAGE_PIXELS = 933120000
