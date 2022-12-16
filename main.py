@@ -3,7 +3,7 @@ import wandb
 import hydra
 import shutil
 from pathlib import Path
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 
 from utils import initialize_wandb, seg_and_patch
 
@@ -11,9 +11,8 @@ from utils import initialize_wandb, seg_and_patch
 def main(cfg: DictConfig):
 
     # set up wandb
-    key = os.environ.get('WANDB_API_KEY')
-    config = OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)
-    wandb_run = initialize_wandb(project=cfg.wandb.project, exp_name=cfg.wandb.exp_name, entity=cfg.wandb.username, config=config, key=key)
+    key = os.environ.get("WANDB_API_KEY")
+    wandb_run = initialize_wandb(cfg, key=key)
     wandb_run.define_metric('processed', summary='max')
 
     output_dir = Path(cfg.output_dir, cfg.dataset_name, cfg.experiment_name)

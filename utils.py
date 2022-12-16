@@ -4,23 +4,74 @@ import time
 import tqdm
 import wandb
 import subprocess
-import numpy as np
 import pandas as pd
 from pathlib import Path
-from omegaconf import DictConfig
-from typing import List, Optional, Tuple, Dict
+from omegaconf import DictConfig, OmegaConf
+from typing import List, Optional, Tuple
 
 from wsi.WholeSlideImage import WholeSlideImage
 from wsi.wsi_utils import StitchCoords, compute_time
 from wsi.batch_process_utils import initialize_df
 
 
-def initialize_wandb(project, exp_name, entity, config={}, tags=None, key=''):
-    command = f'wandb login {key}'
+def write_dictconfig(d, f, child: bool = False, ntab=0):
+    for k, v in d.items():
+        if isinstance(v, dict):
+            if not child:
+                f.write(f"{k}:\n")
+            else:
+                for _ in range(ntab):
+                    f.write("\t")
+                f.write(f"- {k}:\n")
+            write_dictconfig(v, f, True, ntab=ntab + 1)
+        else:
+            if isinstance(v, list):
+                if not child:
+                    f.write(f"{k}:\n")
+                    for e in v:
+                        f.write(f"\t- {e}\n")
+                else:
+                    for _ in range(ntab):
+                        f.write("\t")
+                    f.write(f"{k}:\n")
+                    for e in v:
+                        for _ in range(ntab):
+                            f.write("\t")
+                        f.write(f"\t- {e}\n")
+            else:
+                if not child:
+                    f.write(f"{k}: {v}\n")
+                else:
+                    for _ in range(ntab):
+                        f.write("\t")
+                    f.write(f"- {k}: {v}\n")
+
+
+def initialize_wandb(
+    cfg: DictConfig,
+    tags: Optional[List] = None,
+    key: Optional[str] = "",
+):
+    command = f"wandb login {key}"
     subprocess.call(command, shell=True)
     if tags == None:
-        tags=[]
-    run = wandb.init(project=project, entity=entity, name=exp_name, config=config, tags=tags)
+        tags = []
+    config = OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)
+    run = wandb.init(
+        project=cfg.wandb.project,
+        entity=cfg.wandb.username,
+        name=cfg.wandb.exp_name,
+        group=cfg.wandb.group,
+        dir=cfg.wandb.dir,
+        config=config,
+        tags=tags,
+    )
+    config_file_path = Path(run.dir, "run_config.yaml")
+    d = OmegaConf.to_container(cfg, resolve=True)
+    with open(config_file_path, "w+") as f:
+        write_dictconfig(d, f)
+        wandb.save(str(config_file_path))
+        f.close()
     return run
 
 
