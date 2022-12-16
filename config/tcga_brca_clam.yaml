@@ -1,5 +1,6 @@
-data_dir: 'data'
-output_dir: 'output'
+defaults:
+  - default
+  - _self_
 
 dataset_name: tcga_brca
 slide_list: 'data/tcga_brca/slide_list.txt'
@@ -7,52 +8,12 @@ resume: False
 experiment_name: 'clam'
 
 wandb:
-  project: 'hs2p'
   exp_name: 'tcga_brca_clam'
-  username: 'clemsg'
-
-flags:
-  seg: True
-  patch: True
-  stitch: True
-  auto_skip: False
-  verbose: False
 
 seg_params:
-  seg_level: -1
-  downsample: 64
-  sthresh: 8
-  mthresh: 7
-  close: 4
   use_otsu: False
-  save_mask: True
-
-filter_params:
-  ref_patch_size: 512
-  a_t: 16
-  a_h: 4
-  max_n_holes: 8
-
-vis_params:
-  vis_level: -1
-  downsample: 64
-  downscale: 64
-  line_thickness: 200
 
 patch_params:
-  spacing: 0.5
-  patch_size: 4096
-  step_size: 4096
-  white_thresh: 5
-  black_thresh: 50
-  use_padding: True
   contour_fn: 'four_pt'
   drop_holes: True
-  tissue_thresh: 0.1
   save_patches_to_disk: True
-  format: 'jpg'
-  draw_grid: True
-  bg_color:
-    - 214
-    - 233
-    - 238
