@@ -4,23 +4,74 @@ import time
 import tqdm
 import wandb
 import subprocess
-import numpy as np
 import pandas as pd
 from pathlib import Path
-from omegaconf import DictConfig
-from typing import List, Optional, Tuple, Dict
+from omegaconf import DictConfig, OmegaConf
+from typing import List, Optional, Tuple
 
-from wsi.WholeSlideImage import WholeSlideImage
-from wsi.wsi_utils import StitchCoords, compute_time
-from wsi.batch_process_utils import initialize_df
+from source.wsi import WholeSlideImage
+from source.wsi_utils import StitchCoords, compute_time
+from source.batch_process_utils import initialize_df
 
 
-def initialize_wandb(project, exp_name, entity, config={}, tags=None, key=''):
-    command = f'wandb login {key}'
+def write_dictconfig(d, f, child: bool = False, ntab=0):
+    for k, v in d.items():
+        if isinstance(v, dict):
+            if not child:
+                f.write(f"{k}:\n")
+            else:
+                for _ in range(ntab):
+                    f.write("\t")
+                f.write(f"- {k}:\n")
+            write_dictconfig(v, f, True, ntab=ntab + 1)
+        else:
+            if isinstance(v, list):
+                if not child:
+                    f.write(f"{k}:\n")
+                    for e in v:
+                        f.write(f"\t- {e}\n")
+                else:
+                    for _ in range(ntab):
+                        f.write("\t")
+                    f.write(f"{k}:\n")
+                    for e in v:
+                        for _ in range(ntab):
+                            f.write("\t")
+                        f.write(f"\t- {e}\n")
+            else:
+                if not child:
+                    f.write(f"{k}: {v}\n")
+                else:
+                    for _ in range(ntab):
+                        f.write("\t")
+                    f.write(f"- {k}: {v}\n")
+
+
+def initialize_wandb(
+    cfg: DictConfig,
+    tags: Optional[List] = None,
+    key: Optional[str] = "",
+):
+    command = f"wandb login {key}"
     subprocess.call(command, shell=True)
     if tags == None:
-        tags=[]
-    run = wandb.init(project=project, entity=entity, name=exp_name, config=config, tags=tags)
+        tags = []
+    config = OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)
+    run = wandb.init(
+        project=cfg.wandb.project,
+        entity=cfg.wandb.username,
+        name=cfg.wandb.exp_name,
+        group=cfg.wandb.group,
+        dir=cfg.wandb.dir,
+        config=config,
+        tags=tags,
+    )
+    config_file_path = Path(run.dir, "run_config.yaml")
+    d = OmegaConf.to_container(cfg, resolve=True)
+    with open(config_file_path, "w+") as f:
+        write_dictconfig(d, f)
+        wandb.save(str(config_file_path))
+        f.close()
     return run
 
 
@@ -46,18 +97,11 @@ def segment(
 	return WSI_object, seg_time_elapsed
 
 
-def patching_old(WSI_object, **kwargs):
-	start_time = time.time()
-	file_path = WSI_object.createPatches_bag_hdf5(**kwargs, save_coord=True)
-	patch_time_elapsed = time.time() - start_time
-	return file_path, patch_time_elapsed
-
-
 def patching(
 	WSI_object: WholeSlideImage,
 	save_dir: Path,
 	seg_level: int,
-	patch_level: int,
+	spacing: float,
 	patch_size: int,
 	step_size: int,
 	contour_fn: str,
@@ -77,7 +121,7 @@ def patching(
 	file_path = WSI_object.process_contours(
 		save_dir=save_dir,
 		seg_level=seg_level,
-		patch_level=patch_level,
+		spacing=spacing,
 		patch_size=patch_size,
 		step_size=step_size,
 		contour_fn=contour_fn,
@@ -182,7 +226,6 @@ def seg_and_patch(
 
 		for i in t:
 
-			df.to_csv(Path(output_dir, 'process_list.csv'), index=False)
 			idx = process_stack.index[i]
 			slide = process_stack.loc[idx, 'slide_id']
 			t.display(f'Processing {slide}', pos=2)
@@ -199,21 +242,19 @@ def seg_and_patch(
 			WSI_object = WholeSlideImage(full_path)
 
 			vis_level = vis_params.vis_level
-			if vis_params.vis_level < 0:
+			if vis_level < 0:
 				if len(WSI_object.level_dim) == 1:
 					vis_params.vis_level = 0
 				else:
-					wsi = WSI_object.getOpenSlide()
-					best_level = wsi.get_best_level_for_downsample(64)
+					best_level = WSI_object.get_best_level_for_downsample_custom(vis_params.downsample)
 					vis_params.vis_level = best_level
 
 			seg_level = seg_params.seg_level
-			if seg_params.seg_level < 0:
+			if seg_level < 0:
 				if len(WSI_object.level_dim) == 1:
 					seg_params.seg_level = 0
 				else:
-					wsi = WSI_object.getOpenSlide()
-					best_level = wsi.get_best_level_for_downsample(64)
+					best_level = WSI_object.get_best_level_for_downsample_custom(seg_params.downsample)
 					seg_params.seg_level = best_level
 
 			w, h = WSI_object.level_dim[seg_params.seg_level]
@@ -234,19 +275,21 @@ def seg_and_patch(
 				)
 
 			if seg_params.save_mask:
-				mask = WSI_object.visWSI(**vis_params)
+				mask = WSI_object.visWSI(
+					vis_level=vis_params.vis_level,
+					line_thickness=vis_params.line_thickness,
+				)
 				mask_path = Path(mask_save_dir, f'{slide_id}.jpg')
 				mask.save(mask_path)
 
 			patch_time_elapsed = -1
 			if patch:
 				slide_save_dir = Path(patch_save_dir, slide_id, f'{patch_params.patch_size}')
-				slide_save_dir.mkdir(parents=True, exist_ok=True)
 				file_path, patch_time_elapsed = patching(
 					WSI_object=WSI_object,
 					save_dir=slide_save_dir,
 					seg_level=seg_params.seg_level,
-					patch_level=patch_params.patch_level,
+					spacing=patch_params.spacing,
 					patch_size=patch_params.patch_size,
 					step_size=patch_params.step_size,
 					contour_fn=patch_params.contour_fn,
@@ -259,16 +302,15 @@ def seg_and_patch(
 					tqdm_output_fp=tqdm_output_fp,
 					verbose=verbose,
 				)
-				# file_path, patch_time_elapsed = patching_old(WSI_object=WSI_object,  **patch_params)
 
 			stitch_time_elapsed = -1
 			if stitch:
-				file_path = Path(patch_save_dir, slide_id, f'{patch_params.patch_size}', f'{slide_id}.h5')
+				# if file_path exists, patches were extracted
 				if file_path.is_file():
 					heatmap, stitch_time_elapsed = stitching(
 						file_path,
 						WSI_object,
-						downscale=64,
+						downscale=vis_params.downscale,
 						bg_color=tuple(patch_params.bg_color),
 						draw_grid=patch_params.draw_grid,
 						tqdm_position=3,
@@ -277,9 +319,13 @@ def seg_and_patch(
 					)
 					stitch_path = Path(stitch_save_dir, f'{slide_id}_{patch_params.patch_size}.jpg')
 					heatmap.save(stitch_path)
+					df.loc[idx, 'has_patches'] = 'yes'
+				else:
+					df.loc[idx, 'has_patches'] = 'no'
 
 			df.loc[idx, 'process'] = 0
 			df.loc[idx, 'status'] = 'processed'
+			df.to_csv(Path(output_dir, 'process_list.csv'), index=False)
 
 			seg_times += seg_time_elapsed
 			patch_times += patch_time_elapsed

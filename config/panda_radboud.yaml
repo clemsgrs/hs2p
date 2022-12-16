@@ -1,0 +1,26 @@
+defaults:
+  - default
+  - _self_
+
+dataset_name: 'panda_radboud'
+slide_list: '${data_dir}/${dataset_name}/slide_list.txt'
+resume: False
+experiment_name: 'clam'
+
+wandb:
+  exp_name: 'panda_radboud'
+
+seg_params:
+  close: 10
+  use_otsu: False
+
+filter_params:
+  ref_patch_size: 512
+  a_t: 1
+  a_h: 2
+
+vis_params:
+  line_thickness: 150
+
+patch_params:
+  save_patches_to_disk: True

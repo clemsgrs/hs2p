@@ -1,13 +1,14 @@
 data_dir: 'data'
 output_dir: 'output'
 
-dataset_name: 'tmp'
-slide_list: 'data/tmp/tmp.txt'
+dataset_name: 'toy'
+slide_list: '${data_dir}/${dataset_name}/panda_radboud.txt'
 resume: False
+experiment_name: 'toy'
 
 wandb:
   project: 'hs2p'
-  exp_name: 'tmp'
+  exp_name: '${experiment_name}'
   username: 'clemsg'
 
 flags:
@@ -19,6 +20,7 @@ flags:
 
 seg_params:
   seg_level: -1
+  downsample: 64
   sthresh: 8
   mthresh: 7
   close: 4
@@ -26,16 +28,19 @@ seg_params:
   save_mask: True
 
 filter_params:
-  a_t: 16
-  a_h: 4
-  max_n_holes: 8
+  ref_patch_size: 512 # reference patch size at level 0
+  a_t: 16 # area filter threshold for tissue (positive integer, the minimum size of detected foreground contours to consider, relative to the reference patch size ref_patch_size at level 0, e.g. a value 10 means only detected foreground contours of size greater than 10 [ref_patch_size, ref_patch_size] sized patches at level 0 will be processed)
+  a_h: 4 # area filter threshold for holes (positive integer, the minimum size of detected holes/cavities in foreground contours to avoid, once again relative to the reference patch size ref_patch_size at level 0)
+  max_n_holes: 8 # maximum of holes to consider per detected foreground contours (positive integer, higher values lead to more accurate patching but increase computational cost ; keeps the biggest holes)
 
 vis_params:
   vis_level: -1
+  downsample: 64
+  downscale: 64
   line_thickness: 200
 
 patch_params:
-  patch_level: 0
+  spacing: 0.5
   patch_size: 4096
   step_size: 4096
   white_thresh: 5
@@ -44,7 +49,7 @@ patch_params:
   contour_fn: 'pct'
   drop_holes: False
   tissue_thresh: 0.1
-  save_patches_to_disk: False
+  save_patches_to_disk: True
   format: 'jpg'
   draw_grid: True
   bg_color:
