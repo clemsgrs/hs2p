@@ -1,10 +1,10 @@
 import cv2
-import math
+import sys
 import tqdm
 import time
 import h5py
-import openslide
 import numpy as np
+import pandas as pd
 
 from PIL import Image
 from pathlib import Path
@@ -15,6 +15,92 @@ def compute_time(start_time, end_time):
     elapsed_mins = int(elapsed_time / 60)
     elapsed_secs = int(elapsed_time - (elapsed_mins * 60))
     return elapsed_mins, elapsed_secs
+
+
+def initialize_df(
+	slides,
+	seg_params,
+	filter_params,
+	vis_params,
+	patch_params,
+	use_heatmap_args=False,
+	save_patches=False,
+	):
+	'''
+	initiate a pandas df describing a list of slides to process
+	args:
+		slides (df or array-like):
+			array-like structure containing list of slide ids, if df, these ids assumed to be
+			stored under the 'slide_id' column
+		seg_params (dict): segmentation paramters
+		filter_params (dict): filter parameters
+		vis_params (dict): visualization paramters
+		patch_params (dict): patching paramters
+		use_heatmap_args (bool): whether to include heatmap arguments such as ROI coordinates
+	'''
+	total = len(slides)
+	if isinstance(slides, pd.DataFrame):
+		slide_ids = slides.slide_id.values
+	else:
+		slide_ids = slides
+	default_df_dict = {'slide_id': slide_ids, 'process': np.full((total), 1, dtype=np.uint8)}
+
+	# initiate empty labels in case not provided
+	if use_heatmap_args:
+		default_df_dict.update({'label': np.full((total), -1)})
+
+	default_df_dict.update({
+		'status': np.full((total), 'tbp'),
+		'has_patches': np.full((total), 'tbd'),
+		# seg params
+		'seg_level': np.full((total), int(seg_params['seg_level']), dtype=np.int8),
+		'sthresh': np.full((total), int(seg_params['sthresh']), dtype=np.uint8),
+		'mthresh': np.full((total), int(seg_params['mthresh']), dtype=np.uint8),
+		'close': np.full((total), int(seg_params['close']), dtype=np.uint32),
+		'use_otsu': np.full((total), bool(seg_params['use_otsu']), dtype=bool),
+
+		# filter params
+		'a_t': np.full((total), int(filter_params['a_t']), dtype=np.float32),
+		'a_h': np.full((total), int(filter_params['a_h']), dtype=np.float32),
+		'max_n_holes': np.full((total), int(filter_params['max_n_holes']), dtype=np.uint32),
+
+		# vis params
+		'vis_level': np.full((total), int(vis_params['vis_level']), dtype=np.int8),
+		'line_thickness': np.full((total), int(vis_params['line_thickness']), dtype=np.uint32),
+
+		# patching params
+		'use_padding': np.full((total), bool(patch_params['use_padding']), dtype=bool),
+		'contour_fn': np.full((total), patch_params['contour_fn']),
+		'tissue_thresh': np.full((total), patch_params['tissue_thresh']),
+		})
+
+	if save_patches:
+		default_df_dict.update({
+			'white_thresh': np.full((total), int(patch_params['white_thresh']), dtype=np.uint8),
+			'black_thresh': np.full((total), int(patch_params['black_thresh']), dtype=np.uint8)})
+
+	if use_heatmap_args:
+		# initiate empty x,y coordinates in case not provided
+		default_df_dict.update({'x1': np.empty((total)).fill(np.NaN),
+			'x2': np.empty((total)).fill(np.NaN),
+			'y1': np.empty((total)).fill(np.NaN),
+			'y2': np.empty((total)).fill(np.NaN)})
+
+
+	if isinstance(slides, pd.DataFrame):
+		temp_copy = pd.DataFrame(default_df_dict) # temporary dataframe w/ default params
+		# find key in provided df
+		# if exist, fill empty fields w/ default values, else, insert the default values as a new column
+		for key in default_df_dict.keys():
+			if key in slides.columns:
+				mask = slides[key].isna()
+				slides.loc[mask, key] = temp_copy.loc[mask, key]
+			else:
+				slides.insert(len(slides.columns), key, default_df_dict[key])
+	else:
+		slides = pd.DataFrame(default_df_dict)
+
+	return slides
 
 
 def isWhitePatch(patch, satThresh=5):
@@ -78,7 +164,7 @@ def save_hdf5(output_path, asset_dict, attr_dict=None, mode='a'):
     return output_path
 
 
-def save_patch(cont_idx, n_contours, wsi, save_dir, asset_dict, attr_dict=None, position=-1, fmt='png'):
+def save_patch(cont_idx, n_contours, wsi, save_dir, asset_dict, attr_dict=None, tqdm_position=-1, tqdm_output_fp=None, fmt='png'):
     coords = asset_dict['coords']
     patch_size = attr_dict['coords']['patch_size']
     patch_level = attr_dict['coords']['patch_level']
@@ -87,13 +173,16 @@ def save_patch(cont_idx, n_contours, wsi, save_dir, asset_dict, attr_dict=None, 
     npatch = len(coords)
     start_time = time.time()
 
+    tqdm_file = open(tqdm_output_fp, 'a') if tqdm_output_fp is not None else sys.stderr
+
     with tqdm.tqdm(
         coords,
         desc=(f'\tSaving {npatch} patch for contour {cont_idx}/{n_contours}'),
         unit=' patch',
         ncols=100,
-        position=position,
-        leave=True,
+        position=tqdm_position,
+        file=tqdm_file,
+        leave=False,
     ) as t:
 
         for coord in t:
@@ -103,8 +192,8 @@ def save_patch(cont_idx, n_contours, wsi, save_dir, asset_dict, attr_dict=None, 
 
     end_time = time.time()
     patch_saving_mins, patch_saving_secs = compute_time(start_time, end_time)
+    tqdm_file.close()
     return npatch, patch_saving_mins, patch_saving_secs
-
 
 
 def initialize_hdf5_bag(first_patch, save_coord=False):
@@ -145,7 +234,6 @@ def DrawMap(canvas, patch_dset, coords, patch_size, indices=None, verbose=False,
         indices = np.arange(len(coords))
     total = len(indices)
     if verbose:
-        ten_percent_chunk = math.ceil(total * 0.1)
         print(f'Start stitching {patch_dset.attrs["wsi_name"]}...')
 
     with tqdm.tqdm(
@@ -179,7 +267,8 @@ def DrawMapFromCoords(
     vis_level,
     indices=None,
     draw_grid=True,
-    position=-1,
+    tqdm_position=-1,
+    tqdm_output_fp=None,
     verbose=False,
     ):
 
@@ -192,13 +281,16 @@ def DrawMapFromCoords(
     if verbose:
         print(f'downscaled patch size: {patch_size}')
 
+    tqdm_file = open(tqdm_output_fp, 'a') if tqdm_output_fp is not None else sys.stderr
+
     with tqdm.tqdm(
         range(total),
         desc=(f'Stitching'),
         unit=' patch',
         ncols=80,
-        position=position,
-        leave=True,
+        position=tqdm_position,
+        file=tqdm_file,
+        leave=False,
     ) as t:
 
         for idx in t:
@@ -212,7 +304,9 @@ def DrawMapFromCoords(
             if draw_grid:
                 DrawGrid(canvas, coord, patch_size)
 
-    return Image.fromarray(canvas), position+1
+    tqdm_file.close()
+
+    return Image.fromarray(canvas)
 
 
 def StitchPatches(hdf5_file_path, downscale=16, draw_grid=False, bg_color=(0,0,0), alpha=-1):
@@ -248,9 +342,10 @@ def StitchPatches(hdf5_file_path, downscale=16, draw_grid=False, bg_color=(0,0,0
     return heatmap
 
 
-def StitchCoords(hdf5_file_path, wsi_object, downscale=16, draw_grid=False, bg_color=(0,0,0), alpha=-1, position=-1, verbose=False):
+def StitchCoords(hdf5_file_path, wsi_object, downscale=16, draw_grid=False, bg_color=(0,0,0), alpha=-1, tqdm_position=-1, tqdm_output_fp=None, verbose=False):
     wsi = wsi_object.getOpenSlide()
-    vis_level = wsi.get_best_level_for_downsample(downscale)
+    # vis_level = wsi.get_best_level_for_downsample(downscale)
+    vis_level = wsi_object.get_best_level_for_downsample_custom(downscale)
     file = h5py.File(hdf5_file_path, 'r')
     dset = file['coords']
     coords = dset[:]
@@ -283,8 +378,8 @@ def StitchCoords(hdf5_file_path, wsi_object, downscale=16, draw_grid=False, bg_c
         heatmap = Image.new(size=(w,h), mode="RGBA", color=bg_color + (int(255 * alpha),))
 
     heatmap = np.array(heatmap)
-    heatmap, updated_position = DrawMapFromCoords(heatmap, wsi_object, coords, patch_size, vis_level, indices=None, draw_grid=draw_grid, position=position, verbose=verbose)
+    heatmap = DrawMapFromCoords(heatmap, wsi_object, coords, patch_size, vis_level, indices=None, draw_grid=draw_grid, tqdm_position=tqdm_position, tqdm_output_fp=tqdm_output_fp, verbose=verbose)
 
     file.close()
     # print('Done!')
-    return heatmap, updated_position
+    return heatmap
