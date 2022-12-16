@@ -1,10 +1,8 @@
 import cv2
 import sys
-import math
 import tqdm
 import time
 import h5py
-import openslide
 import numpy as np
 
 from PIL import Image

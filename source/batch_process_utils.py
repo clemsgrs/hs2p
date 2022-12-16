@@ -1,19 +1,7 @@
 import pandas as pd
 import numpy as np
-import pdb
 
-'''
-initiate a pandas df describing a list of slides to process
-args:
-	slides (df or array-like):
-		array-like structure containing list of slide ids, if df, these ids assumed to be
-		stored under the 'slide_id' column
-	seg_params (dict): segmentation paramters
-	filter_params (dict): filter parameters
-	vis_params (dict): visualization paramters
-	patch_params (dict): patching paramters
-	use_heatmap_args (bool): whether to include heatmap arguments such as ROI coordinates
-'''
+
 def initialize_df(
 	slides,
 	seg_params,
@@ -23,7 +11,18 @@ def initialize_df(
 	use_heatmap_args=False,
 	save_patches=False,
 	):
-
+	'''
+	initiate a pandas df describing a list of slides to process
+	args:
+		slides (df or array-like):
+			array-like structure containing list of slide ids, if df, these ids assumed to be
+			stored under the 'slide_id' column
+		seg_params (dict): segmentation paramters
+		filter_params (dict): filter parameters
+		vis_params (dict): visualization paramters
+		patch_params (dict): patching paramters
+		use_heatmap_args (bool): whether to include heatmap arguments such as ROI coordinates
+	'''
 	total = len(slides)
 	if isinstance(slides, pd.DataFrame):
 		slide_ids = slides.slide_id.values

@@ -9,7 +9,7 @@ from pathlib import Path
 from omegaconf import DictConfig, OmegaConf
 from typing import List, Optional, Tuple
 
-from source.WholeSlideImage import WholeSlideImage
+from source.wsi import WholeSlideImage
 from source.wsi_utils import StitchCoords, compute_time
 from source.batch_process_utils import initialize_df
 
