@@ -13,8 +13,8 @@ from PIL import Image
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
-from wsi.wsi_utils import savePatchIter_bag_hdf5, initialize_hdf5_bag, save_hdf5, save_patch, isBlackPatch, isWhitePatch, compute_time
-from wsi.util_classes import Contour_Checking_fn, isInContourV1, isInContourV2, isInContourV3_Easy, isInContourV3_Hard, isInContour_pct
+from source.wsi_utils import savePatchIter_bag_hdf5, initialize_hdf5_bag, save_hdf5, save_patch, isBlackPatch, isWhitePatch, compute_time
+from source.util_classes import Contour_Checking_fn, isInContourV1, isInContourV2, isInContourV3_Easy, isInContourV3_Hard, isInContour_pct
 
 Image.MAX_IMAGE_PIXELS = 933120000
 

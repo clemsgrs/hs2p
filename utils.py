@@ -9,9 +9,9 @@ from pathlib import Path
 from omegaconf import DictConfig, OmegaConf
 from typing import List, Optional, Tuple
 
-from wsi.WholeSlideImage import WholeSlideImage
-from wsi.wsi_utils import StitchCoords, compute_time
-from wsi.batch_process_utils import initialize_df
+from source.WholeSlideImage import WholeSlideImage
+from source.wsi_utils import StitchCoords, compute_time
+from source.batch_process_utils import initialize_df
 
 
 def write_dictconfig(d, f, child: bool = False, ntab=0):
