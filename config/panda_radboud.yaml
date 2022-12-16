@@ -28,6 +28,7 @@ seg_params:
   save_mask: True
 
 filter_params:
+  ref_patch_size: 512
   a_t: 1
   a_h: 2
   max_n_holes: 8
