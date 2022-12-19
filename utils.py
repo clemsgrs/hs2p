@@ -180,7 +180,6 @@ def seg_and_patch(
 	seg: bool = False,
 	stitch: bool = False,
 	patch: bool = False,
-	auto_skip: bool = True,
 	process_list: Optional[Path] = None,
 	tqdm_output_fp: Optional[Path] = None,
 	verbose: bool = False,
@@ -231,11 +230,6 @@ def seg_and_patch(
 			t.display(f'Processing {slide}', pos=2)
 
 			slide_id = Path(slide).stem
-
-			if auto_skip and Path(patch_save_dir, slide_id + '.h5').is_file():
-				print(f'{slide_id} already exist in destination location, skipped')
-				df.loc[idx, 'status'] = 'already_exist'
-				continue
 
 			# Inialize WSI
 			full_path = Path(data_dir, slide)

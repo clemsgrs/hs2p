@@ -56,7 +56,6 @@ def main(cfg: DictConfig):
         seg=cfg.flags.seg,
         patch=cfg.flags.patch,
         stitch=cfg.flags.stitch,
-        auto_skip=cfg.flags.auto_skip,
         process_list=process_list_fp,
         seg_params=cfg.seg_params,
         filter_params=cfg.filter_params,
