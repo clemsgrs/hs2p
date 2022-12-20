@@ -343,7 +343,7 @@ class WholeSlideImage(object):
         seg_level: int = -1,
         spacing: float = 0.5,
         patch_size: int = 256,
-        step_size: int = 256,
+        overlap: float = 0.,
         contour_fn: str = "pct",
         drop_holes: bool = True,
         tissue_thresh: float = 0.01,
@@ -370,7 +370,7 @@ class WholeSlideImage(object):
                 spacing,
                 save_dir,
                 patch_size,
-                step_size,
+                overlap,
                 contour_fn,
                 drop_holes,
                 tissue_thresh,
@@ -409,7 +409,7 @@ class WholeSlideImage(object):
         spacing: float,
         save_dir: Path,
         patch_size: int = 256,
-        step_size: int = 256,
+        overlap: float = 0.,
         contour_fn: str = "pct",
         drop_holes: bool = True,
         tissue_thresh: float = 0.01,
@@ -419,6 +419,7 @@ class WholeSlideImage(object):
         verbose: bool = False,
     ):
 
+        step_size = int(patch_size * (1. - overlap))
         patch_level = self.get_best_level_for_spacing(spacing)
         if cont is not None:
             start_x, start_y, w, h = cv2.boundingRect(cont)
