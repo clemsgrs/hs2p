@@ -34,9 +34,9 @@ def main(cfg: DictConfig):
         if not cfg.resume:
             if dirpath.exists():
                 shutil.rmtree(dirpath)
-            dirpath.mkdir(parents=False)
+            dirpath.mkdir(parents=True)
         else:
-            dirpath.mkdir(parents=False, exist_ok=True)
+            dirpath.mkdir(parents=True, exist_ok=True)
 
     slide_list = Path(cfg.slide_list)
 

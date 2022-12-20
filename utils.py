@@ -206,7 +206,7 @@ def seg_and_patch(
 
             idx = process_stack.index[i]
             slide_id = process_stack.loc[idx, "slide_id"]
-            slide_path = Path(process_stack.loc[idx, "slidslide_pathe_id"])
+            slide_path = Path(process_stack.loc[idx, "slide_path"])
             t.display(f"Processing {slide_id}", pos=2)
 
             # Inialize WSI

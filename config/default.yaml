@@ -1,13 +1,15 @@
-slide_list: # path to the .txt file containing slides paths
+slide_list: 'data/debug.txt' # path to the .txt file containing slides paths
 
 output_dir: 'output' # folder where to save algorithm output
-experiment_name: 'toy'
+experiment_name: 'debug'
 resume: False # whether or not to resume existing experiment
 
 wandb:
   project: 'hs2p'
   exp_name: '${experiment_name}'
-  username:
+  username: 'clemsg'
+  dir: '/home/user'
+  group:
 
 flags:
   seg: True # whether or not to compute tissue segmentation masks
