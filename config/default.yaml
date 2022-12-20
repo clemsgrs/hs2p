@@ -1,20 +1,18 @@
-data_dir: 'data' # parent folder containing data
-output_dir: 'output' # folder where to save algorithm output
-
-dataset_name: 'toy'
 slide_list: '${data_dir}/${dataset_name}/panda_radboud.txt' # if specified, will filter the slides to be processed based on that text file
-resume: False # whether or not to resume existing experiment
+
+output_dir: 'output' # folder where to save algorithm output
 experiment_name: 'toy'
+resume: False # whether or not to resume existing experiment
 
 wandb:
   project: 'hs2p'
   exp_name: '${experiment_name}'
-  username: 'clemsg'
+  username:
 
 flags:
   seg: True # whether or not to compute tissue segmentation masks
   patch: True # whether or not to extract patches from segmented tissue regions
-  stitch: True # whether or not to generate a .jpg image to visualize patching results
+  visu: True # whether or not to generate a .jpg image to visualize patching results
   verbose: False
 
 seg_params:
@@ -36,14 +34,12 @@ vis_params:
   vis_level: -1 # downsample level to visualize the segmentation results (-1 = uses the downsample level in the WSI closest to the following downsample parameter)
   downsample: 64 # if vis_level = -1, then uses this value to find the closest downsample level in the WSI for tissue segmentation visualization
   downscale: 64 # downsample to visualize the result of patch extraction
-  line_thickness: 200 # line thickness to draw the segmentation results (positive integer, in terms of number of pixels occupied by drawn line at level 0)
+  line_thickness: 200 # line thickness to draw the segmentation results (positive integer)
 
 patch_params:
   spacing: 0.5 # pixel spacing (in micron/pixel) at which patches should be extracted (will find the level with spacing the closest to this value)
   patch_size: 4096 # patch size at previous pixel spacing
   step_size: 4096 # number of pixels between the top-left corner of two consecutive patches (at previous pixel spacing)
-  white_thresh: 5 # a threshold to decide whether or not a patch is white
-  black_thresh: 50 # a threshold to decide whether or not a patch is black
   use_padding: True # whether to pad the border of the slide
   contour_fn: 'pct' # contour checking function to decide whether a patch should be considered foreground or background (choices between 'pct' - checks if the given patch has enough tissue using the following parameter as decision threshold, 'four_pt' - checks if all four points in a small grid around the center of the patch are inside the contour, 'center' - checks if the center of the patch is inside the contour, 'basic' - checks if the top-left corner of the patch is inside the contour)
   tissue_thresh: 0.1 # if contour_fn = 'pct', threshold used to filter out patches that have less tissue than this value (percentage)

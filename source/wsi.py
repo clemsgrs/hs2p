@@ -1,7 +1,5 @@
-import sys
 import cv2
 import time
-import tqdm
 import math
 import openslide
 import numpy as np
@@ -354,8 +352,6 @@ class WholeSlideImage(object):
         patch_format: str = "png",
         top_left: Optional[List[int]] = None,
         bot_right: Optional[List[int]] = None,
-        tqdm_position: int = -1,
-        tqdm_output_fp: Optional[Path] = None,
         verbose: bool = False,
     ):
         save_path_hdf5 = Path(save_dir, f"{self.name}.h5")
@@ -365,64 +361,44 @@ class WholeSlideImage(object):
             print(f"Total number of contours to process: {n_contours}")
         init = True
 
-        tqdm_file = (
-            open(tqdm_output_fp, "a") if tqdm_output_fp is not None else sys.stderr
-        )
+        for i, cont in enumerate(self.contours_tissue):
 
-        with tqdm.tqdm(
-            self.contours_tissue,
-            desc=(f"Patching"),
-            unit=" contour",
-            ncols=80,
-            position=tqdm_position,
-            file=tqdm_file,
-            leave=False,
-        ) as t:
-
-            for i, cont in enumerate(t):
-
-                asset_dict, attr_dict = self.process_contour(
-                    cont,
-                    self.holes_tissue[i],
-                    seg_level,
-                    spacing,
-                    save_dir,
-                    patch_size,
-                    step_size,
-                    contour_fn,
-                    drop_holes,
-                    tissue_thresh,
-                    use_padding,
-                    top_left,
-                    bot_right,
-                    verbose=verbose,
-                )
-                if len(asset_dict) > 0:
-                    if init:
-                        save_dir.mkdir(parents=True, exist_ok=True)
-                        save_hdf5(save_path_hdf5, asset_dict, attr_dict, mode="w")
-                        init = False
-                    else:
-                        save_hdf5(save_path_hdf5, asset_dict, mode="a")
-                    if save_patches_to_disk:
-                        patch_save_dir = Path(save_dir, patch_format)
-                        patch_save_dir.mkdir(parents=True, exist_ok=True)
-                        npatch, mins, secs = save_patch(
-                            i + 1,
-                            n_contours,
-                            self.wsi,
-                            patch_save_dir,
-                            asset_dict,
-                            attr_dict,
-                            tqdm_position=tqdm_position + 1,
-                            tqdm_output_fp=tqdm_output_fp,
-                            fmt=patch_format,
-                        )
+            asset_dict, attr_dict = self.process_contour(
+                cont,
+                self.holes_tissue[i],
+                seg_level,
+                spacing,
+                save_dir,
+                patch_size,
+                step_size,
+                contour_fn,
+                drop_holes,
+                tissue_thresh,
+                use_padding,
+                top_left,
+                bot_right,
+                verbose=verbose,
+            )
+            if len(asset_dict) > 0:
+                if init:
+                    save_dir.mkdir(parents=True, exist_ok=True)
+                    save_hdf5(save_path_hdf5, asset_dict, attr_dict, mode="w")
+                    init = False
+                else:
+                    save_hdf5(save_path_hdf5, asset_dict, mode="a")
+                if save_patches_to_disk:
+                    patch_save_dir = Path(save_dir, patch_format)
+                    patch_save_dir.mkdir(parents=True, exist_ok=True)
+                    npatch, mins, secs = save_patch(
+                        self.wsi,
+                        patch_save_dir,
+                        asset_dict,
+                        attr_dict,
+                        fmt=patch_format,
+                    )
 
         end_time = time.time()
         patch_saving_mins, patch_saving_secs = compute_time(start_time, end_time)
-        tqdm_file.close()
-
         return save_path_hdf5
 
     def process_contour(

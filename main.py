@@ -1,5 +1,4 @@
 import os
-import wandb
 import hydra
 import shutil
 from pathlib import Path
@@ -12,33 +11,32 @@ from utils import initialize_wandb, seg_and_patch
 def main(cfg: DictConfig):
 
     # set up wandb
-    key = os.environ.get("WANDB_API_KEY")
-    wandb_run = initialize_wandb(cfg, key=key)
-    wandb_run.define_metric("processed", summary="max")
+    if cfg.wandb.username:
+        key = os.environ.get("WANDB_API_KEY")
+        wandb_run = initialize_wandb(cfg, key=key)
+        wandb_run.define_metric("processed", summary="max")
 
-    output_dir = Path(cfg.output_dir, cfg.dataset_name, cfg.experiment_name)
+    output_dir = Path(cfg.output_dir, cfg.experiment_name)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     patch_save_dir = Path(output_dir, "patches")
     mask_save_dir = Path(output_dir, "masks")
-    stitch_save_dir = Path(output_dir, "stitches")
+    visu_save_dir = Path(output_dir, "visualization")
 
     directories = {
-        "data_dir": Path(cfg.data_dir, cfg.dataset_name, "slides"),
         "output_dir": output_dir,
         "patch_save_dir": patch_save_dir,
         "mask_save_dir": mask_save_dir,
-        "stitch_save_dir": stitch_save_dir,
+        "visu_save_dir": visu_save_dir,
     }
 
-    for dirname, dirpath in directories.items():
-        if dirname not in ["data_dir"]:
-            if not cfg.resume:
-                if dirpath.exists():
-                    shutil.rmtree(dirpath)
-                dirpath.mkdir(parents=False)
-            else:
-                dirpath.mkdir(parents=False, exist_ok=True)
+    for dirpath in directories.values():
+        if not cfg.resume:
+            if dirpath.exists():
+                shutil.rmtree(dirpath)
+            dirpath.mkdir(parents=False)
+        else:
+            dirpath.mkdir(parents=False, exist_ok=True)
 
     slide_list = Path(cfg.slide_list)
 
@@ -48,28 +46,23 @@ def main(cfg: DictConfig):
 
     print()
 
-    tqdm_output_fp = Path(f"tqdm_{wandb.run.id}.log")
-    tqdm_output_fp.unlink(missing_ok=True)
-
     seg_times, patch_times = seg_and_patch(
-        **directories,
+        output_dir,
+        patch_save_dir,
+        mask_save_dir,
+        visu_save_dir,
         slide_list=slide_list,
         seg=cfg.flags.seg,
         patch=cfg.flags.patch,
-        stitch=cfg.flags.stitch,
+        visu=cfg.flags.visu,
         process_list=process_list_fp,
         seg_params=cfg.seg_params,
         filter_params=cfg.filter_params,
         vis_params=cfg.vis_params,
         patch_params=cfg.patch_params,
-        tqdm_output_fp=tqdm_output_fp,
         verbose=cfg.flags.verbose,
     )
 
-    tqdm_output_fp.unlink()
-
-
 if __name__ == "__main__":
 
-    # python3 main.py --config-name 'panda'
     main()
