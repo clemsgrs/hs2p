@@ -76,6 +76,21 @@ hs2p/
 
 If, for some reason, the experiment crashes, you should be able to resume from last processed slide simply by turning the `resume` parameter in your config file to `True`, keeping all other parameters unchanged.
 
+## Troubleshooting
+
+If the generated visualization are noisy, you'll need to change `libpixman` version. Running the following command should fix this issue:
+
+```
+sudo -S wget https://www.cairographics.org/releases/pixman-0.40.0.tar.gz
+sudo -S tar -xf pixman-0.40.0.tar.gz
+cd pixman-0.40.0
+sudo -S ./configure
+sudo -S make
+sudo -S make install
+
+export LD_PRELOAD=/usr/local/lib/libpixman-1.so.0.40.0
+```
+
 ## TODO List
 
 - [ ] improve documentation
