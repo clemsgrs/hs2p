@@ -21,7 +21,7 @@ def main(cfg: DictConfig):
 
     patch_save_dir = Path(output_dir, "patches")
     mask_save_dir = Path(output_dir, "masks")
-    visu_save_dir = Path(output_dir, "visualization")
+    visu_save_dir = Path(output_dir, "visualization", f"{cfg.patch_params.patch_size}")
 
     directories = {
         "output_dir": output_dir,

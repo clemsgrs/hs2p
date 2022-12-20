@@ -292,9 +292,7 @@ def seg_and_patch(
                         draw_grid=patch_params.draw_grid,
                         verbose=verbose,
                     )
-                    visu_path = Path(
-                        visu_save_dir, f"{slide_id}_{patch_params.patch_size}.jpg"
-                    )
+                    visu_path = Path(visu_save_dir, f"{slide_id}.jpg")
                     heatmap.save(visu_path)
                     df.loc[idx, "has_patches"] = "yes"
                 else:
