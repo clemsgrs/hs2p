@@ -21,24 +21,17 @@ install requirements via `pip3 install -r requirements.txt`
 If you want to benefit from wandb logging, you need to follow these simple steps:
  - grab your wandb API key under your profile and export
  - run the following command in your terminal: `export WANDB_API_KEY=<your_personal_key>`
- - change wandb paramters in the config file under `config/` (mainly `project` and `username`)
+ - change wandb paramters in the configuration file under `config/` (mainly `username`)
 
-2. Create a new folder under the `data/` directory and give that folder a name.<br>
-Then, place your slides in the `slides` folder under that new folder:
+2. Create a .txt file containing paths to the desired slides:
 
 ```
-hs2p/ 
-├── source/
-├── config/
-├── data/
-│     └── <dataset_name>/
-│          └── slides/
-│             ├── slide_1.tif
-│             ├── slide_2.tif
-│             └── ...
+path/to/slide_1.tif
+slightly/different/path/to/slide_2.tif
+...
 ```
 
-3. Create a configuration file under `config` and change parameters as you wish.<br>
+3. Create a configuration file under `config/` and change parameters as you wish.<br>
 A good starting point is to use the default configuration file `config/default.yaml` where parameters are documented.
 
 4. Run the following command to kick off the algorithm:
@@ -50,7 +43,7 @@ A good starting point is to use the default configuration file `config/default.y
 
 ```
 hs2p/ 
-├── output/<dataset_name>/<experiment_name>/
+├── output/<experiment_name>/
 │     ├── masks/
 │     │     ├── slide_1.jpg
 │     │     ├── slide_2.jpg
@@ -90,10 +83,3 @@ sudo -S make install
 
 export LD_PRELOAD=/usr/local/lib/libpixman-1.so.0.40.0
 ```
-
-## TODO List
-
-- [ ] improve documentation
-- [ ] make patch saving to disk faster (using multiprocessing?)
-- [ ] add support for deep-learning based tissue segmentation
-- [ ] add support for black patch removal in latest contour processing function
