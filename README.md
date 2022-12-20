@@ -58,10 +58,11 @@ hs2p/
 │     │        │          └── ...
 │     │        ├── slide_2/
 │     │        └── ...
-│     ├── stitches/
-│     │     ├── slide_1_<patch_size>.jpg
-│     │     ├── slide_2_<patch_size>.jpg
-│     │     └── ...
+│     ├── visualization/
+│     │     └── <patch_size>/
+│     │         ├── slide_1.jpg
+│     │         ├── slide_2.jpg
+│     │         └── ...
 │     └── process_list.csv
 ```
 
