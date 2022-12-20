@@ -8,6 +8,8 @@ HS2P is an open-source project largely based on [CLAM](https://github.com/mahmoo
    <a href="https://github.com/PyCQA/pylint"><img alt="empty" src=https://img.shields.io/github/stars/clemsgrs/hs2p?style=social></a>
 </p>
 
+<img src="illustration.png" width="1000px" align="center" />
+
 ## Requirements
 
 install requirements via `pip3 install -r requirements.txt`
