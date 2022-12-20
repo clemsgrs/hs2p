@@ -7,7 +7,7 @@ resume: False # whether or not to resume existing experiment
 wandb:
   project: 'hs2p'
   exp_name: '${experiment_name}'
-  username: 'clemsg'
+  username: 'username'
   dir: '/home/user'
   group:
 
