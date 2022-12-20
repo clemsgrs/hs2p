@@ -3,7 +3,7 @@ output_dir: 'output' # folder where to save algorithm output
 
 dataset_name: 'toy'
 slide_list: '${data_dir}/${dataset_name}/panda_radboud.txt' # if specified, will filter the slides to be processed based on that text file
-resume: False # whether or not to resume existing experiment 
+resume: False # whether or not to resume existing experiment
 experiment_name: 'toy'
 
 wandb:
