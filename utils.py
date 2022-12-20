@@ -176,7 +176,9 @@ def seg_and_patch(
         slide_paths = sorted([s.strip() for s in f])
 
     if process_list is None:
-        df = initialize_df(slide_paths, seg_params, filter_params, vis_params, patch_params)
+        df = initialize_df(
+            slide_paths, seg_params, filter_params, vis_params, patch_params
+        )
     else:
         df = pd.read_csv(process_list)
         df = initialize_df(df, seg_params, filter_params, vis_params, patch_params)

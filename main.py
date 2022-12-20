@@ -63,6 +63,7 @@ def main(cfg: DictConfig):
         verbose=cfg.flags.verbose,
     )
 
+
 if __name__ == "__main__":
 
     main()
