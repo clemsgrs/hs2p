@@ -5,6 +5,7 @@ experiment_name: 'debug'
 resume: False # whether or not to resume existing experiment
 
 wandb:
+  enable: False
   project: 'hs2p'
   exp_name: '${experiment_name}'
   username: 'username'

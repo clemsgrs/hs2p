@@ -11,7 +11,7 @@ from utils import initialize_wandb, seg_and_patch
 def main(cfg: DictConfig):
 
     # set up wandb
-    if cfg.wandb.username:
+    if cfg.wandb.enable:
         key = os.environ.get("WANDB_API_KEY")
         wandb_run = initialize_wandb(cfg, key=key)
         wandb_run.define_metric("processed", summary="max")
@@ -61,6 +61,7 @@ def main(cfg: DictConfig):
         vis_params=cfg.vis_params,
         patch_params=cfg.patch_params,
         verbose=cfg.flags.verbose,
+        log_to_wandb=cfg.wandb.enable,
     )
 
 

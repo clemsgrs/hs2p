@@ -170,6 +170,7 @@ def seg_and_patch(
     patch: bool = False,
     process_list: Optional[Path] = None,
     verbose: bool = False,
+    log_to_wandb: bool = False
 ):
     start_time = time.time()
     with open(slide_list, "r") as f:
@@ -306,7 +307,8 @@ def seg_and_patch(
             patch_times += patch_time_elapsed
             visu_times += visu_time_elapsed
 
-            wandb.log({"processed": already_processed + i + 1})
+            if log_to_wandb:
+                wandb.log({"processed": already_processed + i + 1})
 
             # restore original values
             vis_params.vis_level = vis_level
