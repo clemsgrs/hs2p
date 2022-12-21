@@ -10,8 +10,7 @@ from omegaconf import DictConfig, OmegaConf
 from typing import List, Optional, Tuple
 
 from source.wsi import WholeSlideImage
-from source.wsi_utils import StitchCoords, compute_time
-from source.batch_process_utils import initialize_df
+from source.utils import StitchCoords, compute_time, initialize_df
 
 
 def write_dictconfig(d, f, child: bool = False, ntab=0):
