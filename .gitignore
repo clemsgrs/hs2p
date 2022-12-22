@@ -1,4 +1,6 @@
+data/*
 wandb/*
+output/*
 outputs/*
 
 # Byte-compiled / optimized / DLL files

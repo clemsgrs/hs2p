@@ -1,9 +1,9 @@
 h5py
+tqdm
 wandb
 numpy
 pandas
 Pillow
 opencv-python
 openslide-python
-tqdm==4.33.0
 hydra-core==1.2.0
