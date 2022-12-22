@@ -21,7 +21,7 @@ install requirements via `pip3 install -r requirements.txt`
 If you want to benefit from wandb logging, you need to follow these simple steps:
  - grab your wandb API key under your profile and export
  - run the following command in your terminal: `export WANDB_API_KEY=<your_personal_key>`
- - change wandb paramters in the configuration file under `config/` (mainly `username`)
+ - change wandb paramters in the configuration file under `config/` (set `enable` to `True`)
 
 2. Create a .txt file containing paths to the desired slides:
 
@@ -31,7 +31,7 @@ slightly/different/path/to/slide_2.tif
 ...
 ```
 
-3. Create a configuration file under `config/` and change parameters as you wish.<br>
+3. Create a configuration file under `config/`.<br>
 A good starting point is to use the default configuration file `config/default.yaml` where parameters are documented.
 
 4. Run the following command to kick off the algorithm:
@@ -65,6 +65,10 @@ hs2p/
 │     │         └── ...
 │     └── process_list.csv
 ```
+
+Extracted patches will be saved as `x_y.jpg` where `x` and `y` represent the true location in the slide **at level 0**:
+- if spacing at level 0 is `0.25` and you extract [256, 256] patches at spacing `0.25`, two consecutive patches will be distant from `256` pixels (either along `x` or `y` axis)
+- if spacing at level 0 is `0.25` and you extract [256, 256] patches at spacing `0.5`, two consecutive patches will be distant from `512` pixels (either along `x` or `y` axis)
 
 ## Resuming experiment after crash / bug
 
