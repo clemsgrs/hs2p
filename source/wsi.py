@@ -319,13 +319,11 @@ class WholeSlideImage(object):
 
         return level_downsamples
 
-    def get_best_level_for_spacing(self, target_spacing: float, tol: float = 0.15):
+    def get_best_level_for_spacing(self, target_spacing: float):
         # OpenSlide gives the resolution in centimeters so we convert this to microns
         x_res = float(self.wsi.properties["tiff.XResolution"]) / 10000
         y_res = float(self.wsi.properties["tiff.YResolution"]) / 10000
         x_spacing, y_spacing = 1 / x_res, 1 / y_res
-        if abs((target_spacing - x_spacing) / target_spacing) > tol or abs((target_spacing - y_spacing) / target_spacing) > tol:
-            print(f'WARNING: target spacing and actual spacing are more than {int(tol*100)}% appart!')
         downsample_x, downsample_y = target_spacing / x_spacing, target_spacing / y_spacing
         # get_best_level_for_downsample just chooses the largest level with a downsample less than user's downsample
         # see https://github.com/openslide/openslide/issues/274
