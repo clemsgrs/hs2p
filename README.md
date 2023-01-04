@@ -88,10 +88,3 @@ sudo -S make install
 
 export LD_PRELOAD=/usr/local/lib/libpixman-1.so.0.40.0
 ```
-
-## TODO List
-
-- [ ] improve documentation
-- [ ] add support for deep-learning based tissue segmentation
-- [ ] add support for black patch removal in latest contour processing function
-- [ ] make patch saving to disk faster (using multiprocessing?)
