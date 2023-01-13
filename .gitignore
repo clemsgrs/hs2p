@@ -2,6 +2,7 @@ data/*
 wandb/*
 output/*
 outputs/*
+scripts/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
