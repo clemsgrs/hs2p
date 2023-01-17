@@ -74,6 +74,7 @@ def initialize_wandb(
 
 def segment(
     wsi_object: WholeSlideImage,
+    spacing: float,
     seg_params: DictConfig,
     filter_params: DictConfig,
     mask_file: Optional[Path] = None,
@@ -83,6 +84,7 @@ def segment(
         wsi_object.initSegmentation(mask_file)
     else:
         wsi_object.segmentTissue(
+            spacing=spacing,
             seg_level=seg_params.seg_level,
             sthresh=seg_params.sthresh,
             mthresh=seg_params.mthresh,
@@ -248,6 +250,7 @@ def seg_and_patch(
             if seg:
                 wsi_object, seg_time_elapsed = segment(
                     wsi_object,
+                    patch_params.spacing,
                     seg_params,
                     filter_params,
                 )
