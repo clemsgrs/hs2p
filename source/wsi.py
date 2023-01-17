@@ -53,6 +53,7 @@ class WholeSlideImage(object):
 
     def segmentTissue(
         self,
+        spacing: float,
         seg_level: int = 0,
         sthresh: int = 20,
         sthresh_up: int = 255,
@@ -137,7 +138,10 @@ class WholeSlideImage(object):
 
         self.binary_mask = img_thresh
 
-        scale = self.level_downsamples[seg_level]
+        spacing_level = self.get_best_level_for_spacing(spacing)
+        current_scale = self.level_downsamples[spacing_level]
+        target_scale = self.level_downsamples[seg_level]
+        scale = tuple(a/b for a,b in zip(target_scale,current_scale))
         ref_patch_size = filter_params["ref_patch_size"]
         scaled_ref_patch_area = int(ref_patch_size**2 / (scale[0] * scale[1]))
 
@@ -157,8 +161,8 @@ class WholeSlideImage(object):
                 contours, hierarchy, filter_params
             )
 
-        self.contours_tissue = self.scaleContourDim(foreground_contours, scale)
-        self.holes_tissue = self.scaleHolesDim(hole_contours, scale)
+        self.contours_tissue = self.scaleContourDim(foreground_contours, target_scale)
+        self.holes_tissue = self.scaleHolesDim(hole_contours, target_scale)
 
     def visWSI(
         self,

@@ -1,7 +1,7 @@
-slide_list: 'data/debug.txt' # path to the .txt file containing slides paths
+slide_list: 'data/debug_tcga.txt' # path to the .txt file containing slides paths
 
 output_dir: 'output' # folder where to save algorithm output
-experiment_name: 'debug'
+experiment_name: 'debug_tcga'
 resume: False # whether or not to resume existing experiment
 
 wandb:
@@ -28,9 +28,9 @@ seg_params:
   save_mask: True # save tissue mask to disk as a .jpg image
 
 filter_params:
-  ref_patch_size: 512 # reference patch size at level 0
-  a_t: 16 # area filter threshold for tissue (positive integer, the minimum size of detected foreground contours to consider, relative to the reference patch size ref_patch_size at level 0, e.g. a value 10 means only detected foreground contours of size greater than 10 [ref_patch_size, ref_patch_size] sized patches at level 0 will be processed)
-  a_h: 4 # area filter threshold for holes (positive integer, the minimum size of detected holes/cavities in foreground contours to avoid, once again relative to the reference patch size ref_patch_size at level 0)
+  ref_patch_size: 256 # reference patch size at spacing patch_params.spacing
+  a_t: 16 # area filter threshold for tissue (positive integer, the minimum size of detected foreground contours to consider, relative to the reference patch size ref_patch_size, e.g. a value 10 means only detected foreground contours of size greater than 10 [ref_patch_size, ref_patch_size] sized patches at spacing patch_params.spacing will be processed)
+  a_h: 4 # area filter threshold for holes (positive integer, the minimum size of detected holes/cavities in foreground contours to avoid, once again relative to the reference patch size ref_patch_size)
   max_n_holes: 8 # maximum of holes to consider per detected foreground contours (positive integer, higher values lead to more accurate patching but increase computational cost ; keeps the biggest holes)
 
 vis_params:
