@@ -1,7 +1,7 @@
-slide_list: 'data/debug_tcga.txt' # path to the .txt file containing slides paths
+slide_list: 'data/debug.txt' # path to the .txt file containing slides paths
 
 output_dir: 'output' # folder where to save algorithm output
-experiment_name: 'debug_tcga'
+experiment_name: 'debug'
 resume: False # whether or not to resume existing experiment
 
 wandb:
