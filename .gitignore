@@ -3,6 +3,7 @@ wandb/*
 output/*
 outputs/*
 scripts/*
+notebooks/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
