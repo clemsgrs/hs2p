@@ -343,7 +343,7 @@ class WholeSlideImage(object):
 
     def process_contours(
         self,
-        save_dir,
+        save_dir: Path,
         seg_level: int = -1,
         spacing: float = 0.5,
         patch_size: int = 256,
@@ -391,7 +391,7 @@ class WholeSlideImage(object):
                 else:
                     save_hdf5(save_path_hdf5, asset_dict, mode="a")
                 if save_patches_to_disk:
-                    patch_save_dir = Path(save_dir, patch_format)
+                    patch_save_dir = Path(save_dir, 'imgs')
                     patch_save_dir.mkdir(parents=True, exist_ok=True)
                     npatch, mins, secs = save_patch(
                         self.wsi,
