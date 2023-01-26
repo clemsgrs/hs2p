@@ -355,7 +355,7 @@ class WholeSlideImage(object):
             print(f'WARNING! The closest natural spacing to the target spacing was more than 15% appart.')
         return level
 
-    def get_best_level_for_downsample_custom(self, downsample, tol: float = 0.15, return_tol_status: bool = False):
+    def get_best_level_for_downsample_custom(self, downsample, tol: float = 0.2, return_tol_status: bool = False):
         level = int(np.argmin([abs(x - downsample) for x in self.wsi.level_downsamples]))
         above_tol = abs(self.wsi.level_downsamples[level] / downsample - 1) > tol
         if return_tol_status:
