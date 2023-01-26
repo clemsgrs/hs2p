@@ -4,14 +4,6 @@ output_dir: 'output' # folder where to save algorithm output
 experiment_name: 'debug'
 resume: False # whether or not to resume existing experiment
 
-wandb:
-  enable: False
-  project: 'hs2p'
-  exp_name: '${experiment_name}'
-  username: 'username'
-  dir: '/home/user'
-  group:
-
 flags:
   seg: True # whether or not to compute tissue segmentation masks
   patch: True # whether or not to extract patches from segmented tissue regions
@@ -54,3 +46,14 @@ patch_params:
     - 214
     - 233
     - 238
+
+speed:
+  multiprocessing: True
+
+wandb:
+  enable: False
+  project: 'hs2p'
+  exp_name: '${experiment_name}'
+  username: 'username'
+  dir: '/home/user'
+  group:

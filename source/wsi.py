@@ -516,17 +516,22 @@ class WholeSlideImage(object):
             [x_coords.flatten(), y_coords.flatten()]
         ).transpose()
 
-        num_workers = mp.cpu_count()
-        if num_workers > 4:
-            num_workers = 4
-        pool = mp.Pool(num_workers)
+        # num_workers = mp.cpu_count()
+        # if num_workers > 4:
+        #     num_workers = 4
+        # pool = mp.Pool(num_workers)
 
-        iterable = [
-            (coord, contour_holes, ref_patch_size[0], cont_check_fn, drop_holes)
-            for coord in coord_candidates
-        ]
-        results = pool.starmap(WholeSlideImage.process_coord_candidate, iterable)
-        pool.close()
+        # iterable = [
+        #     (coord, contour_holes, ref_patch_size[0], cont_check_fn, drop_holes)
+        #     for coord in coord_candidates
+        # ]
+        # results = pool.starmap(WholeSlideImage.process_coord_candidate, iterable)
+        # pool.close()
+        # results = np.array([result for result in results if result is not None])
+        results = []
+        for coord in coord_candidates:
+            c = self.process_coord_candidate(coord, contour_holes, ref_patch_size[0], cont_check_fn, drop_holes)
+            results.append(c)
         results = np.array([result for result in results if result is not None])
 
         if verbose:

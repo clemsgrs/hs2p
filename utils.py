@@ -166,7 +166,7 @@ def seg_and_patch(
     filter_params,
     vis_params,
     patch_params,
-    slide_list: Optional[List[str]] = None,
+    slide_paths_fp: Optional[List[str]] = None,
     seg: bool = False,
     visu: bool = False,
     patch: bool = False,
@@ -175,7 +175,7 @@ def seg_and_patch(
     log_to_wandb: bool = False
 ):
     start_time = time.time()
-    with open(slide_list, "r") as f:
+    with open(slide_paths_fp, "r") as f:
         slide_paths = sorted([s.strip() for s in f])
 
     if process_list is None:
@@ -334,3 +334,115 @@ def seg_and_patch(
     print("-" * 7, "-" * (len("summary") + 2), "-" * 7, sep="")
 
     return seg_times, patch_times
+
+
+def seg_and_patch_slide(
+    patch_save_dir: Path,
+    mask_save_dir: Path,
+    visu_save_dir: Path,
+    seg_params,
+    filter_params,
+    vis_params,
+    patch_params,
+    slide_fp: str,
+    slide_id: str,
+    seg: bool = False,
+    visu: bool = False,
+    patch: bool = False,
+    verbose: bool = False,
+):
+    print(f'Processing {slide_id}...')
+
+    # Inialize WSI
+    wsi_object = WholeSlideImage(slide_fp)
+
+    vis_level = vis_params.vis_level
+    if vis_level < 0:
+        if len(wsi_object.level_dim) == 1:
+            vis_params.vis_level = 0
+            best_vis_level = 0
+        else:
+            best_vis_level = wsi_object.get_best_level_for_downsample_custom(
+                vis_params.downsample
+            )
+            vis_params.vis_level = best_vis_level
+
+    seg_level = seg_params.seg_level
+    if seg_level < 0:
+        if len(wsi_object.level_dim) == 1:
+            seg_params.seg_level = 0
+            best_seg_level = 0
+        else:
+            best_seg_level = wsi_object.get_best_level_for_downsample_custom(
+                seg_params.downsample
+            )
+            seg_params.seg_level = best_seg_level
+
+    w, h = wsi_object.level_dim[seg_params.seg_level]
+    if w * h > 1e8:
+        print(
+            f"level_dim {w} x {h} is likely too large for successful segmentation, aborting"
+        )
+        status = "failed_seg"
+        return status
+
+    seg_time = -1
+    if seg:
+        wsi_object, seg_time = segment(
+            wsi_object,
+            patch_params.spacing,
+            seg_params,
+            filter_params,
+        )
+
+    if seg_params.save_mask:
+        mask = wsi_object.visWSI(
+            vis_level=vis_params.vis_level,
+            line_thickness=vis_params.line_thickness,
+        )
+        mask_path = Path(mask_save_dir, f"{slide_id}.jpg")
+        mask.save(mask_path)
+
+    patch_time = -1
+    if patch:
+        slide_save_dir = Path(
+            patch_save_dir, slide_id, f"{patch_params.patch_size}"
+        )
+        file_path, patch_time = patching(
+            wsi_object=wsi_object,
+            save_dir=slide_save_dir,
+            seg_level=seg_params.seg_level,
+            spacing=patch_params.spacing,
+            patch_size=patch_params.patch_size,
+            overlap=patch_params.overlap,
+            contour_fn=patch_params.contour_fn,
+            drop_holes=patch_params.drop_holes,
+            tissue_thresh=patch_params.tissue_thresh,
+            use_padding=patch_params.use_padding,
+            save_patches_to_disk=patch_params.save_patches_to_disk,
+            patch_format=patch_params.format,
+            verbose=verbose,
+        )
+
+    visu_time = -1
+    if visu:
+        # if file_path exists, patches were extracted
+        if file_path.is_file():
+            heatmap, visu_time = visualize(
+                file_path,
+                wsi_object,
+                downscale=vis_params.downscale,
+                bg_color=tuple(patch_params.bg_color),
+                draw_grid=patch_params.draw_grid,
+                verbose=verbose,
+            )
+            visu_path = Path(visu_save_dir, f"{slide_id}.jpg")
+            heatmap.save(visu_path)
+
+    status = "processed"
+
+    # restore original values
+    vis_params.vis_level = vis_level
+    seg_params.seg_level = seg_level
+
+    return status, slide_id, best_vis_level, best_seg_level
