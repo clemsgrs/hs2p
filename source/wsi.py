@@ -32,6 +32,7 @@ class WholeSlideImage(object):
 
         self.path = path
         self.name = path.stem
+        self.fmt = path.suffix
         self.wsi = openslide.open_slide(str(path))
         self.level_downsamples = self._assertLevelDownsamples()
         self.level_dim = self.wsi.level_dimensions
@@ -323,11 +324,25 @@ class WholeSlideImage(object):
 
         return level_downsamples
 
+    def get_spacings(self):
+        if self.fmt in ['.tif', '.tiff']:
+            # OpenSlide gives the resolution in centimeters so we convert this to microns
+            x_res = float(self.wsi.properties["tiff.XResolution"]) / 10000
+            y_res = float(self.wsi.properties["tiff.YResolution"]) / 10000
+            x_spacing, y_spacing = 1 / x_res, 1 / y_res
+        elif self.fmt == '.mrxs':
+            x_spacing = float(self.wsi.properties["openslide.mpp-x"])
+            y_spacing = float(self.wsi.properties["openslide.mpp-y"])
+        else:
+            try:
+                x_spacing = float(self.wsi.properties["openslide.mpp-x"])
+                y_spacing = float(self.wsi.properties["openslide.mpp-y"])
+            except KeyError as e:
+                raise e
+        return x_spacing, y_spacing
+
     def get_best_level_for_spacing(self, target_spacing: float):
-        # OpenSlide gives the resolution in centimeters so we convert this to microns
-        x_res = float(self.wsi.properties["tiff.XResolution"]) / 10000
-        y_res = float(self.wsi.properties["tiff.YResolution"]) / 10000
-        x_spacing, y_spacing = 1 / x_res, 1 / y_res
+        x_spacing, y_spacing = self.get_spacings()
         downsample_x, downsample_y = target_spacing / x_spacing, target_spacing / y_spacing
         # get_best_level_for_downsample just chooses the largest level with a downsample less than user's downsample
         # see https://github.com/openslide/openslide/issues/274
@@ -335,11 +350,18 @@ class WholeSlideImage(object):
         assert self.get_best_level_for_downsample_custom(
             downsample_x
         ) == self.get_best_level_for_downsample_custom(downsample_y)
-        level = self.get_best_level_for_downsample_custom(downsample_x)
+        level, above_tol = self.get_best_level_for_downsample_custom(downsample_x, return_tol_status=True)
+        if above_tol:
+            print(f'WARNING! The closest natural spacing to the target spacing was more than 15% appart.')
         return level
 
-    def get_best_level_for_downsample_custom(self, downsample):
-        return int(np.argmin([abs(x - downsample) for x in self.wsi.level_downsamples]))
+    def get_best_level_for_downsample_custom(self, downsample, tol: float = 0.15, return_tol_status: bool = False):
+        level = int(np.argmin([abs(x - downsample) for x in self.wsi.level_downsamples]))
+        above_tol = abs(self.wsi.level_downsamples[level] / downsample - 1) > tol
+        if return_tol_status:
+            return level, above_tol
+        else:
+            return level
 
     def process_contours(
         self,
