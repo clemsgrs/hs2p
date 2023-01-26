@@ -48,16 +48,15 @@ hs2p/
 │     │     ├── slide_1.jpg
 │     │     ├── slide_2.jpg
 │     │     └── ...
-│     ├── patches/
-│     │        ├── slide_1/
-│     │        │   └── <patch_size>/
-│     │        │       ├── slide_1.h5
-│     │        │       └── jpg/
-│     │        │          ├── x0_y0.jpg
-│     │        │          ├── x1_y0.jpg
-│     │        │          └── ...
-│     │        ├── slide_2/
-│     │        └── ...
+│     ├── patches/<patch_size>/<format>/
+│     │     ├── slide_1/
+│     │     │     ├── slide_1.h5
+│     │     │     └── imgs/
+│     │     │         ├── x0_y0.<format>
+│     │     │         ├── x1_y0.<format>
+│     │     │         └── ...
+│     │     ├── slide_2/
+│     │     └── ...
 │     ├── visualization/
 │     │     └── <patch_size>/
 │     │         ├── slide_1.jpg
