@@ -1,4 +1,6 @@
 import os
+import tqdm
+import wandb
 import hydra
 import shutil
 import pandas as pd
@@ -81,10 +83,13 @@ def main(cfg: DictConfig):
             ) for fp, sid in zip(slide_paths_to_process, slide_ids_to_process)
         ]
         num_workers = mp.cpu_count()
-        if num_workers > 4:
-            num_workers = 4
+        if num_workers > 10:
+            num_workers = 10
+        results = []
         with mp.Pool(num_workers) as pool:
-            results = pool.starmap(seg_and_patch_slide, args)
+            for i, r in enumerate(tqdm.tqdm(pool.starmap(seg_and_patch_slide, args), total=len(args))):
+                results.append(r)
+                wandb.log({"processed": i+1})
         for s, sid, vl, sl in results:
             row = df.loc[df.slide_id == sid]
             row.status = s
