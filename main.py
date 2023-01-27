@@ -25,18 +25,17 @@ def main(cfg: DictConfig):
     output_dir = Path(cfg.output_dir, cfg.experiment_name)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    patch_save_dir = Path(output_dir, "patches")
     mask_save_dir = Path(output_dir, "masks")
+    patch_save_dir = Path(output_dir, "patches", f"{cfg.patch_params.patch_size}", f"{cfg.patch_params.format}")
     visu_save_dir = Path(output_dir, "visualization", f"{cfg.patch_params.patch_size}")
 
     directories = {
-        "output_dir": output_dir,
-        "patch_save_dir": patch_save_dir,
         "mask_save_dir": mask_save_dir,
+        "patch_save_dir": patch_save_dir,
         "visu_save_dir": visu_save_dir,
     }
 
-    for dirpath in directories.values():
+    for dirname, dirpath in directories.items():
         if not cfg.resume:
             if dirpath.exists():
                 shutil.rmtree(dirpath)

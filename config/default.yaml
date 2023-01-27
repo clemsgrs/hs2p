@@ -54,6 +54,6 @@ wandb:
   enable: False
   project: 'hs2p'
   exp_name: '${experiment_name}'
-  username: 'username'
+  username: 'clemsg'
   dir: '/home/user'
   group:
