@@ -88,7 +88,8 @@ def main(cfg: DictConfig):
         with mp.Pool(num_workers) as pool:
             for i, r in enumerate(tqdm.tqdm(pool.starmap(seg_and_patch_slide, args), total=len(args))):
                 results.append(r)
-                wandb.log({"processed": i+1})
+                if cfg.wandb.enable:
+                    wandb.log({"processed": i+1})
         for s, sid, vl, sl in results:
             row = df.loc[df.slide_id == sid]
             row.status = s
