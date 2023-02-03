@@ -403,9 +403,7 @@ def seg_and_patch_slide(
 
     patch_time = -1
     if patch:
-        slide_save_dir = Path(
-            patch_save_dir, slide_id, f"{patch_params.patch_size}"
-        )
+        slide_save_dir = Path(patch_save_dir, slide_id)
         file_path, patch_time = patching(
             wsi_object=wsi_object,
             save_dir=slide_save_dir,
