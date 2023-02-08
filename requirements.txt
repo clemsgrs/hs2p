@@ -4,6 +4,8 @@ wandb
 numpy
 pandas
 Pillow
+tifffile
+imagecodecs
 opencv-python
 openslide-python
 hydra-core==1.2.0

@@ -1,7 +1,7 @@
 <h1 align="center">Histopathology Slide Pre-processing Pipeline</h2>
 
 
-HS2P is an open-source project largely based on [CLAM](https://github.com/mahmoodlab/CLAM) tissue segmentation and patching code. 
+HS2P is an open-source project largely based on [CLAM](https://github.com/mahmoodlab/CLAM) tissue segmentation and patching code.
 
 <p>
    <a href="https://github.com/psf/black"><img alt="empty" src=https://img.shields.io/badge/code%20style-black-000000.svg></a>
@@ -23,11 +23,14 @@ If you want to benefit from wandb logging, you need to follow these simple steps
  - run the following command in your terminal: `export WANDB_API_KEY=<your_personal_key>`
  - change wandb paramters in the configuration file under `config/` (set `enable` to `True`)
 
-2. Create a .txt file containing paths to the desired slides:
+2. Create a .csv file containing paths to the desired slides:
+
+You can optionally provide paths to pre-computed segmentation masks under the 'mask_path' column
 
 ```
-path/to/slide_1.tif
-slightly/different/path/to/slide_2.tif
+slide_path, mask_path
+path/to/slide_1.tif, path/to/slide_1_mask.tif
+path/to/slide_2.tif, path/to/slide_2_mask.tif
 ...
 ```
 
@@ -42,7 +45,7 @@ A good starting point is to use the default configuration file `config/default.y
 
 
 ```
-hs2p/ 
+hs2p/
 ├── output/<experiment_name>/
 │     ├── masks/
 │     │     ├── slide_1.jpg

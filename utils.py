@@ -77,11 +77,17 @@ def segment(
     spacing: float,
     seg_params: DictConfig,
     filter_params: DictConfig,
-    mask_file: Optional[Path] = None,
+    mask_fp: Optional[Path] = None,
 ):
     start_time = time.time()
-    if mask_file is not None:
-        wsi_object.initSegmentation(mask_file)
+    if mask_fp is not None:
+        # print(f"Loading segmentation mask at: {mask_fp}")
+        seg_level = wsi_object.loadSegmentation(
+            mask_fp,
+            spacing=spacing,
+            filter_params=filter_params,
+        )
+        seg_params.seg_level = seg_level
     else:
         wsi_object.segmentTissue(
             spacing=spacing,
@@ -115,7 +121,7 @@ def patching(
 ):
 
     start_time = time.time()
-    file_path = wsi_object.process_contours(
+    file_path, tile_df = wsi_object.process_contours(
         save_dir=save_dir,
         seg_level=seg_level,
         spacing=spacing,
@@ -132,7 +138,7 @@ def patching(
         verbose=verbose,
     )
     patch_time_elapsed = time.time() - start_time
-    return file_path, patch_time_elapsed
+    return file_path, tile_df, patch_time_elapsed
 
 
 def visualize(
@@ -166,8 +172,7 @@ def seg_and_patch(
     filter_params,
     vis_params,
     patch_params,
-    slide_list: Optional[List[str]] = None,
-    seg: bool = False,
+    slide_df: pd.DataFrame,
     visu: bool = False,
     patch: bool = False,
     process_list: Optional[Path] = None,
@@ -175,12 +180,14 @@ def seg_and_patch(
     log_to_wandb: bool = False
 ):
     start_time = time.time()
-    with open(slide_list, "r") as f:
-        slide_paths = sorted([s.strip() for s in f])
+    slide_paths = slide_df.slide_path.values.tolist()
+    mask_paths = []
+    if "mask_path" in slide_df.columns:
+        mask_paths = slide_df.mask_path.values.tolist()
 
     if process_list is None:
         df = initialize_df(
-            slide_paths, seg_params, filter_params, vis_params, patch_params
+            slide_paths, mask_paths, seg_params, filter_params, vis_params, patch_params
         )
     else:
         df = pd.read_csv(process_list)
@@ -194,6 +201,8 @@ def seg_and_patch(
     seg_times = 0.0
     patch_times = 0.0
     visu_times = 0.0
+
+    dfs = []
 
     with tqdm.tqdm(
         range(total),
@@ -210,6 +219,9 @@ def seg_and_patch(
             idx = process_stack.index[i]
             slide_id = process_stack.loc[idx, "slide_id"]
             slide_path = Path(process_stack.loc[idx, "slide_path"])
+            mask_path = None
+            if "mask_path" in process_stack.columns:
+                mask_path = Path(process_stack.loc[idx, "mask_path"])
             t.display(f"Processing {slide_id}", pos=2)
 
             # Inialize WSI
@@ -243,17 +255,14 @@ def seg_and_patch(
                 df.loc[idx, "status"] = "failed_seg"
                 continue
 
-            df.loc[idx, "vis_level"] = vis_params.vis_level
-            df.loc[idx, "seg_level"] = seg_params.seg_level
-
             seg_time_elapsed = -1
-            if seg:
-                wsi_object, seg_time_elapsed = segment(
-                    wsi_object,
-                    patch_params.spacing,
-                    seg_params,
-                    filter_params,
-                )
+            wsi_object, seg_time_elapsed = segment(
+                wsi_object,
+                patch_params.spacing,
+                seg_params,
+                filter_params,
+                mask_path,
+            )
 
             if seg_params.save_mask:
                 mask = wsi_object.visWSI(
@@ -266,7 +275,7 @@ def seg_and_patch(
             patch_time_elapsed = -1
             if patch:
                 slide_save_dir = Path(patch_save_dir, slide_id)
-                file_path, patch_time_elapsed = patching(
+                file_path, tile_df, patch_time_elapsed = patching(
                     wsi_object=wsi_object,
                     save_dir=slide_save_dir,
                     seg_level=seg_params.seg_level,
@@ -281,6 +290,7 @@ def seg_and_patch(
                     patch_format=patch_params.format,
                     verbose=verbose,
                 )
+                dfs.append(tile_df)
 
             visu_time_elapsed = -1
             if visu:
@@ -302,6 +312,8 @@ def seg_and_patch(
 
             df.loc[idx, "process"] = 0
             df.loc[idx, "status"] = "processed"
+            df.loc[idx, "vis_level"] = vis_params.vis_level
+            df.loc[idx, "seg_level"] = seg_params.seg_level
             df.to_csv(Path(output_dir, "process_list.csv"), index=False)
 
             seg_times += seg_time_elapsed
@@ -321,6 +333,9 @@ def seg_and_patch(
     seg_times /= total + 1e-5
     patch_times /= total + 1e-5
     visu_times /= total + 1e-5
+
+    tile_df = pd.concat(dfs, ignore_index=True)
+    tile_df.to_csv(Path(output_dir, f"tiles.csv"), index=False)
 
     df.to_csv(Path(output_dir, "process_list.csv"), index=False)
     print(f"\n" * 4)
