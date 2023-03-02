@@ -3,6 +3,7 @@ import time
 import math
 import openslide
 import numpy as np
+import pandas as pd
 import multiprocessing as mp
 
 from PIL import Image
@@ -32,6 +33,7 @@ class WholeSlideImage(object):
 
         self.path = path
         self.name = path.stem
+        self.fmt = path.suffix
         self.wsi = openslide.open_slide(str(path))
         self.level_downsamples = self._assertLevelDownsamples()
         self.level_dim = self.wsi.level_dimensions
@@ -42,14 +44,27 @@ class WholeSlideImage(object):
     def getOpenSlide(self):
         return self.wsi
 
-    def initSegmentation(self, mask_file: Path):
+    def initSegmentation(self, mask_fp: Path):
         # load segmentation results from pickle file
         import pickle
-
-        with open(mask_file, "rb") as f:
+        with open(mask_fp, "rb") as f:
             asset_dict = pickle.load(f)
             self.holes_tissue = asset_dict["holes"]
             self.contours_tissue = asset_dict["tissue"]
+
+    def loadSegmentation(self, mask_fp: Path, spacing, filter_params, sthresh_up: int = 255):
+        import tifffile
+        mask = tifffile.imread(mask_fp)
+        mask = mask - np.ones_like(mask)
+        if np.max(mask) == 1:
+            mask = mask * sthresh_up
+        w, h = mask.shape
+        x_level = int(np.argmin([abs(x - w) for x,_ in self.level_dim]))
+        y_level = int(np.argmin([abs(y - h) for _,y in self.level_dim]))
+        assert x_level == y_level
+        self.binary_mask = mask
+        self.detect_contours(mask, spacing, x_level, filter_params)
+        return x_level
 
     def segmentTissue(
         self,
@@ -65,6 +80,33 @@ class WholeSlideImage(object):
         """
         Segment the tissue via HSV -> Median thresholding -> Binary threshold
         """
+
+        img = np.array(
+            self.wsi.read_region((0, 0), seg_level, self.level_dim[seg_level])
+        )
+        img_hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)  # Convert to HSV space
+        img_med = cv2.medianBlur(img_hsv[:, :, 1], mthresh)  # Apply median blurring
+
+        # Thresholding
+        if use_otsu:
+            _, img_thresh = cv2.threshold(
+                img_med, 0, sthresh_up, cv2.THRESH_OTSU + cv2.THRESH_BINARY
+            )
+        else:
+            _, img_thresh = cv2.threshold(
+                img_med, sthresh, sthresh_up, cv2.THRESH_BINARY
+            )
+
+        # Morphological closing
+        if close > 0:
+            kernel = np.ones((close, close), np.uint8)
+            img_thresh = cv2.morphologyEx(img_thresh, cv2.MORPH_CLOSE, kernel)
+
+        self.binary_mask = img_thresh
+        self.detect_contours(img_thresh, spacing, seg_level, filter_params)
+
+
+    def detect_contours(self, img_thresh, spacing: float, seg_level: int, filter_params: Dict[str, int]):
 
         def _filter_contours(contours, hierarchy, filter_params):
             """
@@ -114,29 +156,6 @@ class WholeSlideImage(object):
                 hole_contours.append(filtered_holes)
 
             return foreground_contours, hole_contours
-
-        img = np.array(
-            self.wsi.read_region((0, 0), seg_level, self.level_dim[seg_level])
-        )
-        img_hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)  # Convert to HSV space
-        img_med = cv2.medianBlur(img_hsv[:, :, 1], mthresh)  # Apply median blurring
-
-        # Thresholding
-        if use_otsu:
-            _, img_thresh = cv2.threshold(
-                img_med, 0, sthresh_up, cv2.THRESH_OTSU + cv2.THRESH_BINARY
-            )
-        else:
-            _, img_thresh = cv2.threshold(
-                img_med, sthresh, sthresh_up, cv2.THRESH_BINARY
-            )
-
-        # Morphological closing
-        if close > 0:
-            kernel = np.ones((close, close), np.uint8)
-            img_thresh = cv2.morphologyEx(img_thresh, cv2.MORPH_CLOSE, kernel)
-
-        self.binary_mask = img_thresh
 
         spacing_level = self.get_best_level_for_spacing(spacing)
         current_scale = self.level_downsamples[spacing_level]
@@ -323,11 +342,25 @@ class WholeSlideImage(object):
 
         return level_downsamples
 
+    def get_spacings(self):
+        if self.fmt in ['.tif', '.tiff']:
+            # OpenSlide gives the resolution in centimeters so we convert this to microns
+            x_res = float(self.wsi.properties["tiff.XResolution"]) / 10000
+            y_res = float(self.wsi.properties["tiff.YResolution"]) / 10000
+            x_spacing, y_spacing = 1 / x_res, 1 / y_res
+        elif self.fmt == '.mrxs':
+            x_spacing = float(self.wsi.properties["openslide.mpp-x"])
+            y_spacing = float(self.wsi.properties["openslide.mpp-y"])
+        else:
+            try:
+                x_spacing = float(self.wsi.properties["openslide.mpp-x"])
+                y_spacing = float(self.wsi.properties["openslide.mpp-y"])
+            except KeyError as e:
+                raise e
+        return x_spacing, y_spacing
+
     def get_best_level_for_spacing(self, target_spacing: float):
-        # OpenSlide gives the resolution in centimeters so we convert this to microns
-        x_res = float(self.wsi.properties["tiff.XResolution"]) / 10000
-        y_res = float(self.wsi.properties["tiff.YResolution"]) / 10000
-        x_spacing, y_spacing = 1 / x_res, 1 / y_res
+        x_spacing, y_spacing = self.get_spacings()
         downsample_x, downsample_y = target_spacing / x_spacing, target_spacing / y_spacing
         # get_best_level_for_downsample just chooses the largest level with a downsample less than user's downsample
         # see https://github.com/openslide/openslide/issues/274
@@ -335,11 +368,18 @@ class WholeSlideImage(object):
         assert self.get_best_level_for_downsample_custom(
             downsample_x
         ) == self.get_best_level_for_downsample_custom(downsample_y)
-        level = self.get_best_level_for_downsample_custom(downsample_x)
+        level, above_tol = self.get_best_level_for_downsample_custom(downsample_x, return_tol_status=True)
+        if above_tol:
+            print(f'WARNING! The closest natural spacing to the target spacing was more than 15% appart.')
         return level
 
-    def get_best_level_for_downsample_custom(self, downsample):
-        return int(np.argmin([abs(x - downsample) for x in self.wsi.level_downsamples]))
+    def get_best_level_for_downsample_custom(self, downsample, tol: float = 0.2, return_tol_status: bool = False):
+        level = int(np.argmin([abs(x - downsample) for x in self.wsi.level_downsamples]))
+        above_tol = abs(self.wsi.level_downsamples[level] / downsample - 1) > tol
+        if return_tol_status:
+            return level, above_tol
+        else:
+            return level
 
     def process_contours(
         self,
@@ -363,11 +403,13 @@ class WholeSlideImage(object):
         n_contours = len(self.contours_tissue)
         if verbose:
             print(f"Total number of contours to process: {n_contours}")
+
+        dfs = []
         init = True
 
         for i, cont in enumerate(self.contours_tissue):
 
-            asset_dict, attr_dict = self.process_contour(
+            asset_dict, attr_dict, tile_df = self.process_contour(
                 cont,
                 self.holes_tissue[i],
                 seg_level,
@@ -383,6 +425,11 @@ class WholeSlideImage(object):
                 bot_right,
                 verbose=verbose,
             )
+
+            if tile_df is not None:
+                tile_df["contour"] = [i] * len(tile_df)
+                dfs.append(tile_df)
+
             if len(asset_dict) > 0:
                 if init:
                     save_dir.mkdir(parents=True, exist_ok=True)
@@ -403,7 +450,8 @@ class WholeSlideImage(object):
 
         end_time = time.time()
         patch_saving_mins, patch_saving_secs = compute_time(start_time, end_time)
-        return save_path_hdf5
+        df = pd.concat(dfs, ignore_index=True)
+        return save_path_hdf5, df
 
     def process_contour(
         self,
@@ -528,15 +576,15 @@ class WholeSlideImage(object):
         results = pool.starmap(WholeSlideImage.process_coord_candidate, iterable)
         pool.close()
         results = np.array([result for result in results if result is not None])
+        npatch = len(results)
 
         if verbose:
-            print(f"Extracted {len(results)} patches")
+            print(f"Extracted {npatch} patches")
 
-        if len(results) > 0:
+        if npatch > 0:
             asset_dict = {
                 "coords": results,
             }
-
             attr = {
                 "patch_size": patch_size,
                 "spacing": spacing,
@@ -548,12 +596,21 @@ class WholeSlideImage(object):
                 "wsi_name": self.name,
                 "save_path": str(save_dir),
             }
-
             attr_dict = {"coords": attr}
-            return asset_dict, attr_dict
+            df_data = {
+                "slide_id": [self.name] * npatch,
+                "tile_size": [patch_size] * npatch,
+                "spacing": [spacing] * npatch,
+                "level": [patch_level] * npatch,
+                "level_dim": [self.level_dim[patch_level]] * npatch,
+                "x": list(results[:,0]),
+                "y": list(results[:,1]),
+            }
+            tile_df = pd.DataFrame.from_dict(df_data)
+            return asset_dict, attr_dict, tile_df
 
         else:
-            return {}, {}
+            return {}, {}, None
 
     @staticmethod
     def process_coord_candidate(
