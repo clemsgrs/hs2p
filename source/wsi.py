@@ -343,20 +343,15 @@ class WholeSlideImage(object):
         return level_downsamples
 
     def get_spacings(self):
-        if self.fmt in ['.tif', '.tiff']:
-            # OpenSlide gives the resolution in centimeters so we convert this to microns
+        if "openslide.mpp-x" in self.wsi.properties:
+            x_spacing = float(self.wsi.properties["openslide.mpp-x"])
+            y_spacing = float(self.wsi.properties["openslide.mpp-y"])
+        elif "tiff.XResolution" in self.wsi.properties:
             x_res = float(self.wsi.properties["tiff.XResolution"]) / 10000
             y_res = float(self.wsi.properties["tiff.YResolution"]) / 10000
             x_spacing, y_spacing = 1 / x_res, 1 / y_res
-        elif self.fmt == '.mrxs':
-            x_spacing = float(self.wsi.properties["openslide.mpp-x"])
-            y_spacing = float(self.wsi.properties["openslide.mpp-y"])
         else:
-            try:
-                x_spacing = float(self.wsi.properties["openslide.mpp-x"])
-                y_spacing = float(self.wsi.properties["openslide.mpp-y"])
-            except KeyError as e:
-                raise e
+            raise KeyError("Neither 'openslide.mpp-x' nor 'tiff.XResolution' were found in slide's properties.\nYou may fix this by inspecting one of your slides' properties and add an elif in the code above")
         return x_spacing, y_spacing
 
     def get_best_level_for_spacing(self, target_spacing: float):
