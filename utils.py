@@ -46,13 +46,10 @@ def write_dictconfig(d, f, child: bool = False, ntab=0):
 
 def initialize_wandb(
     cfg: DictConfig,
-    tags: Optional[List] = None,
     key: Optional[str] = "",
 ):
     command = f"wandb login {key}"
     subprocess.call(command, shell=True)
-    if tags == None:
-        tags = []
     config = OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)
     run = wandb.init(
         project=cfg.wandb.project,
@@ -61,7 +58,7 @@ def initialize_wandb(
         group=cfg.wandb.group,
         dir=cfg.wandb.dir,
         config=config,
-        tags=tags,
+        tags=cfg.wandb.tags,
     )
     config_file_path = Path(run.dir, "run_config.yaml")
     d = OmegaConf.to_container(cfg, resolve=True)

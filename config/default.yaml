@@ -53,3 +53,4 @@ wandb:
   username: 'clemsg'
   dir: '/home/user'
   group:
+  tags: []
