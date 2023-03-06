@@ -348,8 +348,6 @@ def seg_and_patch(
 
 
 def seg_and_patch_slide(
-    df: pd.DataFrame,
-    output_dir: Path,
     patch_save_dir: Path,
     mask_save_dir: Path,
     visu_save_dir: Path,
@@ -357,9 +355,9 @@ def seg_and_patch_slide(
     filter_params,
     vis_params,
     patch_params,
-    slide_fp: str,
     slide_id: str,
-    seg: bool = False,
+    slide_fp: str,
+    mask_fp: str,
     visu: bool = False,
     patch: bool = False,
     verbose: bool = False,
@@ -367,8 +365,11 @@ def seg_and_patch_slide(
     if verbose:
         print(f'Processing {slide_id}...')
 
+    if mask_fp is not None:
+        mask_fp = Path(mask_fp)
+
     # Inialize WSI
-    wsi_object = WholeSlideImage(slide_fp)
+    wsi_object = WholeSlideImage(Path(slide_fp))
 
     vis_level = vis_params.vis_level
     if vis_level < 0:
@@ -398,16 +399,26 @@ def seg_and_patch_slide(
             f"level_dim {w} x {h} is likely too large for successful segmentation, aborting"
         )
         status = "failed_seg"
-        return status
+        tile_df = pd.DataFrame.from_dict({
+            "slide_id": [],
+            "tile_size": [],
+            "spacing": [],
+            "level": [],
+            "level_dim": [],
+            "x": [],
+            "y": [],
+            "contour": [],
+        })
+        return tile_df, slide_id, status, best_vis_level, best_seg_level
 
     seg_time = -1
-    if seg:
-        wsi_object, seg_time = segment(
-            wsi_object,
-            patch_params.spacing,
-            seg_params,
-            filter_params,
-        )
+    wsi_object, seg_time = segment(
+        wsi_object,
+        patch_params.spacing,
+        seg_params,
+        filter_params,
+        mask_fp,
+    )
 
     if seg_params.save_mask:
         mask = wsi_object.visWSI(
@@ -420,7 +431,7 @@ def seg_and_patch_slide(
     patch_time = -1
     if patch:
         slide_save_dir = Path(patch_save_dir, slide_id)
-        file_path, patch_time = patching(
+        file_path, tile_df, patch_time = patching(
             wsi_object=wsi_object,
             save_dir=slide_save_dir,
             seg_level=seg_params.seg_level,
@@ -457,12 +468,4 @@ def seg_and_patch_slide(
     vis_params.vis_level = vis_level
     seg_params.seg_level = seg_level
 
-    mask = df["slide_id"] == slide_id
-    df.loc[mask, 'status'] = status
-    df.loc[mask, 'process'] = 0
-    df.loc[mask, 'vis_level'] = best_vis_level
-    df.loc[mask, 'seg_level'] = best_seg_level
-
-    df.to_csv(Path(output_dir, "process_list.csv"), index=False)
-
-    return seg_time, patch_time
+    return tile_df, slide_id, status, best_vis_level, best_seg_level

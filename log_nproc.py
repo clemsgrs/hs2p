@@ -31,7 +31,7 @@ if __name__ == "__main__":
     while not stop:
         nproc = main(args["output_dir"], args["fmt"])
         if nproc > previous_nproc:
-            wandb.log({"processed": nproc+1})
+            wandb.log({"processed": nproc})
             print(f'nslide processed: {nproc}/{args["total"]}', end="\r")
         time.sleep(args["freq"])
         stop = (nproc == args["total"])

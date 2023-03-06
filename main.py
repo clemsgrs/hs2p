@@ -75,12 +75,13 @@ def main(cfg: DictConfig):
 
         mask = df["process"] == 1
         process_stack = df[mask]
-        slide_paths_to_process = process_stack.slide_path
         slide_ids_to_process = process_stack.slide_id
+        slide_paths_to_process = process_stack.slide_path
+        mask_paths_to_process = [None] * len(slide_paths_to_process)
+        if "mask_path" in process_stack.columns:
+            mask_paths_to_process = process_stack.mask_path
         args = [
             (
-                df,
-                output_dir,
                 patch_save_dir,
                 mask_save_dir,
                 visu_save_dir,
@@ -88,13 +89,13 @@ def main(cfg: DictConfig):
                 cfg.filter_params,
                 cfg.vis_params,
                 cfg.patch_params,
-                Path(fp),
                 sid,
-                cfg.flags.seg,
+                slide_fp,
+                mask_fp,
                 cfg.flags.patch,
                 cfg.flags.visu,
                 cfg.flags.verbose,
-            ) for fp, sid in zip(slide_paths_to_process, slide_ids_to_process)
+            ) for sid, slide_fp, mask_fp in zip(slide_ids_to_process, slide_paths_to_process, mask_paths_to_process)
         ]
 
         if cfg.wandb.enable:
@@ -103,8 +104,26 @@ def main(cfg: DictConfig):
         num_workers = mp.cpu_count()
         if num_workers > 10:
             num_workers = 10
+        results = []
         with mp.Pool(num_workers) as pool:
-            results = pool.starmap(seg_and_patch_slide, args)
+            for i, r in enumerate(pool.starmap(seg_and_patch_slide, args)):
+                results.append(r)
+
+        dfs = []
+        for t_df, sid, s, vl, sl in results:
+
+            mask = df["slide_id"] == sid
+            df.loc[mask, 'status'] = s
+            df.loc[mask, 'process'] = 0
+            df.loc[mask, 'vis_level'] = vl
+            df.loc[mask, 'seg_level'] = sl
+
+            dfs.append(t_df)
+
+        df.to_csv(Path(output_dir, "process_list.csv"), index=False)
+
+        tile_df = pd.concat(dfs, ignore_index=True)
+        tile_df.to_csv(Path(output_dir, f"tiles.csv"), index=False)
 
     else:
 
