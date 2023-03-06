@@ -59,6 +59,7 @@ def initialize_wandb(
         dir=cfg.wandb.dir,
         config=config,
         tags=cfg.wandb.tags,
+        resume="allow",
     )
     config_file_path = Path(run.dir, "run_config.yaml")
     d = OmegaConf.to_container(cfg, resolve=True)
@@ -114,6 +115,7 @@ def patching(
     patch_format: str = "png",
     top_left: Optional[List[int]] = None,
     bot_right: Optional[List[int]] = None,
+    enable_mp: bool = True,
     verbose: bool = False,
 ):
 
@@ -132,6 +134,7 @@ def patching(
         patch_format=patch_format,
         top_left=top_left,
         bot_right=bot_right,
+        enable_mp=enable_mp,
         verbose=verbose,
     )
     patch_time_elapsed = time.time() - start_time
@@ -174,7 +177,7 @@ def seg_and_patch(
     patch: bool = False,
     process_list: Optional[Path] = None,
     verbose: bool = False,
-    log_to_wandb: bool = False
+    log_to_wandb: bool = False,
 ):
     start_time = time.time()
     slide_paths = slide_df.slide_path.values.tolist()
@@ -285,6 +288,7 @@ def seg_and_patch(
                     use_padding=patch_params.use_padding,
                     save_patches_to_disk=patch_params.save_patches_to_disk,
                     patch_format=patch_params.format,
+                    enable_mp=True,
                     verbose=verbose,
                 )
                 dfs.append(tile_df)
@@ -344,3 +348,130 @@ def seg_and_patch(
     print("-" * 7, "-" * (len("summary") + 2), "-" * 7, sep="")
 
     return seg_times, patch_times
+
+
+def seg_and_patch_slide(
+    patch_save_dir: Path,
+    mask_save_dir: Path,
+    visu_save_dir: Path,
+    seg_params,
+    filter_params,
+    vis_params,
+    patch_params,
+    slide_id: str,
+    slide_fp: str,
+    mask_fp: str,
+    visu: bool = False,
+    patch: bool = False,
+    verbose: bool = False,
+):
+    if verbose:
+        print(f"Processing {slide_id}...")
+
+    if mask_fp is not None:
+        mask_fp = Path(mask_fp)
+
+    # Inialize WSI
+    wsi_object = WholeSlideImage(Path(slide_fp))
+
+    vis_level = vis_params.vis_level
+    if vis_level < 0:
+        if len(wsi_object.level_dim) == 1:
+            vis_params.vis_level = 0
+            best_vis_level = 0
+        else:
+            best_vis_level = wsi_object.get_best_level_for_downsample_custom(
+                vis_params.downsample
+            )
+            vis_params.vis_level = best_vis_level
+
+    seg_level = seg_params.seg_level
+    if seg_level < 0:
+        if len(wsi_object.level_dim) == 1:
+            seg_params.seg_level = 0
+            best_seg_level = 0
+        else:
+            best_seg_level = wsi_object.get_best_level_for_downsample_custom(
+                seg_params.downsample
+            )
+            seg_params.seg_level = best_seg_level
+
+    w, h = wsi_object.level_dim[seg_params.seg_level]
+    if w * h > 1e8:
+        print(
+            f"level_dim {w} x {h} is likely too large for successful segmentation, aborting"
+        )
+        status = "failed_seg"
+        tile_df = pd.DataFrame.from_dict(
+            {
+                "slide_id": [],
+                "tile_size": [],
+                "spacing": [],
+                "level": [],
+                "level_dim": [],
+                "x": [],
+                "y": [],
+                "contour": [],
+            }
+        )
+        return tile_df, slide_id, status, best_vis_level, best_seg_level
+
+    seg_time = -1
+    wsi_object, seg_time = segment(
+        wsi_object,
+        patch_params.spacing,
+        seg_params,
+        filter_params,
+        mask_fp,
+    )
+
+    if seg_params.save_mask:
+        mask = wsi_object.visWSI(
+            vis_level=vis_params.vis_level,
+            line_thickness=vis_params.line_thickness,
+        )
+        mask_path = Path(mask_save_dir, f"{slide_id}.jpg")
+        mask.save(mask_path)
+
+    patch_time = -1
+    if patch:
+        slide_save_dir = Path(patch_save_dir, slide_id)
+        file_path, tile_df, patch_time = patching(
+            wsi_object=wsi_object,
+            save_dir=slide_save_dir,
+            seg_level=seg_params.seg_level,
+            spacing=patch_params.spacing,
+            patch_size=patch_params.patch_size,
+            overlap=patch_params.overlap,
+            contour_fn=patch_params.contour_fn,
+            drop_holes=patch_params.drop_holes,
+            tissue_thresh=patch_params.tissue_thresh,
+            use_padding=patch_params.use_padding,
+            save_patches_to_disk=patch_params.save_patches_to_disk,
+            patch_format=patch_params.format,
+            enable_mp=False,
+            verbose=verbose,
+        )
+
+    visu_time = -1
+    if visu:
+        # if file_path exists, patches were extracted
+        if file_path.is_file():
+            heatmap, visu_time = visualize(
+                file_path,
+                wsi_object,
+                downscale=vis_params.downscale,
+                bg_color=tuple(patch_params.bg_color),
+                draw_grid=patch_params.draw_grid,
+                verbose=verbose,
+            )
+            visu_path = Path(visu_save_dir, f"{slide_id}.jpg")
+            heatmap.save(visu_path)
+
+    status = "processed"
+
+    # restore original values
+    vis_params.vis_level = vis_level
+    seg_params.seg_level = seg_level
+
+    return tile_df, slide_id, status, best_vis_level, best_seg_level

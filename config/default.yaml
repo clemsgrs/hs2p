@@ -1,4 +1,4 @@
-slide_csv: 'data/debug.csv' # path to the .txt file containing slides paths
+slide_csv: 'data/debug/debug.txt' # path to the .txt file containing slides paths
 
 output_dir: 'output' # folder where to save algorithm output
 experiment_name: 'debug'
@@ -32,7 +32,7 @@ vis_params:
 
 patch_params:
   spacing: 0.5 # pixel spacing (in micron/pixel) at which patches should be extracted (will find the level with spacing the closest to this value)
-  patch_size: 4096 # patch size at previous pixel spacing
+  patch_size: 2048 # patch size at previous pixel spacing
   overlap: 0. # percentage of overlap between two consecutive patches (float between 0 and 1)
   use_padding: True # whether to pad the border of the slide
   contour_fn: 'pct' # contour checking function to decide whether a patch should be considered foreground or background (choices between 'pct' - checks if the given patch has enough tissue using the following parameter as decision threshold, 'four_pt' - checks if all four points in a small grid around the center of the patch are inside the contour, 'center' - checks if the center of the patch is inside the contour, 'basic' - checks if the top-left corner of the patch is inside the contour)
@@ -46,8 +46,11 @@ patch_params:
     - 233
     - 238
 
+speed:
+  multiprocessing: True
+
 wandb:
-  enable: False
+  enable: True
   project: 'hs2p'
   exp_name: '${experiment_name}'
   username: 'clemsg'

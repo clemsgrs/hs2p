@@ -47,20 +47,24 @@ class WholeSlideImage(object):
     def initSegmentation(self, mask_fp: Path):
         # load segmentation results from pickle file
         import pickle
+
         with open(mask_fp, "rb") as f:
             asset_dict = pickle.load(f)
             self.holes_tissue = asset_dict["holes"]
             self.contours_tissue = asset_dict["tissue"]
 
-    def loadSegmentation(self, mask_fp: Path, spacing, filter_params, sthresh_up: int = 255):
+    def loadSegmentation(
+        self, mask_fp: Path, spacing, filter_params, sthresh_up: int = 255
+    ):
         import tifffile
+
         mask = tifffile.imread(mask_fp)
         mask = mask - np.ones_like(mask)
         if np.max(mask) == 1:
             mask = mask * sthresh_up
         w, h = mask.shape
-        x_level = int(np.argmin([abs(x - w) for x,_ in self.level_dim]))
-        y_level = int(np.argmin([abs(y - h) for _,y in self.level_dim]))
+        x_level = int(np.argmin([abs(x - w) for x, _ in self.level_dim]))
+        y_level = int(np.argmin([abs(y - h) for _, y in self.level_dim]))
         assert x_level == y_level
         self.binary_mask = mask
         self.detect_contours(mask, spacing, x_level, filter_params)
@@ -105,9 +109,9 @@ class WholeSlideImage(object):
         self.binary_mask = img_thresh
         self.detect_contours(img_thresh, spacing, seg_level, filter_params)
 
-
-    def detect_contours(self, img_thresh, spacing: float, seg_level: int, filter_params: Dict[str, int]):
-
+    def detect_contours(
+        self, img_thresh, spacing: float, seg_level: int, filter_params: Dict[str, int]
+    ):
         def _filter_contours(contours, hierarchy, filter_params):
             """
             Filter contours by: area.
@@ -160,7 +164,7 @@ class WholeSlideImage(object):
         spacing_level = self.get_best_level_for_spacing(spacing)
         current_scale = self.level_downsamples[spacing_level]
         target_scale = self.level_downsamples[seg_level]
-        scale = tuple(a/b for a,b in zip(target_scale,current_scale))
+        scale = tuple(a / b for a, b in zip(target_scale, current_scale))
         ref_patch_size = filter_params["ref_patch_size"]
         scaled_ref_patch_area = int(ref_patch_size**2 / (scale[0] * scale[1]))
 
@@ -351,25 +355,38 @@ class WholeSlideImage(object):
             y_res = float(self.wsi.properties["tiff.YResolution"]) / 10000
             x_spacing, y_spacing = 1 / x_res, 1 / y_res
         else:
-            raise KeyError("Neither 'openslide.mpp-x' nor 'tiff.XResolution' were found in slide's properties.\nYou may fix this by inspecting one of your slides' properties and add an elif in the code above")
+            raise KeyError(
+                "Neither 'openslide.mpp-x' nor 'tiff.XResolution' were found in slide's properties.\nYou may fix this by inspecting one of your slides' properties and add an elif in the code above"
+            )
         return x_spacing, y_spacing
 
     def get_best_level_for_spacing(self, target_spacing: float):
         x_spacing, y_spacing = self.get_spacings()
-        downsample_x, downsample_y = target_spacing / x_spacing, target_spacing / y_spacing
+        downsample_x, downsample_y = (
+            target_spacing / x_spacing,
+            target_spacing / y_spacing,
+        )
         # get_best_level_for_downsample just chooses the largest level with a downsample less than user's downsample
         # see https://github.com/openslide/openslide/issues/274
         # so I made my own version of get_best_level_for_downsample
         assert self.get_best_level_for_downsample_custom(
             downsample_x
         ) == self.get_best_level_for_downsample_custom(downsample_y)
-        level, above_tol = self.get_best_level_for_downsample_custom(downsample_x, return_tol_status=True)
+        level, above_tol = self.get_best_level_for_downsample_custom(
+            downsample_x, return_tol_status=True
+        )
         if above_tol:
-            print(f'WARNING! The closest natural spacing to the target spacing was more than 15% appart.')
+            print(
+                f"WARNING! The closest natural spacing to the target spacing was more than 15% appart."
+            )
         return level
 
-    def get_best_level_for_downsample_custom(self, downsample, tol: float = 0.2, return_tol_status: bool = False):
-        level = int(np.argmin([abs(x - downsample) for x in self.wsi.level_downsamples]))
+    def get_best_level_for_downsample_custom(
+        self, downsample, tol: float = 0.2, return_tol_status: bool = False
+    ):
+        level = int(
+            np.argmin([abs(x - downsample) for x in self.wsi.level_downsamples])
+        )
         above_tol = abs(self.wsi.level_downsamples[level] / downsample - 1) > tol
         if return_tol_status:
             return level, above_tol
@@ -382,7 +399,7 @@ class WholeSlideImage(object):
         seg_level: int = -1,
         spacing: float = 0.5,
         patch_size: int = 256,
-        overlap: float = 0.,
+        overlap: float = 0.0,
         contour_fn: str = "pct",
         drop_holes: bool = True,
         tissue_thresh: float = 0.01,
@@ -391,6 +408,7 @@ class WholeSlideImage(object):
         patch_format: str = "png",
         top_left: Optional[List[int]] = None,
         bot_right: Optional[List[int]] = None,
+        enable_mp: bool = True,
         verbose: bool = False,
     ):
         save_path_hdf5 = Path(save_dir, f"{self.name}.h5")
@@ -418,6 +436,7 @@ class WholeSlideImage(object):
                 use_padding,
                 top_left,
                 bot_right,
+                enable_mp=enable_mp,
                 verbose=verbose,
             )
 
@@ -433,7 +452,7 @@ class WholeSlideImage(object):
                 else:
                     save_hdf5(save_path_hdf5, asset_dict, mode="a")
                 if save_patches_to_disk:
-                    patch_save_dir = Path(save_dir, 'imgs')
+                    patch_save_dir = Path(save_dir, "imgs")
                     patch_save_dir.mkdir(parents=True, exist_ok=True)
                     npatch, mins, secs = save_patch(
                         self.wsi,
@@ -456,17 +475,18 @@ class WholeSlideImage(object):
         spacing: float,
         save_dir: Path,
         patch_size: int = 256,
-        overlap: float = 0.,
+        overlap: float = 0.0,
         contour_fn: str = "pct",
         drop_holes: bool = True,
         tissue_thresh: float = 0.01,
         use_padding: bool = True,
         top_left: Optional[List[int]] = None,
         bot_right: Optional[List[int]] = None,
+        enable_mp: bool = True,
         verbose: bool = False,
     ):
 
-        step_size = int(patch_size * (1. - overlap))
+        step_size = int(patch_size * (1.0 - overlap))
         patch_level = self.get_best_level_for_spacing(spacing)
         if cont is not None:
             start_x, start_y, w, h = cv2.boundingRect(cont)
@@ -559,18 +579,28 @@ class WholeSlideImage(object):
             [x_coords.flatten(), y_coords.flatten()]
         ).transpose()
 
-        num_workers = mp.cpu_count()
-        if num_workers > 4:
-            num_workers = 4
-        pool = mp.Pool(num_workers)
+        if enable_mp:
+            num_workers = mp.cpu_count()
+            if num_workers > 4:
+                num_workers = 4
+            pool = mp.Pool(num_workers)
 
-        iterable = [
-            (coord, contour_holes, ref_patch_size[0], cont_check_fn, drop_holes)
-            for coord in coord_candidates
-        ]
-        results = pool.starmap(WholeSlideImage.process_coord_candidate, iterable)
-        pool.close()
-        results = np.array([result for result in results if result is not None])
+            iterable = [
+                (coord, contour_holes, ref_patch_size[0], cont_check_fn, drop_holes)
+                for coord in coord_candidates
+            ]
+            results = pool.starmap(WholeSlideImage.process_coord_candidate, iterable)
+            pool.close()
+            results = np.array([result for result in results if result is not None])
+        else:
+            results = []
+            for coord in coord_candidates:
+                c = self.process_coord_candidate(
+                    coord, contour_holes, ref_patch_size[0], cont_check_fn, drop_holes
+                )
+                results.append(c)
+            results = np.array([result for result in results if result is not None])
+
         npatch = len(results)
 
         if verbose:
@@ -598,8 +628,8 @@ class WholeSlideImage(object):
                 "spacing": [spacing] * npatch,
                 "level": [patch_level] * npatch,
                 "level_dim": [self.level_dim[patch_level]] * npatch,
-                "x": list(results[:,0]),
-                "y": list(results[:,1]),
+                "x": list(results[:, 0]),
+                "y": list(results[:, 1]),
             }
             tile_df = pd.DataFrame.from_dict(df_data)
             return asset_dict, attr_dict, tile_df
