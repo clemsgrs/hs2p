@@ -177,7 +177,7 @@ def seg_and_patch(
     patch: bool = False,
     process_list: Optional[Path] = None,
     verbose: bool = False,
-    log_to_wandb: bool = False
+    log_to_wandb: bool = False,
 ):
     start_time = time.time()
     slide_paths = slide_df.slide_path.values.tolist()
@@ -366,7 +366,7 @@ def seg_and_patch_slide(
     verbose: bool = False,
 ):
     if verbose:
-        print(f'Processing {slide_id}...')
+        print(f"Processing {slide_id}...")
 
     if mask_fp is not None:
         mask_fp = Path(mask_fp)
@@ -402,16 +402,18 @@ def seg_and_patch_slide(
             f"level_dim {w} x {h} is likely too large for successful segmentation, aborting"
         )
         status = "failed_seg"
-        tile_df = pd.DataFrame.from_dict({
-            "slide_id": [],
-            "tile_size": [],
-            "spacing": [],
-            "level": [],
-            "level_dim": [],
-            "x": [],
-            "y": [],
-            "contour": [],
-        })
+        tile_df = pd.DataFrame.from_dict(
+            {
+                "slide_id": [],
+                "tile_size": [],
+                "spacing": [],
+                "level": [],
+                "level_dim": [],
+                "x": [],
+                "y": [],
+                "contour": [],
+            }
+        )
         return tile_df, slide_id, status, best_vis_level, best_seg_level
 
     seg_time = -1
