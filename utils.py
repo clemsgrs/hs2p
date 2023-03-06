@@ -115,6 +115,7 @@ def patching(
     patch_format: str = "png",
     top_left: Optional[List[int]] = None,
     bot_right: Optional[List[int]] = None,
+    enable_mp: bool = True,
     verbose: bool = False,
 ):
 
@@ -133,6 +134,7 @@ def patching(
         patch_format=patch_format,
         top_left=top_left,
         bot_right=bot_right,
+        enable_mp=enable_mp,
         verbose=verbose,
     )
     patch_time_elapsed = time.time() - start_time
@@ -286,6 +288,7 @@ def seg_and_patch(
                     use_padding=patch_params.use_padding,
                     save_patches_to_disk=patch_params.save_patches_to_disk,
                     patch_format=patch_params.format,
+                    enable_mp=True,
                     verbose=verbose,
                 )
                 dfs.append(tile_df)
@@ -444,6 +447,7 @@ def seg_and_patch_slide(
             use_padding=patch_params.use_padding,
             save_patches_to_disk=patch_params.save_patches_to_disk,
             patch_format=patch_params.format,
+            enable_mp=False,
             verbose=verbose,
         )
 

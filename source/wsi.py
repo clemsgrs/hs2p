@@ -391,6 +391,7 @@ class WholeSlideImage(object):
         patch_format: str = "png",
         top_left: Optional[List[int]] = None,
         bot_right: Optional[List[int]] = None,
+        enable_mp: bool = True,
         verbose: bool = False,
     ):
         save_path_hdf5 = Path(save_dir, f"{self.name}.h5")
@@ -418,6 +419,7 @@ class WholeSlideImage(object):
                 use_padding,
                 top_left,
                 bot_right,
+                enable_mp=enable_mp,
                 verbose=verbose,
             )
 
@@ -463,6 +465,7 @@ class WholeSlideImage(object):
         use_padding: bool = True,
         top_left: Optional[List[int]] = None,
         bot_right: Optional[List[int]] = None,
+        enable_mp: bool = True,
         verbose: bool = False,
     ):
 
@@ -559,23 +562,26 @@ class WholeSlideImage(object):
             [x_coords.flatten(), y_coords.flatten()]
         ).transpose()
 
-        # num_workers = mp.cpu_count()
-        # if num_workers > 4:
-        #     num_workers = 4
-        # pool = mp.Pool(num_workers)
+        if enable_mp:
+            num_workers = mp.cpu_count()
+            if num_workers > 4:
+                num_workers = 4
+            pool = mp.Pool(num_workers)
 
-        # iterable = [
-        #     (coord, contour_holes, ref_patch_size[0], cont_check_fn, drop_holes)
-        #     for coord in coord_candidates
-        # ]
-        # results = pool.starmap(WholeSlideImage.process_coord_candidate, iterable)
-        # pool.close()
-        # results = np.array([result for result in results if result is not None])
-        results = []
-        for coord in coord_candidates:
-            c = self.process_coord_candidate(coord, contour_holes, ref_patch_size[0], cont_check_fn, drop_holes)
-            results.append(c)
-        results = np.array([result for result in results if result is not None])
+            iterable = [
+                (coord, contour_holes, ref_patch_size[0], cont_check_fn, drop_holes)
+                for coord in coord_candidates
+            ]
+            results = pool.starmap(WholeSlideImage.process_coord_candidate, iterable)
+            pool.close()
+            results = np.array([result for result in results if result is not None])
+        else:
+            results = []
+            for coord in coord_candidates:
+                c = self.process_coord_candidate(coord, contour_holes, ref_patch_size[0], cont_check_fn, drop_holes)
+                results.append(c)
+            results = np.array([result for result in results if result is not None])
+
         npatch = len(results)
 
         if verbose:
