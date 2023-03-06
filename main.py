@@ -45,7 +45,12 @@ def main(cfg: DictConfig):
         else:
             dirpath.mkdir(parents=True, exist_ok=True)
 
-    slide_paths_fp = Path(cfg.slide_list)
+    if cfg.slide_csv.endswith('.txt'):
+        with open(cfg.slide_csv, 'r') as f:
+            slide_paths = [x.strip() for x in f.readlines()]
+        slide_df = pd.DataFrame.from_dict({'slide_path': slide_paths})
+    else:
+        slide_df = pd.read_csv(cfg.slide_csv)
 
     process_list_fp = None
     if Path(output_dir, "process_list.csv").is_file() and cfg.resume:
@@ -55,10 +60,15 @@ def main(cfg: DictConfig):
 
     if cfg.speed.multiprocessing:
 
-        with open(slide_paths_fp, "r") as f:
-            slide_paths = sorted([s.strip() for s in f])
+        slide_paths = slide_df.slide_path.values.tolist()
+        mask_paths = []
+        if "mask_path" in slide_df.columns:
+            mask_paths = slide_df.mask_path.values.tolist()
+
         if process_list_fp is None:
-            df = initialize_df(slide_paths, cfg.seg_params, cfg.filter_params, cfg.vis_params, cfg.patch_params)
+            df = initialize_df(
+                slide_paths, mask_paths, cfg.seg_params, cfg.filter_params, cfg.vis_params, cfg.patch_params
+            )
         else:
             df = pd.read_csv(process_list_fp)
             df = initialize_df(df, cfg.seg_params, cfg.filter_params, cfg.vis_params, cfg.patch_params)
@@ -103,8 +113,7 @@ def main(cfg: DictConfig):
             patch_save_dir,
             mask_save_dir,
             visu_save_dir,
-            slide_paths_fp=slide_paths_fp,
-            seg=cfg.flags.seg,
+            slide_df=slide_df,
             patch=cfg.flags.patch,
             visu=cfg.flags.visu,
             process_list=process_list_fp,

@@ -1,11 +1,10 @@
-slide_list: 'data/debug/debug.txt' # path to the .txt file containing slides paths
+slide_csv: 'data/debug/debug.txt' # path to the .txt file containing slides paths
 
 output_dir: 'output' # folder where to save algorithm output
 experiment_name: 'debug'
 resume: False # whether or not to resume existing experiment
 
 flags:
-  seg: True # whether or not to compute tissue segmentation masks
   patch: True # whether or not to extract patches from segmented tissue regions
   visu: True # whether or not to generate a .jpg image to visualize patching results
   verbose: False
@@ -57,3 +56,4 @@ wandb:
   username: 'clemsg'
   dir: '/home/user'
   group:
+  tags: []
