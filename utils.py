@@ -62,6 +62,7 @@ def initialize_wandb(
         dir=cfg.wandb.dir,
         config=config,
         tags=tags,
+        resume="allow",
     )
     config_file_path = Path(run.dir, "run_config.yaml")
     d = OmegaConf.to_container(cfg, resolve=True)
@@ -335,6 +336,8 @@ def seg_and_patch(
 
 
 def seg_and_patch_slide(
+    df: pd.DataFrame,
+    output_dir: Path,
     patch_save_dir: Path,
     mask_save_dir: Path,
     visu_save_dir: Path,
@@ -349,7 +352,8 @@ def seg_and_patch_slide(
     patch: bool = False,
     verbose: bool = False,
 ):
-    print(f'Processing {slide_id}...')
+    if verbose:
+        print(f'Processing {slide_id}...')
 
     # Inialize WSI
     wsi_object = WholeSlideImage(slide_fp)
@@ -441,4 +445,12 @@ def seg_and_patch_slide(
     vis_params.vis_level = vis_level
     seg_params.seg_level = seg_level
 
-    return status, slide_id, best_vis_level, best_seg_level
+    mask = df["slide_id"] == slide_id
+    df.loc[mask, 'status'] = status
+    df.loc[mask, 'process'] = 0
+    df.loc[mask, 'vis_level'] = best_vis_level
+    df.loc[mask, 'seg_level'] = best_seg_level
+
+    df.to_csv(Path(output_dir, "process_list.csv"), index=False)
+
+    return seg_time, patch_time
