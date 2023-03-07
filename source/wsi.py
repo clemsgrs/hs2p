@@ -54,18 +54,31 @@ class WholeSlideImage(object):
             self.contours_tissue = asset_dict["tissue"]
 
     def loadSegmentation(
-        self, mask_fp: Path, spacing: float, downsample: int, filter_params, sthresh_up: int = 255, tissue_val: int = 2,
+        self, mask_fp: Path, spacing: float, downsample: int, filter_params, sthresh_up: int = 255, tissue_val: int = 1,
     ):
 
-        mask = openslide.OpenSlide(str(mask_fp))
-        w, h = mask.dimensions
-        mask_level = int(np.argmin([abs(x - w) for x, _ in self.wsi.level_dimensions]))
-        seg_level = self.get_best_level_for_downsample_custom(downsample)
+        try:
 
-        assert seg_level >= mask_level, f"Segmentation mask highest resolution is smaller than target segmentation result resolution, please use a bigger downsample value"
+            mask = openslide.OpenSlide(str(mask_fp))
+            w, h = mask.dimensions
+            mask_level = int(np.argmin([abs(x - w) for x, _ in self.wsi.level_dimensions]))
+            seg_level = self.get_best_level_for_downsample_custom(downsample)
 
-        m = mask.read_region((0,0), seg_level-mask_level, mask.level_dimensions[seg_level-mask_level]).convert('RGB')
-        m = np.array(m)[...,0]
+            assert seg_level >= mask_level, f"Segmentation mask highest resolution is smaller than target segmentation result resolution, please use a bigger downsample value"
+
+            m = mask.read_region((0,0), seg_level-mask_level, mask.level_dimensions[seg_level-mask_level]).convert('RGB')
+            m = np.array(m)[...,0]
+
+        except openslide.lowlevel.OpenSlideError:
+
+            from tifffile import TiffFile
+
+            tif = TiffFile(mask_fp)
+            mask = tif.pages[0]
+            h, w = mask.shape
+            mask_level = int(np.argmin([abs(x - w) for x, _ in self.wsi.level_dimensions]))
+            seg_level = self.get_best_level_for_downsample_custom(downsample)
+            m = tif.pages[seg_level-mask_level].asarray()
 
         if tissue_val == 2:
             m = m - np.ones_like(m)

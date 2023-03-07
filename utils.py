@@ -85,6 +85,7 @@ def segment(
             spacing=spacing,
             downsample=seg_params.downsample,
             filter_params=filter_params,
+            tissue_val=seg_params.tissue_pixel_value,
         )
         seg_params.seg_level = seg_level
     else:

@@ -17,6 +17,7 @@ seg_params:
   close: 4 # additional morphological closing to apply following initial thresholding (positive integer)
   use_otsu: True # use otsu's method instead of simple binary thresholding
   save_mask: True # save tissue mask to disk as a .jpg image
+  tissue_pixel_value: 1 # value of tissue pixel in pre-computed segmentation masks
 
 filter_params:
   ref_patch_size: 256 # reference patch size at spacing patch_params.spacing
