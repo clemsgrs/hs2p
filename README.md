@@ -23,7 +23,14 @@ If you want to benefit from wandb logging, you need to follow these simple steps
  - run the following command in your terminal: `export WANDB_API_KEY=<your_personal_key>`
  - change wandb paramters in the configuration file under `config/` (set `enable` to `True`)
 
-2. Create a .csv file containing paths to the desired slides:
+2. Create a .csv / a .txt file containing paths to the desired slides:
+
+```
+slide_path
+path/to/slide_1.tif
+path/to/slide_2.tif
+...
+```
 
 You can optionally provide paths to pre-computed segmentation masks under the 'mask_path' column
 
@@ -65,7 +72,16 @@ hs2p/
 │     │         ├── slide_1.jpg
 │     │         ├── slide_2.jpg
 │     │         └── ...
+│     ├── tiles.csv
 │     └── process_list.csv
+```
+
+`tiles.csv` contain patching information for each slide that ended up having patches extracted:
+
+```
+slide_id,tile_size,spacing,level,level_dim,x,y,contour
+slide_id_1,2048,0.5,0,"(10496, 20992)",752,5840,0
+...
 ```
 
 Extracted patches will be saved as `x_y.jpg` where `x` and `y` represent the true location in the slide **at level 0**:

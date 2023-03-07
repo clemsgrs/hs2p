@@ -483,7 +483,10 @@ class WholeSlideImage(object):
 
         end_time = time.time()
         patch_saving_mins, patch_saving_secs = compute_time(start_time, end_time)
-        df = pd.concat(dfs, ignore_index=True)
+        if len(dfs) >0:
+            df = pd.concat(dfs, ignore_index=True)
+        else:
+            df = None
         return save_path_hdf5, df
 
     def process_contour(

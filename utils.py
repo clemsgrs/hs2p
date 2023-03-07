@@ -293,7 +293,8 @@ def seg_and_patch(
                     enable_mp=True,
                     verbose=verbose,
                 )
-                dfs.append(tile_df)
+                if tile_df is not None:
+                    dfs.append(tile_df)
 
             visu_time_elapsed = -1
             if visu:
