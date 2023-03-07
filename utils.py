@@ -83,6 +83,7 @@ def segment(
         seg_level = wsi_object.loadSegmentation(
             mask_fp,
             spacing=spacing,
+            downsample=seg_params.downsample,
             filter_params=filter_params,
         )
         seg_params.seg_level = seg_level

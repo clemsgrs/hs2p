@@ -54,21 +54,27 @@ class WholeSlideImage(object):
             self.contours_tissue = asset_dict["tissue"]
 
     def loadSegmentation(
-        self, mask_fp: Path, spacing, filter_params, sthresh_up: int = 255
+        self, mask_fp: Path, spacing: float, downsample: int, filter_params, sthresh_up: int = 255, tissue_val: int = 2,
     ):
-        import tifffile
 
-        mask = tifffile.imread(mask_fp)
-        mask = mask - np.ones_like(mask)
-        if np.max(mask) == 1:
-            mask = mask * sthresh_up
-        w, h = mask.shape
-        x_level = int(np.argmin([abs(x - w) for x, _ in self.level_dim]))
-        y_level = int(np.argmin([abs(y - h) for _, y in self.level_dim]))
-        assert x_level == y_level
-        self.binary_mask = mask
-        self.detect_contours(mask, spacing, x_level, filter_params)
-        return x_level
+        mask = openslide.OpenSlide(str(mask_fp))
+        w, h = mask.dimensions
+        mask_level = int(np.argmin([abs(x - w) for x, _ in self.wsi.level_dimensions]))
+        seg_level = self.get_best_level_for_downsample_custom(downsample)
+
+        assert seg_level >= mask_level, f"Segmentation mask highest resolution is smaller than target segmentation result resolution, please use a bigger downsample value"
+
+        m = mask.read_region((0,0), seg_level-mask_level, mask.level_dimensions[seg_level-mask_level]).convert('RGB')
+        m = np.array(m)[...,0]
+
+        if tissue_val == 2:
+            m = m - np.ones_like(m)
+        if np.max(m) == 1:
+            m = m * sthresh_up
+
+        self.binary_mask = m
+        self.detect_contours(m, spacing, seg_level, filter_params)
+        return seg_level
 
     def segmentTissue(
         self,
