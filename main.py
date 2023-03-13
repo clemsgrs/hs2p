@@ -1,4 +1,5 @@
 import os
+import wandb
 import hydra
 import shutil
 import datetime
@@ -113,29 +114,30 @@ def main(cfg: DictConfig):
             )
         ]
 
+        command_line = [
+            "python3",
+            "log_nproc.py",
+            "--output_dir",
+            f"{visu_save_dir}",
+            "--fmt",
+            "jpg",
+            "--total",
+            f"{len(process_stack)}"
+        ]
         if cfg.wandb.enable:
-            subprocess.Popen(
-                [
-                    "python3",
-                    "log_nproc.py",
-                    "--id",
-                    f"{run_id}",
-                    "--output_dir",
-                    f"{visu_save_dir}",
-                    "--fmt",
-                    "jpg",
-                    "--total",
-                    f"{len(process_stack)}",
-                ]
-            )
+            command_line = command_line + ["--log_to_wandb", "--id", f"{run_id}"]
+        subprocess.Popen(command_line)
 
         num_workers = mp.cpu_count()
-        if num_workers > 10:
-            num_workers = 10
+        if num_workers > cfg.speed.num_workers:
+            num_workers = cfg.speed.num_workers
         results = []
         with mp.Pool(num_workers) as pool:
             for i, r in enumerate(pool.starmap(seg_and_patch_slide, args)):
                 results.append(r)
+        if cfg.wandb.enable:
+            p = len([r for r in results if r[0] is not None])
+            wandb.log({"processed": p})
 
         dfs = []
         for t_df, sid, s, vl, sl in results:

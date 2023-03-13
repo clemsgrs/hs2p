@@ -19,7 +19,10 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--id", help="id of the corresponding main experiment", required=True
+        "--log_to_wandb", action='store_true', help="whether logging to wandb should be enabled",
+    )
+    parser.add_argument(
+        "--id", help="id of the corresponding main experiment",
     )
     parser.add_argument(
         "--output_dir",
@@ -42,12 +45,13 @@ if __name__ == "__main__":
         "--tol",
         type=int,
         help="if number of processed slides stops moving for longer than tol (in minutes), the process is killed",
-        default=10,
+        default=30,
     )
     args = vars(parser.parse_args())
 
-    run = wandb.init(id=args["id"])
-    run.define_metric("processed", summary="max")
+    if args["log_to_wandb"]:
+        run = wandb.init(id=args["id"])
+        run.define_metric("processed", summary="max")
     print()
     stop = False
     previous_nproc = 0
@@ -56,7 +60,8 @@ if __name__ == "__main__":
         nproc = main(args["output_dir"], args["fmt"])
         if nproc > previous_nproc:
             start_time = time.time()
-            wandb.log({"processed": nproc})
+            if args["log_to_wandb"]:
+                wandb.log({"processed": nproc})
             print(f'nslide processed: {nproc}/{args["total"]}', end="\r")
         else:
             end_time = time.time()
