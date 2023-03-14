@@ -8,13 +8,13 @@ HS2P is an open-source project largely based on [CLAM](https://github.com/mahmoo
    <a href="https://github.com/PyCQA/pylint"><img alt="empty" src=https://img.shields.io/github/stars/clemsgrs/hs2p?style=social></a>
 </p>
 
-<img src="illustration.png" width="1000px" align="center" />
-
 ## Requirements
 
 install requirements via `pip3 install -r requirements.txt`
 
 ## Patch Extraction: Step-by-step guide
+
+<img src="extraction_illu.png" width="1000px" align="center" />
 
 1. [Optional] Configure wandb
 
@@ -95,6 +95,8 @@ Extracted patches will be saved as `x_y.jpg` where `x` and `y` represent the tru
 - if spacing at level 0 is `0.25` and you extract [256, 256] patches at spacing `0.5`, two consecutive patches will be distant from `512` pixels (either along `x` or `y` axis)
 
 ## Patch Sampling: Step-by-step guide
+
+<img src="sampling_illu.png" width="1000px" align="center" />
 
 1. [Optional] Configure wandb
 
