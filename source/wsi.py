@@ -203,6 +203,7 @@ class WholeSlideImage(object):
                 contours, hierarchy, filter_params
             )
 
+        # scale detected contours to level 0
         self.contours_tissue = self.scaleContourDim(foreground_contours, target_scale)
         self.holes_tissue = self.scaleHolesDim(hole_contours, target_scale)
 
@@ -414,7 +415,7 @@ class WholeSlideImage(object):
 
     def process_contours(
         self,
-        save_dir: Path,
+        save_dir: Optional[Path] = None,
         seg_level: int = -1,
         spacing: float = 0.5,
         patch_size: int = 256,
@@ -430,7 +431,11 @@ class WholeSlideImage(object):
         enable_mp: bool = True,
         verbose: bool = False,
     ):
-        save_path_hdf5 = Path(save_dir, f"{self.name}.h5")
+        save_flag = save_dir is not None
+        if save_flag:
+            save_path_hdf5 = Path(save_dir, f"{self.name}.h5")
+        else:
+            save_path_hdf5 = None
         start_time = time.time()
         n_contours = len(self.contours_tissue)
         if verbose:
@@ -463,7 +468,7 @@ class WholeSlideImage(object):
                 tile_df["contour"] = [i] * len(tile_df)
                 dfs.append(tile_df)
 
-            if len(asset_dict) > 0:
+            if len(asset_dict) > 0 and save_flag:
                 if init:
                     save_dir.mkdir(parents=True, exist_ok=True)
                     save_hdf5(save_path_hdf5, asset_dict, attr_dict, mode="w")
@@ -521,7 +526,7 @@ class WholeSlideImage(object):
             )
 
         # 256x256 patches at 20x are equivalent to 512x512 patches at 40x
-        # ref_patch_size capture the patch size at the lowest level
+        # ref_patch_size capture the patch size at level 0
         patch_downsample = (
             int(self.level_downsamples[patch_level][0]),
             int(self.level_downsamples[patch_level][1]),
@@ -591,9 +596,12 @@ class WholeSlideImage(object):
             assert isinstance(contour_fn, Contour_Checking_fn)
             cont_check_fn = contour_fn
 
+        # input step_size is defined w.r.t to input spacing
+        # given contours are defined w.r.t level 0, step_size (potentially) needs to be upsampled
         ref_step_size_x = step_size * patch_downsample[0]
         ref_step_size_y = step_size * patch_downsample[1]
 
+        # x & y values are defined w.r.t level 0
         x_range = np.arange(start_x, stop_x, step=ref_step_size_x)
         y_range = np.arange(start_y, stop_y, step=ref_step_size_y)
         x_coords, y_coords = np.meshgrid(x_range, y_range, indexing="ij")
@@ -650,8 +658,8 @@ class WholeSlideImage(object):
                 "spacing": [spacing] * npatch,
                 "level": [patch_level] * npatch,
                 "level_dim": [self.level_dim[patch_level]] * npatch,
-                "x": list(results[:, 0]),
-                "y": list(results[:, 1]),
+                "x": list(results[:, 0]), # defined w.r.t level 0
+                "y": list(results[:, 1]), # defined w.r.t level 0
             }
             tile_df = pd.DataFrame.from_dict(df_data)
             return asset_dict, attr_dict, tile_df
