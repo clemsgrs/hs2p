@@ -14,7 +14,7 @@ from source.utils import initialize_df
 from utils import initialize_wandb, seg_and_patch, seg_and_patch_slide
 
 
-@hydra.main(version_base="1.2.0", config_path="config", config_name="default")
+@hydra.main(version_base="1.2.0", config_path="config/extraction", config_name="default")
 def main(cfg: DictConfig):
 
     run_id = datetime.datetime.now().strftime("%Y-%m-%d_%H_%M")

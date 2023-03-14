@@ -4,6 +4,7 @@ wandb
 numpy
 pandas
 Pillow
+seaborn
 tifffile
 imagecodecs
 opencv-python
