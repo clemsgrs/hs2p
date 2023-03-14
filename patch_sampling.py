@@ -306,7 +306,9 @@ def sample_patches(
     # loop over annotation categories and extract top scoring patches
     # among previously extracted tissue patches
     for cat, pixel_val in pixel_mapping.items():
+
         if cat not in skip:
+
             coords, pct = extract_top_tiles(
                 wsi_object,
                 annotation_mask,
@@ -325,21 +327,32 @@ def sample_patches(
             categories.extend([cat]*len(coords))
 
             if patch_params.save_patches_to_disk:
-                for x, y in coords:
-                    tile = wsi_object.wsi.read_region((x,y), spacing_level, (patch_params.patch_size, patch_params.patch_size)).convert('RGB')
-                    fname = f'{slide_id}_{x}_{y}'
-                    tile_fp = Path(raw_tile_dir, cat, f'{fname}.{patch_params.fmt}')
-                    tile_fp.parent.mkdir(exist_ok=True, parents=True)
-                    tile.save(tile_fp)
 
-                    if vis_params.overlay_mask_on_patch:
-                        masked_tile = annotation_mask.wsi.read_region((x,y), spacing_level, (patch_params.patch_size, patch_params.patch_size))
-                        # mask data is present in the R channel
-                        masked_tile = masked_tile.split()[0]
-                        overlayed_tile = overlay_mask_on_tile(tile, masked_tile, pixel_mapping, color_mapping, alpha=0.5)
-                        overlayed_tile_fp = Path(overlay_tile_dir, cat, f'{fname}_mask.{patch_params.fmt}')
-                        overlayed_tile_fp.parent.mkdir(exist_ok=True, parents=True)
-                        overlayed_tile.save(overlayed_tile_fp)
+                with tqdm.tqdm(
+                    coords,
+                    desc=(f"Processing {slide_id}"),
+                    unit=f" {cat} patch",
+                    initial=0,
+                    total=len(coords),
+                    leave=False,
+                ) as t:
+
+                    for x, y in t:
+
+                        tile = wsi_object.wsi.read_region((x,y), spacing_level, (patch_params.patch_size, patch_params.patch_size)).convert('RGB')
+                        fname = f'{slide_id}_{x}_{y}'
+                        tile_fp = Path(raw_tile_dir, cat, f'{fname}.{patch_params.fmt}')
+                        tile_fp.parent.mkdir(exist_ok=True, parents=True)
+                        tile.save(tile_fp)
+
+                        if vis_params.overlay_mask_on_patch:
+                            masked_tile = annotation_mask.wsi.read_region((x,y), spacing_level, (patch_params.patch_size, patch_params.patch_size))
+                            # mask data is present in the R channel
+                            masked_tile = masked_tile.split()[0]
+                            overlayed_tile = overlay_mask_on_tile(tile, masked_tile, pixel_mapping, color_mapping, alpha=0.5)
+                            overlayed_tile_fp = Path(overlay_tile_dir, cat, f'{fname}_mask.{patch_params.fmt}')
+                            overlayed_tile_fp.parent.mkdir(exist_ok=True, parents=True)
+                            overlayed_tile.save(overlayed_tile_fp)
 
     if len(coordinates) > 0:
         x, y = list(map(list, zip(*coordinates)))
@@ -426,8 +439,10 @@ def main(cfg: DictConfig):
 
         with tqdm.tqdm(
             zip(slide_ids, slide_fps, seg_mask_fps, annot_mask_fps),
-            desc=f"",
+            desc=f"Sampling Patches",
             unit=" slide",
+            initial=0,
+            total=len(slide_ids),
             leave=True,
         ) as t:
 

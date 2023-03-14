@@ -208,7 +208,7 @@ def seg_and_patch(
 
     with tqdm.tqdm(
         range(total),
-        desc=(f"Seg&Patch"),
+        desc=(f"Patch Extraction"),
         unit=" slide",
         ncols=100,
         initial=already_processed,
