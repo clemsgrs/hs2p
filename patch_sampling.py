@@ -159,7 +159,7 @@ def overlay_mask_on_tile(
     mask: PIL.Image,
     pixel_mapping: Dict[str,int],
     color_mapping: Optional[Dict[str,List[int]]] = None,
-    alpha=0.6,
+    alpha=0.5,
 ):
 
     # Create alpha mask
@@ -218,6 +218,7 @@ def sample_patches(
     skip: List[str] = [],
     sort: bool = False,
     topk: Optional[int] = None,
+    alpha: float = 0.5,
 ):
 
     # Inialize WSI & annotation mask
@@ -278,6 +279,7 @@ def sample_patches(
             vis_params.vis_level,
             pixel_mapping,
             color_mapping,
+            alpha=alpha,
         )
         overlay_mask_save_dir = Path(output_dir, 'annotation_mask')
         overlay_mask_save_dir.mkdir(parents=True, exist_ok=True)
@@ -349,7 +351,7 @@ def sample_patches(
                             masked_tile = annotation_mask.wsi.read_region((x,y), spacing_level, (patch_params.patch_size, patch_params.patch_size))
                             # mask data is present in the R channel
                             masked_tile = masked_tile.split()[0]
-                            overlayed_tile = overlay_mask_on_tile(tile, masked_tile, pixel_mapping, color_mapping, alpha=0.5)
+                            overlayed_tile = overlay_mask_on_tile(tile, masked_tile, pixel_mapping, color_mapping, alpha=alpha)
                             overlayed_tile_fp = Path(overlay_tile_dir, cat, f'{fname}_mask.{patch_params.fmt}')
                             overlayed_tile_fp.parent.mkdir(exist_ok=True, parents=True)
                             overlayed_tile.save(overlayed_tile_fp)
@@ -417,6 +419,7 @@ def main(cfg: DictConfig):
                 cfg.skip_category,
                 cfg.sort,
                 cfg.topk,
+                cfg.alpha,
             )
             for sid, slide_fp, seg_mask_fp, annot_mask_fp in zip(slide_ids, slide_fps, seg_mask_fps, annot_mask_fps)
         ]
@@ -465,6 +468,7 @@ def main(cfg: DictConfig):
                     skip=cfg.skip_category,
                     sort=cfg.sort,
                     topk=cfg.topk,
+                    alpha=cfg.alpha,
                 )
                 if t_df is not None:
                     dfs.append(t_df)

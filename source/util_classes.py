@@ -114,6 +114,7 @@ class isInContour_pct(Contour_Checking_fn):
         # work on downsampled image to compute tissue percentage
         # input patch_size is given for level 0
         downsampled_patch_size = int(self.patch_size * 1 / self.scale[0])
+        assert downsampled_patch_size > 0, f"downsampled patch_size is equal to zero, aborting ; please consider using a smaller seg_params.downsample parameter"
         downsampled_pt = pt * 1 / self.scale[0]
         x_patch, y_patch = downsampled_pt
         x_patch, y_patch = int(x_patch), int(y_patch)
