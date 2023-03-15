@@ -28,7 +28,7 @@ def get_mask_percent(mask, val=0):
         percentage of the numpy array that is equal to val
     '''
     mask_arr = np.array(mask)
-    w, h, _ = mask_arr.shape
+    w, h = mask_arr.shape
     binary_mask = mask_arr == val
     mask_percentage = np.sum(binary_mask) / (w*h)
     return mask_percentage
@@ -104,7 +104,7 @@ def extract_top_tiles(
     spacing: float,
     tile_size: int,
     downsample: int,
-    val: int,
+    pixel_val: int,
     threshold: float = 0.,
     sort: bool = False,
     topk: Optional[int] = None,
@@ -120,7 +120,8 @@ def extract_top_tiles(
     scale = wsi_object.wsi.level_downsamples[downsample_level] / wsi_object.wsi.level_downsamples[spacing_level]
     downsampled_tile_size = int(tile_size * 1. / scale)
 
-    mask_data = mask_object.wsi.read_region((0,0), downsample_level, mask_object.wsi.level_dimensions[downsample_level]).convert('RGB')
+    mask_data = mask_object.wsi.read_region((0,0), downsample_level, mask_object.wsi.level_dimensions[downsample_level])
+    mask_data = mask_data.split()[0]
 
     filtered_grid = []
     tile_percentages = []
@@ -134,11 +135,10 @@ def extract_top_tiles(
             x_downsampled, y_downsampled = scale_coordinates(x, y, 1. / downsample_factor)
             coords = x_downsampled, y_downsampled, x_downsampled+downsampled_tile_size, y_downsampled+downsampled_tile_size
             masked_tile = mask_data.crop(coords)
-            pct = get_mask_percent(masked_tile, val)
+            pct = get_mask_percent(masked_tile, pixel_val)
             if pct > threshold:
                 # scale coordinates back to input spacing_level
-                x_scaled, y_scaled = scale_coordinates(x_downsampled, y_downsampled, scale)
-                filtered_grid.append((x_scaled,y_scaled))
+                filtered_grid.append((x,y))
                 tile_percentages.append(pct)
 
         if sort:
@@ -289,7 +289,7 @@ def sample_patches(
     # extract patches from identified tissue blobs
     start_time = time.time()
     _, tile_df = wsi_object.process_contours(
-        seg_level=seg_level,
+        seg_level=seg_params.seg_level,
         spacing=patch_params.spacing,
         patch_size=patch_params.patch_size,
         overlap=patch_params.overlap,
@@ -370,7 +370,7 @@ def sample_patches(
     return sampled_tiles_df
 
 
-@hydra.main(version_base="1.2.0", config_path="config/sampling", config_name="default")
+@hydra.main(version_base="1.2.0", config_path="config/sampling", config_name="witali_liver")
 def main(cfg: DictConfig):
 
     run_id = datetime.datetime.now().strftime("%Y-%m-%d_%H_%M")
