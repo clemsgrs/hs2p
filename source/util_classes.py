@@ -14,10 +14,10 @@ class isInContourV1(Contour_Checking_fn):
 
     def __call__(self, pt):
         return (
-            1
+            1, -1
             if cv2.pointPolygonTest(self.cont, tuple(np.array(pt).astype(float)), False)
             >= 0
-            else 0
+            else 0, -1
         )
 
 
@@ -31,10 +31,10 @@ class isInContourV2(Contour_Checking_fn):
             (pt[0] + self.patch_size // 2, pt[1] + self.patch_size // 2)
         ).astype(float)
         return (
-            1
+            1, -1
             if cv2.pointPolygonTest(self.cont, tuple(np.array(pt).astype(float)), False)
             >= 0
-            else 0
+            else 0, -1
         )
 
 
@@ -64,8 +64,8 @@ class isInContourV3_Easy(Contour_Checking_fn):
                 )
                 >= 0
             ):
-                return 1
-        return 0
+                return 1, -1
+        return 0, -1
 
 
 # Hard version of 4pt contour checking function - all 4 points need to be in the contour for test to pass
@@ -94,8 +94,8 @@ class isInContourV3_Hard(Contour_Checking_fn):
                 )
                 < 0
             ):
-                return 0
-        return 1
+                return 0, -1
+        return 1, -1
 
 
 class isInContour_pct(Contour_Checking_fn):
@@ -137,9 +137,9 @@ class isInContour_pct(Contour_Checking_fn):
 
         patch_area = downsampled_patch_size**2
         tissue_area = np.sum(sub_mask)
-        tissue_pct = tissue_area / patch_area
+        tissue_pct = round(tissue_area / patch_area, 3)
 
         if tissue_pct >= self.pct:
-            return 1
+            return 1, tissue_pct
         else:
-            return 0
+            return 0, tissue_pct

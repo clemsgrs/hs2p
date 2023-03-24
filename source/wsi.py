@@ -333,12 +333,13 @@ class WholeSlideImage(object):
 
     @staticmethod
     def isInContours(cont_check_fn, pt, holes=None, drop_holes=True, patch_size=256):
-        if cont_check_fn(pt):
+        keep_flag, tissue_pct = cont_check_fn(pt)
+        if keep_flag:
             if holes is not None and drop_holes:
-                return not WholeSlideImage.isInHoles(holes, pt, patch_size)
+                return not WholeSlideImage.isInHoles(holes, pt, patch_size), tissue_pct
             else:
-                return 1
-        return 0
+                return 1, tissue_pct
+        return 0, tissue_pct
 
     @staticmethod
     def scaleContourDim(contours, scale):
@@ -466,6 +467,11 @@ class WholeSlideImage(object):
 
             if tile_df is not None:
                 tile_df["contour"] = [i] * len(tile_df)
+                if save_patches_to_disk:
+                    tile_df["tile_path"] = tile_df.apply(lambda row: Path(save_dir, "imgs", f"{row.x}_{row.y}.{patch_format}").resolve(), axis=1)
+                    cols = list(tile_df.columns)
+                    cols = [cols[-1]] + cols[:-1]
+                    tile_df = tile_df[cols]
                 dfs.append(tile_df)
 
             if len(asset_dict) > 0 and save_flag:
@@ -621,24 +627,28 @@ class WholeSlideImage(object):
             ]
             results = pool.starmap(WholeSlideImage.process_coord_candidate, iterable)
             pool.close()
-            results = np.array([result for result in results if result is not None])
+            filtered_results = np.array([result[0] for result in results if result[0] is not None])
+            filtered_tissue_pcts = [result[1] for result in results if result[0] is not None]
         else:
             results = []
+            tissue_pcts = []
             for coord in coord_candidates:
-                c = self.process_coord_candidate(
+                c, pct = self.process_coord_candidate(
                     coord, contour_holes, ref_patch_size[0], cont_check_fn, drop_holes
                 )
                 results.append(c)
-            results = np.array([result for result in results if result is not None])
+                tissue_pcts.append(pct)
+            filtered_results = np.array([result for result in results if result is not None])
+            filtered_tissue_pcts = [tissue_pct for i, tissue_pct in enumerate(tissue_pcts) if results[i] is not None]
 
-        npatch = len(results)
+        npatch = len(filtered_results)
 
         if verbose:
             print(f"Extracted {npatch} patches")
 
         if npatch > 0:
             asset_dict = {
-                "coords": results,
+                "coords": filtered_results,
             }
             attr = {
                 "patch_size": patch_size,
@@ -654,12 +664,13 @@ class WholeSlideImage(object):
             attr_dict = {"coords": attr}
             df_data = {
                 "slide_id": [self.name] * npatch,
-                "tile_size": [patch_size] * npatch,
                 "spacing": [spacing] * npatch,
                 "level": [patch_level] * npatch,
                 "level_dim": [self.level_dim[patch_level]] * npatch,
-                "x": list(results[:, 0]), # defined w.r.t level 0
-                "y": list(results[:, 1]), # defined w.r.t level 0
+                "tile_size": [patch_size] * npatch,
+                "x": list(filtered_results[:, 0]), # defined w.r.t level 0
+                "y": list(filtered_results[:, 1]), # defined w.r.t level 0
+                "tissue_pct": filtered_tissue_pcts,
             }
             tile_df = pd.DataFrame.from_dict(df_data)
             return asset_dict, attr_dict, tile_df
@@ -671,9 +682,8 @@ class WholeSlideImage(object):
     def process_coord_candidate(
         coord, contour_holes, patch_size, cont_check_fn, drop_holes
     ):
-        if WholeSlideImage.isInContours(
-            cont_check_fn, coord, contour_holes, drop_holes, patch_size
-        ):
-            return coord
+        keep_flag, tissue_pct = WholeSlideImage.isInContours(cont_check_fn, coord, contour_holes, drop_holes, patch_size)
+        if keep_flag:
+            return coord, tissue_pct
         else:
-            return None
+            return None, tissue_pct

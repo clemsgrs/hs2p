@@ -364,8 +364,8 @@ def seg_and_patch_slide(
     slide_id: str,
     slide_fp: str,
     mask_fp: str,
-    visu: bool = False,
     patch: bool = False,
+    visu: bool = False,
     verbose: bool = False,
 ):
     if verbose:

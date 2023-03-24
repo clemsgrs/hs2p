@@ -1,9 +1,12 @@
 import os
+import re
 import PIL
 import tqdm
 import time
+import wandb
 import hydra
 import datetime
+import subprocess
 import pandas as pd
 import numpy as np
 import seaborn as sns
@@ -81,7 +84,7 @@ def overlay_mask_on_slide(
             color_palette = sns.color_palette("tab20")[:ncat]
         else:
             raise ValueError(f"Implementation supports up to 20 categories (provided pixel_mapping has {ncat})")
-        color_mapping = {k: color_palette[i]*255 for i, k in enumerate(pixel_mapping.keys())}
+        color_mapping = {k: tuple(255*x for x in color_palette[i]) for i, k in enumerate(pixel_mapping.keys())}
 
     p = [0]*3*len(color_mapping)
     for k, v in pixel_mapping.items():
@@ -185,7 +188,7 @@ def overlay_mask_on_tile(
             color_palette = sns.color_palette("tab20")[:ncat]
         else:
             raise ValueError(f"Implementation supports up to 20 categories (provided pixel_mapping has {ncat})")
-        color_mapping = {k: color_palette[i]*255 for i, k in enumerate(pixel_mapping.keys())}
+        color_mapping = {k: tuple(255*x for x in color_palette[i]) for i, k in enumerate(pixel_mapping.keys())}
 
     p = [0]*3*len(color_mapping)
     for k, v in pixel_mapping.items():
@@ -219,6 +222,8 @@ def sample_patches(
     sort: bool = False,
     topk: Optional[int] = None,
     alpha: float = 0.5,
+    seg_mask_save_dir: Optional[Path] = None,
+    overlay_mask_save_dir: Optional[Path] = None,
 ):
 
     # Inialize WSI & annotation mask
@@ -267,24 +272,8 @@ def sample_patches(
             vis_level=vis_params.vis_level,
             line_thickness=vis_params.line_thickness,
         )
-        seg_mask_save_dir = Path(output_dir, 'segmentation_mask')
-        seg_mask_save_dir.mkdir(parents=True, exist_ok=True)
         seg_mask_path = Path(seg_mask_save_dir, f"{slide_id}.jpg")
         seg_mask.save(seg_mask_path)
-
-    if vis_params.overlay_mask_on_slide:
-        overlay_mask = overlay_mask_on_slide(
-            wsi_object,
-            annotation_mask,
-            vis_params.vis_level,
-            pixel_mapping,
-            color_mapping,
-            alpha=alpha,
-        )
-        overlay_mask_save_dir = Path(output_dir, 'annotation_mask')
-        overlay_mask_save_dir.mkdir(parents=True, exist_ok=True)
-        overlay_mask_path = Path(overlay_mask_save_dir, f"{slide_id}.jpg")
-        overlay_mask.save(overlay_mask_path)
 
     # extract patches from identified tissue blobs
     start_time = time.time()
@@ -330,10 +319,12 @@ def sample_patches(
 
             if patch_params.save_patches_to_disk:
 
+                cat_ = re.sub(r"\s+", "_", cat)
+
                 with tqdm.tqdm(
                     coords,
                     desc=(f"Processing {slide_id}"),
-                    unit=f" {cat} patch",
+                    unit=f" {cat_} patch",
                     initial=0,
                     total=len(coords),
                     leave=False,
@@ -343,7 +334,7 @@ def sample_patches(
 
                         tile = wsi_object.wsi.read_region((x,y), spacing_level, (patch_params.patch_size, patch_params.patch_size)).convert('RGB')
                         fname = f'{slide_id}_{x}_{y}'
-                        tile_fp = Path(raw_tile_dir, cat, f'{fname}.{patch_params.fmt}')
+                        tile_fp = Path(raw_tile_dir, cat_, f'{fname}.{patch_params.fmt}')
                         tile_fp.parent.mkdir(exist_ok=True, parents=True)
                         tile.save(tile_fp)
 
@@ -352,9 +343,21 @@ def sample_patches(
                             # mask data is present in the R channel
                             masked_tile = masked_tile.split()[0]
                             overlayed_tile = overlay_mask_on_tile(tile, masked_tile, pixel_mapping, color_mapping, alpha=alpha)
-                            overlayed_tile_fp = Path(overlay_tile_dir, cat, f'{fname}_mask.{patch_params.fmt}')
+                            overlayed_tile_fp = Path(overlay_tile_dir, cat_, f'{fname}_mask.{patch_params.fmt}')
                             overlayed_tile_fp.parent.mkdir(exist_ok=True, parents=True)
                             overlayed_tile.save(overlayed_tile_fp)
+
+    if vis_params.overlay_mask_on_slide:
+        overlay_mask = overlay_mask_on_slide(
+            wsi_object,
+            annotation_mask,
+            vis_params.vis_level,
+            pixel_mapping,
+            color_mapping,
+            alpha=alpha,
+        )
+        overlay_mask_path = Path(overlay_mask_save_dir, f"{slide_id}.jpg")
+        overlay_mask.save(overlay_mask_path)
 
     if len(coordinates) > 0:
         x, y = list(map(list, zip(*coordinates)))
@@ -390,6 +393,11 @@ def main(cfg: DictConfig):
     output_dir = Path(cfg.output_dir, cfg.experiment_name, run_id)
     output_dir.mkdir(exist_ok=True, parents=True)
 
+    seg_mask_save_dir = Path(output_dir, 'segmentation_mask')
+    overlay_mask_save_dir = Path(output_dir, 'annotation_mask')
+    seg_mask_save_dir.mkdir(exist_ok=True)
+    overlay_mask_save_dir.mkdir(exist_ok=True)
+
     df = pd.read_csv(cfg.csv)
 
     slide_ids = df['slide_id'].values.tolist()
@@ -420,9 +428,25 @@ def main(cfg: DictConfig):
                 cfg.sort,
                 cfg.topk,
                 cfg.alpha,
+                seg_mask_save_dir,
+                overlay_mask_save_dir,
             )
             for sid, slide_fp, seg_mask_fp, annot_mask_fp in zip(slide_ids, slide_fps, seg_mask_fps, annot_mask_fps)
         ]
+
+        command_line = [
+            "python3",
+            "log_nproc.py",
+            "--output_dir",
+            f"{overlay_mask_save_dir}",
+            "--fmt",
+            "jpg",
+            "--total",
+            f"{len(slide_ids)}"
+        ]
+        if cfg.wandb.enable:
+            command_line = command_line + ["--log_to_wandb", "--id", f"{run_id}"]
+        subprocess.Popen(command_line)
 
         num_workers = mp.cpu_count()
         if num_workers > cfg.speed.num_workers:
@@ -431,6 +455,8 @@ def main(cfg: DictConfig):
         with mp.Pool(num_workers) as pool:
             for i, r in enumerate(pool.starmap(sample_patches, args)):
                 dfs.append(r)
+        if cfg.wandb.enable:
+            wandb.log({"processed": len(dfs)})
 
         tile_df = pd.concat(dfs, ignore_index=True)
         tiles_fp = Path(output_dir, f'sampled_patches.csv')
@@ -449,7 +475,7 @@ def main(cfg: DictConfig):
             leave=True,
         ) as t:
 
-            for sid, slide_fp, seg_mask_fp, annot_mask_fp in t:
+            for i, (sid, slide_fp, seg_mask_fp, annot_mask_fp) in enumerate(t):
 
                 t_df = sample_patches(
                     sid,
@@ -469,9 +495,14 @@ def main(cfg: DictConfig):
                     sort=cfg.sort,
                     topk=cfg.topk,
                     alpha=cfg.alpha,
+                    seg_mask_save_dir=seg_mask_save_dir,
+                    overlay_mask_save_dir=overlay_mask_save_dir,
                 )
                 if t_df is not None:
                     dfs.append(t_df)
+
+                if cfg.wandb.enable:
+                    wandb.log({"processed": i + 1})
 
             df = pd.concat(dfs, ignore_index=True)
             tiles_fp = Path(output_dir, f'sampled_patches.csv')
