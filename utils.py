@@ -2,6 +2,7 @@ import time
 import tqdm
 import wandb
 import subprocess
+import numpy as np
 import pandas as pd
 from pathlib import Path
 from omegaconf import DictConfig, OmegaConf
@@ -186,10 +187,13 @@ def seg_and_patch(
     mask_paths = []
     if "mask_path" in slide_df.columns:
         mask_paths = slide_df.mask_path.values.tolist()
+    spacings = []
+    if "spacing" in slide_df.columns:
+        spacings = slide_df.spacing.values.tolist()
 
     if process_list is None:
         df = initialize_df(
-            slide_paths, mask_paths, seg_params, filter_params, vis_params, patch_params
+            slide_paths, mask_paths, spacings, seg_params, filter_params, vis_params, patch_params
         )
     else:
         df = pd.read_csv(process_list)
@@ -224,10 +228,13 @@ def seg_and_patch(
             mask_path = None
             if "mask_path" in process_stack.columns:
                 mask_path = Path(process_stack.loc[idx, "mask_path"])
+            spacing = None
+            if "spacing" in process_stack.columns:
+                spacing = Path(process_stack.loc[idx, "spacing"])
             t.display(f"Processing {slide_id}", pos=2)
 
             # Inialize WSI
-            wsi_object = WholeSlideImage(slide_path)
+            wsi_object = WholeSlideImage(slide_path, spacing)
 
             vis_level = vis_params.vis_level
             if vis_level < 0:
@@ -273,6 +280,12 @@ def seg_and_patch(
                 )
                 mask_path = Path(mask_save_dir, f"{slide_id}.jpg")
                 mask.save(mask_path)
+
+            if seg_params.save_numpy:
+                numpy_save_dir = Path(mask_save_dir, "npy")
+                numpy_save_dir.mkdir(exist_ok=True)
+                numpy_path = Path(numpy_save_dir, f"{slide_id}.npy")
+                np.save(numpy_path, wsi_object.binary_mask)
 
             patch_time_elapsed = -1
             if patch:
@@ -364,6 +377,7 @@ def seg_and_patch_slide(
     slide_id: str,
     slide_fp: str,
     mask_fp: str,
+    spacing: float,
     patch: bool = False,
     visu: bool = False,
     verbose: bool = False,
@@ -375,7 +389,7 @@ def seg_and_patch_slide(
         mask_fp = Path(mask_fp)
 
     # Inialize WSI
-    wsi_object = WholeSlideImage(Path(slide_fp))
+    wsi_object = WholeSlideImage(Path(slide_fp), spacing)
 
     vis_level = vis_params.vis_level
     if vis_level < 0:
@@ -435,6 +449,13 @@ def seg_and_patch_slide(
         )
         mask_path = Path(mask_save_dir, f"{slide_id}.jpg")
         mask.save(mask_path)
+
+    if seg_params.save_numpy:
+        # add mechanism to generate mask as tiff file
+        numpy_save_dir = Path(mask_save_dir, "npy")
+        numpy_save_dir.mkdir(exist_ok=True)
+        numpy_path = Path(numpy_save_dir, f"{slide_id}.npy")
+        np.save(numpy_path, wsi_object.binary_mask, )
 
     patch_time = -1
     if patch:
