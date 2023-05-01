@@ -274,18 +274,22 @@ def seg_and_patch(
             )
 
             if seg_params.save_mask:
+                import pyvips
+                tif_save_dir = Path(mask_save_dir, "tif")
+                tif_save_dir.mkdir(exist_ok=True)
+                mask_path = Path(tif_save_dir, f"{slide_id}.tif")
+                mask = pyvips.Image.new_from_array(wsi_object.binary_mask.tolist())
+                mask.tiffsave(mask_path, tile=True, compression='jpeg', bigtiff=True, pyramid=True, Q=70)
+
+            if seg_params.visualize_mask:
                 mask = wsi_object.visWSI(
                     vis_level=vis_params.vis_level,
                     line_thickness=vis_params.line_thickness,
                 )
-                mask_path = Path(mask_save_dir, f"{slide_id}.jpg")
+                jpg_save_dir = Path(mask_save_dir, "jpg")
+                jpg_save_dir.mkdir(exist_ok=True)
+                mask_path = Path(jpg_save_dir, f"{slide_id}.jpg")
                 mask.save(mask_path)
-
-            if seg_params.save_numpy:
-                numpy_save_dir = Path(mask_save_dir, "npy")
-                numpy_save_dir.mkdir(exist_ok=True)
-                numpy_path = Path(numpy_save_dir, f"{slide_id}.npy")
-                np.save(numpy_path, wsi_object.binary_mask)
 
             patch_time_elapsed = -1
             if patch:
@@ -443,19 +447,22 @@ def seg_and_patch_slide(
     )
 
     if seg_params.save_mask:
+        import pyvips
+        tif_save_dir = Path(mask_save_dir, "tif")
+        tif_save_dir.mkdir(exist_ok=True)
+        mask_path = Path(tif_save_dir, f"{slide_id}.tif")
+        mask = pyvips.Image.new_from_array(wsi_object.binary_mask.tolist())
+        mask.tiffsave(mask_path, tile=True, compression='jpeg', bigtiff=True, pyramid=True, Q=70)
+
+    if seg_params.visualize_mask:
         mask = wsi_object.visWSI(
             vis_level=vis_params.vis_level,
             line_thickness=vis_params.line_thickness,
         )
-        mask_path = Path(mask_save_dir, f"{slide_id}.jpg")
+        jpg_save_dir = Path(mask_save_dir, "jpg")
+        jpg_save_dir.mkdir(exist_ok=True)
+        mask_path = Path(jpg_save_dir, f"{slide_id}.jpg")
         mask.save(mask_path)
-
-    if seg_params.save_numpy:
-        # add mechanism to generate mask as tiff file
-        numpy_save_dir = Path(mask_save_dir, "npy")
-        numpy_save_dir.mkdir(exist_ok=True)
-        numpy_path = Path(numpy_save_dir, f"{slide_id}.npy")
-        np.save(numpy_path, wsi_object.binary_mask, )
 
     patch_time = -1
     if patch:
