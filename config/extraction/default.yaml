@@ -1,4 +1,4 @@
-slide_csv: 'data/debug/debug_witali.csv' # path to the .txt file containing slides paths
+slide_csv: '/data/pathology/projects/ais-cap/dataset/witali-liver/tcga_liver_debug.csv' # path to the .txt file containing slides paths
 
 output_dir: 'output' # folder where to save algorithm output
 experiment_name: 'debug'
@@ -15,7 +15,7 @@ seg_params:
   sthresh: 8 # segmentation threshold (positive integer, using a higher threshold leads to less foreground and more background detection) (not used when use_otsu=True)
   mthresh: 7 # median filter size (positive, odd integer)
   close: 4 # additional morphological closing to apply following initial thresholding (positive integer)
-  use_otsu: True # use otsu's method instead of simple binary thresholding
+  use_otsu: False # use otsu's method instead of simple binary thresholding
   save_mask: True # save tissue mask to disk as a .jpg image
   tissue_pixel_value: 1 # value of tissue pixel in pre-computed segmentation masks
 
@@ -28,7 +28,7 @@ filter_params:
 vis_params:
   vis_level: -1 # downsample level to visualize the segmentation results (-1 = uses the downsample level in the WSI closest to the following downsample parameter)
   downsample: 64 # if vis_level = -1, then uses this value to find the closest downsample level in the WSI for tissue segmentation visualization
-  downscale: 16 # downsample to visualize the result of patch extraction
+  downscale: 64 # downsample to visualize the result of patch extraction
   line_thickness: 200 # line thickness to draw the segmentation results (positive integer)
 
 patch_params:
@@ -59,3 +59,8 @@ wandb:
   dir: '/home/user'
   group:
   tags: []
+
+# hydra
+hydra:
+  run:
+    dir: /tmp/hydra_output

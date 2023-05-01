@@ -65,3 +65,8 @@ wandb:
   dir: '/home/user'
   group:
   tags: []
+
+# hydra
+hydra:
+  run:
+    dir: /tmp/hydra_output
