@@ -70,11 +70,15 @@ def main(cfg: DictConfig):
         mask_paths = []
         if "mask_path" in slide_df.columns:
             mask_paths = slide_df.mask_path.values.tolist()
+        spacings = []
+        if "spacing" in slide_df.columns:
+            spacings = slide_df.spacing.values.tolist()
 
         if process_list_fp is None:
             df = initialize_df(
                 slide_paths,
                 mask_paths,
+                spacings,
                 cfg.seg_params,
                 cfg.filter_params,
                 cfg.vis_params,
@@ -93,6 +97,9 @@ def main(cfg: DictConfig):
         mask_paths_to_process = [None] * len(slide_paths_to_process)
         if "mask_path" in process_stack.columns:
             mask_paths_to_process = process_stack.mask_path
+        spacings_to_process = [None] * len(slide_paths_to_process)
+        if "spacing" in process_stack.columns:
+            spacings_to_process = process_stack.spacing
         args = [
             (
                 patch_save_dir,
@@ -105,12 +112,13 @@ def main(cfg: DictConfig):
                 sid,
                 slide_fp,
                 mask_fp,
+                spacing,
                 cfg.flags.patch,
                 cfg.flags.visu,
                 cfg.flags.verbose,
             )
-            for sid, slide_fp, mask_fp in zip(
-                slide_ids_to_process, slide_paths_to_process, mask_paths_to_process
+            for sid, slide_fp, mask_fp, spacing in zip(
+                slide_ids_to_process, slide_paths_to_process, mask_paths_to_process, spacings_to_process
             )
         ]
 

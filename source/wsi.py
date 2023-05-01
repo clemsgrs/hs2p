@@ -24,7 +24,7 @@ Image.MAX_IMAGE_PIXELS = 933120000
 
 
 class WholeSlideImage(object):
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, spacing: Optional[float] = None):
 
         """
         Args:
@@ -37,6 +37,7 @@ class WholeSlideImage(object):
         self.wsi = openslide.open_slide(str(path))
         self.level_downsamples = self._assertLevelDownsamples()
         self.level_dim = self.wsi.level_dimensions
+        self.spacing = spacing
 
         self.contours_tissue = None
         self.contours_tumor = None
@@ -368,10 +369,13 @@ class WholeSlideImage(object):
         return level_downsamples
 
     def get_spacings(self):
-        if "openslide.mpp-x" in self.wsi.properties:
+        if self.spacing:
+            return self.spacing, self.spacing
+        elif "openslide.mpp-x" in self.wsi.properties:
             x_spacing = float(self.wsi.properties["openslide.mpp-x"])
             y_spacing = float(self.wsi.properties["openslide.mpp-y"])
         elif "tiff.XResolution" in self.wsi.properties:
+            # OpenSlide gives the resolution in centimeters so we convert this to microns
             x_res = float(self.wsi.properties["tiff.XResolution"]) / 10000
             y_res = float(self.wsi.properties["tiff.YResolution"]) / 10000
             x_spacing, y_spacing = 1 / x_res, 1 / y_res
@@ -381,7 +385,7 @@ class WholeSlideImage(object):
             )
         return x_spacing, y_spacing
 
-    def get_best_level_for_spacing(self, target_spacing: float):
+    def get_best_level_for_spacing(self, target_spacing: float, ignore_warning: bool = False):
         x_spacing, y_spacing = self.get_spacings()
         downsample_x, downsample_y = (
             target_spacing / x_spacing,
@@ -396,7 +400,7 @@ class WholeSlideImage(object):
         level, above_tol = self.get_best_level_for_downsample_custom(
             downsample_x, return_tol_status=True
         )
-        if above_tol:
+        if above_tol and not ignore_warning:
             print(
                 f"WARNING! The closest natural spacing to the target spacing was more than 15% appart."
             )
@@ -544,8 +548,8 @@ class WholeSlideImage(object):
 
         img_w, img_h = self.level_dim[0]
         if use_padding:
-            stop_y = start_y + h
-            stop_x = start_x + w
+            stop_y = int(start_y + h)
+            stop_x = int(start_x + w)
         else:
             stop_y = min(start_y + h, img_h - ref_patch_size[1] + 1)
             stop_x = min(start_x + w, img_w - ref_patch_size[0] + 1)
@@ -604,8 +608,8 @@ class WholeSlideImage(object):
 
         # input step_size is defined w.r.t to input spacing
         # given contours are defined w.r.t level 0, step_size (potentially) needs to be upsampled
-        ref_step_size_x = step_size * patch_downsample[0]
-        ref_step_size_y = step_size * patch_downsample[1]
+        ref_step_size_x = int(step_size * patch_downsample[0])
+        ref_step_size_y = int(step_size * patch_downsample[1])
 
         # x & y values are defined w.r.t level 0
         x_range = np.arange(start_x, stop_x, step=ref_step_size_x)

@@ -18,6 +18,7 @@ def compute_time(start_time, end_time):
 def initialize_df(
     slides,
     masks,
+    spacings,
     seg_params,
     filter_params,
     vis_params,
@@ -30,6 +31,7 @@ def initialize_df(
             slides (df or list): list of slide filepath
                     if df, these paths assumed to be stored under the 'slide_path' column
             masks (list): list of slides' segmentation masks filepath
+            spacings (list): list of slides' spacing at level 0
             seg_params (dict): segmentation paramters
             filter_params (dict): filter parameters
             vis_params (dict): visualization paramters
@@ -42,16 +44,21 @@ def initialize_df(
         slide_paths = list(slides.slide_path.values)
         if "mask_path" in slides.columns:
             mask_paths = list(slides.mask_path.values)
+        if "spacing" in slides.columns:
+            slide_spacings = list(slides.spacing.values)
     else:
         slide_ids = [Path(s).stem for s in slides]
         slide_paths = slides.copy()
         mask_paths = masks.copy()
+        slide_spacings = spacings.copy()
     default_df_dict = {
         "slide_id": slide_ids,
         "slide_path": slide_paths,
     }
     if len(mask_paths) > 0:
         default_df_dict.update({"mask_path": mask_paths})
+    if len(slide_spacings) > 0:
+        default_df_dict.update({"spacing": slide_spacings})
 
     # initiate empty labels in case not provided
     if use_heatmap_args:
