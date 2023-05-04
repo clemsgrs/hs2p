@@ -70,12 +70,10 @@ def overlay_mask_on_slide(
 
     s = wsi_object.open_page(vis_level)
     region = pyvips.Region.new(s).fetch(0, 0, s.width, s.height)
-    # slide = Image.frombuffer(mode="RGBA", size=(s.width,s.height), data=region)
     slide = Image.frombuffer(mode=wsi_object.mode, size=(s.width,s.height), data=region).convert("RGBA")
 
     m = mask_object.open_page(mask_vis_level)
     region = pyvips.Region.new(m).fetch(0, 0, m.width, m.height)
-    # mask = Image.frombuffer(mode="RGBA", size=(m.width,m.height), data=region)
     mask = Image.frombuffer(mode=mask_object.mode, size=(m.width,m.height), data=region)
     # Mask data is present in the R channel
     mask = mask.split()[0]
@@ -195,7 +193,6 @@ def extract_top_tiles(
 
     mask = pyvips.Image.new_from_file(str(mask_object.path), page=mask_downsample_level)
     region = pyvips.Region.new(mask).fetch(0, 0, mask.width, mask.height)
-    # mask_data = Image.frombuffer(mode="RGBA", size=(mask.width,mask.height), data=region)
     mask_data = Image.frombuffer(mode=mask_object.mode, size=(mask.width,mask.height), data=region)
     mask_data = mask_data.split()[0]
 
@@ -369,7 +366,6 @@ def sample_patches(
                         x_scaled, y_scaled = int(x * 1. / wsi_scale[0]), int(y * 1. / wsi_scale[1])
                         ps_x, ps_y = min(patch_params.patch_size, wsi.width-x_scaled), min(patch_params.patch_size, wsi.height-y_scaled)
                         region = pyvips.Region.new(wsi).fetch(x_scaled, y_scaled, ps_x, ps_y)
-                        # tile = Image.frombuffer(mode="RGBA", size=(ps_x,ps_y), data=region).convert("RGB")
                         tile = Image.frombuffer(mode=wsi_object.mode, size=(ps_x,ps_y), data=region).convert("RGB")
                         if ps_x != patch_params.patch_size or ps_y != patch_params.patch_size:
                             tile = ImageOps.pad(tile, (patch_params.patch_size,patch_params.patch_size), color=None, centering=(0, 0))
@@ -391,7 +387,6 @@ def sample_patches(
                             ps_x, ps_y = min(ts_x, mask.width-x_scaled), min(ts_y, mask.height-y_scaled)
                             region = pyvips.Region.new(mask).fetch(x_scaled, y_scaled, ps_x, ps_y)
                             mode = get_mode(mask.bands)
-                            # masked_tile = Image.frombuffer(mode="RGBA", size=(ps_x,ps_y), data=region)
                             masked_tile = Image.frombuffer(mode=mode, size=(ps_x,ps_y), data=region)
                             masked_tile = masked_tile.split()[0]
                             if ps_x != ts_x or ps_y != ts_y:
@@ -405,7 +400,6 @@ def sample_patches(
                                 # option 2
                                 # wsi = wsi_object.open_page(mask_min_level+mask_spacing_level)
                                 # r = pyvips.Region.new(wsi).fetch(x_scaled, y_scaled, ps_x, ps_y)
-                                # # tile = Image.frombuffer(mode="RGBA", size=(ps_x,ps_y), data=r).convert("RGB")
                                 # tile = Image.frombuffer(mode=wsi_object.mode, size=(ps_x,ps_y), data=r).convert("RGB")
                                 # if ps_x != ts_x or ps_y != ts_y:
                                 #     tile = ImageOps.pad(tile, (ts_x,ts_y), color=None, centering=(0, 0))

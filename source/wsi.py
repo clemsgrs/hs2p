@@ -113,11 +113,6 @@ class WholeSlideImage(object):
         region = pyvips.Region.new(wsi).fetch(0, 0, wsi.width, wsi.height)
         mode = self.mode
         img = np.array(Image.frombuffer(mode=mode, size=(wsi.width,wsi.height), data=region).convert("RGBA"))
-        # img = np.ndarray(
-        #     buffer=region,
-        #     dtype=np.uint8,
-        #     shape=(wsi.height, wsi.width, wsi.bands)
-        # )
 
         # Convert to HSV space
         img_hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
@@ -243,7 +238,6 @@ class WholeSlideImage(object):
         wsi = self.open_page(vis_level)
         region = pyvips.Region.new(wsi).fetch(0, 0, wsi.width, wsi.height)
         mode = self.mode
-        # img = np.array(Image.frombuffer(mode='RGBA', size=(wsi.width,wsi.height), data=region).convert("RGB"))
         img = np.array(Image.frombuffer(mode=mode, size=(wsi.width,wsi.height), data=region).convert("RGB"))
 
         if not view_slide_only:
