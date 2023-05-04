@@ -371,7 +371,7 @@ def sample_patches(
                                 scale = wsi_object.wsi.level_downsamples[mask_min_level] / wsi_object.wsi.level_downsamples[0]
                                 x_scaled, y_scaled = int(x * 1. / scale), int(y * 1. / scale)
                                 # need to scale tile size from wsi_spacing_level to mask_spacing_level
-                                ts_scale = wsi_object.wsi.level_downsamples[mask_min_level] / wsi_object.wsi.level_downsamples[wsi_spacing_level]
+                                ts_scale = wsi_object.wsi.level_downsamples[mask_min_level+mask_spacing_level] / wsi_object.wsi.level_downsamples[wsi_spacing_level]
                                 ts = int(patch_params.patch_size * 1. / ts_scale)
                                 # read annotation tile from mask
                                 masked_tile = annotation_mask.wsi.read_region((x_scaled,y_scaled), mask_spacing_level, (ts, ts))
