@@ -19,10 +19,13 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--log_to_wandb", action='store_true', help="whether logging to wandb should be enabled",
+        "--log_to_wandb",
+        action="store_true",
+        help="whether logging to wandb should be enabled",
     )
     parser.add_argument(
-        "--id", help="id of the corresponding main experiment",
+        "--id",
+        help="id of the corresponding main experiment",
     )
     parser.add_argument(
         "--output_dir",

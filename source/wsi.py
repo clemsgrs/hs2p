@@ -45,18 +45,18 @@ class WholeSlideImage(object):
 
     def get_level_dimensions(self):
         level_dimensions = []
-        if self.fmt == '.svs':
-            npages = int(self.wsi.get('openslide.level-count'))
+        if self.fmt == ".svs":
+            npages = int(self.wsi.get("openslide.level-count"))
         else:
             npages = self.wsi.get_n_pages()
         for p in range(npages):
             s = self.open_page(p)
             w, h = s.width, s.height
-            level_dimensions.append((w,h))
+            level_dimensions.append((w, h))
         return level_dimensions
 
     def open_page(self, page):
-        if self.fmt == '.svs':
+        if self.fmt == ".svs":
             return pyvips.Image.new_from_file(str(self.path), level=page)
         else:
             return pyvips.Image.new_from_file(str(self.path), page=page)
@@ -64,13 +64,20 @@ class WholeSlideImage(object):
     def initSegmentation(self, mask_fp: Path):
         # load segmentation results from pickle file
         import pickle
+
         with open(mask_fp, "rb") as f:
             asset_dict = pickle.load(f)
             self.holes_tissue = asset_dict["holes"]
             self.contours_tissue = asset_dict["tissue"]
 
     def loadSegmentation(
-        self, mask_fp: Path, spacing: float, downsample: int, filter_params, sthresh_up: int = 255, tissue_val: int = 1,
+        self,
+        mask_fp: Path,
+        spacing: float,
+        downsample: int,
+        filter_params,
+        sthresh_up: int = 255,
+        tissue_val: int = 1,
     ):
 
         mask = pyvips.Image.new_from_file(str(mask_fp), page=0)
@@ -78,13 +85,23 @@ class WholeSlideImage(object):
         mask_level = int(np.argmin([abs(x - w) for x, _ in self.level_dimensions]))
         seg_level = self.get_best_level_for_downsample(downsample)
 
-        assert seg_level >= mask_level, f"Segmentation mask highest resolution is smaller than target segmentation result resolution, please use a bigger downsample value"
+        assert (
+            seg_level >= mask_level
+        ), f"Segmentation mask highest resolution is smaller than target segmentation result resolution, please use a bigger downsample value"
 
-        downsampled_mask = pyvips.Image.new_from_file(str(mask_fp), page=seg_level-mask_level)
-        region = pyvips.Region.new(downsampled_mask).fetch(0, 0, downsampled_mask.width, downsampled_mask.height)
+        downsampled_mask = pyvips.Image.new_from_file(
+            str(mask_fp), page=seg_level - mask_level
+        )
+        region = pyvips.Region.new(downsampled_mask).fetch(
+            0, 0, downsampled_mask.width, downsampled_mask.height
+        )
         mode = get_mode(downsampled_mask.bands)
-        m = Image.frombuffer(mode=mode, size=(downsampled_mask.width,downsampled_mask.height), data=region).convert("RGB")
-        m = np.array(m)[...,0]
+        m = Image.frombuffer(
+            mode=mode,
+            size=(downsampled_mask.width, downsampled_mask.height),
+            data=region,
+        ).convert("RGB")
+        m = np.array(m)[..., 0]
 
         if tissue_val == 2:
             m = m - np.ones_like(m)
@@ -112,7 +129,11 @@ class WholeSlideImage(object):
         wsi = self.open_page(seg_level)
         region = pyvips.Region.new(wsi).fetch(0, 0, wsi.width, wsi.height)
         mode = self.mode
-        img = np.array(Image.frombuffer(mode=mode, size=(wsi.width,wsi.height), data=region).convert("RGBA"))
+        img = np.array(
+            Image.frombuffer(
+                mode=mode, size=(wsi.width, wsi.height), data=region
+            ).convert("RGBA")
+        )
 
         # Convert to HSV space
         img_hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
@@ -238,10 +259,14 @@ class WholeSlideImage(object):
         wsi = self.open_page(vis_level)
         region = pyvips.Region.new(wsi).fetch(0, 0, wsi.width, wsi.height)
         mode = self.mode
-        img = np.array(Image.frombuffer(mode=mode, size=(wsi.width,wsi.height), data=region).convert("RGB"))
+        img = np.array(
+            Image.frombuffer(
+                mode=mode, size=(wsi.width, wsi.height), data=region
+            ).convert("RGB")
+        )
 
         if not view_slide_only:
-            offset = tuple(-(np.array((0,0)) * scale).astype(int))
+            offset = tuple(-(np.array((0, 0)) * scale).astype(int))
             line_thickness = int(line_thickness * math.sqrt(scale[0] * scale[1]))
             if self.contours_tissue is not None and seg_display:
                 if not number_contours:
@@ -367,7 +392,9 @@ class WholeSlideImage(object):
             y_spacing = 1000 / self.wsi.yres
         return x_spacing, y_spacing
 
-    def get_best_level_for_spacing(self, target_spacing: float, ignore_warning: bool = False):
+    def get_best_level_for_spacing(
+        self, target_spacing: float, ignore_warning: bool = False
+    ):
         x_spacing, y_spacing = self.get_spacings()
         downsample_x, downsample_y = (
             target_spacing / x_spacing,
@@ -388,9 +415,7 @@ class WholeSlideImage(object):
     def get_best_level_for_downsample(
         self, downsample, tol: float = 0.2, return_tol_status: bool = False
     ):
-        level = int(
-            np.argmin([abs(x - downsample) for x,_ in self.level_downsamples])
-        )
+        level = int(np.argmin([abs(x - downsample) for x, _ in self.level_downsamples]))
         above_tol = abs(self.level_downsamples[level][0] / downsample - 1) > tol
         if return_tol_status:
             return level, above_tol
@@ -451,7 +476,12 @@ class WholeSlideImage(object):
             if tile_df is not None:
                 tile_df["contour"] = [i] * len(tile_df)
                 if save_patches_to_disk:
-                    tile_df["tile_path"] = tile_df.apply(lambda row: Path(save_dir, "imgs", f"{row.x}_{row.y}.{patch_format}").resolve(), axis=1)
+                    tile_df["tile_path"] = tile_df.apply(
+                        lambda row: Path(
+                            save_dir, "imgs", f"{row.x}_{row.y}.{patch_format}"
+                        ).resolve(),
+                        axis=1,
+                    )
                     cols = list(tile_df.columns)
                     cols = [cols[-1]] + cols[:-1]
                     tile_df = tile_df[cols]
@@ -481,7 +511,7 @@ class WholeSlideImage(object):
 
         end_time = time.time()
         patch_saving_mins, patch_saving_secs = compute_time(start_time, end_time)
-        if len(dfs) >0:
+        if len(dfs) > 0:
             df = pd.concat(dfs, ignore_index=True)
         else:
             df = None
@@ -614,8 +644,12 @@ class WholeSlideImage(object):
             ]
             results = pool.starmap(WholeSlideImage.process_coord_candidate, iterable)
             pool.close()
-            filtered_results = np.array([result[0] for result in results if result[0] is not None])
-            filtered_tissue_pcts = [result[1] for result in results if result[0] is not None]
+            filtered_results = np.array(
+                [result[0] for result in results if result[0] is not None]
+            )
+            filtered_tissue_pcts = [
+                result[1] for result in results if result[0] is not None
+            ]
         else:
             results = []
             tissue_pcts = []
@@ -625,8 +659,14 @@ class WholeSlideImage(object):
                 )
                 results.append(c)
                 tissue_pcts.append(pct)
-            filtered_results = np.array([result for result in results if result is not None])
-            filtered_tissue_pcts = [tissue_pct for i, tissue_pct in enumerate(tissue_pcts) if results[i] is not None]
+            filtered_results = np.array(
+                [result for result in results if result is not None]
+            )
+            filtered_tissue_pcts = [
+                tissue_pct
+                for i, tissue_pct in enumerate(tissue_pcts)
+                if results[i] is not None
+            ]
 
         npatch = len(filtered_results)
 
@@ -643,7 +683,9 @@ class WholeSlideImage(object):
                 "patch_level": patch_level,
                 "ref_patch_size": ref_patch_size[0],
                 "downsample": self.level_downsamples[patch_level],
-                "downsampled_level_dim": tuple(np.array(self.level_dimensions[patch_level])),
+                "downsampled_level_dim": tuple(
+                    np.array(self.level_dimensions[patch_level])
+                ),
                 "level_dim": self.level_dimensions[patch_level],
                 "wsi_name": self.name,
                 "save_path": str(save_dir),
@@ -655,8 +697,8 @@ class WholeSlideImage(object):
                 "level": [patch_level] * npatch,
                 "level_dim": [self.level_dimensions[patch_level]] * npatch,
                 "tile_size": [patch_size] * npatch,
-                "x": list(filtered_results[:, 0]), # defined w.r.t level 0
-                "y": list(filtered_results[:, 1]), # defined w.r.t level 0
+                "x": list(filtered_results[:, 0]),  # defined w.r.t level 0
+                "y": list(filtered_results[:, 1]),  # defined w.r.t level 0
                 "tissue_pct": filtered_tissue_pcts,
             }
             tile_df = pd.DataFrame.from_dict(df_data)
@@ -669,7 +711,9 @@ class WholeSlideImage(object):
     def process_coord_candidate(
         coord, contour_holes, patch_size, cont_check_fn, drop_holes
     ):
-        keep_flag, tissue_pct = WholeSlideImage.isInContours(cont_check_fn, coord, contour_holes, drop_holes, patch_size)
+        keep_flag, tissue_pct = WholeSlideImage.isInContours(
+            cont_check_fn, coord, contour_holes, drop_holes, patch_size
+        )
         if keep_flag:
             return coord, tissue_pct
         else:

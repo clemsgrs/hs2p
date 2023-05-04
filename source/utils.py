@@ -17,7 +17,7 @@ def compute_time(start_time, end_time):
 
 
 def get_mode(bands):
-    bands_to_mode = {1: 'L', 3: 'RGB', 4: 'RGBA'}
+    bands_to_mode = {1: "L", 3: "RGB", 4: "RGBA"}
     return bands_to_mode[bands]
 
 
@@ -179,12 +179,16 @@ def save_patch(
 
     for i, coord in enumerate(coords):
 
-        ps_x, ps_y = min(patch_size, wsi.width-downscaled_coords[i][0]), min(patch_size, wsi.height-downscaled_coords[i][1])
+        ps_x, ps_y = min(patch_size, wsi.width - downscaled_coords[i][0]), min(
+            patch_size, wsi.height - downscaled_coords[i][1]
+        )
         r = region.fetch(downscaled_coords[i][0], downscaled_coords[i][1], ps_x, ps_y)
         mode = get_mode(wsi.bands)
-        patch = Image.frombuffer(mode=mode, size=(ps_x,ps_y), data=r).convert("RGB")
+        patch = Image.frombuffer(mode=mode, size=(ps_x, ps_y), data=r).convert("RGB")
         if ps_x != patch_size or ps_y != patch_size:
-            patch = ImageOps.pad(patch, (patch_size,patch_size), color=None, centering=(0, 0))
+            patch = ImageOps.pad(
+                patch, (patch_size, patch_size), color=None, centering=(0, 0)
+            )
         # when saving patch, keep level 0 as (x,y) reference
         save_path = Path(save_dir, f"{coord[0]}_{coord[1]}.{fmt}")
         patch.save(save_path)
@@ -281,12 +285,18 @@ def DrawMapFromCoords(
         patch_id = indices[idx]
         coord = downscaled_coords[patch_id]
         wsi = wsi_object.open_page(vis_level)
-        ps_x, ps_y = min(downscaled_patch_size[0], wsi.width-coord[0]), min(downscaled_patch_size[1], wsi.height-coord[1])
+        ps_x, ps_y = min(downscaled_patch_size[0], wsi.width - coord[0]), min(
+            downscaled_patch_size[1], wsi.height - coord[1]
+        )
         region = pyvips.Region.new(wsi).fetch(coord[0], coord[1], ps_x, ps_y)
         mode = get_mode(wsi.bands)
-        patch = Image.frombuffer(mode=mode, size=(ps_x,ps_y), data=region).convert("RGB")
+        patch = Image.frombuffer(mode=mode, size=(ps_x, ps_y), data=region).convert(
+            "RGB"
+        )
         if ps_x != downscaled_patch_size[0] or ps_y != downscaled_patch_size[1]:
-            patch = ImageOps.pad(patch, downscaled_patch_size, color=None, centering=(0, 0))
+            patch = ImageOps.pad(
+                patch, downscaled_patch_size, color=None, centering=(0, 0)
+            )
         patch = np.array(patch)
         canvas_crop_shape = canvas[
             coord[1] : coord[1] + downscaled_patch_size[1],
@@ -333,7 +343,10 @@ def VisualizeCoords(
         print(f"patch level: {patch_level}")
 
     patch_size = tuple(
-        (np.array((patch_size, patch_size)) * wsi_object.level_downsamples[patch_level]).astype(np.int32)
+        (
+            np.array((patch_size, patch_size))
+            * wsi_object.level_downsamples[patch_level]
+        ).astype(np.int32)
     )
     if verbose:
         print(f"ref patch size: {patch_size}")

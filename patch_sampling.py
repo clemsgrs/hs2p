@@ -24,18 +24,18 @@ from source.utils import get_mode
 
 
 def get_mask_percent(mask, val=0):
-    '''
+    """
     Determine the percentage of a mask that is equal to gleason score gs
     input:
         mask: mask as a PIL Image
         val: given value we want to check for
     output:
         percentage of the numpy array that is equal to val
-    '''
+    """
     mask_arr = np.array(mask)
     w, h = mask_arr.shape
     binary_mask = mask_arr == val
-    mask_percentage = np.sum(binary_mask) / (w*h)
+    mask_percentage = np.sum(binary_mask) / (w * h)
     return mask_percentage
 
 
@@ -43,8 +43,8 @@ def overlay_mask_on_slide(
     wsi_object,
     mask_object,
     vis_params,
-    pixel_mapping: Dict[str,int],
-    color_mapping: Optional[Dict[str,List[int]]] = None,
+    pixel_mapping: Dict[str, int],
+    color_mapping: Optional[Dict[str, List[int]]] = None,
     alpha: float = 0.5,
 ):
     """
@@ -52,16 +52,16 @@ def overlay_mask_on_slide(
     """
 
     x_mask = mask_object.level_dimensions[0][0]
-    mask_min_level = np.argmin([abs(x_wsi-x_mask) for x_wsi,_ in wsi_object.level_dimensions])
+    mask_min_level = np.argmin(
+        [abs(x_wsi - x_mask) for x_wsi, _ in wsi_object.level_dimensions]
+    )
 
     if vis_params.vis_level < 0:
         if len(wsi_object.level_dimensions) == 1:
             vis_level = 0
             assert mask_min_level == 0
         else:
-            vis_level = wsi_object.get_best_level_for_downsample(
-                vis_params.downsample
-            )
+            vis_level = wsi_object.get_best_level_for_downsample(vis_params.downsample)
             vis_level = max(vis_level, mask_min_level)
     else:
         vis_level = max(vis_params.vis_level, mask_min_level)
@@ -70,25 +70,33 @@ def overlay_mask_on_slide(
 
     s = wsi_object.open_page(vis_level)
     region = pyvips.Region.new(s).fetch(0, 0, s.width, s.height)
-    slide = Image.frombuffer(mode=wsi_object.mode, size=(s.width,s.height), data=region).convert("RGBA")
+    slide = Image.frombuffer(
+        mode=wsi_object.mode, size=(s.width, s.height), data=region
+    ).convert("RGBA")
 
     m = mask_object.open_page(mask_vis_level)
     region = pyvips.Region.new(m).fetch(0, 0, m.width, m.height)
-    mask = Image.frombuffer(mode=mask_object.mode, size=(m.width,m.height), data=region)
+    mask = Image.frombuffer(
+        mode=mask_object.mode, size=(m.width, m.height), data=region
+    )
     # Mask data is present in the R channel
     mask = mask.split()[0]
 
     # Create alpha mask
     mask_arr = np.array(mask)
-    alpha_int = int(round(255*alpha))
+    alpha_int = int(round(255 * alpha))
     if color_mapping is not None:
         alpha_content = np.zeros_like(mask_arr)
         for k, v in pixel_mapping.items():
             if color_mapping[k] is not None:
-                alpha_content += (mask_arr == v)
-        alpha_content = np.less(alpha_content, 1).astype('uint8') * alpha_int + (255 - alpha_int)
+                alpha_content += mask_arr == v
+        alpha_content = np.less(alpha_content, 1).astype("uint8") * alpha_int + (
+            255 - alpha_int
+        )
     else:
-        alpha_content = np.less_equal(mask_arr, 0).astype('uint8') * alpha_int + (255 - alpha_int)
+        alpha_content = np.less_equal(mask_arr, 0).astype("uint8") * alpha_int + (
+            255 - alpha_int
+        )
     alpha_content = Image.fromarray(alpha_content)
 
     preview_palette = np.zeros(shape=768, dtype=int)
@@ -100,42 +108,53 @@ def overlay_mask_on_slide(
         elif ncat <= 20:
             color_palette = sns.color_palette("tab20")[:ncat]
         else:
-            raise ValueError(f"Implementation supports up to 20 categories (provided pixel_mapping has {ncat})")
-        color_mapping = {k: tuple(255*x for x in color_palette[i]) for i, k in enumerate(pixel_mapping.keys())}
+            raise ValueError(
+                f"Implementation supports up to 20 categories (provided pixel_mapping has {ncat})"
+            )
+        color_mapping = {
+            k: tuple(255 * x for x in color_palette[i])
+            for i, k in enumerate(pixel_mapping.keys())
+        }
 
-    p = [0]*3*len(color_mapping)
+    p = [0] * 3 * len(color_mapping)
     for k, v in pixel_mapping.items():
         if color_mapping[k] is not None:
-            p[v*3:v*3+3] = color_mapping[k]
+            p[v * 3 : v * 3 + 3] = color_mapping[k]
     n = len(p)
     preview_palette[0:n] = np.array(p).astype(int)
 
     mask.putpalette(data=preview_palette.tolist())
     mask_rgb = mask.convert(mode="RGB")
 
-    overlayed_image = PIL.Image.composite(image1=slide, image2=mask_rgb, mask=alpha_content)
+    overlayed_image = PIL.Image.composite(
+        image1=slide, image2=mask_rgb, mask=alpha_content
+    )
     return overlayed_image
 
 
 def overlay_mask_on_tile(
     tile: PIL.Image,
     mask: PIL.Image,
-    pixel_mapping: Dict[str,int],
-    color_mapping: Optional[Dict[str,List[int]]] = None,
+    pixel_mapping: Dict[str, int],
+    color_mapping: Optional[Dict[str, List[int]]] = None,
     alpha=0.5,
 ):
 
     # Create alpha mask
     mask_arr = np.array(mask)
-    alpha_int = int(round(255*alpha))
+    alpha_int = int(round(255 * alpha))
     if color_mapping is not None:
         alpha_content = np.zeros_like(mask_arr)
         for k, v in pixel_mapping.items():
             if color_mapping[k] is not None:
-                alpha_content += (mask_arr == v)
-        alpha_content = np.less(alpha_content, 1).astype('uint8') * alpha_int + (255 - alpha_int)
+                alpha_content += mask_arr == v
+        alpha_content = np.less(alpha_content, 1).astype("uint8") * alpha_int + (
+            255 - alpha_int
+        )
     else:
-        alpha_content = np.less_equal(mask_arr, 0).astype('uint8') * alpha_int + (255 - alpha_int)
+        alpha_content = np.less_equal(mask_arr, 0).astype("uint8") * alpha_int + (
+            255 - alpha_int
+        )
     alpha_content = Image.fromarray(alpha_content)
 
     preview_palette = np.zeros(shape=768, dtype=int)
@@ -147,20 +166,27 @@ def overlay_mask_on_tile(
         elif ncat <= 20:
             color_palette = sns.color_palette("tab20")[:ncat]
         else:
-            raise ValueError(f"Implementation supports up to 20 categories (provided pixel_mapping has {ncat})")
-        color_mapping = {k: tuple(255*x for x in color_palette[i]) for i, k in enumerate(pixel_mapping.keys())}
+            raise ValueError(
+                f"Implementation supports up to 20 categories (provided pixel_mapping has {ncat})"
+            )
+        color_mapping = {
+            k: tuple(255 * x for x in color_palette[i])
+            for i, k in enumerate(pixel_mapping.keys())
+        }
 
-    p = [0]*3*len(color_mapping)
+    p = [0] * 3 * len(color_mapping)
     for k, v in pixel_mapping.items():
         if color_mapping[k] is not None:
-            p[v*3:v*3+3] = color_mapping[k]
+            p[v * 3 : v * 3 + 3] = color_mapping[k]
     n = len(p)
     preview_palette[0:n] = np.array(p).astype(int)
 
     mask.putpalette(data=preview_palette.tolist())
     mask_rgb = mask.convert(mode="RGB")
 
-    overlayed_image = PIL.Image.composite(image1=tile, image2=mask_rgb, mask=alpha_content)
+    overlayed_image = PIL.Image.composite(
+        image1=tile, image2=mask_rgb, mask=alpha_content
+    )
     return overlayed_image
 
 
@@ -172,14 +198,16 @@ def extract_top_tiles(
     tile_size: int,
     downsample: int,
     pixel_val: int,
-    threshold: float = 0.,
+    threshold: float = 0.0,
     sort: bool = False,
     topk: Optional[int] = None,
 ):
 
     wsi_spacing_level = wsi_object.get_best_level_for_spacing(spacing)
     x_mask = mask_object.level_dimensions[0][0]
-    mask_min_level = np.argmin([abs(x_wsi-x_mask) for x_wsi,_ in wsi_object.level_dimensions])
+    mask_min_level = np.argmin(
+        [abs(x_wsi - x_mask) for x_wsi, _ in wsi_object.level_dimensions]
+    )
     if downsample == -1:
         wsi_downsample_level = max(wsi_spacing_level, mask_min_level)
     else:
@@ -188,12 +216,19 @@ def extract_top_tiles(
     assert wsi_spacing_level <= wsi_downsample_level
     mask_downsample_level = wsi_downsample_level - mask_min_level
 
-    wsi_scale = tuple(np.array(wsi_object.level_downsamples[wsi_downsample_level]) / np.array(wsi_object.level_downsamples[wsi_spacing_level]))
-    downsampled_tile_size_x, downsampled_tile_size_y = int(tile_size * 1. / wsi_scale[0]), int(tile_size * 1. / wsi_scale[1])
+    wsi_scale = tuple(
+        np.array(wsi_object.level_downsamples[wsi_downsample_level])
+        / np.array(wsi_object.level_downsamples[wsi_spacing_level])
+    )
+    downsampled_tile_size_x, downsampled_tile_size_y = int(
+        tile_size * 1.0 / wsi_scale[0]
+    ), int(tile_size * 1.0 / wsi_scale[1])
 
     mask = pyvips.Image.new_from_file(str(mask_object.path), page=mask_downsample_level)
     region = pyvips.Region.new(mask).fetch(0, 0, mask.width, mask.height)
-    mask_data = Image.frombuffer(mode=mask_object.mode, size=(mask.width,mask.height), data=region)
+    mask_data = Image.frombuffer(
+        mode=mask_object.mode, size=(mask.width, mask.height), data=region
+    )
     mask_data = mask_data.split()[0]
 
     filtered_grid = []
@@ -203,21 +238,32 @@ def extract_top_tiles(
 
         # in tile_df, x & y coordinates are defined w.r.t level 0 in the slide
         # need to downsample them to match input downsample value
-        for x, y in tile_df[['x', 'y']].values:
+        for x, y in tile_df[["x", "y"]].values:
             scale = wsi_object.level_downsamples[wsi_downsample_level]
-            x_downsampled, y_downsampled = int(x * 1. / scale[0]), int(y * 1. / scale[1])
+            x_downsampled, y_downsampled = int(x * 1.0 / scale[0]), int(
+                y * 1.0 / scale[1]
+            )
             # crop mask tile
-            coords = x_downsampled, y_downsampled, x_downsampled+downsampled_tile_size_x, y_downsampled+downsampled_tile_size_y
+            coords = (
+                x_downsampled,
+                y_downsampled,
+                x_downsampled + downsampled_tile_size_x,
+                y_downsampled + downsampled_tile_size_y,
+            )
             masked_tile = mask_data.crop(coords)
             pct = get_mask_percent(masked_tile, pixel_val)
             if pct > threshold:
                 # scale coordinates back to input spacing_level
-                filtered_grid.append((int(x),int(y)))
+                filtered_grid.append((int(x), int(y)))
                 tile_percentages.append(pct)
 
         if sort:
             sorted_tile_percentages = sorted(tile_percentages, reverse=True)
-            sorted_idxs = sorted(range(len(tile_percentages)), key=lambda k: tile_percentages[k], reverse=True)
+            sorted_idxs = sorted(
+                range(len(tile_percentages)),
+                key=lambda k: tile_percentages[k],
+                reverse=True,
+            )
             filtered_grid = [filtered_grid[idx] for idx in sorted_idxs]
             tile_percentages = sorted_tile_percentages
 
@@ -233,15 +279,15 @@ def sample_patches(
     slide_fp: Path,
     annot_mask_fp: Path,
     output_dir: Path,
-    pixel_mapping: Dict[str,int],
+    pixel_mapping: Dict[str, int],
     seg_params,
     vis_params,
     filter_params,
     patch_params,
     seg_mask_fp: Optional[str] = None,
     enable_mp: bool = False,
-    color_mapping: Optional[Dict[str,int]] = None,
-    filtering_threshold: float = 0.,
+    color_mapping: Optional[Dict[str, int]] = None,
+    filtering_threshold: float = 0.0,
     skip: List[str] = [],
     sort: bool = False,
     topk: Optional[int] = None,
@@ -256,8 +302,12 @@ def sample_patches(
     wsi_spacing_level = wsi_object.get_best_level_for_spacing(patch_params.spacing)
 
     x_mask = annotation_mask.level_dimensions[0][0]
-    mask_min_level = np.argmin([abs(x_wsi-x_mask) for x_wsi,_ in wsi_object.level_dimensions])
-    mask_spacing_level = annotation_mask.get_best_level_for_spacing(patch_params.spacing, ignore_warning=True)
+    mask_min_level = np.argmin(
+        [abs(x_wsi - x_mask) for x_wsi, _ in wsi_object.level_dimensions]
+    )
+    mask_spacing_level = annotation_mask.get_best_level_for_spacing(
+        patch_params.spacing, ignore_warning=True
+    )
 
     vis_level = vis_params.vis_level
     if vis_level < 0:
@@ -319,8 +369,8 @@ def sample_patches(
     patch_time_elapsed = time.time() - start_time
 
     slide_ids, coordinates, percentages, categories = [], [], [], []
-    raw_tile_dir = Path(output_dir, 'patches', 'raw')
-    overlay_tile_dir = Path(output_dir, 'patches', 'mask')
+    raw_tile_dir = Path(output_dir, "patches", "raw")
+    overlay_tile_dir = Path(output_dir, "patches", "mask")
 
     # loop over annotation categories and extract top scoring patches
     # among previously extracted tissue patches
@@ -340,10 +390,10 @@ def sample_patches(
                 sort,
                 topk,
             )
-            slide_ids.extend([slide_id]*len(coords))
+            slide_ids.extend([slide_id] * len(coords))
             coordinates.extend(coords)
             percentages.extend(pct)
-            categories.extend([cat]*len(coords))
+            categories.extend([cat] * len(coords))
 
             if patch_params.save_patches_to_disk:
 
@@ -362,41 +412,101 @@ def sample_patches(
 
                         wsi = wsi_object.open_page(wsi_spacing_level)
                         # need to move x, y from level 0 to wsi_spacing_level
-                        wsi_scale = tuple(np.array(wsi_object.level_downsamples[wsi_spacing_level]) / np.array(wsi_object.level_downsamples[0]))
-                        x_scaled, y_scaled = int(x * 1. / wsi_scale[0]), int(y * 1. / wsi_scale[1])
-                        ps_x, ps_y = min(patch_params.patch_size, wsi.width-x_scaled), min(patch_params.patch_size, wsi.height-y_scaled)
-                        region = pyvips.Region.new(wsi).fetch(x_scaled, y_scaled, ps_x, ps_y)
-                        tile = Image.frombuffer(mode=wsi_object.mode, size=(ps_x,ps_y), data=region).convert("RGB")
-                        if ps_x != patch_params.patch_size or ps_y != patch_params.patch_size:
-                            tile = ImageOps.pad(tile, (patch_params.patch_size,patch_params.patch_size), color=None, centering=(0, 0))
+                        wsi_scale = tuple(
+                            np.array(wsi_object.level_downsamples[wsi_spacing_level])
+                            / np.array(wsi_object.level_downsamples[0])
+                        )
+                        x_scaled, y_scaled = int(x * 1.0 / wsi_scale[0]), int(
+                            y * 1.0 / wsi_scale[1]
+                        )
+                        ps_x, ps_y = min(
+                            patch_params.patch_size, wsi.width - x_scaled
+                        ), min(patch_params.patch_size, wsi.height - y_scaled)
+                        region = pyvips.Region.new(wsi).fetch(
+                            x_scaled, y_scaled, ps_x, ps_y
+                        )
+                        tile = Image.frombuffer(
+                            mode=wsi_object.mode, size=(ps_x, ps_y), data=region
+                        ).convert("RGB")
+                        if (
+                            ps_x != patch_params.patch_size
+                            or ps_y != patch_params.patch_size
+                        ):
+                            tile = ImageOps.pad(
+                                tile,
+                                (patch_params.patch_size, patch_params.patch_size),
+                                color=None,
+                                centering=(0, 0),
+                            )
 
-                        fname = f'{slide_id}_{x}_{y}'
-                        tile_fp = Path(raw_tile_dir, cat_, f'{fname}.{patch_params.fmt}')
+                        fname = f"{slide_id}_{x}_{y}"
+                        tile_fp = Path(
+                            raw_tile_dir, cat_, f"{fname}.{patch_params.fmt}"
+                        )
                         tile_fp.parent.mkdir(exist_ok=True, parents=True)
                         tile.save(tile_fp)
 
                         if vis_params.overlay_mask_on_patch:
                             # need to scale x, y from slide level 0 to mask_spacing_level referential
-                            mask_scale = tuple(np.array(wsi_object.level_downsamples[mask_min_level+mask_spacing_level]) / np.array(wsi_object.level_downsamples[0]))
-                            x_scaled, y_scaled = int(x * 1. / mask_scale[0]), int(y * 1. / mask_scale[1])
+                            mask_scale = tuple(
+                                np.array(
+                                    wsi_object.level_downsamples[
+                                        mask_min_level + mask_spacing_level
+                                    ]
+                                )
+                                / np.array(wsi_object.level_downsamples[0])
+                            )
+                            x_scaled, y_scaled = int(x * 1.0 / mask_scale[0]), int(
+                                y * 1.0 / mask_scale[1]
+                            )
                             # need to scale tile size from wsi_spacing_level to mask_spacing_level
-                            ts_scale = tuple(np.array(wsi_object.level_downsamples[mask_min_level+mask_spacing_level]) / np.array(wsi_object.level_downsamples[wsi_spacing_level]))
-                            ts_x, ts_y = int(patch_params.patch_size * 1. / ts_scale[0]), int(patch_params.patch_size * 1. / ts_scale[1])
+                            ts_scale = tuple(
+                                np.array(
+                                    wsi_object.level_downsamples[
+                                        mask_min_level + mask_spacing_level
+                                    ]
+                                )
+                                / np.array(
+                                    wsi_object.level_downsamples[wsi_spacing_level]
+                                )
+                            )
+                            ts_x, ts_y = int(
+                                patch_params.patch_size * 1.0 / ts_scale[0]
+                            ), int(patch_params.patch_size * 1.0 / ts_scale[1])
                             # read annotation tile from mask
-                            mask = pyvips.Image.new_from_file(str(annotation_mask.path), page=mask_spacing_level)
-                            ps_x, ps_y = min(ts_x, mask.width-x_scaled), min(ts_y, mask.height-y_scaled)
-                            region = pyvips.Region.new(mask).fetch(x_scaled, y_scaled, ps_x, ps_y)
+                            mask = pyvips.Image.new_from_file(
+                                str(annotation_mask.path), page=mask_spacing_level
+                            )
+                            ps_x, ps_y = min(ts_x, mask.width - x_scaled), min(
+                                ts_y, mask.height - y_scaled
+                            )
+                            region = pyvips.Region.new(mask).fetch(
+                                x_scaled, y_scaled, ps_x, ps_y
+                            )
                             mode = get_mode(mask.bands)
-                            masked_tile = Image.frombuffer(mode=mode, size=(ps_x,ps_y), data=region)
+                            masked_tile = Image.frombuffer(
+                                mode=mode, size=(ps_x, ps_y), data=region
+                            )
                             masked_tile = masked_tile.split()[0]
                             if ps_x != ts_x or ps_y != ts_y:
-                                masked_tile = ImageOps.pad(masked_tile, (ts_x,ts_y), color=None, centering=(0, 0))
+                                masked_tile = ImageOps.pad(
+                                    masked_tile,
+                                    (ts_x, ts_y),
+                                    color=None,
+                                    centering=(0, 0),
+                                )
                             if ts_scale[0] > 1 or ts_scale[1] > 1:
                                 # 2 possible ways to go:
                                 # - upsample annotation tile to match true tile size
                                 # - read tile from slide to match annotation tile size (end up with images smaller than input patch size)
                                 # option 1
-                                masked_tile = masked_tile.resize(tuple(int(e * ts_scale[i]) for i,e in enumerate(masked_tile.size)), Image.NEAREST)
+                                masked_tile = masked_tile.resize(
+                                    tuple(
+                                        int(e * ts_scale[i])
+                                        for i, e in enumerate(masked_tile.size)
+                                    ),
+                                    Image.NEAREST,
+                                )
                                 # option 2
                                 # wsi = wsi_object.open_page(mask_min_level+mask_spacing_level)
                                 # r = pyvips.Region.new(wsi).fetch(x_scaled, y_scaled, ps_x, ps_y)
@@ -404,8 +514,18 @@ def sample_patches(
                                 # if ps_x != ts_x or ps_y != ts_y:
                                 #     tile = ImageOps.pad(tile, (ts_x,ts_y), color=None, centering=(0, 0))
 
-                            overlayed_tile = overlay_mask_on_tile(tile, masked_tile, pixel_mapping, color_mapping, alpha=alpha)
-                            overlayed_tile_fp = Path(overlay_tile_dir, cat_, f'{fname}_mask.{patch_params.fmt}')
+                            overlayed_tile = overlay_mask_on_tile(
+                                tile,
+                                masked_tile,
+                                pixel_mapping,
+                                color_mapping,
+                                alpha=alpha,
+                            )
+                            overlayed_tile_fp = Path(
+                                overlay_tile_dir,
+                                cat_,
+                                f"{fname}_mask.{patch_params.fmt}",
+                            )
                             overlayed_tile_fp.parent.mkdir(exist_ok=True, parents=True)
                             overlayed_tile.save(overlayed_tile_fp)
 
@@ -425,13 +545,15 @@ def sample_patches(
         x, y = list(map(list, zip(*coordinates)))
     else:
         x, y = [], []
-    sampled_tiles_df = pd.DataFrame.from_dict({
-        'slide_id': slide_ids,
-        'category': categories,
-        'x': x,
-        'y': y,
-        'pct': percentages,
-    })
+    sampled_tiles_df = pd.DataFrame.from_dict(
+        {
+            "slide_id": slide_ids,
+            "category": categories,
+            "x": x,
+            "y": y,
+            "pct": percentages,
+        }
+    )
 
     # restore original values
     vis_params.vis_level = vis_level
@@ -440,7 +562,9 @@ def sample_patches(
     return sampled_tiles_df
 
 
-@hydra.main(version_base="1.2.0", config_path="config/sampling", config_name="witali_liver")
+@hydra.main(
+    version_base="1.2.0", config_path="config/sampling", config_name="witali_liver"
+)
 def main(cfg: DictConfig):
 
     run_id = datetime.datetime.now().strftime("%Y-%m-%d_%H_%M")
@@ -460,19 +584,19 @@ def main(cfg: DictConfig):
     output_dir = Path(cfg.output_dir, cfg.experiment_name, run_id)
     output_dir.mkdir(exist_ok=True, parents=True)
 
-    seg_mask_save_dir = Path(output_dir, 'segmentation_mask')
-    overlay_mask_save_dir = Path(output_dir, 'annotation_mask')
+    seg_mask_save_dir = Path(output_dir, "segmentation_mask")
+    overlay_mask_save_dir = Path(output_dir, "annotation_mask")
     seg_mask_save_dir.mkdir(exist_ok=True)
     overlay_mask_save_dir.mkdir(exist_ok=True)
 
     df = pd.read_csv(cfg.csv)
 
-    slide_ids = df['slide_id'].values.tolist()
-    slide_fps = df['slide_path'].values.tolist()
+    slide_ids = df["slide_id"].values.tolist()
+    slide_fps = df["slide_path"].values.tolist()
     seg_mask_fps = [None] * len(slide_fps)
     if "segmentation_mask_path" in df.columns:
-        seg_mask_fps = df['segmentation_mask_path'].values.tolist()
-    annot_mask_fps = df['annotation_mask_path'].values.tolist()
+        seg_mask_fps = df["segmentation_mask_path"].values.tolist()
+    annot_mask_fps = df["annotation_mask_path"].values.tolist()
 
     if cfg.speed.multiprocessing:
 
@@ -498,7 +622,9 @@ def main(cfg: DictConfig):
                 seg_mask_save_dir,
                 overlay_mask_save_dir,
             )
-            for sid, slide_fp, seg_mask_fp, annot_mask_fp in zip(slide_ids, slide_fps, seg_mask_fps, annot_mask_fps)
+            for sid, slide_fp, seg_mask_fp, annot_mask_fp in zip(
+                slide_ids, slide_fps, seg_mask_fps, annot_mask_fps
+            )
         ]
 
         command_line = [
@@ -509,7 +635,7 @@ def main(cfg: DictConfig):
             "--fmt",
             "jpg",
             "--total",
-            f"{len(slide_ids)}"
+            f"{len(slide_ids)}",
         ]
         if cfg.wandb.enable:
             command_line = command_line + ["--log_to_wandb", "--id", f"{run_id}"]
@@ -526,7 +652,7 @@ def main(cfg: DictConfig):
             wandb.log({"processed": len(dfs)})
 
         tile_df = pd.concat(dfs, ignore_index=True)
-        tiles_fp = Path(output_dir, f'sampled_patches.csv')
+        tiles_fp = Path(output_dir, f"sampled_patches.csv")
         tile_df.to_csv(tiles_fp, index=False)
 
     else:
@@ -572,13 +698,11 @@ def main(cfg: DictConfig):
                     wandb.log({"processed": i + 1})
 
             df = pd.concat(dfs, ignore_index=True)
-            tiles_fp = Path(output_dir, f'sampled_patches.csv')
+            tiles_fp = Path(output_dir, f"sampled_patches.csv")
             df.to_csv(tiles_fp, index=False)
-
 
 
 if __name__ == "__main__":
 
     main()
     # zip -r tiles.zip './tiles'
-
