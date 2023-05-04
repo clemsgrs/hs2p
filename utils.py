@@ -2,7 +2,6 @@ import time
 import tqdm
 import wandb
 import subprocess
-import numpy as np
 import pandas as pd
 from pathlib import Path
 from omegaconf import DictConfig, OmegaConf
@@ -238,28 +237,28 @@ def seg_and_patch(
 
             vis_level = vis_params.vis_level
             if vis_level < 0:
-                if len(wsi_object.level_dim) == 1:
+                if len(wsi_object.level_dimensions) == 1:
                     vis_params.vis_level = 0
                 else:
-                    best_level = wsi_object.get_best_level_for_downsample_custom(
+                    best_level = wsi_object.get_best_level_for_downsample(
                         vis_params.downsample
                     )
                     vis_params.vis_level = best_level
 
             seg_level = seg_params.seg_level
             if seg_level < 0:
-                if len(wsi_object.level_dim) == 1:
+                if len(wsi_object.level_dimensions) == 1:
                     seg_params.seg_level = 0
                 else:
-                    best_level = wsi_object.get_best_level_for_downsample_custom(
+                    best_level = wsi_object.get_best_level_for_downsample(
                         seg_params.downsample
                     )
                     seg_params.seg_level = best_level
 
-            w, h = wsi_object.level_dim[seg_params.seg_level]
+            w, h = wsi_object.level_dimensions[seg_params.seg_level]
             if w * h > 1e8:
                 print(
-                    f"level_dim {w} x {h} is likely too large for successful segmentation, aborting"
+                    f"level dimensions {w} x {h} is likely too large for successful segmentation, aborting"
                 )
                 df.loc[idx, "status"] = "failed_seg"
                 continue
@@ -279,7 +278,7 @@ def seg_and_patch(
                 tif_save_dir.mkdir(exist_ok=True)
                 mask_path = Path(tif_save_dir, f"{slide_id}.tif")
                 mask = pyvips.Image.new_from_array(wsi_object.binary_mask.tolist())
-                mask.tiffsave(mask_path, tile=True, compression='jpeg', bigtiff=True, pyramid=True, Q=70)
+                mask.tiffsave(str(mask_path), tile=True, compression='jpeg', bigtiff=True, pyramid=True, Q=70)
 
             if seg_params.visualize_mask:
                 mask = wsi_object.visWSI(
@@ -397,30 +396,30 @@ def seg_and_patch_slide(
 
     vis_level = vis_params.vis_level
     if vis_level < 0:
-        if len(wsi_object.level_dim) == 1:
+        if len(wsi_object.level_dimensions) == 1:
             vis_params.vis_level = 0
             best_vis_level = 0
         else:
-            best_vis_level = wsi_object.get_best_level_for_downsample_custom(
+            best_vis_level = wsi_object.get_best_level_for_downsample(
                 vis_params.downsample
             )
             vis_params.vis_level = best_vis_level
 
     seg_level = seg_params.seg_level
     if seg_level < 0:
-        if len(wsi_object.level_dim) == 1:
+        if len(wsi_object.level_dimensions) == 1:
             seg_params.seg_level = 0
             best_seg_level = 0
         else:
-            best_seg_level = wsi_object.get_best_level_for_downsample_custom(
+            best_seg_level = wsi_object.get_best_level_for_downsample(
                 seg_params.downsample
             )
             seg_params.seg_level = best_seg_level
 
-    w, h = wsi_object.level_dim[seg_params.seg_level]
+    w, h = wsi_object.level_dimensions[seg_params.seg_level]
     if w * h > 1e8:
         print(
-            f"level_dim {w} x {h} is likely too large for successful segmentation, aborting"
+            f"level dimensions {w} x {h} is likely too large for successful segmentation, aborting"
         )
         status = "failed_seg"
         tile_df = pd.DataFrame.from_dict(
@@ -452,7 +451,7 @@ def seg_and_patch_slide(
         tif_save_dir.mkdir(exist_ok=True)
         mask_path = Path(tif_save_dir, f"{slide_id}.tif")
         mask = pyvips.Image.new_from_array(wsi_object.binary_mask.tolist())
-        mask.tiffsave(mask_path, tile=True, compression='jpeg', bigtiff=True, pyramid=True, Q=70)
+        mask.tiffsave(str(mask_path), tile=True, compression='jpeg', bigtiff=True, pyramid=True, Q=70)
 
     if seg_params.visualize_mask:
         mask = wsi_object.visWSI(

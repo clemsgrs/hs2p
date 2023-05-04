@@ -1,7 +1,7 @@
 import cv2
 import time
 import math
-import openslide
+import pyvips
 import numpy as np
 import pandas as pd
 import multiprocessing as mp
@@ -10,7 +10,7 @@ from PIL import Image
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
-from source.utils import save_hdf5, save_patch, compute_time
+from source.utils import save_hdf5, save_patch, compute_time, get_mode
 from source.util_classes import (
     Contour_Checking_fn,
     isInContourV1,
@@ -34,21 +34,36 @@ class WholeSlideImage(object):
         self.path = path
         self.name = path.stem
         self.fmt = path.suffix
-        self.wsi = openslide.open_slide(str(path))
-        self.level_downsamples = self._assertLevelDownsamples()
-        self.level_dim = self.wsi.level_dimensions
+        self.wsi = pyvips.Image.new_from_file(str(path))
+        self.level_dimensions = self.get_level_dimensions()
+        self.level_downsamples = self.get_level_downsamples()
         self.spacing = spacing
+        self.mode = get_mode(self.wsi.bands)
 
         self.contours_tissue = None
         self.contours_tumor = None
 
-    def getOpenSlide(self):
-        return self.wsi
+    def get_level_dimensions(self):
+        level_dimensions = []
+        if self.fmt == '.svs':
+            npages = int(self.wsi.get('openslide.level-count'))
+        else:
+            npages = self.wsi.get_n_pages()
+        for p in range(npages):
+            s = self.open_page(p)
+            w, h = s.width, s.height
+            level_dimensions.append((w,h))
+        return level_dimensions
+
+    def open_page(self, page):
+        if self.fmt == '.svs':
+            return pyvips.Image.new_from_file(str(self.path), level=page)
+        else:
+            return pyvips.Image.new_from_file(str(self.path), page=page)
 
     def initSegmentation(self, mask_fp: Path):
         # load segmentation results from pickle file
         import pickle
-
         with open(mask_fp, "rb") as f:
             asset_dict = pickle.load(f)
             self.holes_tissue = asset_dict["holes"]
@@ -58,28 +73,18 @@ class WholeSlideImage(object):
         self, mask_fp: Path, spacing: float, downsample: int, filter_params, sthresh_up: int = 255, tissue_val: int = 1,
     ):
 
-        try:
+        mask = pyvips.Image.new_from_file(str(mask_fp), page=0)
+        w = mask.width
+        mask_level = int(np.argmin([abs(x - w) for x, _ in self.level_dimensions]))
+        seg_level = self.get_best_level_for_downsample(downsample)
 
-            mask = openslide.OpenSlide(str(mask_fp))
-            w, h = mask.dimensions
-            mask_level = int(np.argmin([abs(x - w) for x, _ in self.wsi.level_dimensions]))
-            seg_level = self.get_best_level_for_downsample_custom(downsample)
+        assert seg_level >= mask_level, f"Segmentation mask highest resolution is smaller than target segmentation result resolution, please use a bigger downsample value"
 
-            assert seg_level >= mask_level, f"Segmentation mask highest resolution is smaller than target segmentation result resolution, please use a bigger downsample value"
-
-            m = mask.read_region((0,0), seg_level-mask_level, mask.level_dimensions[seg_level-mask_level]).convert('RGB')
-            m = np.array(m)[...,0]
-
-        except openslide.lowlevel.OpenSlideError:
-
-            from tifffile import TiffFile
-
-            tif = TiffFile(mask_fp)
-            mask = tif.pages[0]
-            h, w = mask.shape
-            mask_level = int(np.argmin([abs(x - w) for x, _ in self.wsi.level_dimensions]))
-            seg_level = self.get_best_level_for_downsample_custom(downsample)
-            m = tif.pages[seg_level-mask_level].asarray()
+        downsampled_mask = pyvips.Image.new_from_file(str(mask_fp), page=seg_level-mask_level)
+        region = pyvips.Region.new(downsampled_mask).fetch(0, 0, downsampled_mask.width, downsampled_mask.height)
+        mode = get_mode(downsampled_mask.bands)
+        m = Image.frombuffer(mode=mode, size=(downsampled_mask.width,downsampled_mask.height), data=region).convert("RGB")
+        m = np.array(m)[...,0]
 
         if tissue_val == 2:
             m = m - np.ones_like(m)
@@ -104,12 +109,21 @@ class WholeSlideImage(object):
         """
         Segment the tissue via HSV -> Median thresholding -> Binary threshold
         """
+        wsi = self.open_page(seg_level)
+        region = pyvips.Region.new(wsi).fetch(0, 0, wsi.width, wsi.height)
+        mode = self.mode
+        img = np.array(Image.frombuffer(mode=mode, size=(wsi.width,wsi.height), data=region).convert("RGBA"))
+        # img = np.ndarray(
+        #     buffer=region,
+        #     dtype=np.uint8,
+        #     shape=(wsi.height, wsi.width, wsi.bands)
+        # )
 
-        img = np.array(
-            self.wsi.read_region((0, 0), seg_level, self.level_dim[seg_level])
-        )
-        img_hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)  # Convert to HSV space
-        img_med = cv2.medianBlur(img_hsv[:, :, 1], mthresh)  # Apply median blurring
+        # Convert to HSV space
+        img_hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+
+        # Apply median blurring
+        img_med = cv2.medianBlur(img_hsv[:, :, 1], mthresh)
 
         # Thresholding
         if use_otsu:
@@ -216,8 +230,6 @@ class WholeSlideImage(object):
         annot_color: Tuple[int] = (255, 0, 0),
         line_thickness: int = 250,
         max_size: Optional[int] = None,
-        top_left: Optional[Tuple[int]] = None,
-        bot_right: Optional[Tuple[int]] = None,
         custom_downsample: int = 1,
         view_slide_only: bool = False,
         number_contours: bool = False,
@@ -228,24 +240,14 @@ class WholeSlideImage(object):
         downsample = self.level_downsamples[vis_level]
         scale = [1 / downsample[0], 1 / downsample[1]]
 
-        if top_left is not None and bot_right is not None:
-            top_left = tuple(top_left)
-            bot_right = tuple(bot_right)
-            w, h = tuple(
-                (np.array(bot_right) * scale).astype(int)
-                - (np.array(top_left) * scale).astype(int)
-            )
-            region_size = (w, h)
-        else:
-            top_left = (0, 0)
-            region_size = self.level_dim[vis_level]
-
-        img = np.array(
-            self.wsi.read_region(top_left, vis_level, region_size).convert("RGB")
-        )
+        wsi = self.open_page(vis_level)
+        region = pyvips.Region.new(wsi).fetch(0, 0, wsi.width, wsi.height)
+        mode = self.mode
+        # img = np.array(Image.frombuffer(mode='RGBA', size=(wsi.width,wsi.height), data=region).convert("RGB"))
+        img = np.array(Image.frombuffer(mode=mode, size=(wsi.width,wsi.height), data=region).convert("RGB"))
 
         if not view_slide_only:
-            offset = tuple(-(np.array(top_left) * scale).astype(int))
+            offset = tuple(-(np.array((0,0)) * scale).astype(int))
             line_thickness = int(line_thickness * math.sqrt(scale[0] * scale[1]))
             if self.contours_tissue is not None and seg_display:
                 if not number_contours:
@@ -353,36 +355,22 @@ class WholeSlideImage(object):
             for holes in contours
         ]
 
-    def _assertLevelDownsamples(self):
+    def get_level_downsamples(self):
         level_downsamples = []
-        dim_0 = self.wsi.level_dimensions[0]
-
-        for downsample, dim in zip(
-            self.wsi.level_downsamples, self.wsi.level_dimensions
-        ):
-            estimated_downsample = (dim_0[0] / float(dim[0]), dim_0[1] / float(dim[1]))
-            level_downsamples.append(estimated_downsample) if estimated_downsample != (
-                downsample,
-                downsample,
-            ) else level_downsamples.append((downsample, downsample))
-
+        dim_0 = self.level_dimensions[0]
+        for dim in self.level_dimensions:
+            level_downsample = (dim_0[0] / float(dim[0]), dim_0[1] / float(dim[1]))
+            level_downsamples.append(level_downsample)
         return level_downsamples
 
     def get_spacings(self):
         if self.spacing:
             return self.spacing, self.spacing
-        elif "openslide.mpp-x" in self.wsi.properties:
-            x_spacing = float(self.wsi.properties["openslide.mpp-x"])
-            y_spacing = float(self.wsi.properties["openslide.mpp-y"])
-        elif "tiff.XResolution" in self.wsi.properties:
-            # OpenSlide gives the resolution in centimeters so we convert this to microns
-            x_res = float(self.wsi.properties["tiff.XResolution"]) / 10000
-            y_res = float(self.wsi.properties["tiff.YResolution"]) / 10000
-            x_spacing, y_spacing = 1 / x_res, 1 / y_res
         else:
-            raise KeyError(
-                "Neither 'openslide.mpp-x' nor 'tiff.XResolution' were found in slide's properties.\nYou may fix this by inspecting one of your slides' properties and add an elif in the code above"
-            )
+            # pyvips gives resolution in pixels / mm
+            # we need to convert it to microns / pixel
+            x_spacing = 1000 / self.wsi.xres
+            y_spacing = 1000 / self.wsi.yres
         return x_spacing, y_spacing
 
     def get_best_level_for_spacing(self, target_spacing: float, ignore_warning: bool = False):
@@ -391,13 +379,10 @@ class WholeSlideImage(object):
             target_spacing / x_spacing,
             target_spacing / y_spacing,
         )
-        # get_best_level_for_downsample just chooses the largest level with a downsample less than user's downsample
-        # see https://github.com/openslide/openslide/issues/274
-        # so I made my own version of get_best_level_for_downsample
-        assert self.get_best_level_for_downsample_custom(
+        assert self.get_best_level_for_downsample(
             downsample_x
-        ) == self.get_best_level_for_downsample_custom(downsample_y)
-        level, above_tol = self.get_best_level_for_downsample_custom(
+        ) == self.get_best_level_for_downsample(downsample_y)
+        level, above_tol = self.get_best_level_for_downsample(
             downsample_x, return_tol_status=True
         )
         if above_tol and not ignore_warning:
@@ -406,13 +391,13 @@ class WholeSlideImage(object):
             )
         return level
 
-    def get_best_level_for_downsample_custom(
+    def get_best_level_for_downsample(
         self, downsample, tol: float = 0.2, return_tol_status: bool = False
     ):
         level = int(
-            np.argmin([abs(x - downsample) for x in self.wsi.level_downsamples])
+            np.argmin([abs(x - downsample) for x,_ in self.level_downsamples])
         )
-        above_tol = abs(self.wsi.level_downsamples[level] / downsample - 1) > tol
+        above_tol = abs(self.level_downsamples[level][0] / downsample - 1) > tol
         if return_tol_status:
             return level, above_tol
         else:
@@ -488,8 +473,12 @@ class WholeSlideImage(object):
                 if save_patches_to_disk:
                     patch_save_dir = Path(save_dir, "imgs")
                     patch_save_dir.mkdir(parents=True, exist_ok=True)
+                    patch_level = attr_dict["coords"]["patch_level"]
+                    wsi = self.open_page(patch_level)
+                    scale = self.level_downsamples[patch_level]
                     npatch, mins, secs = save_patch(
-                        self.wsi,
+                        wsi,
+                        scale,
                         patch_save_dir,
                         asset_dict,
                         attr_dict,
@@ -531,8 +520,8 @@ class WholeSlideImage(object):
             start_x, start_y, w, h = (
                 0,
                 0,
-                self.level_dim[patch_level][0],
-                self.level_dim[patch_level][1],
+                self.level_dimensions[patch_level][0],
+                self.level_dimensions[patch_level][1],
             )
 
         # 256x256 patches at 20x are equivalent to 512x512 patches at 40x
@@ -546,7 +535,7 @@ class WholeSlideImage(object):
             patch_size * patch_downsample[1],
         )
 
-        img_w, img_h = self.level_dim[0]
+        img_w, img_h = self.level_dimensions[0]
         if use_padding:
             stop_y = int(start_y + h)
             stop_x = int(start_x + w)
@@ -660,8 +649,8 @@ class WholeSlideImage(object):
                 "patch_level": patch_level,
                 "ref_patch_size": ref_patch_size[0],
                 "downsample": self.level_downsamples[patch_level],
-                "downsampled_level_dim": tuple(np.array(self.level_dim[patch_level])),
-                "level_dim": self.level_dim[patch_level],
+                "downsampled_level_dim": tuple(np.array(self.level_dimensions[patch_level])),
+                "level_dim": self.level_dimensions[patch_level],
                 "wsi_name": self.name,
                 "save_path": str(save_dir),
             }
@@ -670,7 +659,7 @@ class WholeSlideImage(object):
                 "slide_id": [self.name] * npatch,
                 "spacing": [spacing] * npatch,
                 "level": [patch_level] * npatch,
-                "level_dim": [self.level_dim[patch_level]] * npatch,
+                "level_dim": [self.level_dimensions[patch_level]] * npatch,
                 "tile_size": [patch_size] * npatch,
                 "x": list(filtered_results[:, 0]), # defined w.r.t level 0
                 "y": list(filtered_results[:, 1]), # defined w.r.t level 0

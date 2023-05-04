@@ -1,10 +1,11 @@
 import cv2
 import time
 import h5py
+import pyvips
 import numpy as np
 import pandas as pd
 
-from PIL import Image
+from PIL import Image, ImageOps
 from pathlib import Path
 
 
@@ -13,6 +14,11 @@ def compute_time(start_time, end_time):
     elapsed_mins = int(elapsed_time / 60)
     elapsed_secs = int(elapsed_time - (elapsed_mins * 60))
     return elapsed_mins, elapsed_secs
+
+
+def get_mode(bands):
+    bands_to_mode = {1: 'L', 3: 'RGB', 4: 'RGBA'}
+    return bands_to_mode[bands]
 
 
 def initialize_df(
@@ -154,6 +160,7 @@ def save_hdf5(output_path, asset_dict, attr_dict=None, mode="a"):
 
 def save_patch(
     wsi,
+    scale,
     save_dir,
     asset_dict,
     attr_dict=None,
@@ -161,18 +168,27 @@ def save_patch(
 ):
     coords = asset_dict["coords"]
     patch_size = attr_dict["coords"]["patch_size"]
-    patch_level = attr_dict["coords"]["patch_level"]
-    wsi_name = attr_dict["coords"]["wsi_name"]
 
     npatch = len(coords)
+    region = pyvips.Region.new(wsi)
+
+    # given we use .fetch, we need to move coordinates from slide level 0 to patch_level
+    downscaled_coords = np.ceil((np.array(coords) / np.array(scale))).astype(np.int32)
+
     start_time = time.time()
 
-    for coord in coords:
-        pil_patch = wsi.read_region(
-            tuple(coord), patch_level, (patch_size, patch_size)
-        ).convert("RGB")
+    for i, coord in enumerate(coords):
+
+        ps_x, ps_y = min(patch_size, wsi.width-downscaled_coords[i][0]), min(patch_size, wsi.height-downscaled_coords[i][1])
+        r = region.fetch(downscaled_coords[i][0], downscaled_coords[i][1], ps_x, ps_y)
+        mode = get_mode(wsi.bands)
+        # patch = Image.frombuffer(mode='RGBA', size=(ps_x,ps_y), data=r).convert("RGB")
+        patch = Image.frombuffer(mode=mode, size=(ps_x,ps_y), data=r).convert("RGB")
+        if ps_x != patch_size or ps_y != patch_size:
+            patch = ImageOps.pad(patch, (patch_size,patch_size), color=None, centering=(0, 0))
+        # when saving patch, keep level 0 as (x,y) reference
         save_path = Path(save_dir, f"{coord[0]}_{coord[1]}.{fmt}")
-        pil_patch.save(save_path)
+        patch.save(save_path)
 
     end_time = time.time()
     patch_saving_mins, patch_saving_secs = compute_time(start_time, end_time)
@@ -247,39 +263,45 @@ def DrawMapFromCoords(
     verbose=False,
 ):
 
-    downsamples = wsi_object.wsi.level_downsamples[vis_level]
+    downsamples = wsi_object.level_downsamples[vis_level]
     if indices is None:
         indices = np.arange(len(coords))
     total = len(indices)
 
-    patch_size = tuple(
+    downscaled_patch_size = tuple(
         np.ceil((np.array(patch_size) / np.array(downsamples))).astype(np.int32)
     )
     if verbose:
-        print(f"downscaled patch size: {patch_size}")
+        print(f"downscaled patch size: {downscaled_patch_size}")
+
+    # if we use pyvips Region fetching, we need to scale coordinates from level 0 to to vis_level
+    downscaled_coords = np.ceil((coords / np.array(downsamples))).astype(np.int32)
 
     for idx in range(total):
 
         patch_id = indices[idx]
-        coord = coords[patch_id]
-        patch = np.array(
-            wsi_object.wsi.read_region(tuple(coord), vis_level, patch_size).convert(
-                "RGB"
-            )
-        )
-        coord = np.ceil(coord / downsamples).astype(np.int32)
+        coord = downscaled_coords[patch_id]
+        wsi = wsi_object.open_page(vis_level)
+        ps_x, ps_y = min(downscaled_patch_size[0], wsi.width-coord[0]), min(downscaled_patch_size[1], wsi.height-coord[1])
+        region = pyvips.Region.new(wsi).fetch(coord[0], coord[1], ps_x, ps_y)
+        mode = get_mode(wsi.bands)
+        # patch = Image.frombuffer(mode="RGBA", size=(ps_x,ps_y), data=region).convert("RGB")
+        patch = Image.frombuffer(mode=mode, size=(ps_x,ps_y), data=region).convert("RGB")
+        if ps_x != downscaled_patch_size[0] or ps_y != downscaled_patch_size[1]:
+            patch = ImageOps.pad(patch, downscaled_patch_size, color=None, centering=(0, 0))
+        patch = np.array(patch)
         canvas_crop_shape = canvas[
-            coord[1] : coord[1] + patch_size[1],
-            coord[0] : coord[0] + patch_size[0],
+            coord[1] : coord[1] + downscaled_patch_size[1],
+            coord[0] : coord[0] + downscaled_patch_size[0],
             :3,
         ].shape[:2]
         canvas[
-            coord[1] : coord[1] + patch_size[1],
-            coord[0] : coord[0] + patch_size[0],
+            coord[1] : coord[1] + downscaled_patch_size[1],
+            coord[0] : coord[0] + downscaled_patch_size[0],
             :3,
         ] = patch[: canvas_crop_shape[0], : canvas_crop_shape[1], :]
         if draw_grid:
-            DrawGrid(canvas, coord, patch_size)
+            DrawGrid(canvas, coord, downscaled_patch_size)
 
     return Image.fromarray(canvas)
 
@@ -293,17 +315,16 @@ def VisualizeCoords(
     alpha=-1,
     verbose=False,
 ):
-    wsi = wsi_object.getOpenSlide()
-    vis_level = wsi_object.get_best_level_for_downsample_custom(downscale)
+    vis_level = wsi_object.get_best_level_for_downsample(downscale)
     file = h5py.File(hdf5_file_path, "r")
     dset = file["coords"]
     coords = dset[:]
-    w, h = wsi.level_dimensions[0]
+    w, h = wsi_object.level_dimensions[0]
 
     if verbose:
         print(f"original size: {w} x {h}")
 
-    w, h = wsi.level_dimensions[vis_level]
+    w, h = wsi_object.level_dimensions[vis_level]
 
     patch_size = dset.attrs["patch_size"]
     patch_level = dset.attrs["patch_level"]
@@ -314,9 +335,7 @@ def VisualizeCoords(
         print(f"patch level: {patch_level}")
 
     patch_size = tuple(
-        (
-            np.array((patch_size, patch_size)) * wsi.level_downsamples[patch_level]
-        ).astype(np.int32)
+        (np.array((patch_size, patch_size)) * wsi_object.level_downsamples[patch_level]).astype(np.int32)
     )
     if verbose:
         print(f"ref patch size: {patch_size}")
