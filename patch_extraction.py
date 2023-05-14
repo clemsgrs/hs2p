@@ -68,8 +68,8 @@ def main(cfg: DictConfig):
 
         slide_paths = slide_df.slide_path.values.tolist()
         mask_paths = []
-        if "mask_path" in slide_df.columns:
-            mask_paths = slide_df.mask_path.values.tolist()
+        if "segmentation_mask_path" in slide_df.columns:
+            mask_paths = slide_df.segmentation_mask_path.values.tolist()
         spacings = []
         if "spacing" in slide_df.columns:
             spacings = slide_df.spacing.values.tolist()
@@ -95,8 +95,8 @@ def main(cfg: DictConfig):
         slide_ids_to_process = process_stack.slide_id
         slide_paths_to_process = process_stack.slide_path
         mask_paths_to_process = [None] * len(slide_paths_to_process)
-        if "mask_path" in process_stack.columns:
-            mask_paths_to_process = process_stack.mask_path
+        if "segmentation_mask_path" in process_stack.columns:
+            mask_paths_to_process = process_stack.segmentation_mask_path
         spacings_to_process = [None] * len(slide_paths_to_process)
         if "spacing" in process_stack.columns:
             spacings_to_process = process_stack.spacing
