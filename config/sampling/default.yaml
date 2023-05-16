@@ -15,6 +15,7 @@ color_mapping:  # [r,g,b] color code of overlayed annotation mask, leave blank i
 
 skip_category: ['category_1'] # categories we don't want to save patches for
 filtering_threshold: 0.8 # patches with annotated area below filtering_threshold are discarded
+alpha: 0.6 # controls the opacity of the annotation mask overlay on the slide & on the patches
 sort: False # whether or not to sort patches with annotated area above filtering_threshold by decreasing area
 topk: # if sort = True, use this value to only keep the topk patch with highest annotated area for each category
 
