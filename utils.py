@@ -442,7 +442,7 @@ def seg_and_patch_slide(
                 "tile_size": [],
                 "spacing": [],
                 "level": [],
-                "level_dim": [],
+                "level_dimensions": [],
                 "x": [],
                 "y": [],
                 "contour": [],

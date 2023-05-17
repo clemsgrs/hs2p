@@ -333,7 +333,7 @@ def sample_patches(
     w, h = wsi_object.level_dimensions[seg_params.seg_level]
     if w * h > 1e8:
         print(
-            f"level_dim {w} x {h} is likely too large for successful segmentation, aborting"
+            f"level dimensions {w} x {h} is likely too large for successful segmentation, aborting"
         )
         return 0
 

@@ -686,7 +686,7 @@ class WholeSlideImage(object):
                 "downsampled_level_dim": tuple(
                     np.array(self.level_dimensions[patch_level])
                 ),
-                "level_dim": self.level_dimensions[patch_level],
+                "level_dimensions": self.level_dimensions[patch_level],
                 "wsi_name": self.name,
                 "save_path": str(save_dir),
             }
@@ -695,7 +695,7 @@ class WholeSlideImage(object):
                 "slide_id": [self.name] * npatch,
                 "spacing": [spacing] * npatch,
                 "level": [patch_level] * npatch,
-                "level_dim": [self.level_dimensions[patch_level]] * npatch,
+                "level_dimensions": [self.level_dimensions[patch_level]] * npatch,
                 "tile_size": [patch_size] * npatch,
                 "x": list(filtered_results[:, 0]),  # defined w.r.t level 0
                 "y": list(filtered_results[:, 1]),  # defined w.r.t level 0
