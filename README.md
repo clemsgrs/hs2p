@@ -36,8 +36,8 @@ You can optionally provide paths to pre-computed segmentation masks under the 's
 
 ```
 slide_id,slide_path,segmentation_mask_path
-slide_id_1,path/to/slide_1.tif, path/to/slide_1_mask.tif
-slide_id_2,path/to/slide_2.tif, path/to/slide_2_mask.tif
+slide_id_1,path/to/slide_1.tif,path/to/slide_1_mask.tif
+slide_id_2,path/to/slide_2.tif,path/to/slide_2_mask.tif
 ...
 ```
 

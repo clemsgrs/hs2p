@@ -284,6 +284,7 @@ def sample_patches(
     vis_params,
     filter_params,
     patch_params,
+    spacing: Optional[float] = None,
     seg_mask_fp: Optional[str] = None,
     enable_mp: bool = False,
     color_mapping: Optional[Dict[str, int]] = None,
@@ -297,7 +298,7 @@ def sample_patches(
 ):
 
     # Inialize WSI & annotation mask
-    wsi_object = WholeSlideImage(slide_fp)
+    wsi_object = WholeSlideImage(slide_fp, spacing)
     annotation_mask = WholeSlideImage(annot_mask_fp)
     wsi_spacing_level = wsi_object.get_best_level_for_spacing(patch_params.spacing)
 
@@ -598,6 +599,10 @@ def main(cfg: DictConfig):
         seg_mask_fps = df["segmentation_mask_path"].values.tolist()
     annot_mask_fps = df["annotation_mask_path"].values.tolist()
 
+    spacings = [None] * len(slide_ids)
+    if "spacing" in df.columns:
+        spacings = df.spacing.values.tolist()
+
     if cfg.speed.multiprocessing:
 
         args = [
@@ -611,6 +616,7 @@ def main(cfg: DictConfig):
                 cfg.vis_params,
                 cfg.filter_params,
                 cfg.patch_params,
+                spacing,
                 seg_mask_fp,
                 False,
                 color_mapping,
@@ -622,8 +628,8 @@ def main(cfg: DictConfig):
                 seg_mask_save_dir,
                 overlay_mask_save_dir,
             )
-            for sid, slide_fp, seg_mask_fp, annot_mask_fp in zip(
-                slide_ids, slide_fps, seg_mask_fps, annot_mask_fps
+            for sid, slide_fp, seg_mask_fp, annot_mask_fp, spacing in zip(
+                slide_ids, slide_fps, seg_mask_fps, annot_mask_fps, spacings
             )
         ]
 
@@ -660,7 +666,7 @@ def main(cfg: DictConfig):
         dfs = []
 
         with tqdm.tqdm(
-            zip(slide_ids, slide_fps, seg_mask_fps, annot_mask_fps),
+            zip(slide_ids, slide_fps, seg_mask_fps, annot_mask_fps, spacings),
             desc=f"Sampling Patches",
             unit=" slide",
             initial=0,
@@ -668,7 +674,7 @@ def main(cfg: DictConfig):
             leave=True,
         ) as t:
 
-            for i, (sid, slide_fp, seg_mask_fp, annot_mask_fp) in enumerate(t):
+            for i, (sid, slide_fp, seg_mask_fp, annot_mask_fp, spacing) in enumerate(t):
 
                 t_df = sample_patches(
                     sid,
@@ -680,6 +686,7 @@ def main(cfg: DictConfig):
                     cfg.vis_params,
                     cfg.filter_params,
                     cfg.patch_params,
+                    spacing=spacing,
                     seg_mask_fp=seg_mask_fp,
                     enable_mp=True,
                     color_mapping=color_mapping,
@@ -705,4 +712,3 @@ def main(cfg: DictConfig):
 if __name__ == "__main__":
 
     main()
-    # zip -r tiles.zip './tiles'
