@@ -188,7 +188,7 @@ def initialize_hdf5_bag(first_patch, save_coord=False):
         patch_level,
         downsample,
         downsampled_level_dim,
-        level_dim,
+        level_dimensions,
         img_patch,
         name,
         save_path,
@@ -212,7 +212,7 @@ def initialize_hdf5_bag(first_patch, save_coord=False):
     dset.attrs["patch_level"] = patch_level
     dset.attrs["wsi_name"] = name
     dset.attrs["downsample"] = downsample
-    dset.attrs["level_dim"] = level_dim
+    dset.attrs["level_dimensions"] = level_dimensions
     dset.attrs["downsampled_level_dim"] = downsampled_level_dim
 
     if save_coord:

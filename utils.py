@@ -238,7 +238,7 @@ def seg_and_patch(
 
             vis_level = vis_params.vis_level
             if vis_level < 0:
-                if len(wsi_object.level_dim) == 1:
+                if len(wsi_object.level_dimensions) == 1:
                     vis_params.vis_level = 0
                 else:
                     best_level = wsi_object.get_best_level_for_downsample_custom(
@@ -248,7 +248,7 @@ def seg_and_patch(
 
             seg_level = seg_params.seg_level
             if seg_level < 0:
-                if len(wsi_object.level_dim) == 1:
+                if len(wsi_object.level_dimensions) == 1:
                     seg_params.seg_level = 0
                 else:
                     best_level = wsi_object.get_best_level_for_downsample_custom(
@@ -256,10 +256,10 @@ def seg_and_patch(
                     )
                     seg_params.seg_level = best_level
 
-            w, h = wsi_object.level_dim[seg_params.seg_level]
+            w, h = wsi_object.level_dimensions[seg_params.seg_level]
             if w * h > 1e8:
                 print(
-                    f"level_dim {w} x {h} is likely too large for successful segmentation, aborting"
+                    f"level dimensions {w} x {h} is likely too large for successful segmentation, aborting"
                 )
                 df.loc[idx, "status"] = "failed_seg"
                 continue
@@ -397,7 +397,7 @@ def seg_and_patch_slide(
 
     vis_level = vis_params.vis_level
     if vis_level < 0:
-        if len(wsi_object.level_dim) == 1:
+        if len(wsi_object.level_dimensions) == 1:
             vis_params.vis_level = 0
             best_vis_level = 0
         else:
@@ -408,7 +408,7 @@ def seg_and_patch_slide(
 
     seg_level = seg_params.seg_level
     if seg_level < 0:
-        if len(wsi_object.level_dim) == 1:
+        if len(wsi_object.level_dimensions) == 1:
             seg_params.seg_level = 0
             best_seg_level = 0
         else:
@@ -417,10 +417,10 @@ def seg_and_patch_slide(
             )
             seg_params.seg_level = best_seg_level
 
-    w, h = wsi_object.level_dim[seg_params.seg_level]
+    w, h = wsi_object.level_dimensions[seg_params.seg_level]
     if w * h > 1e8:
         print(
-            f"level_dim {w} x {h} is likely too large for successful segmentation, aborting"
+            f"level dimensions {w} x {h} is likely too large for successful segmentation, aborting"
         )
         status = "failed_seg"
         tile_df = pd.DataFrame.from_dict(
@@ -429,7 +429,7 @@ def seg_and_patch_slide(
                 "tile_size": [],
                 "spacing": [],
                 "level": [],
-                "level_dim": [],
+                "level_dimensions": [],
                 "x": [],
                 "y": [],
                 "contour": [],

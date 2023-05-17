@@ -59,7 +59,7 @@ def overlay_mask_on_slide(
     mask_min_level = np.argmin([abs(x_wsi-x_mask) for x_wsi,_ in wsi_object.wsi.level_dimensions])
 
     if vis_params.vis_level < 0:
-        if len(wsi_object.level_dim) == 1:
+        if len(wsi_object.level_dimensions) == 1:
             vis_level = 0
             assert mask_min_level == 0
         else:
@@ -247,6 +247,7 @@ def sample_patches(
     alpha: float = 0.5,
     seg_mask_save_dir: Optional[Path] = None,
     overlay_mask_save_dir: Optional[Path] = None,
+    eps: float = 1e-5,
 ):
 
     # Inialize WSI & annotation mask
@@ -260,7 +261,7 @@ def sample_patches(
 
     vis_level = vis_params.vis_level
     if vis_level < 0:
-        if len(wsi_object.level_dim) == 1:
+        if len(wsi_object.level_dimensions) == 1:
             best_vis_level = 0
         else:
             best_vis_level = wsi_object.get_best_level_for_downsample_custom(
@@ -270,7 +271,7 @@ def sample_patches(
 
     seg_level = seg_params.seg_level
     if seg_level < 0:
-        if len(wsi_object.level_dim) == 1:
+        if len(wsi_object.level_dimensions) == 1:
             best_seg_level = 0
         else:
             best_seg_level = wsi_object.get_best_level_for_downsample_custom(
@@ -281,7 +282,7 @@ def sample_patches(
     w, h = wsi_object.wsi.level_dimensions[seg_params.seg_level]
     if w * h > 1e8:
         print(
-            f"level_dim {w} x {h} is likely too large for successful segmentation, aborting"
+            f"level dimensions {w} x {h} is likely too large for successful segmentation, aborting"
         )
         return 0
 
@@ -367,26 +368,23 @@ def sample_patches(
 
                         if vis_params.overlay_mask_on_patch:
                             # if mask doesn't start at same spacing as wsi, need to downsample tile & scale (x, y) coordinates!
-                            if mask_min_level > 0:
-                                # need to scale x, y from slide level 0 to mask level 0 referential
-                                scale = wsi_object.wsi.level_downsamples[mask_min_level] / wsi_object.wsi.level_downsamples[0]
-                                x_scaled, y_scaled = int(x * 1. / scale), int(y * 1. / scale)
-                                # need to scale tile size from wsi_spacing_level to mask_spacing_level
-                                ts_scale = wsi_object.wsi.level_downsamples[mask_min_level+mask_spacing_level] / wsi_object.wsi.level_downsamples[wsi_spacing_level]
-                                ts = int(patch_params.patch_size * 1. / ts_scale)
-                                # read annotation tile from mask
-                                masked_tile = annotation_mask.wsi.read_region((x_scaled,y_scaled), mask_spacing_level, (ts, ts))
-                                masked_tile = masked_tile.split()[0]
+                            # need to scale x, y from slide level 0 to mask level 0 referential
+                            mask_scale = wsi_object.level_downsamples[mask_min_level] / wsi_object.level_downsamples[0]
+                            x_scaled, y_scaled = int(x * 1. / mask_scale[0]), int(y * 1. / mask_scale[1])
+                            # need to scale tile size from wsi_spacing_level to mask_spacing_level
+                            ts_scale = wsi_object.level_downsamples[mask_min_level+mask_spacing_level] / wsi_object.level_downsamples[wsi_spacing_level]
+                            ts_x, ts_y = int(patch_params.patch_size * 1. / ts_scale[0]), int(patch_params.patch_size * 1. / ts_scale[1])
+                            # read annotation tile from mask
+                            masked_tile = annotation_mask.wsi.read_region((x_scaled,y_scaled), mask_spacing_level, (ts_x, ts_y))
+                            masked_tile = masked_tile.split()[0]
+                            if ts_scale[0] > (1+eps) or ts_scale[1] > (1+eps):
                                 # 2 possible ways to go:
                                 # - upsample annotation tile to match true tile size
                                 # - read tile from slide to match annotation tile size
                                 # option 1
-                                masked_tile = masked_tile.resize(tuple(int(e * ts_scale) for e in masked_tile.size), Image.NEAREST)
+                                masked_tile = masked_tile.resize(tuple(int(e * ts_scale[i]) for i,e in enumerate(masked_tile.size)), Image.NEAREST)
                                 # option 2
-                                # tile = wsi_object.wsi.read_region((x,y), mask_min_level+mask_spacing_level, (ts, ts)).convert('RGB')
-                            else:
-                                masked_tile = annotation_mask.wsi.read_region((x,y), mask_spacing_level, (patch_params.patch_size, patch_params.patch_size))
-                                masked_tile = masked_tile.split()[0]
+                                # tile = wsi_object.wsi.read_region((x,y), mask_min_level+mask_spacing_level, (ts_x, ts_y)).convert('RGB')
 
                             overlayed_tile = overlay_mask_on_tile(tile, masked_tile, pixel_mapping, color_mapping, alpha=alpha)
                             overlayed_tile_fp = Path(overlay_tile_dir, cat_, f'{fname}_mask.{patch_params.fmt}')

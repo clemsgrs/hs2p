@@ -35,8 +35,8 @@ class WholeSlideImage(object):
         self.name = path.stem
         self.fmt = path.suffix
         self.wsi = openslide.open_slide(str(path))
-        self.level_downsamples = self._assertLevelDownsamples()
-        self.level_dim = self.wsi.level_dimensions
+        self.level_dimensions = self.wsi.level_dimensions
+        self.level_downsamples = self.get_level_downsamples()
         self.spacing = spacing
 
         self.contours_tissue = None
@@ -106,7 +106,7 @@ class WholeSlideImage(object):
         """
 
         img = np.array(
-            self.wsi.read_region((0, 0), seg_level, self.level_dim[seg_level])
+            self.wsi.read_region((0, 0), seg_level, self.level_dimensions[seg_level])
         )
         img_hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)  # Convert to HSV space
         img_med = cv2.medianBlur(img_hsv[:, :, 1], mthresh)  # Apply median blurring
@@ -238,7 +238,7 @@ class WholeSlideImage(object):
             region_size = (w, h)
         else:
             top_left = (0, 0)
-            region_size = self.level_dim[vis_level]
+            region_size = self.level_dimensions[vis_level]
 
         img = np.array(
             self.wsi.read_region(top_left, vis_level, region_size).convert("RGB")
@@ -353,19 +353,12 @@ class WholeSlideImage(object):
             for holes in contours
         ]
 
-    def _assertLevelDownsamples(self):
+    def get_level_downsamples(self):
         level_downsamples = []
-        dim_0 = self.wsi.level_dimensions[0]
-
-        for downsample, dim in zip(
-            self.wsi.level_downsamples, self.wsi.level_dimensions
-        ):
-            estimated_downsample = (dim_0[0] / float(dim[0]), dim_0[1] / float(dim[1]))
-            level_downsamples.append(estimated_downsample) if estimated_downsample != (
-                downsample,
-                downsample,
-            ) else level_downsamples.append((downsample, downsample))
-
+        dim_0 = self.level_dimensions[0]
+        for dim in self.level_dimensions:
+            level_downsample = (dim_0[0] / float(dim[0]), dim_0[1] / float(dim[1]))
+            level_downsamples.append(level_downsample)
         return level_downsamples
 
     def get_spacings(self):
@@ -531,8 +524,8 @@ class WholeSlideImage(object):
             start_x, start_y, w, h = (
                 0,
                 0,
-                self.level_dim[patch_level][0],
-                self.level_dim[patch_level][1],
+                self.level_dimensions[patch_level][0],
+                self.level_dimensions[patch_level][1],
             )
 
         # 256x256 patches at 20x are equivalent to 512x512 patches at 40x
@@ -546,7 +539,7 @@ class WholeSlideImage(object):
             patch_size * patch_downsample[1],
         )
 
-        img_w, img_h = self.level_dim[0]
+        img_w, img_h = self.level_dimensions[0]
         if use_padding:
             stop_y = int(start_y + h)
             stop_x = int(start_x + w)
@@ -660,8 +653,8 @@ class WholeSlideImage(object):
                 "patch_level": patch_level,
                 "ref_patch_size": ref_patch_size[0],
                 "downsample": self.level_downsamples[patch_level],
-                "downsampled_level_dim": tuple(np.array(self.level_dim[patch_level])),
-                "level_dim": self.level_dim[patch_level],
+                "downsampled_level_dim": tuple(np.array(self.level_dimensions[patch_level])),
+                "level_dimension": self.level_dimensions[patch_level],
                 "wsi_name": self.name,
                 "save_path": str(save_dir),
             }
@@ -670,7 +663,7 @@ class WholeSlideImage(object):
                 "slide_id": [self.name] * npatch,
                 "spacing": [spacing] * npatch,
                 "level": [patch_level] * npatch,
-                "level_dim": [self.level_dim[patch_level]] * npatch,
+                "level_dimension": [self.level_dimensions[patch_level]] * npatch,
                 "tile_size": [patch_size] * npatch,
                 "x": list(filtered_results[:, 0]), # defined w.r.t level 0
                 "y": list(filtered_results[:, 1]), # defined w.r.t level 0
