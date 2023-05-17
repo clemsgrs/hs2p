@@ -459,8 +459,8 @@ def main(cfg: DictConfig):
     annot_mask_fps = df['annotation_mask_path'].values.tolist()
 
     spacings = [None] * len(slide_ids)
-    if "spacing" in slide_df.columns:
-        spacings = slide_df.spacing.values.tolist()
+    if "spacing" in df.columns:
+        spacings = df.spacing.values.tolist()
 
     if cfg.speed.multiprocessing:
 
