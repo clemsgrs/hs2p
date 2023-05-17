@@ -295,6 +295,7 @@ def sample_patches(
     alpha: float = 0.5,
     seg_mask_save_dir: Optional[Path] = None,
     overlay_mask_save_dir: Optional[Path] = None,
+    eps: float = 1e-5,
 ):
 
     # Inialize WSI & annotation mask
