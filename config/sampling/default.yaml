@@ -3,6 +3,8 @@ csv: '' # path to the .csv file containing slide ids, slide paths and annotation
 output_dir: 'output' # folder where to save algorithm output
 experiment_name: 'debug'
 
+backend: 'asap'
+
 pixel_mapping:  # mapping annotated categories to their corresponding pixel values
   - 'category_1': 0
   - 'category_2': 1

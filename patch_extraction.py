@@ -116,6 +116,7 @@ def main(cfg: DictConfig):
                 cfg.flags.patch,
                 cfg.flags.visu,
                 cfg.flags.verbose,
+                cfg.backend,
             )
             for sid, slide_fp, mask_fp, spacing in zip(
                 slide_ids_to_process, slide_paths_to_process, mask_paths_to_process, spacings_to_process
@@ -180,6 +181,7 @@ def main(cfg: DictConfig):
             patch_params=cfg.patch_params,
             verbose=cfg.flags.verbose,
             log_to_wandb=cfg.wandb.enable,
+            backend=cfg.backend,
         )
 
 

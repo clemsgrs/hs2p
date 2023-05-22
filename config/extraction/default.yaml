@@ -4,6 +4,8 @@ output_dir: 'output' # folder where to save algorithm output
 experiment_name: 'debug'
 resume: False # whether or not to resume existing experiment
 
+backend: 'asap'
+
 flags:
   patch: True # whether or not to extract patches from segmented tissue regions
   visu: True # whether or not to generate a .jpg image to visualize patching results

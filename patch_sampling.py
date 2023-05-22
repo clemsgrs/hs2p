@@ -255,12 +255,13 @@ def sample_patches(
     alpha: float = 0.5,
     seg_mask_save_dir: Optional[Path] = None,
     overlay_mask_save_dir: Optional[Path] = None,
+    backend: str = 'asap',
     eps: float = 1e-5,
 ):
 
     # Inialize WSI & annotation mask
-    wsi_object = WholeSlideImage(slide_fp, spacing)
-    annotation_mask = WholeSlideImage(annot_mask_fp)
+    wsi_object = WholeSlideImage(slide_fp, spacing, backend)
+    annotation_mask = WholeSlideImage(annot_mask_fp, backend=backend)
     wsi_spacing_level = wsi_object.get_best_level_for_spacing(patch_params.spacing)
 
     x_mask = annotation_mask.level_dimensions[0][0]
@@ -501,6 +502,7 @@ def main(cfg: DictConfig):
                 cfg.alpha,
                 seg_mask_save_dir,
                 overlay_mask_save_dir,
+                cfg.backend,
             )
             for sid, slide_fp, seg_mask_fp, annot_mask_fp, spacing in zip(slide_ids, slide_fps, seg_mask_fps, annot_mask_fps, spacings)
         ]
@@ -569,6 +571,7 @@ def main(cfg: DictConfig):
                     alpha=cfg.alpha,
                     seg_mask_save_dir=seg_mask_save_dir,
                     overlay_mask_save_dir=overlay_mask_save_dir,
+                    backend=cfg.backend,
                 )
                 if t_df is not None:
                     dfs.append(t_df)

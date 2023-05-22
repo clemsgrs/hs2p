@@ -181,6 +181,7 @@ def seg_and_patch(
     process_list: Optional[Path] = None,
     verbose: bool = False,
     log_to_wandb: bool = False,
+    backend: str = 'asap',
 ):
     start_time = time.time()
     slide_paths = slide_df.slide_path.values.tolist()
@@ -234,7 +235,7 @@ def seg_and_patch(
             t.display(f"Processing {slide_id}", pos=2)
 
             # Inialize WSI
-            wsi_object = WholeSlideImage(slide_path, spacing)
+            wsi_object = WholeSlideImage(slide_path, spacing, backend)
 
             vis_level = vis_params.vis_level
             if vis_level < 0:
@@ -385,6 +386,7 @@ def seg_and_patch_slide(
     patch: bool = False,
     visu: bool = False,
     verbose: bool = False,
+    backend: str = 'asap',
 ):
     if verbose:
         print(f"Processing {slide_id}...")
@@ -393,7 +395,7 @@ def seg_and_patch_slide(
         mask_fp = Path(mask_fp)
 
     # Inialize WSI
-    wsi_object = WholeSlideImage(Path(slide_fp), spacing)
+    wsi_object = WholeSlideImage(Path(slide_fp), spacing, backend)
 
     vis_level = vis_params.vis_level
     if vis_level < 0:
