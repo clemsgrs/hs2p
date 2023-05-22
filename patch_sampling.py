@@ -37,12 +37,6 @@ def get_mask_percent(mask, val=0):
     return mask_percentage
 
 
-def scale_coordinates(x, y, scale):
-    xx = int(x * scale)
-    yy = int(y * scale)
-    return xx, yy
-
-
 def overlay_mask_on_slide(
     wsi_object,
     mask_object,
@@ -55,8 +49,8 @@ def overlay_mask_on_slide(
     Show a mask overlayed on a slide
     """
 
-    x_mask = mask_object.wsi.level_dimensions[0][0]
-    mask_min_level = np.argmin([abs(x_wsi-x_mask) for x_wsi,_ in wsi_object.wsi.level_dimensions])
+    x_mask = mask_object.level_dimensions[0][0]
+    mask_min_level = np.argmin([abs(x_wsi-x_mask) for x_wsi,_ in wsi_object.level_dimensions])
 
     if vis_params.vis_level < 0:
         if len(wsi_object.level_dimensions) == 1:
@@ -72,8 +66,17 @@ def overlay_mask_on_slide(
 
     mask_vis_level = vis_level - mask_min_level
 
-    slide = wsi_object.wsi.read_region((0,0), vis_level, wsi_object.wsi.level_dimensions[vis_level])
-    mask = mask_object.wsi.read_region((0,0), mask_vis_level, mask_object.wsi.level_dimensions[mask_vis_level])
+    slide_vis_spacing = wsi_object.spacings[vis_level]
+    slide_width, slide_height = wsi_object.level_dimensions[vis_level]
+    slide = wsi_object.wsi.get_patch(0, 0, slide_width, slide_height, spacing=wsi_object.spacing_mapping[slide_vis_spacing], center=False)
+    slide = Image.fromarray(slide).convert("RGBA")
+
+    mask_vis_spacing = mask_object.spacings[mask_vis_level]
+    mask_width, mask_height = mask_object.level_dimensions[mask_vis_level]
+    mask = mask_object.wsi.get_patch(0, 0, mask_width, mask_height, spacing=mask_object.spacing_mapping[mask_vis_spacing], center=False)
+    if mask.shape[-1] == 1:
+        mask = np.squeeze(mask, axis=-1)
+    mask = Image.fromarray(mask)
 
     # Mask data is present in the R channel
     mask = mask.split()[0]
@@ -178,8 +181,8 @@ def extract_top_tiles(
 ):
 
     wsi_spacing_level = wsi_object.get_best_level_for_spacing(spacing)
-    x_mask = mask_object.wsi.level_dimensions[0][0]
-    mask_min_level = np.argmin([abs(x_wsi-x_mask) for x_wsi,_ in wsi_object.wsi.level_dimensions])
+    x_mask = mask_object.level_dimensions[0][0]
+    mask_min_level = np.argmin([abs(x_wsi-x_mask) for x_wsi,_ in wsi_object.level_dimensions])
     if downsample == -1:
         wsi_downsample_level = max(wsi_spacing_level, mask_min_level)
     else:
@@ -188,10 +191,15 @@ def extract_top_tiles(
     assert wsi_spacing_level <= wsi_downsample_level
     mask_downsample_level = wsi_downsample_level - mask_min_level
 
-    wsi_scale = wsi_object.wsi.level_downsamples[wsi_downsample_level] / wsi_object.wsi.level_downsamples[wsi_spacing_level]
-    downsampled_tile_size = int(tile_size * 1. / wsi_scale)
+    wsi_scale = tuple(a / b for a, b in zip(wsi_object.level_downsamples[wsi_downsample_level], wsi_object.level_downsamples[wsi_spacing_level]))
+    downsampled_tile_size = tuple(int(tile_size * 1. / s) for s in wsi_scale)
 
-    mask_data = mask_object.wsi.read_region((0,0), mask_downsample_level, mask_object.wsi.level_dimensions[mask_downsample_level])
+    mask_downsample_spacing = mask_object.spacings[mask_downsample_level]
+    mask_width, mask_height = mask_object.level_dimensions[mask_downsample_level]
+    mask_data = mask_object.wsi.get_patch(0, 0, mask_width, mask_height, spacing=mask_object.spacing_mapping[mask_downsample_spacing], center=False)
+    if mask_data.shape[-1] == 1:
+        mask_data = np.squeeze(mask_data, axis=-1)
+    mask_data = Image.fromarray(mask_data)
     mask_data = mask_data.split()[0]
 
     filtered_grid = []
@@ -202,10 +210,10 @@ def extract_top_tiles(
         # in tile_df, x & y coordinates are defined w.r.t level 0 in the slide
         # need to downsample them to match input downsample value
         for x, y in tile_df[['x', 'y']].values:
-            downsample_factor = wsi_object.wsi.level_downsamples[wsi_downsample_level]
-            x_downsampled, y_downsampled = scale_coordinates(x, y, 1. / downsample_factor)
+            downsample_factor = wsi_object.level_downsamples[wsi_downsample_level]
+            x_downsampled, y_downsampled = int(x * 1. / downsample_factor[0]), int(y * 1. / downsample_factor[1])
             # crop mask tile
-            coords = x_downsampled, y_downsampled, x_downsampled+downsampled_tile_size, y_downsampled+downsampled_tile_size
+            coords = x_downsampled, y_downsampled, x_downsampled+downsampled_tile_size[0], y_downsampled+downsampled_tile_size[1]
             masked_tile = mask_data.crop(coords)
             pct = get_mask_percent(masked_tile, pixel_val)
             if pct > threshold:
@@ -255,8 +263,8 @@ def sample_patches(
     annotation_mask = WholeSlideImage(annot_mask_fp)
     wsi_spacing_level = wsi_object.get_best_level_for_spacing(patch_params.spacing)
 
-    x_mask = annotation_mask.wsi.level_dimensions[0][0]
-    mask_min_level = np.argmin([abs(x_wsi-x_mask) for x_wsi,_ in wsi_object.wsi.level_dimensions])
+    x_mask = annotation_mask.level_dimensions[0][0]
+    mask_min_level = np.argmin([abs(x_wsi-x_mask) for x_wsi,_ in wsi_object.level_dimensions])
     mask_spacing_level = annotation_mask.get_best_level_for_spacing(patch_params.spacing, ignore_warning=True)
 
     vis_level = vis_params.vis_level
@@ -279,7 +287,7 @@ def sample_patches(
             )
         seg_params.seg_level = best_seg_level
 
-    w, h = wsi_object.wsi.level_dimensions[seg_params.seg_level]
+    w, h = wsi_object.level_dimensions[seg_params.seg_level]
     if w * h > 1e8:
         print(
             f"level dimensions {w} x {h} is likely too large for successful segmentation, aborting"
@@ -360,7 +368,8 @@ def sample_patches(
 
                     for x, y in t:
 
-                        tile = wsi_object.wsi.read_region((x,y), wsi_spacing_level, (patch_params.patch_size, patch_params.patch_size)).convert('RGB')
+                        tile = wsi_object.wsi.get_patch(x, y, patch_params.patch_size, patch_params.patch_size, spacing=wsi_object.spacing_mapping[patch_params.spacing], center=False)
+                        tile = Image.fromarray(tile).convert("RGB")
                         fname = f'{slide_id}_{x}_{y}'
                         tile_fp = Path(raw_tile_dir, cat_, f'{fname}.{patch_params.fmt}')
                         tile_fp.parent.mkdir(exist_ok=True, parents=True)
@@ -369,13 +378,16 @@ def sample_patches(
                         if vis_params.overlay_mask_on_patch:
                             # if mask doesn't start at same spacing as wsi, need to downsample tile & scale (x, y) coordinates!
                             # need to scale x, y from slide level 0 to mask level 0 referential
-                            mask_scale = wsi_object.level_downsamples[mask_min_level] / wsi_object.level_downsamples[0]
+                            mask_scale = tuple(a / b for a, b in zip(wsi_object.level_downsamples[mask_min_level], wsi_object.level_downsamples[0]))
                             x_scaled, y_scaled = int(x * 1. / mask_scale[0]), int(y * 1. / mask_scale[1])
                             # need to scale tile size from wsi_spacing_level to mask_spacing_level
-                            ts_scale = wsi_object.level_downsamples[mask_min_level+mask_spacing_level] / wsi_object.level_downsamples[wsi_spacing_level]
+                            ts_scale = tuple(a / b for a, b in zip(wsi_object.level_downsamples[mask_min_level+mask_spacing_level], wsi_object.level_downsamples[wsi_spacing_level]))
                             ts_x, ts_y = int(patch_params.patch_size * 1. / ts_scale[0]), int(patch_params.patch_size * 1. / ts_scale[1])
                             # read annotation tile from mask
-                            masked_tile = annotation_mask.wsi.read_region((x_scaled,y_scaled), mask_spacing_level, (ts_x, ts_y))
+                            masked_tile = annotation_mask.wsi.get_patch(x_scaled, y_scaled, ts_x, ts_y, spacing=annotation_mask.spacing_mapping[patch_params.spacing], center=False)
+                            if masked_tile.shape[-1] == 1:
+                                masked_tile = np.squeeze(masked_tile, axis=-1)
+                            masked_tile = Image.fromarray(masked_tile)
                             masked_tile = masked_tile.split()[0]
                             if ts_scale[0] > (1+eps) or ts_scale[1] > (1+eps):
                                 # 2 possible ways to go:
@@ -384,7 +396,9 @@ def sample_patches(
                                 # option 1
                                 masked_tile = masked_tile.resize(tuple(int(e * ts_scale[i]) for i,e in enumerate(masked_tile.size)), Image.NEAREST)
                                 # option 2
-                                # tile = wsi_object.wsi.read_region((x,y), mask_min_level+mask_spacing_level, (ts_x, ts_y)).convert('RGB')
+                                # tile_spacing = wsi_object.spacings[mask_min_level+mask_spacing_level]
+                                # tile = wsi_object.get_patch(x, y, ts_x, ts_y, spacing=wsi_object.spacing_mapping[tile_spacing], center=False)
+                                # tile = Image.fromarray(tile).convert("RGB")
 
                             overlayed_tile = overlay_mask_on_tile(tile, masked_tile, pixel_mapping, color_mapping, alpha=alpha)
                             overlayed_tile_fp = Path(overlay_tile_dir, cat_, f'{fname}_mask.{patch_params.fmt}')

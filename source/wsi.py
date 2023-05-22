@@ -1,9 +1,9 @@
 import cv2
 import time
 import math
-import openslide
 import numpy as np
 import pandas as pd
+import wholeslidedata as wsd
 import multiprocessing as mp
 
 from PIL import Image
@@ -24,7 +24,7 @@ Image.MAX_IMAGE_PIXELS = 933120000
 
 
 class WholeSlideImage(object):
-    def __init__(self, path: Path, spacing: Optional[float] = None):
+    def __init__(self, path: Path, spacing: Optional[float] = None, backend: str = 'asap'):
 
         """
         Args:
@@ -34,16 +34,17 @@ class WholeSlideImage(object):
         self.path = path
         self.name = path.stem
         self.fmt = path.suffix
-        self.wsi = openslide.open_slide(str(path))
-        self.level_dimensions = self.wsi.level_dimensions
-        self.level_downsamples = self.get_level_downsamples()
+        self.wsi = wsd.WholeSlideImage(path, backend=backend)
+        self.level_dimensions = self.wsi.shapes
+        self.level_downsamples = self.get_downsamples()
         self.spacing = spacing
+        self.spacings = self.get_spacings()
+        self.backend = backend
+
+        self.spacing_mapping = {a: b for a, b in zip(self.spacings, self.wsi.spacings)}
 
         self.contours_tissue = None
         self.contours_tumor = None
-
-    def getOpenSlide(self):
-        return self.wsi
 
     def initSegmentation(self, mask_fp: Path):
         # load segmentation results from pickle file
@@ -58,28 +59,17 @@ class WholeSlideImage(object):
         self, mask_fp: Path, spacing: float, downsample: int, filter_params, sthresh_up: int = 255, tissue_val: int = 1,
     ):
 
-        try:
+        mask = WholeSlideImage(mask_fp, backend=self.backend)
+        w, h = mask.level_dimensions[0]
+        mask_level = int(np.argmin([abs(x - w) for x, _ in self.level_dimensions]))
+        seg_level = self.get_best_level_for_downsample_custom(downsample)
 
-            mask = openslide.OpenSlide(str(mask_fp))
-            w, h = mask.dimensions
-            mask_level = int(np.argmin([abs(x - w) for x, _ in self.wsi.level_dimensions]))
-            seg_level = self.get_best_level_for_downsample_custom(downsample)
+        assert seg_level >= mask_level, f"Segmentation mask highest resolution is smaller than target segmentation result resolution, please use a bigger downsample value"
 
-            assert seg_level >= mask_level, f"Segmentation mask highest resolution is smaller than target segmentation result resolution, please use a bigger downsample value"
-
-            m = mask.read_region((0,0), seg_level-mask_level, mask.level_dimensions[seg_level-mask_level]).convert('RGB')
-            m = np.array(m)[...,0]
-
-        except openslide.lowlevel.OpenSlideError:
-
-            from tifffile import TiffFile
-
-            tif = TiffFile(mask_fp)
-            mask = tif.pages[0]
-            h, w = mask.shape
-            mask_level = int(np.argmin([abs(x - w) for x, _ in self.wsi.level_dimensions]))
-            seg_level = self.get_best_level_for_downsample_custom(downsample)
-            m = tif.pages[seg_level-mask_level].asarray()
+        mask_spacing = mask.spacings[seg_level-mask_level]
+        width, height = mask.level_dimensions[seg_level]
+        m = mask.get_patch(0, 0, width, height, spacing=mask.spacing_mapping[mask_spacing], center=False)
+        m = m[...,0]
 
         if tissue_val == 2:
             m = m - np.ones_like(m)
@@ -105,9 +95,10 @@ class WholeSlideImage(object):
         Segment the tissue via HSV -> Median thresholding -> Binary threshold
         """
 
-        img = np.array(
-            self.wsi.read_region((0, 0), seg_level, self.level_dimensions[seg_level])
-        )
+        seg_spacing = self.spacings[seg_level]
+        width, height = self.level_dimensions[seg_level]
+        img = self.wsi.get_patch(0, 0, width, height, spacing=self.spacing_mapping[seg_spacing], center=False)
+        img = np.array(Image.fromarray(img).convert("RGBA"))
         img_hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)  # Convert to HSV space
         img_med = cv2.medianBlur(img_hsv[:, :, 1], mthresh)  # Apply median blurring
 
@@ -240,9 +231,10 @@ class WholeSlideImage(object):
             top_left = (0, 0)
             region_size = self.level_dimensions[vis_level]
 
-        img = np.array(
-            self.wsi.read_region(top_left, vis_level, region_size).convert("RGB")
-        )
+        x, y = top_left
+        vis_spacing = self.spacings[vis_level]
+        width, height = region_size[0], region_size[1]
+        img = self.wsi.get_patch(x, y, width, height, spacing=self.spacing_mapping[vis_spacing], center=False)
 
         if not view_slide_only:
             offset = tuple(-(np.array(top_left) * scale).astype(int))
@@ -353,7 +345,7 @@ class WholeSlideImage(object):
             for holes in contours
         ]
 
-    def get_level_downsamples(self):
+    def get_downsamples(self):
         level_downsamples = []
         dim_0 = self.level_dimensions[0]
         for dim in self.level_dimensions:
@@ -362,36 +354,19 @@ class WholeSlideImage(object):
         return level_downsamples
 
     def get_spacings(self):
-        if self.spacing:
-            return self.spacing, self.spacing
-        elif "openslide.mpp-x" in self.wsi.properties:
-            x_spacing = float(self.wsi.properties["openslide.mpp-x"])
-            y_spacing = float(self.wsi.properties["openslide.mpp-y"])
-        elif "tiff.XResolution" in self.wsi.properties:
-            # OpenSlide gives the resolution in centimeters so we convert this to microns
-            x_res = float(self.wsi.properties["tiff.XResolution"]) / 10000
-            y_res = float(self.wsi.properties["tiff.YResolution"]) / 10000
-            x_spacing, y_spacing = 1 / x_res, 1 / y_res
+        if self.spacing is None:
+            return self.wsi.spacings
         else:
-            raise KeyError(
-                "Neither 'openslide.mpp-x' nor 'tiff.XResolution' were found in slide's properties.\nYou may fix this by inspecting one of your slides' properties and add an elif in the code above"
-            )
-        return x_spacing, y_spacing
+            return [self.spacing * s / self.wsi.spacings[0] for s in self.wsi.spacings]
+
+    def get_level_spacing(self, level: int = 0):
+        return self.spacings[level]
 
     def get_best_level_for_spacing(self, target_spacing: float, ignore_warning: bool = False):
-        x_spacing, y_spacing = self.get_spacings()
-        downsample_x, downsample_y = (
-            target_spacing / x_spacing,
-            target_spacing / y_spacing,
-        )
-        # get_best_level_for_downsample just chooses the largest level with a downsample less than user's downsample
-        # see https://github.com/openslide/openslide/issues/274
-        # so I made my own version of get_best_level_for_downsample
-        assert self.get_best_level_for_downsample_custom(
-            downsample_x
-        ) == self.get_best_level_for_downsample_custom(downsample_y)
+        spacing = self.get_level_spacing(0)
+        downsample = target_spacing / spacing
         level, above_tol = self.get_best_level_for_downsample_custom(
-            downsample_x, return_tol_status=True
+            downsample, return_tol_status=True
         )
         if above_tol and not ignore_warning:
             print(
@@ -403,9 +378,9 @@ class WholeSlideImage(object):
         self, downsample, tol: float = 0.2, return_tol_status: bool = False
     ):
         level = int(
-            np.argmin([abs(x - downsample) for x in self.wsi.level_downsamples])
+            np.argmin([abs(x - downsample) for x,_ in self.level_downsamples])
         )
-        above_tol = abs(self.wsi.level_downsamples[level] / downsample - 1) > tol
+        above_tol = abs(self.level_downsamples[level][0] / downsample - 1) > tol
         if return_tol_status:
             return level, above_tol
         else:
@@ -481,8 +456,10 @@ class WholeSlideImage(object):
                 if save_patches_to_disk:
                     patch_save_dir = Path(save_dir, "imgs")
                     patch_save_dir.mkdir(parents=True, exist_ok=True)
+                    patch_spacing = self.spacing_mapping[self.get_level_spacing(attr_dict["coords"]["patch_level"])]
                     npatch, mins, secs = save_patch(
                         self.wsi,
+                        patch_spacing,
                         patch_save_dir,
                         asset_dict,
                         attr_dict,

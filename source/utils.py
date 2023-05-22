@@ -154,6 +154,7 @@ def save_hdf5(output_path, asset_dict, attr_dict=None, mode="a"):
 
 def save_patch(
     wsi,
+    spacing: float,
     save_dir,
     asset_dict,
     attr_dict=None,
@@ -161,17 +162,16 @@ def save_patch(
 ):
     coords = asset_dict["coords"]
     patch_size = attr_dict["coords"]["patch_size"]
-    patch_level = attr_dict["coords"]["patch_level"]
     wsi_name = attr_dict["coords"]["wsi_name"]
 
     npatch = len(coords)
     start_time = time.time()
 
     for coord in coords:
-        pil_patch = wsi.read_region(
-            tuple(coord), patch_level, (patch_size, patch_size)
-        ).convert("RGB")
-        save_path = Path(save_dir, f"{coord[0]}_{coord[1]}.{fmt}")
+        x, y = coord
+        patch = wsi.get_patch(x, y, patch_size, patch_size, spacing=spacing, center=False)
+        pil_patch = Image.fromarray(patch).convert("RGB")
+        save_path = Path(save_dir, f"{int(x)}_{int(y)}.{fmt}")
         pil_patch.save(save_path)
 
     end_time = time.time()
@@ -247,7 +247,7 @@ def DrawMapFromCoords(
     verbose=False,
 ):
 
-    downsamples = wsi_object.wsi.level_downsamples[vis_level]
+    downsamples = wsi_object.level_downsamples[vis_level]
     if indices is None:
         indices = np.arange(len(coords))
     total = len(indices)
@@ -262,11 +262,10 @@ def DrawMapFromCoords(
 
         patch_id = indices[idx]
         coord = coords[patch_id]
-        patch = np.array(
-            wsi_object.wsi.read_region(tuple(coord), vis_level, patch_size).convert(
-                "RGB"
-            )
-        )
+        x, y = coord
+        spacing = wsi_object.spacings[vis_level]
+        width, height = patch_size
+        patch = wsi_object.wsi.get_patch(x, y, width, height, spacing=wsi_object.spacing_mapping[spacing], center=False)
         coord = np.ceil(coord / downsamples).astype(np.int32)
         canvas_crop_shape = canvas[
             coord[1] : coord[1] + patch_size[1],
@@ -293,17 +292,16 @@ def VisualizeCoords(
     alpha=-1,
     verbose=False,
 ):
-    wsi = wsi_object.getOpenSlide()
     vis_level = wsi_object.get_best_level_for_downsample_custom(downscale)
     file = h5py.File(hdf5_file_path, "r")
     dset = file["coords"]
     coords = dset[:]
-    w, h = wsi.level_dimensions[0]
+    w, h = wsi_object.level_dimensions[0]
 
     if verbose:
         print(f"original size: {w} x {h}")
 
-    w, h = wsi.level_dimensions[vis_level]
+    w, h = wsi_object.level_dimensions[vis_level]
 
     patch_size = dset.attrs["patch_size"]
     patch_level = dset.attrs["patch_level"]
@@ -315,7 +313,7 @@ def VisualizeCoords(
 
     patch_size = tuple(
         (
-            np.array((patch_size, patch_size)) * wsi.level_downsamples[patch_level]
+            np.array((patch_size, patch_size)) * wsi_object.level_downsamples[patch_level]
         ).astype(np.int32)
     )
     if verbose:
