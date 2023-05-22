@@ -46,6 +46,47 @@ class WholeSlideImage(object):
         self.contours_tissue = None
         self.contours_tumor = None
 
+    def get_downsamples(self):
+        level_downsamples = []
+        dim_0 = self.level_dimensions[0]
+        for dim in self.level_dimensions:
+            level_downsample = (dim_0[0] / float(dim[0]), dim_0[1] / float(dim[1]))
+            level_downsamples.append(level_downsample)
+        return level_downsamples
+
+    def get_spacings(self):
+        if self.spacing is None:
+            return self.wsi.spacings
+        else:
+            return [self.spacing * s / self.wsi.spacings[0] for s in self.wsi.spacings]
+
+    def get_level_spacing(self, level: int = 0):
+        return self.spacings[level]
+
+    def get_best_level_for_spacing(self, target_spacing: float, ignore_warning: bool = False):
+        spacing = self.get_level_spacing(0)
+        downsample = target_spacing / spacing
+        level, above_tol = self.get_best_level_for_downsample_custom(
+            downsample, return_tol_status=True
+        )
+        if above_tol and not ignore_warning:
+            print(
+                f"WARNING! The closest natural spacing to the target spacing was more than 15% appart."
+            )
+        return level
+
+    def get_best_level_for_downsample_custom(
+        self, downsample, tol: float = 0.2, return_tol_status: bool = False
+    ):
+        level = int(
+            np.argmin([abs(x - downsample) for x,_ in self.level_downsamples])
+        )
+        above_tol = abs(self.level_downsamples[level][0] / downsample - 1) > tol
+        if return_tol_status:
+            return level, above_tol
+        else:
+            return level
+
     def initSegmentation(self, mask_fp: Path):
         # load segmentation results from pickle file
         import pickle
@@ -67,8 +108,9 @@ class WholeSlideImage(object):
         assert seg_level >= mask_level, f"Segmentation mask highest resolution is smaller than target segmentation result resolution, please use a bigger downsample value"
 
         mask_spacing = mask.spacings[seg_level-mask_level]
+        s = mask.spacing_mapping[mask.wsi.get_real_spacing(mask_spacing)]
         width, height = mask.level_dimensions[seg_level]
-        m = mask.get_patch(0, 0, width, height, spacing=mask.spacing_mapping[mask_spacing], center=False)
+        m = mask.get_patch(0, 0, width, height, spacing=s, center=False)
         m = m[...,0]
 
         if tissue_val == 2:
@@ -96,8 +138,9 @@ class WholeSlideImage(object):
         """
 
         seg_spacing = self.spacings[seg_level]
+        s = self.spacing_mapping[self.wsi.get_real_spacing(seg_spacing)]
         width, height = self.level_dimensions[seg_level]
-        img = self.wsi.get_patch(0, 0, width, height, spacing=self.spacing_mapping[seg_spacing], center=False)
+        img = self.wsi.get_patch(0, 0, width, height, spacing=s, center=False)
         img = np.array(Image.fromarray(img).convert("RGBA"))
         img_hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)  # Convert to HSV space
         img_med = cv2.medianBlur(img_hsv[:, :, 1], mthresh)  # Apply median blurring
@@ -233,8 +276,9 @@ class WholeSlideImage(object):
 
         x, y = top_left
         vis_spacing = self.spacings[vis_level]
+        s = self.spacing_mapping[self.wsi.get_real_spacing(vis_spacing)]
         width, height = region_size[0], region_size[1]
-        img = self.wsi.get_patch(x, y, width, height, spacing=self.spacing_mapping[vis_spacing], center=False)
+        img = self.wsi.get_patch(x, y, width, height, spacing=s, center=False)
 
         if not view_slide_only:
             offset = tuple(-(np.array(top_left) * scale).astype(int))
@@ -345,47 +389,6 @@ class WholeSlideImage(object):
             for holes in contours
         ]
 
-    def get_downsamples(self):
-        level_downsamples = []
-        dim_0 = self.level_dimensions[0]
-        for dim in self.level_dimensions:
-            level_downsample = (dim_0[0] / float(dim[0]), dim_0[1] / float(dim[1]))
-            level_downsamples.append(level_downsample)
-        return level_downsamples
-
-    def get_spacings(self):
-        if self.spacing is None:
-            return self.wsi.spacings
-        else:
-            return [self.spacing * s / self.wsi.spacings[0] for s in self.wsi.spacings]
-
-    def get_level_spacing(self, level: int = 0):
-        return self.spacings[level]
-
-    def get_best_level_for_spacing(self, target_spacing: float, ignore_warning: bool = False):
-        spacing = self.get_level_spacing(0)
-        downsample = target_spacing / spacing
-        level, above_tol = self.get_best_level_for_downsample_custom(
-            downsample, return_tol_status=True
-        )
-        if above_tol and not ignore_warning:
-            print(
-                f"WARNING! The closest natural spacing to the target spacing was more than 15% appart."
-            )
-        return level
-
-    def get_best_level_for_downsample_custom(
-        self, downsample, tol: float = 0.2, return_tol_status: bool = False
-    ):
-        level = int(
-            np.argmin([abs(x - downsample) for x,_ in self.level_downsamples])
-        )
-        above_tol = abs(self.level_downsamples[level][0] / downsample - 1) > tol
-        if return_tol_status:
-            return level, above_tol
-        else:
-            return level
-
     def process_contours(
         self,
         save_dir: Optional[Path] = None,
@@ -456,7 +459,7 @@ class WholeSlideImage(object):
                 if save_patches_to_disk:
                     patch_save_dir = Path(save_dir, "imgs")
                     patch_save_dir.mkdir(parents=True, exist_ok=True)
-                    patch_spacing = self.spacing_mapping[self.get_level_spacing(attr_dict["coords"]["patch_level"])]
+                    patch_spacing = self.spacing_mapping[wsi_object.wsi.get_real_spacing(self.get_level_spacing(attr_dict["coords"]["patch_level"]))]
                     npatch, mins, secs = save_patch(
                         self.wsi,
                         patch_spacing,

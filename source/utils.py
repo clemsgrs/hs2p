@@ -264,8 +264,9 @@ def DrawMapFromCoords(
         coord = coords[patch_id]
         x, y = coord
         spacing = wsi_object.spacings[vis_level]
+        s = wsi_object.spacing_mapping[wsi_object.wsi.get_real_spacing(spacing)]
         width, height = patch_size
-        patch = wsi_object.wsi.get_patch(x, y, width, height, spacing=wsi_object.spacing_mapping[spacing], center=False)
+        patch = wsi_object.wsi.get_patch(x, y, width, height, spacing=s, center=False)
         coord = np.ceil(coord / downsamples).astype(np.int32)
         canvas_crop_shape = canvas[
             coord[1] : coord[1] + patch_size[1],
