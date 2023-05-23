@@ -82,6 +82,9 @@ hs2p/
 ```
 </details>
 
+`masks/` will contain a downsampled view of the slide with tissue segmentation overlayed<br>
+`visualization/` will contain a downsampled view of the slide where extracted patches are highlighted<br>
+
 `tiles.csv` contain patching information for each slide that ended up having patches extracted:
 
 ```
@@ -148,16 +151,28 @@ hs2p/
 │     │     │     │   └── ...
 │     │     │     ├── category_2/
 │     │     │     └── ...
-│     │     └── mask/
-│     │           ├── category_1/
-│     │           │   ├── slide_id_1_x0_y0_mask.<format>
-│     │           │   ├── slide_id_1_x1_y0_mask.<format>
-│     │           │   └── ...
-│     │           ├── category_2/
+│     │     ├── mask/
+│     │     │     ├── category_1/
+│     │     │     │   ├── slide_id_1_x0_y0_mask.<format>
+│     │     │     │   ├── slide_id_1_x1_y0_mask.<format>
+│     │     │     │   └── ...
+│     │     │     ├── category_2/
+│     │     │     └── ...
+│     │     └── h5/
+│     │           ├── slide_id_1.h5
+│     │           ├── slide_id_2.h5
 │     │           └── ...
+│     ├── visualization/
+│     │     ├── slide_id_1.jpg
+│     │     ├── slide_id_2.jpg
+│     │     └── ...
 │     └── sampled_tiles.csv
 ```
 </details>
+
+`annotation_mask/` will contain a downsampled view of the slide with corresponding annotation mask overlayed<br>
+`segmentation_mask/` will contain a downsampled view of the slide with tissue segmentation overlayed<br>
+`visualization/` will contain a downsampled view of the slide where sampled patches are highlighted<br>
 
 `sampled_patches.csv` contain information for each patch that ended up being extracted:
 

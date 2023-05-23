@@ -6,6 +6,7 @@ import pandas as pd
 
 from PIL import Image
 from pathlib import Path
+from typing import Optional, Tuple, Dict, List
 
 
 def compute_time(start_time, end_time):
@@ -225,6 +226,185 @@ def initialize_hdf5_bag(first_patch, save_coord=False):
     return file_path
 
 
+def overlay_mask_on_slide(
+    wsi_object,
+    mask_object,
+    vis_level: int,
+    pixel_mapping: Dict[str,int],
+    color_mapping: Optional[Dict[str,List[int]]] = None,
+    alpha: float = 0.5,
+    downsample: int = -1,
+):
+    """
+    Show a mask overlayed on a slide
+    """
+
+    x_mask = mask_object.level_dimensions[0][0]
+    mask_min_level = np.argmin([abs(x_wsi-x_mask) for x_wsi,_ in wsi_object.level_dimensions])
+
+    if vis_level < 0:
+        if len(wsi_object.level_dimensions) == 1:
+            vis_level = 0
+            assert mask_min_level == 0
+        else:
+            vis_level = wsi_object.get_best_level_for_downsample_custom(
+                downsample
+            )
+            vis_level = max(vis_level, mask_min_level)
+    else:
+        vis_level = max(vis_level, mask_min_level)
+
+    mask_vis_level = vis_level - mask_min_level
+
+    slide_vis_spacing = wsi_object.spacings[vis_level]
+    slide_width, slide_height = wsi_object.level_dimensions[vis_level]
+    slide = wsi_object.wsi.get_patch(0, 0, slide_width, slide_height, spacing=wsi_object.spacing_mapping[slide_vis_spacing], center=False)
+    slide = Image.fromarray(slide).convert("RGBA")
+
+    mask_vis_spacing = mask_object.spacings[mask_vis_level]
+    mask_width, mask_height = mask_object.level_dimensions[mask_vis_level]
+    mask = mask_object.wsi.get_patch(0, 0, mask_width, mask_height, spacing=mask_object.spacing_mapping[mask_vis_spacing], center=False)
+    if mask.shape[-1] == 1:
+        mask = np.squeeze(mask, axis=-1)
+    mask = Image.fromarray(mask)
+
+    # Mask data is present in the R channel
+    mask = mask.split()[0]
+
+    # Create alpha mask
+    mask_arr = np.array(mask)
+    alpha_int = int(round(255*alpha))
+    if color_mapping is not None:
+        alpha_content = np.zeros_like(mask_arr)
+        for k, v in pixel_mapping.items():
+            if color_mapping[k] is not None:
+                alpha_content += (mask_arr == v)
+        alpha_content = np.less(alpha_content, 1).astype('uint8') * alpha_int + (255 - alpha_int)
+    else:
+        alpha_content = np.less_equal(mask_arr, 0).astype('uint8') * alpha_int + (255 - alpha_int)
+    alpha_content = Image.fromarray(alpha_content)
+
+    preview_palette = np.zeros(shape=768, dtype=int)
+
+    if color_mapping is None:
+        ncat = len(pixel_mapping)
+        if ncat <= 10:
+            color_palette = sns.color_palette("tab10")[:ncat]
+        elif ncat <= 20:
+            color_palette = sns.color_palette("tab20")[:ncat]
+        else:
+            raise ValueError(f"Implementation supports up to 20 categories (provided pixel_mapping has {ncat})")
+        color_mapping = {k: tuple(255*x for x in color_palette[i]) for i, k in enumerate(pixel_mapping.keys())}
+
+    p = [0]*3*len(color_mapping)
+    for k, v in pixel_mapping.items():
+        if color_mapping[k] is not None:
+            p[v*3:v*3+3] = color_mapping[k]
+    n = len(p)
+    preview_palette[0:n] = np.array(p).astype(int)
+
+    mask.putpalette(data=preview_palette.tolist())
+    mask_rgb = mask.convert(mode='RGB')
+
+    overlayed_image = Image.composite(image1=slide, image2=mask_rgb, mask=alpha_content)
+    return overlayed_image
+
+
+def get_masked_tile(
+    wsi_object,
+    mask_object,
+    tile: Image.Image,
+    x: int,
+    y: int,
+    spacing: float,
+    patch_size: Tuple[int],
+    upsample: bool = True,
+    eps: float = 1e-5,
+):
+
+    wsi_spacing_level = wsi_object.get_best_level_for_spacing(spacing)
+
+    x_mask = mask_object.level_dimensions[0][0]
+    mask_min_level = np.argmin([abs(x_wsi-x_mask) for x_wsi,_ in wsi_object.level_dimensions])
+    mask_spacing_level = mask_object.get_best_level_for_spacing(spacing, ignore_warning=True)
+
+    # if mask doesn't start at same spacing as wsi, need to downsample tile & scale (x, y) coordinates!
+    # need to scale x, y from slide level 0 to mask level 0 referential
+    mask_scale = tuple(a / b for a, b in zip(wsi_object.level_downsamples[mask_min_level], wsi_object.level_downsamples[0]))
+    x_scaled, y_scaled = int(x * 1. / mask_scale[0]), int(y * 1. / mask_scale[1])
+    # need to scale tile size from wsi_spacing_level to mask_spacing_level
+    ts_scale = tuple(a / b for a, b in zip(wsi_object.level_downsamples[mask_min_level+mask_spacing_level], wsi_object.level_downsamples[wsi_spacing_level]))
+    ts_x, ts_y = int(patch_size[0] * 1. / ts_scale[0]), int(patch_size[1] * 1. / ts_scale[1])
+    # read annotation tile from mask
+    s = mask_object.spacing_mapping[spacing]
+    masked_tile = mask_object.wsi.get_patch(x_scaled, y_scaled, ts_x, ts_y, spacing=s, center=False)
+    if masked_tile.shape[-1] == 1:
+        masked_tile = np.squeeze(masked_tile, axis=-1)
+    masked_tile = Image.fromarray(masked_tile)
+    masked_tile = masked_tile.split()[0]
+    if ts_scale[0] > (1+eps) or ts_scale[1] > (1+eps):
+        # 2 possible ways to go:
+        # - upsample annotation tile to match true tile size
+        # - read tile from slide to match annotation tile size
+        if upsample:
+            # option 1
+            masked_tile = masked_tile.resize(tuple(int(e * ts_scale[i]) for i,e in enumerate(masked_tile.size)), Image.NEAREST)
+        else:
+            # option 2
+            tile_spacing = wsi_object.spacings[mask_min_level+mask_spacing_level]
+            s = wsi_object.spacing_mapping[tile_spacing]
+            tile = wsi_object.get_patch(x, y, ts_x, ts_y, spacing=s, center=False)
+            tile = Image.fromarray(tile).convert("RGB")
+    return tile, masked_tile
+
+
+def overlay_mask_on_tile(
+    tile: Image.Image,
+    mask: Image.Image,
+    pixel_mapping: Dict[str,int],
+    color_mapping: Optional[Dict[str,List[int]]] = None,
+    alpha=0.5,
+):
+
+    # Create alpha mask
+    mask_arr = np.array(mask)
+    alpha_int = int(round(255*alpha))
+    if color_mapping is not None:
+        alpha_content = np.zeros_like(mask_arr)
+        for k, v in pixel_mapping.items():
+            if color_mapping[k] is not None:
+                alpha_content += (mask_arr == v)
+        alpha_content = np.less(alpha_content, 1).astype('uint8') * alpha_int + (255 - alpha_int)
+    else:
+        alpha_content = np.less_equal(mask_arr, 0).astype('uint8') * alpha_int + (255 - alpha_int)
+    alpha_content = Image.fromarray(alpha_content)
+
+    preview_palette = np.zeros(shape=768, dtype=int)
+
+    if color_mapping is None:
+        ncat = len(pixel_mapping)
+        if ncat <= 10:
+            color_palette = sns.color_palette("tab10")[:ncat]
+        elif ncat <= 20:
+            color_palette = sns.color_palette("tab20")[:ncat]
+        else:
+            raise ValueError(f"Implementation supports up to 20 categories (provided pixel_mapping has {ncat})")
+        color_mapping = {k: tuple(255*x for x in color_palette[i]) for i, k in enumerate(pixel_mapping.keys())}
+
+    p = [0]*3*len(color_mapping)
+    for k, v in pixel_mapping.items():
+        if color_mapping[k] is not None:
+            p[v*3:v*3+3] = color_mapping[k]
+    n = len(p)
+    preview_palette[0:n] = np.array(p).astype(int)
+
+    mask.putpalette(data=preview_palette.tolist())
+    mask_rgb = mask.convert(mode='RGB')
+
+    overlayed_image = Image.composite(image1=tile, image2=mask_rgb, mask=alpha_content)
+    return overlayed_image
+
+
 def DrawGrid(img, coord, shape, thickness=2, color=(0, 0, 0, 255)):
     cv2.rectangle(
         img,
@@ -241,10 +421,15 @@ def DrawMapFromCoords(
     wsi_object,
     coords,
     patch_size,
-    vis_level,
+    vis_level: int,
     indices=None,
-    draw_grid=True,
-    verbose=False,
+    draw_grid: bool = True,
+    thickness: int = 2,
+    verbose: bool = False,
+    mask_object: Optional = None,
+    pixel_mapping: Optional[Dict[str,int]] = None,
+    color_mapping: Optional[Dict[str,int]] = None,
+    alpha: Optional[float] = None,
 ):
 
     downsamples = wsi_object.level_downsamples[vis_level]
@@ -266,7 +451,21 @@ def DrawMapFromCoords(
         spacing = wsi_object.spacings[vis_level]
         s = wsi_object.spacing_mapping[spacing]
         width, height = patch_size
-        patch = wsi_object.wsi.get_patch(x, y, width, height, spacing=s, center=False)
+        tile = wsi_object.wsi.get_patch(x, y, width, height, spacing=s, center=False)
+
+        if mask_object is not None:
+            tile, masked_tile = get_masked_tile(
+                wsi_object,
+                mask_object,
+                Image.fromarray(tile).convert("RGB"),
+                x,
+                y,
+                spacing,
+                patch_size,
+            )
+            tile = overlay_mask_on_tile(tile, masked_tile, pixel_mapping, color_mapping, alpha=alpha)
+            tile = np.array(tile)
+
         coord = np.ceil(coord / downsamples).astype(np.int32)
         canvas_crop_shape = canvas[
             coord[1] : coord[1] + patch_size[1],
@@ -277,27 +476,36 @@ def DrawMapFromCoords(
             coord[1] : coord[1] + patch_size[1],
             coord[0] : coord[0] + patch_size[0],
             :3,
-        ] = patch[: canvas_crop_shape[0], : canvas_crop_shape[1], :]
+        ] = tile[: canvas_crop_shape[0], : canvas_crop_shape[1], :]
         if draw_grid:
-            DrawGrid(canvas, coord, patch_size)
+            DrawGrid(canvas, coord, patch_size, thickness=thickness)
 
     return Image.fromarray(canvas)
 
 
 def VisualizeCoords(
-    hdf5_file_path,
+    hdf5_file_path: Path,
     wsi_object,
-    downscale=16,
-    draw_grid=False,
-    bg_color=(0, 0, 0),
-    alpha=-1,
-    verbose=False,
+    downscale: int = 16,
+    draw_grid: bool = False,
+    thickness: int = 2,
+    bg_color: Tuple[int] = (0, 0, 0),
+    verbose: bool = False,
+    key: str = "coords",
+    heatmap: Optional[Image.Image] = None,
+    mask_object: Optional = None,
+    pixel_mapping: Optional[Dict[str,int]] = None,
+    color_mapping: Optional[Dict[str,int]] = None,
+    alpha: Optional[float] = None,
 ):
     vis_level = wsi_object.get_best_level_for_downsample_custom(downscale)
-    file = h5py.File(hdf5_file_path, "r")
-    dset = file["coords"]
+    h5_file = h5py.File(hdf5_file_path, "r")
+    dset = h5_file[key]
     coords = dset[:]
     w, h = wsi_object.level_dimensions[0]
+
+    if len(coords) == 0:
+        return heatmap
 
     if verbose:
         print(f"original size: {w} x {h}")
@@ -325,12 +533,17 @@ def VisualizeCoords(
             "Visualization Downscale %d is too large" % downscale
         )
 
-    if alpha < 0 or alpha == -1:
+    if heatmap is None:
         heatmap = Image.new(size=(w, h), mode="RGB", color=bg_color)
-    else:
-        heatmap = Image.new(
-            size=(w, h), mode="RGBA", color=bg_color + (int(255 * alpha),)
-        )
+        if mask_object is not None:
+            heatmap = overlay_mask_on_slide(
+                wsi_object,
+                mask_object,
+                vis_level,
+                pixel_mapping,
+                color_mapping,
+                alpha=alpha,
+            )
 
     heatmap = np.array(heatmap)
     heatmap = DrawMapFromCoords(
@@ -341,8 +554,13 @@ def VisualizeCoords(
         vis_level,
         indices=None,
         draw_grid=draw_grid,
+        thickness=thickness,
         verbose=verbose,
+        mask_object=mask_object,
+        pixel_mapping=pixel_mapping,
+        color_mapping=color_mapping,
+        alpha=alpha,
     )
 
-    file.close()
+    h5_file.close()
     return heatmap

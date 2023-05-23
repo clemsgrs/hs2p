@@ -2,7 +2,6 @@ import time
 import tqdm
 import wandb
 import subprocess
-import numpy as np
 import pandas as pd
 from pathlib import Path
 from omegaconf import DictConfig, OmegaConf
@@ -150,6 +149,7 @@ def visualize(
     downscale: int = 64,
     bg_color: Tuple[int, int, int] = (255, 255, 255),
     draw_grid: bool = False,
+    thickness: int = 2,
     verbose: bool = False,
 ):
     start = time.time()
@@ -158,8 +158,8 @@ def visualize(
         wsi_object,
         downscale=downscale,
         bg_color=bg_color,
-        alpha=-1,
         draw_grid=draw_grid,
+        thickness=thickness,
         verbose=verbose,
     )
     total_time = time.time() - start
@@ -324,6 +324,7 @@ def seg_and_patch(
                         downscale=vis_params.downscale,
                         bg_color=tuple(patch_params.bg_color),
                         draw_grid=patch_params.draw_grid,
+                        thickness=patch_params.grid_thickness,
                         verbose=verbose,
                     )
                     visu_path = Path(visu_save_dir, f"{slide_id}.jpg")
@@ -496,6 +497,7 @@ def seg_and_patch_slide(
                 downscale=vis_params.downscale,
                 bg_color=tuple(patch_params.bg_color),
                 draw_grid=patch_params.draw_grid,
+                thickness=patch_params.grid_thickness,
                 verbose=verbose,
             )
             visu_path = Path(visu_save_dir, f"{slide_id}.jpg")

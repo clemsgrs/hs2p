@@ -45,6 +45,7 @@ patch_params:
   save_patches_to_disk: False # whether or not to save patches as images to disk
   format: 'jpg' # if save_patches_to_disk = True, then saves patches in this file format
   draw_grid: True # whether to draw the patch grid when visualizing patching results
+  grid_thickness: 1 # sets the grid thickness ((in px) when visualizing patching results (256: 1, 4096: 2)
   bg_color: # which (r,g,b) values should be used to represent background when visualizing patching results
     - 214
     - 233
