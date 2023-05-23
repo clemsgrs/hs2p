@@ -369,7 +369,7 @@ def sample_patches(
 
                     for x, y in t:
 
-                        s = wsi_object.spacing_mapping[wsi_object.wsi.get_real_spacing(patch_params.spacing)]
+                        s = wsi_object.spacing_mapping[patch_params.spacing]
                         tile = wsi_object.wsi.get_patch(x, y, patch_params.patch_size, patch_params.patch_size, spacing=s, center=False)
                         tile = Image.fromarray(tile).convert("RGB")
                         fname = f'{slide_id}_{x}_{y}'
@@ -386,7 +386,7 @@ def sample_patches(
                             ts_scale = tuple(a / b for a, b in zip(wsi_object.level_downsamples[mask_min_level+mask_spacing_level], wsi_object.level_downsamples[wsi_spacing_level]))
                             ts_x, ts_y = int(patch_params.patch_size * 1. / ts_scale[0]), int(patch_params.patch_size * 1. / ts_scale[1])
                             # read annotation tile from mask
-                            s = annotation_mask.spacing_mapping[annotation_mask.wsi.get_real_spacing(patch_params.spacing)]
+                            s = annotation_mask.spacing_mapping[patch_params.spacing]
                             masked_tile = annotation_mask.wsi.get_patch(x_scaled, y_scaled, ts_x, ts_y, spacing=s, center=False)
                             if masked_tile.shape[-1] == 1:
                                 masked_tile = np.squeeze(masked_tile, axis=-1)
@@ -400,7 +400,7 @@ def sample_patches(
                                 masked_tile = masked_tile.resize(tuple(int(e * ts_scale[i]) for i,e in enumerate(masked_tile.size)), Image.NEAREST)
                                 # option 2
                                 # tile_spacing = wsi_object.spacings[mask_min_level+mask_spacing_level]
-                                # s = wsi_object.spacing_mapping[wsi_object.wsi.get_real_spacing(tile_spacing)]
+                                # s = wsi_object.spacing_mapping[tile_spacing]
                                 # tile = wsi_object.get_patch(x, y, ts_x, ts_y, spacing=s, center=False)
                                 # tile = Image.fromarray(tile).convert("RGB")
 

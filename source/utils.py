@@ -264,7 +264,7 @@ def DrawMapFromCoords(
         coord = coords[patch_id]
         x, y = coord
         spacing = wsi_object.spacings[vis_level]
-        s = wsi_object.spacing_mapping[wsi_object.wsi.get_real_spacing(spacing)]
+        s = wsi_object.spacing_mapping[spacing]
         width, height = patch_size
         patch = wsi_object.wsi.get_patch(x, y, width, height, spacing=s, center=False)
         coord = np.ceil(coord / downsamples).astype(np.int32)

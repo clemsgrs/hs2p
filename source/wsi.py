@@ -56,9 +56,11 @@ class WholeSlideImage(object):
 
     def get_spacings(self):
         if self.spacing is None:
-            return self.wsi.spacings
+            common_spacings = [0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 256.0, 512.0, 1024.0]
+            spacings = [common_spacings[np.argmin([abs(cs - s) for cs in common_spacings])] for s in self.wsi.spacings]
         else:
-            return [self.spacing * s / self.wsi.spacings[0] for s in self.wsi.spacings]
+            spacings = [self.spacing * s / self.wsi.spacings[0] for s in self.wsi.spacings]
+        return spacings
 
     def get_level_spacing(self, level: int = 0):
         return self.spacings[level]
@@ -108,7 +110,7 @@ class WholeSlideImage(object):
         assert seg_level >= mask_level, f"Segmentation mask highest resolution is smaller than target segmentation result resolution, please use a bigger downsample value"
 
         mask_spacing = mask.spacings[seg_level-mask_level]
-        s = mask.spacing_mapping[mask.wsi.get_real_spacing(mask_spacing)]
+        s = mask.spacing_mapping[mask_spacing]
         width, height = mask.level_dimensions[seg_level]
         m = mask.get_patch(0, 0, width, height, spacing=s, center=False)
         m = m[...,0]
@@ -138,7 +140,7 @@ class WholeSlideImage(object):
         """
 
         seg_spacing = self.spacings[seg_level]
-        s = self.spacing_mapping[self.wsi.get_real_spacing(seg_spacing)]
+        s = self.spacing_mapping[seg_spacing]
         width, height = self.level_dimensions[seg_level]
         img = self.wsi.get_patch(0, 0, width, height, spacing=s, center=False)
         img = np.array(Image.fromarray(img).convert("RGBA"))
@@ -276,7 +278,7 @@ class WholeSlideImage(object):
 
         x, y = top_left
         vis_spacing = self.spacings[vis_level]
-        s = self.spacing_mapping[self.wsi.get_real_spacing(vis_spacing)]
+        s = self.spacing_mapping[vis_spacing]
         width, height = region_size[0], region_size[1]
         img = self.wsi.get_patch(x, y, width, height, spacing=s, center=False)
 
@@ -459,7 +461,7 @@ class WholeSlideImage(object):
                 if save_patches_to_disk:
                     patch_save_dir = Path(save_dir, "imgs")
                     patch_save_dir.mkdir(parents=True, exist_ok=True)
-                    patch_spacing = self.spacing_mapping[wsi_object.wsi.get_real_spacing(self.get_level_spacing(attr_dict["coords"]["patch_level"]))]
+                    patch_spacing = self.spacing_mapping[self.get_level_spacing(attr_dict["coords"]["patch_level"])]
                     npatch, mins, secs = save_patch(
                         self.wsi,
                         patch_spacing,
