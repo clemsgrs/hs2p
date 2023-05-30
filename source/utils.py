@@ -3,6 +3,7 @@ import time
 import h5py
 import numpy as np
 import pandas as pd
+import seaborn as sns
 
 from PIL import Image
 from pathlib import Path
@@ -43,8 +44,8 @@ def initialize_df(
     if isinstance(slides, pd.DataFrame):
         slide_ids = list(slides.slide_id.values)
         slide_paths = list(slides.slide_path.values)
-        if "mask_path" in slides.columns:
-            mask_paths = list(slides.mask_path.values)
+        if "segmentation_mask_path" in slides.columns:
+            mask_paths = list(slides.segmentation_mask_path.values)
         if "spacing" in slides.columns:
             slide_spacings = list(slides.spacing.values)
     else:
@@ -57,7 +58,7 @@ def initialize_df(
         "slide_path": slide_paths,
     }
     if len(mask_paths) > 0:
-        default_df_dict.update({"mask_path": mask_paths})
+        default_df_dict.update({"segmentation_mask_path": mask_paths})
     if len(slide_spacings) > 0:
         default_df_dict.update({"spacing": slide_spacings})
 
@@ -240,7 +241,9 @@ def overlay_mask_on_slide(
     """
 
     x_mask = mask_object.level_dimensions[0][0]
-    mask_min_level = np.argmin([abs(x_wsi-x_mask) for x_wsi,_ in wsi_object.level_dimensions])
+    mask_min_level = int(np.argmin([abs(x_wsi-x_mask) for x_wsi,_ in wsi_object.level_dimensions]))
+
+    assert x_mask == wsi_object.level_dimensions[mask_min_level][0]
 
     if vis_level < 0:
         if len(wsi_object.level_dimensions) == 1:
@@ -325,8 +328,10 @@ def get_masked_tile(
     wsi_spacing_level = wsi_object.get_best_level_for_spacing(spacing)
 
     x_mask = mask_object.level_dimensions[0][0]
-    mask_min_level = np.argmin([abs(x_wsi-x_mask) for x_wsi,_ in wsi_object.level_dimensions])
+    mask_min_level = int(np.argmin([abs(x_wsi-x_mask) for x_wsi,_ in wsi_object.level_dimensions]))
     mask_spacing_level = mask_object.get_best_level_for_spacing(spacing, ignore_warning=True)
+
+    assert x_mask == wsi_object.level_dimensions[mask_min_level][0]
 
     # if mask doesn't start at same spacing as wsi, need to downsample tile & scale (x, y) coordinates!
     # need to scale x, y from slide level 0 to mask level 0 referential
@@ -426,7 +431,7 @@ def DrawMapFromCoords(
     draw_grid: bool = True,
     thickness: int = 2,
     verbose: bool = False,
-    mask_object: Optional = None,
+    mask_object = None,
     pixel_mapping: Optional[Dict[str,int]] = None,
     color_mapping: Optional[Dict[str,int]] = None,
     alpha: Optional[float] = None,
@@ -493,7 +498,7 @@ def VisualizeCoords(
     verbose: bool = False,
     key: str = "coords",
     heatmap: Optional[Image.Image] = None,
-    mask_object: Optional = None,
+    mask_object = None,
     pixel_mapping: Optional[Dict[str,int]] = None,
     color_mapping: Optional[Dict[str,int]] = None,
     alpha: Optional[float] = None,

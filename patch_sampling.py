@@ -1,6 +1,5 @@
 import os
 import re
-import PIL
 import h5py
 import tqdm
 import time
@@ -10,7 +9,6 @@ import datetime
 import subprocess
 import pandas as pd
 import numpy as np
-import seaborn as sns
 import multiprocessing as mp
 
 from PIL import Image
@@ -55,6 +53,9 @@ def extract_top_tiles(
     wsi_spacing_level = wsi_object.get_best_level_for_spacing(spacing)
     x_mask = mask_object.level_dimensions[0][0]
     mask_min_level = np.argmin([abs(x_wsi-x_mask) for x_wsi,_ in wsi_object.level_dimensions])
+
+    assert x_mask == wsi_object.level_dimensions[mask_min_level][0]
+
     if downsample == -1:
         wsi_downsample_level = max(wsi_spacing_level, mask_min_level)
     else:
@@ -135,11 +136,6 @@ def sample_patches(
     # Inialize WSI & annotation mask
     wsi_object = WholeSlideImage(slide_fp, spacing, backend)
     annotation_mask = WholeSlideImage(annot_mask_fp, backend=backend)
-    wsi_spacing_level = wsi_object.get_best_level_for_spacing(patch_params.spacing)
-
-    x_mask = annotation_mask.level_dimensions[0][0]
-    mask_min_level = np.argmin([abs(x_wsi-x_mask) for x_wsi,_ in wsi_object.level_dimensions])
-    mask_spacing_level = annotation_mask.get_best_level_for_spacing(patch_params.spacing, ignore_warning=True)
 
     vis_level = vis_params.vis_level
     if vis_level < 0:

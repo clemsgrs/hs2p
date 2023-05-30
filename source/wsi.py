@@ -99,20 +99,28 @@ class WholeSlideImage(object):
             self.contours_tissue = asset_dict["tissue"]
 
     def loadSegmentation(
-        self, mask_fp: Path, spacing: float, downsample: int, filter_params, sthresh_up: int = 255, tissue_val: int = 1,
+        self, mask_fp: Path, spacing: float, downsample: int, filter_params, sthresh_up: int = 255, tissue_val: int = 1, try_previous_level: bool = True,
     ):
 
         mask = WholeSlideImage(mask_fp, backend=self.backend)
-        w, h = mask.level_dimensions[0]
-        mask_level = int(np.argmin([abs(x - w) for x, _ in self.level_dimensions]))
         seg_level = self.get_best_level_for_downsample_custom(downsample)
+        w, h = self.level_dimensions[seg_level]
 
-        assert seg_level >= mask_level, f"Segmentation mask highest resolution is smaller than target segmentation result resolution, please use a bigger downsample value"
+        mask_level = int(np.argmin([abs(x - w) for x, _ in mask.level_dimensions]))
+        mask_width, mask_height = mask.level_dimensions[mask_level]
 
-        mask_spacing = mask.spacings[seg_level-mask_level]
+        if try_previous_level:
+            while mask_width != w:
+                seg_level = seg_level -1
+                w, h = self.level_dimensions[seg_level]
+                mask_level = int(np.argmin([abs(x - w) for x, _ in mask.level_dimensions]))
+                mask_width, mask_height = mask.level_dimensions[mask_level]
+        else:
+            assert mask_width == w, f"Couldn't match slide's seg_level with correspoding mask level\n If mask's levels are a subset of slide's levels, make sure try_previous_level is set to True"
+
+        mask_spacing = mask.spacings[mask_level]
         s = mask.spacing_mapping[mask_spacing]
-        width, height = mask.level_dimensions[seg_level]
-        m = mask.get_patch(0, 0, width, height, spacing=s, center=False)
+        m = mask.wsi.get_patch(0, 0, mask_width, mask_height, spacing=s, center=False)
         m = m[...,0]
 
         if tissue_val == 2:

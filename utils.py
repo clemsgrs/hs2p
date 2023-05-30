@@ -186,8 +186,8 @@ def seg_and_patch(
     start_time = time.time()
     slide_paths = slide_df.slide_path.values.tolist()
     mask_paths = []
-    if "mask_path" in slide_df.columns:
-        mask_paths = slide_df.mask_path.values.tolist()
+    if "segmentation_mask_path" in slide_df.columns:
+        mask_paths = slide_df.segmentation_mask_path.values.tolist()
     spacings = []
     if "spacing" in slide_df.columns:
         spacings = slide_df.spacing.values.tolist()
@@ -227,8 +227,8 @@ def seg_and_patch(
             slide_id = process_stack.loc[idx, "slide_id"]
             slide_path = Path(process_stack.loc[idx, "slide_path"])
             mask_path = None
-            if "mask_path" in process_stack.columns:
-                mask_path = Path(process_stack.loc[idx, "mask_path"])
+            if "segmentation_mask_path" in process_stack.columns:
+                mask_path = Path(process_stack.loc[idx, "segmentation_mask_path"])
             spacing = None
             if "spacing" in process_stack.columns:
                 spacing = Path(process_stack.loc[idx, "spacing"])
