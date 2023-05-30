@@ -497,6 +497,7 @@ def VisualizeCoords(
     pixel_mapping: Optional[Dict[str,int]] = None,
     color_mapping: Optional[Dict[str,int]] = None,
     alpha: Optional[float] = None,
+    display_slide: bool = True,
 ):
     vis_level = wsi_object.get_best_level_for_downsample_custom(downscale)
     h5_file = h5py.File(hdf5_file_path, "r")
@@ -534,7 +535,6 @@ def VisualizeCoords(
         )
 
     if heatmap is None:
-        heatmap = Image.new(size=(w, h), mode="RGB", color=bg_color)
         if mask_object is not None:
             heatmap = overlay_mask_on_slide(
                 wsi_object,
@@ -544,6 +544,12 @@ def VisualizeCoords(
                 color_mapping,
                 alpha=alpha,
             )
+        elif display_slide:
+            vis_spacing = wsi_object.spacings[vis_level]
+            heatmap = wsi_object.wsi.get_patch(0, 0, w, h, spacing=wsi_object.spacing_mapping[vis_spacing], center=False)
+            heatmap = Image.fromarray(heatmap).convert("RGB")
+        else:
+            heatmap = Image.new(size=(w, h), mode="RGB", color=bg_color)
 
     heatmap = np.array(heatmap)
     heatmap = DrawMapFromCoords(
