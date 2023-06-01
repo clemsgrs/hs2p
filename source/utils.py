@@ -259,6 +259,13 @@ def overlay_mask_on_slide(
 
     mask_vis_level = vis_level - mask_min_level
 
+    if mask_vis_level >= len(mask_object.spacings):
+        # mask_vis_level doens't exist, need to get last available level
+        mask_vis_level = len(mask_object.spacings) - 1
+        x_mask_vis_level = mask_object.level_dimensions[mask_vis_level][0]
+        vis_level = int(np.argmin([abs(x_wsi-x_mask_vis_level) for x_wsi,_ in wsi_object.level_dimensions]))
+        assert x_mask_vis_level == wsi_object.level_dimensions[vis_level][0]
+
     slide_vis_spacing = wsi_object.spacings[vis_level]
     slide_width, slide_height = wsi_object.level_dimensions[vis_level]
     slide = wsi_object.wsi.get_patch(0, 0, slide_width, slide_height, spacing=wsi_object.spacing_mapping[slide_vis_spacing], center=False)

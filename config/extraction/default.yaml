@@ -1,4 +1,4 @@
-slide_csv: '/data/pathology/projects/ais-cap/code/git/clemsgrs/hs2p/data/debug/panda_masks_2.csv' # path to the .csv / .txt file containing slides paths
+slide_csv: '/data/pathology/projects/ais-cap/code/git/clemsgrs/hs2p/data/debug/panda_masks.csv' # path to the .csv / .txt file containing slides paths
 
 output_dir: 'output/debug' # folder where to save algorithm output
 experiment_name: 'patch_extraction'
