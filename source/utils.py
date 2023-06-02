@@ -331,7 +331,6 @@ def get_masked_tile(
     upsample: bool = True,
     eps: float = 1e-5,
 ):
-
     wsi_spacing_level = wsi_object.get_best_level_for_spacing(spacing)
 
     x_mask = mask_object.level_dimensions[0][0]
@@ -461,6 +460,12 @@ def DrawMapFromCoords(
         coord = coords[patch_id]
         x, y = coord
         spacing = wsi_object.spacings[vis_level]
+
+        if spacing not in mask_object.spacing_mapping:
+            idx = np.argmin([abs(s_mask-s) for s_mask in mask_object.spacing_mapping.keys()])
+            spacing = list(mask_object.spacing_mapping.keys())[idx]
+            assert spacing in wsi_object.spacing_mapping.keys()
+
         s = wsi_object.spacing_mapping[spacing]
         width, height = patch_size
         tile = wsi_object.wsi.get_patch(x, y, width, height, spacing=s, center=False)
