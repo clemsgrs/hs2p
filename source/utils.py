@@ -421,7 +421,7 @@ def DrawGrid(img, coord, shape, thickness=2, color=(0, 0, 0, 255)):
         img,
         tuple(np.maximum([0, 0], coord - thickness // 2)),
         tuple(coord - thickness // 2 + np.array(shape)),
-        (0, 0, 0, 255),
+        color,
         thickness=thickness,
     )
     return img
@@ -433,7 +433,7 @@ def DrawMapFromCoords(
     coords,
     patch_size,
     vis_level: int,
-    indices=None,
+    indices: Optional[List[int]] = None,
     draw_grid: bool = True,
     thickness: int = 2,
     verbose: bool = False,
@@ -461,7 +461,7 @@ def DrawMapFromCoords(
         x, y = coord
         spacing = wsi_object.spacings[vis_level]
 
-        if spacing not in mask_object.spacing_mapping:
+        if mask_object and spacing not in mask_object.spacing_mapping:
             idx = np.argmin([abs(s_mask-s) for s_mask in mask_object.spacing_mapping.keys()])
             spacing = list(mask_object.spacing_mapping.keys())[idx]
             assert spacing in wsi_object.spacing_mapping.keys()
