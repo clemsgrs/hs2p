@@ -50,6 +50,10 @@ def initialize_wandb(
 ):
     command = f"wandb login {key}"
     subprocess.call(command, shell=True)
+    if cfg.wandb.tags == None:
+        tags = []
+    else:
+        tags = [str(t) for t in cfg.wandb.tags]
     config = OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)
     run = wandb.init(
         project=cfg.wandb.project,
@@ -58,7 +62,7 @@ def initialize_wandb(
         group=cfg.wandb.group,
         dir=cfg.wandb.dir,
         config=config,
-        tags=cfg.wandb.tags,
+        tags=tags,
         resume="allow",
     )
     config_file_path = Path(run.dir, "run_config.yaml")
