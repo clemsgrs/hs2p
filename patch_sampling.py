@@ -69,7 +69,7 @@ def extract_top_tiles(
 
     mask_downsample_spacing = mask_object.spacings[mask_downsample_level]
     mask_width, mask_height = mask_object.level_dimensions[mask_downsample_level]
-    mask_data = mask_object.wsi.get_patch(0, 0, mask_width, mask_height, spacing=mask_object.spacing_mapping[mask_downsample_spacing], center=False)
+    mask_data = mask_object.wsi.get_patch(0, 0, mask_width, mask_height, spacing=mask_downsample_spacing, center=False)
     if mask_data.shape[-1] == 1:
         mask_data = np.squeeze(mask_data, axis=-1)
     mask_data = Image.fromarray(mask_data)
@@ -264,8 +264,7 @@ def sample_patches(
 
                     for x, y in t:
 
-                        s = wsi_object.spacing_mapping[patch_params.spacing]
-                        tile = wsi_object.wsi.get_patch(x, y, patch_params.patch_size, patch_params.patch_size, spacing=s, center=False)
+                        tile = wsi_object.wsi.get_patch(x, y, patch_params.patch_size, patch_params.patch_size, spacing=patch_params.spacing, center=False)
                         tile = Image.fromarray(tile).convert("RGB")
                         fname = f'{slide_id}_{x}_{y}'
                         tile_fp = Path(raw_tile_dir, cat_, f'{fname}.{patch_params.fmt}')
@@ -495,5 +494,3 @@ def main(cfg: DictConfig):
 if __name__ == "__main__":
 
     main()
-    # zip -r tiles.zip './tiles'
-

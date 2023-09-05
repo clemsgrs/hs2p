@@ -268,12 +268,12 @@ def overlay_mask_on_slide(
 
     slide_vis_spacing = wsi_object.spacings[vis_level]
     slide_width, slide_height = wsi_object.level_dimensions[vis_level]
-    slide = wsi_object.wsi.get_patch(0, 0, slide_width, slide_height, spacing=wsi_object.spacing_mapping[slide_vis_spacing], center=False)
+    slide = wsi_object.wsi.get_patch(0, 0, slide_width, slide_height, spacing=slide_vis_spacing, center=False)
     slide = Image.fromarray(slide).convert("RGBA")
 
     mask_vis_spacing = mask_object.spacings[mask_vis_level]
     mask_width, mask_height = mask_object.level_dimensions[mask_vis_level]
-    mask = mask_object.wsi.get_patch(0, 0, mask_width, mask_height, spacing=mask_object.spacing_mapping[mask_vis_spacing], center=False)
+    mask = mask_object.wsi.get_patch(0, 0, mask_width, mask_height, spacing=mask_vis_spacing, center=False)
     if mask.shape[-1] == 1:
         mask = np.squeeze(mask, axis=-1)
     mask = Image.fromarray(mask)
@@ -331,7 +331,7 @@ def get_masked_tile(
     upsample: bool = True,
     eps: float = 1e-5,
 ):
-    wsi_spacing_level = wsi_object.get_best_level_for_spacing(spacing)
+    wsi_spacing_level = wsi_object.get_best_level_for_spacing(spacing, ignore_warning=True)
 
     x_mask = mask_object.level_dimensions[0][0]
     mask_min_level = int(np.argmin([abs(x_wsi-x_mask) for x_wsi,_ in wsi_object.level_dimensions]))
@@ -347,8 +347,7 @@ def get_masked_tile(
     ts_scale = tuple(a / b for a, b in zip(wsi_object.level_downsamples[mask_min_level+mask_spacing_level], wsi_object.level_downsamples[wsi_spacing_level]))
     ts_x, ts_y = int(patch_size[0] * 1. / ts_scale[0]), int(patch_size[1] * 1. / ts_scale[1])
     # read annotation tile from mask
-    s = mask_object.spacing_mapping[spacing]
-    masked_tile = mask_object.wsi.get_patch(x_scaled, y_scaled, ts_x, ts_y, spacing=s, center=False)
+    masked_tile = mask_object.wsi.get_patch(x_scaled, y_scaled, ts_x, ts_y, spacing=spacing, center=False)
     if masked_tile.shape[-1] == 1:
         masked_tile = np.squeeze(masked_tile, axis=-1)
     masked_tile = Image.fromarray(masked_tile)
@@ -363,8 +362,7 @@ def get_masked_tile(
         else:
             # option 2
             tile_spacing = wsi_object.spacings[mask_min_level+mask_spacing_level]
-            s = wsi_object.spacing_mapping[tile_spacing]
-            tile = wsi_object.get_patch(x, y, ts_x, ts_y, spacing=s, center=False)
+            tile = wsi_object.get_patch(x, y, ts_x, ts_y, spacing=tile_spacing, center=False)
             tile = Image.fromarray(tile).convert("RGB")
     return tile, masked_tile
 
@@ -459,16 +457,18 @@ def DrawMapFromCoords(
         patch_id = indices[idx]
         coord = coords[patch_id]
         x, y = coord
-        spacing = wsi_object.spacings[vis_level]
+        slide_spacing = wsi_object.spacings[vis_level]
+        associated_common_spacing = wsi_object.spacing_mapping[slide_spacing]
 
-        if mask_object and spacing not in mask_object.spacing_mapping:
+        if mask_object and associated_common_spacing not in mask_object.spacing_mapping:
             idx = np.argmin([abs(s_mask-s) for s_mask in mask_object.spacing_mapping.keys()])
-            spacing = list(mask_object.spacing_mapping.keys())[idx]
-            assert spacing in wsi_object.spacing_mapping.keys()
+            associated_common_spacing = list(mask_object.spacing_mapping.keys())[idx]
+            assert associated_common_spacing in wsi_object.spacing_mapping.values()
 
-        s = wsi_object.spacing_mapping[spacing]
+        associated_common_spacing_idx = list(wsi_object.spacing_mapping.values()).index(associated_common_spacing)
+        slide_spacing = wsi_object.spacings[associated_common_spacing_idx]
         width, height = patch_size
-        tile = wsi_object.wsi.get_patch(x, y, width, height, spacing=s, center=False)
+        tile = wsi_object.wsi.get_patch(x, y, width, height, spacing=slide_spacing, center=False)
 
         if mask_object is not None:
             tile, masked_tile = get_masked_tile(
@@ -477,7 +477,7 @@ def DrawMapFromCoords(
                 Image.fromarray(tile).convert("RGB"),
                 x,
                 y,
-                spacing,
+                slide_spacing,
                 patch_size,
             )
             tile = overlay_mask_on_tile(tile, masked_tile, pixel_mapping, color_mapping, alpha=alpha)
@@ -563,7 +563,7 @@ def VisualizeCoords(
             )
         elif display_slide:
             vis_spacing = wsi_object.spacings[vis_level]
-            heatmap = wsi_object.wsi.get_patch(0, 0, w, h, spacing=wsi_object.spacing_mapping[vis_spacing], center=False)
+            heatmap = wsi_object.wsi.get_patch(0, 0, w, h, spacing=vis_spacing, center=False)
             heatmap = Image.fromarray(heatmap).convert("RGB")
         else:
             heatmap = Image.new(size=(w, h), mode="RGB", color=bg_color)

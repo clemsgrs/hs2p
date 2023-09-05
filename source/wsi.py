@@ -38,10 +38,10 @@ class WholeSlideImage(object):
         self.level_dimensions = self.wsi.shapes
         self.level_downsamples = self.get_downsamples()
         self.spacing = spacing
-        self.spacings = self.get_spacings()
+        self.spacings = self.wsi.spacings
         self.backend = backend
 
-        self.spacing_mapping = {a: b for a, b in zip(self.spacings, self.wsi.spacings)}
+        self.spacing_mapping = {a: b for a, b in zip(self.wsi.spacings, self.get_spacings())}
 
         self.contours_tissue = None
         self.contours_tumor = None
@@ -68,12 +68,12 @@ class WholeSlideImage(object):
     def get_best_level_for_spacing(self, target_spacing: float, ignore_warning: bool = False):
         spacing = self.get_level_spacing(0)
         downsample = target_spacing / spacing
-        level, above_tol = self.get_best_level_for_downsample_custom(
+        level, tol, above_tol = self.get_best_level_for_downsample_custom(
             downsample, return_tol_status=True
         )
         if above_tol and not ignore_warning:
             print(
-                f"WARNING! The closest natural spacing to the target spacing was more than 15% appart."
+                f"WARNING! The natural spacing ({round(self.spacings[level],4)}) closest to the target spacing ({round(target_spacing,4)}) was more than {tol*100:.1f}% appart (slide {self.name})."
             )
         return level
 
@@ -85,7 +85,7 @@ class WholeSlideImage(object):
         )
         above_tol = abs(self.level_downsamples[level][0] / downsample - 1) > tol
         if return_tol_status:
-            return level, above_tol
+            return level, tol, above_tol
         else:
             return level
 
@@ -148,9 +148,8 @@ class WholeSlideImage(object):
         """
 
         seg_spacing = self.spacings[seg_level]
-        s = self.spacing_mapping[seg_spacing]
         width, height = self.level_dimensions[seg_level]
-        img = self.wsi.get_patch(0, 0, width, height, spacing=s, center=False)
+        img = self.wsi.get_patch(0, 0, width, height, spacing=seg_spacing, center=False)
         img = np.array(Image.fromarray(img).convert("RGBA"))
         img_hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)  # Convert to HSV space
         img_med = cv2.medianBlur(img_hsv[:, :, 1], mthresh)  # Apply median blurring
@@ -285,10 +284,11 @@ class WholeSlideImage(object):
             region_size = self.level_dimensions[vis_level]
 
         x, y = top_left
-        vis_spacing = self.spacings[vis_level]
-        s = self.spacing_mapping[vis_spacing]
+        s = self.spacings[vis_level]
         width, height = region_size[0], region_size[1]
         img = self.wsi.get_patch(x, y, width, height, spacing=s, center=False)
+        if self.backend == 'openslide':
+            img = np.ascontiguousarray(img)
 
         if not view_slide_only:
             offset = tuple(-(np.array(top_left) * scale).astype(int))
@@ -507,7 +507,7 @@ class WholeSlideImage(object):
     ):
 
         step_size = int(patch_size * (1.0 - overlap))
-        patch_level = self.get_best_level_for_spacing(spacing)
+        patch_level = self.get_best_level_for_spacing(spacing, ignore_warning=True)
         if cont is not None:
             start_x, start_y, w, h = cv2.boundingRect(cont)
         else:
