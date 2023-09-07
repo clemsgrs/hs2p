@@ -483,7 +483,7 @@ def DrawMapFromCoords(
             tile = overlay_mask_on_tile(tile, masked_tile, pixel_mapping, color_mapping, alpha=alpha)
             tile = np.array(tile)
 
-        coord = np.ceil(coord / downsamples).astype(np.int32)
+        coord = np.ceil(tuple(coord[i]/downsamples[i] for i in range(len(coord)))).astype(np.int32)
         canvas_crop_shape = canvas[
             coord[1] : coord[1] + patch_size[1],
             coord[0] : coord[0] + patch_size[0],

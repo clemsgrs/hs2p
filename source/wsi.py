@@ -469,7 +469,7 @@ class WholeSlideImage(object):
                 if save_patches_to_disk:
                     patch_save_dir = Path(save_dir, "imgs")
                     patch_save_dir.mkdir(parents=True, exist_ok=True)
-                    patch_spacing = self.spacing_mapping[self.get_level_spacing(attr_dict["coords"]["patch_level"])]
+                    patch_spacing = self.get_level_spacing(attr_dict["coords"]["patch_level"])
                     npatch, mins, secs = save_patch(
                         self.wsi,
                         patch_spacing,
