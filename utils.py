@@ -235,7 +235,7 @@ def seg_and_patch(
                 mask_path = Path(process_stack.loc[idx, "segmentation_mask_path"])
             spacing = None
             if "spacing" in process_stack.columns:
-                spacing = Path(process_stack.loc[idx, "spacing"])
+                spacing = float(process_stack.loc[idx, "spacing"])
             t.display(f"Processing {slide_id}", pos=2)
 
             # Inialize WSI
