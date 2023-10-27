@@ -123,7 +123,9 @@ def main(cfg: DictConfig):
             )
         ]
 
+        wd = str(Path(__file__).parent)
         command_line = [
+            wd,
             "python3",
             "log_nproc.py",
             "--output_dir",
