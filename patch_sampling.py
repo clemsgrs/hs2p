@@ -412,11 +412,11 @@ def main(cfg: DictConfig):
             for sid, slide_fp, seg_mask_fp, annot_mask_fp, spacing in zip(slide_ids, slide_fps, seg_mask_fps, annot_mask_fps, spacings)
         ]
 
-        wd = str(Path(__file__).parent)
+        wd = Path(__file__).parent)
+        log_file = Path(wd, "log_nproc.py")
         command_line = [
-            wd,
             "python3",
-            "log_nproc.py",
+            f"{log_file}",
             "--output_dir",
             f"{overlay_mask_save_dir}",
             "--fmt",
