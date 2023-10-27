@@ -123,7 +123,7 @@ def main(cfg: DictConfig):
             )
         ]
 
-        wd = Path(__file__).parent)
+        wd = Path(__file__).parent
         log_file = Path(wd, "log_nproc.py")
         command_line = [
             "python3",
