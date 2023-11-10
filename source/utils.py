@@ -461,7 +461,7 @@ def DrawMapFromCoords(
         associated_common_spacing = wsi_object.spacing_mapping[slide_spacing]
 
         if mask_object and associated_common_spacing not in mask_object.spacing_mapping:
-            idx = np.argmin([abs(s_mask-s) for s_mask in mask_object.spacing_mapping.keys()])
+            idx = np.argmin([abs(s_mask-slide_spacing) for s_mask in mask_object.spacing_mapping.keys()])
             associated_common_spacing = list(mask_object.spacing_mapping.keys())[idx]
             assert associated_common_spacing in wsi_object.spacing_mapping.values()
 
