@@ -38,10 +38,8 @@ class WholeSlideImage(object):
         self.level_dimensions = self.wsi.shapes
         self.level_downsamples = self.get_downsamples()
         self.spacing = spacing
-        self.spacings = self.wsi.spacings
+        self.spacings = self.get_spacings()
         self.backend = backend
-
-        self.spacing_mapping = {a: b for a, b in zip(self.wsi.spacings, self.get_spacings())}
 
         self.contours_tissue = None
         self.contours_tumor = None
@@ -56,8 +54,7 @@ class WholeSlideImage(object):
 
     def get_spacings(self):
         if self.spacing is None:
-            common_spacings = [0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 256.0, 512.0, 1024.0]
-            spacings = [common_spacings[np.argmin([abs(cs - s) for cs in common_spacings])] for s in self.wsi.spacings]
+            spacings = self.wsi.spacings
         else:
             spacings = [self.spacing * s / self.wsi.spacings[0] for s in self.wsi.spacings]
         return spacings
@@ -103,29 +100,29 @@ class WholeSlideImage(object):
     ):
 
         mask = WholeSlideImage(mask_fp, backend=self.backend)
+
+        # ensure mask and slide have at least one common spacing
+        common_spacings = list(set([round(s,3) for s in self.spacings]).intersection(set([round(s,3) for s in mask.spacings])))
+        assert len(common_spacings) >= 1, f"The provided segmentation mask (spacings={mask.spacings}) has no common spacing with the slide (spacings={self.spacings}). A minimum of 1 common spacing is required."
+
         seg_level = self.get_best_level_for_downsample_custom(downsample)
-        w, h = self.level_dimensions[seg_level]
+        seg_spacing = self.get_level_spacing(seg_level)
 
-        mask_level = int(np.argmin([abs(x - w) for x, _ in mask.level_dimensions]))
-        mask_width, mask_height = mask.level_dimensions[mask_level]
+        # check if this spacing is present in common spacings
+        is_in_common_spacings = round(seg_spacing,3) in common_spacings
+        if not is_in_common_spacings:
+            # find spacing that is common to slide and mask and that is the closest to seg_spacing
+            closest = np.argmin([abs(seg_spacing-s) for s in common_spacings])
+            closest_common_spacing = common_spacings[closest]
+            seg_spacing = closest_common_spacing
+            seg_level = self.get_best_level_for_spacing(seg_spacing)
 
-        if try_previous_level:
-            while mask_width != w:
-                seg_level = seg_level -1
-                w, h = self.level_dimensions[seg_level]
-                mask_level = int(np.argmin([abs(x - w) for x, _ in mask.level_dimensions]))
-                mask_width, mask_height = mask.level_dimensions[mask_level]
-        else:
-            assert mask_width == w, f"Couldn't match slide's seg_level with correspoding mask level\n If mask's levels are a subset of slide's levels, make sure try_previous_level is set to True"
+        m = mask.wsi.get_slide(spacing=seg_spacing)
+        m = m[..., 0]
 
-        mask_spacing = mask.spacings[mask_level]
-        s = mask.spacing_mapping[mask_spacing]
-        m = mask.wsi.get_patch(0, 0, mask_width, mask_height, spacing=s, center=False)
-        m = m[...,0]
-
-        if tissue_val == 2:
-            m = m - np.ones_like(m)
-        if np.max(m) == 1:
+        if tissue_val > 1:
+            m = m - tissue_val * np.ones_like(m)
+        if np.max(m) <= 1:
             m = m * sthresh_up
 
         self.binary_mask = m
@@ -147,9 +144,8 @@ class WholeSlideImage(object):
         Segment the tissue via HSV -> Median thresholding -> Binary threshold
         """
 
-        seg_spacing = self.spacings[seg_level]
-        width, height = self.level_dimensions[seg_level]
-        img = self.wsi.get_patch(0, 0, width, height, spacing=seg_spacing, center=False)
+        seg_spacing = self.get_level_spacing(seg_level)
+        img = self.wsi.get_slide(spacing=seg_spacing)
         img = np.array(Image.fromarray(img).convert("RGBA"))
         img_hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)  # Convert to HSV space
         img_med = cv2.medianBlur(img_hsv[:, :, 1], mthresh)  # Apply median blurring

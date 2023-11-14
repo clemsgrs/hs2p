@@ -457,18 +457,24 @@ def DrawMapFromCoords(
         patch_id = indices[idx]
         coord = coords[patch_id]
         x, y = coord
-        slide_spacing = wsi_object.spacings[vis_level]
-        associated_common_spacing = wsi_object.spacing_mapping[slide_spacing]
+        vis_spacing = wsi_object.get_level_spacing(vis_level)
 
-        if mask_object and associated_common_spacing not in mask_object.spacing_mapping:
-            idx = np.argmin([abs(s_mask-slide_spacing) for s_mask in mask_object.spacing_mapping.keys()])
-            associated_common_spacing = list(mask_object.spacing_mapping.keys())[idx]
-            assert associated_common_spacing in wsi_object.spacing_mapping.values()
+        if mask_object is not None:
+            # ensure mask and slide have at least one common spacing
+            common_spacings = list(set([round(s,3) for s in wsi_object.spacings]).intersection(set([round(s,3) for s in mask_object.spacings])))
+            assert len(common_spacings) >= 1, f"The provided segmentation mask (spacings={mask_object.spacings}) has no common spacing with the slide (spacings={wsi_object.spacings}). A minimum of 1 common spacing is required."
 
-        associated_common_spacing_idx = list(wsi_object.spacing_mapping.values()).index(associated_common_spacing)
-        slide_spacing = wsi_object.spacings[associated_common_spacing_idx]
+            # check if this spacing is present in common spacings
+            is_in_common_spacings = round(vis_spacing,3) in common_spacings
+            if not is_in_common_spacings:
+                # find spacing that is common to slide and mask and that is the closest to seg_spacing
+                closest = np.argmin([abs(vis_spacing-s) for s in common_spacings])
+                closest_common_spacing = common_spacings[closest]
+                vis_spacing = closest_common_spacing
+                vis_level = wsi_object.get_best_level_for_spacing(vis_spacing)
+
         width, height = patch_size
-        tile = wsi_object.wsi.get_patch(x, y, width, height, spacing=slide_spacing, center=False)
+        tile = wsi_object.wsi.get_patch(x, y, width, height, spacing=vis_spacing, center=False)
 
         if mask_object is not None:
             tile, masked_tile = get_masked_tile(
@@ -477,7 +483,7 @@ def DrawMapFromCoords(
                 Image.fromarray(tile).convert("RGB"),
                 x,
                 y,
-                slide_spacing,
+                vis_spacing,
                 patch_size,
             )
             tile = overlay_mask_on_tile(tile, masked_tile, pixel_mapping, color_mapping, alpha=alpha)
