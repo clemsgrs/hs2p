@@ -37,9 +37,8 @@ def get_mask_percent(mask, val=0):
         percentage of the numpy array that is equal to val
     """
     mask_arr = np.array(mask)
-    w, h = mask_arr.shape
     binary_mask = mask_arr == val
-    mask_percentage = np.sum(binary_mask) / (w * h)
+    mask_percentage = np.sum(binary_mask) / np.size(mask_arr)
     return mask_percentage
 
 
@@ -80,7 +79,6 @@ def extract_top_tiles(
         mask_data = np.squeeze(mask_data, axis=-1)
     mask_data = Image.fromarray(mask_data)
     mask_data = mask_data.split()[0]
-
 
     spacing_level = wsi_object.get_best_level_for_spacing(spacing)
     wsi_scale = tuple(
