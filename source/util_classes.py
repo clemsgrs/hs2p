@@ -14,10 +14,12 @@ class isInContourV1(Contour_Checking_fn):
 
     def __call__(self, pt):
         return (
-            1, -1
+            1,
+            -1
             if cv2.pointPolygonTest(self.cont, tuple(np.array(pt).astype(float)), False)
             >= 0
-            else 0, -1
+            else 0,
+            -1,
         )
 
 
@@ -31,10 +33,12 @@ class isInContourV2(Contour_Checking_fn):
             (pt[0] + self.patch_size // 2, pt[1] + self.patch_size // 2)
         ).astype(float)
         return (
-            1, -1
+            1,
+            -1
             if cv2.pointPolygonTest(self.cont, tuple(np.array(pt).astype(float)), False)
             >= 0
-            else 0, -1
+            else 0,
+            -1,
         )
 
 
@@ -114,7 +118,9 @@ class isInContour_pct(Contour_Checking_fn):
         # work on downsampled image to compute tissue percentage
         # input patch_size is given for level 0
         downsampled_patch_size = int(self.patch_size * 1 / self.scale[0])
-        assert downsampled_patch_size > 0, f"downsampled patch_size is equal to zero, aborting ; please consider using a smaller seg_params.downsample parameter"
+        assert (
+            downsampled_patch_size > 0
+        ), f"downsampled patch_size is equal to zero, aborting ; please consider using a smaller seg_params.downsample parameter"
         downsampled_pt = pt * 1 / self.scale[0]
         x_patch, y_patch = downsampled_pt
         x_patch, y_patch = int(x_patch), int(y_patch)

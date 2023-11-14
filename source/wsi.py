@@ -24,7 +24,9 @@ Image.MAX_IMAGE_PIXELS = 933120000
 
 
 class WholeSlideImage(object):
-    def __init__(self, path: Path, spacing: Optional[float] = None, backend: str = 'asap'):
+    def __init__(
+        self, path: Path, spacing: Optional[float] = None, backend: str = "asap"
+    ):
 
         """
         Args:
@@ -56,13 +58,17 @@ class WholeSlideImage(object):
         if self.spacing is None:
             spacings = self.wsi.spacings
         else:
-            spacings = [self.spacing * s / self.wsi.spacings[0] for s in self.wsi.spacings]
+            spacings = [
+                self.spacing * s / self.wsi.spacings[0] for s in self.wsi.spacings
+            ]
         return spacings
 
     def get_level_spacing(self, level: int = 0):
         return self.spacings[level]
 
-    def get_best_level_for_spacing(self, target_spacing: float, ignore_warning: bool = False):
+    def get_best_level_for_spacing(
+        self, target_spacing: float, ignore_warning: bool = False
+    ):
         spacing = self.get_level_spacing(0)
         downsample = target_spacing / spacing
         level, tol, above_tol = self.get_best_level_for_downsample_custom(
@@ -77,9 +83,7 @@ class WholeSlideImage(object):
     def get_best_level_for_downsample_custom(
         self, downsample, tol: float = 0.2, return_tol_status: bool = False
     ):
-        level = int(
-            np.argmin([abs(x - downsample) for x,_ in self.level_downsamples])
-        )
+        level = int(np.argmin([abs(x - downsample) for x, _ in self.level_downsamples]))
         above_tol = abs(self.level_downsamples[level][0] / downsample - 1) > tol
         if return_tol_status:
             return level, tol, above_tol
@@ -96,23 +100,36 @@ class WholeSlideImage(object):
             self.contours_tissue = asset_dict["tissue"]
 
     def loadSegmentation(
-        self, mask_fp: Path, spacing: float, downsample: int, filter_params, sthresh_up: int = 255, tissue_val: int = 1, try_previous_level: bool = True,
+        self,
+        mask_fp: Path,
+        spacing: float,
+        downsample: int,
+        filter_params,
+        sthresh_up: int = 255,
+        tissue_val: int = 1,
+        try_previous_level: bool = True,
     ):
 
         mask = WholeSlideImage(mask_fp, backend=self.backend)
 
         # ensure mask and slide have at least one common spacing
-        common_spacings = list(set([round(s,3) for s in self.spacings]).intersection(set([round(s,3) for s in mask.spacings])))
-        assert len(common_spacings) >= 1, f"The provided segmentation mask (spacings={mask.spacings}) has no common spacing with the slide (spacings={self.spacings}). A minimum of 1 common spacing is required."
+        common_spacings = list(
+            set([round(s, 3) for s in self.spacings]).intersection(
+                set([round(s, 3) for s in mask.spacings])
+            )
+        )
+        assert (
+            len(common_spacings) >= 1
+        ), f"The provided segmentation mask (spacings={mask.spacings}) has no common spacing with the slide (spacings={self.spacings}). A minimum of 1 common spacing is required."
 
         seg_level = self.get_best_level_for_downsample_custom(downsample)
         seg_spacing = self.get_level_spacing(seg_level)
 
         # check if this spacing is present in common spacings
-        is_in_common_spacings = round(seg_spacing,3) in common_spacings
+        is_in_common_spacings = round(seg_spacing, 3) in common_spacings
         if not is_in_common_spacings:
             # find spacing that is common to slide and mask and that is the closest to seg_spacing
-            closest = np.argmin([abs(seg_spacing-s) for s in common_spacings])
+            closest = np.argmin([abs(seg_spacing - s) for s in common_spacings])
             closest_common_spacing = common_spacings[closest]
             seg_spacing = closest_common_spacing
             seg_level = self.get_best_level_for_spacing(seg_spacing)
@@ -283,7 +300,7 @@ class WholeSlideImage(object):
         s = self.spacings[vis_level]
         width, height = region_size[0], region_size[1]
         img = self.wsi.get_patch(x, y, width, height, spacing=s, center=False)
-        if self.backend == 'openslide':
+        if self.backend == "openslide":
             img = np.ascontiguousarray(img)
 
         if not view_slide_only:
@@ -449,7 +466,12 @@ class WholeSlideImage(object):
             if tile_df is not None:
                 tile_df["contour"] = [i] * len(tile_df)
                 if save_patches_to_disk:
-                    tile_df["tile_path"] = tile_df.apply(lambda row: Path(save_dir, "imgs", f"{row.x}_{row.y}.{patch_format}").resolve(), axis=1)
+                    tile_df["tile_path"] = tile_df.apply(
+                        lambda row: Path(
+                            save_dir, "imgs", f"{row.x}_{row.y}.{patch_format}"
+                        ).resolve(),
+                        axis=1,
+                    )
                     cols = list(tile_df.columns)
                     cols = [cols[-1]] + cols[:-1]
                     tile_df = tile_df[cols]
@@ -465,7 +487,9 @@ class WholeSlideImage(object):
                 if save_patches_to_disk:
                     patch_save_dir = Path(save_dir, "imgs")
                     patch_save_dir.mkdir(parents=True, exist_ok=True)
-                    patch_spacing = self.get_level_spacing(attr_dict["coords"]["patch_level"])
+                    patch_spacing = self.get_level_spacing(
+                        attr_dict["coords"]["patch_level"]
+                    )
                     npatch, mins, secs = save_patch(
                         self.wsi,
                         patch_spacing,
@@ -477,7 +501,7 @@ class WholeSlideImage(object):
 
         end_time = time.time()
         patch_saving_mins, patch_saving_secs = compute_time(start_time, end_time)
-        if len(dfs) >0:
+        if len(dfs) > 0:
             df = pd.concat(dfs, ignore_index=True)
         else:
             df = None
@@ -610,8 +634,12 @@ class WholeSlideImage(object):
             ]
             results = pool.starmap(WholeSlideImage.process_coord_candidate, iterable)
             pool.close()
-            filtered_results = np.array([result[0] for result in results if result[0] is not None])
-            filtered_tissue_pcts = [result[1] for result in results if result[0] is not None]
+            filtered_results = np.array(
+                [result[0] for result in results if result[0] is not None]
+            )
+            filtered_tissue_pcts = [
+                result[1] for result in results if result[0] is not None
+            ]
         else:
             results = []
             tissue_pcts = []
@@ -621,8 +649,14 @@ class WholeSlideImage(object):
                 )
                 results.append(c)
                 tissue_pcts.append(pct)
-            filtered_results = np.array([result for result in results if result is not None])
-            filtered_tissue_pcts = [tissue_pct for i, tissue_pct in enumerate(tissue_pcts) if results[i] is not None]
+            filtered_results = np.array(
+                [result for result in results if result is not None]
+            )
+            filtered_tissue_pcts = [
+                tissue_pct
+                for i, tissue_pct in enumerate(tissue_pcts)
+                if results[i] is not None
+            ]
 
         npatch = len(filtered_results)
 
@@ -639,7 +673,9 @@ class WholeSlideImage(object):
                 "patch_level": patch_level,
                 "ref_patch_size": ref_patch_size[0],
                 "downsample": self.level_downsamples[patch_level],
-                "downsampled_level_dim": tuple(np.array(self.level_dimensions[patch_level])),
+                "downsampled_level_dim": tuple(
+                    np.array(self.level_dimensions[patch_level])
+                ),
                 "level_dimension": self.level_dimensions[patch_level],
                 "wsi_name": self.name,
                 "save_path": str(save_dir),
@@ -651,8 +687,8 @@ class WholeSlideImage(object):
                 "level": [patch_level] * npatch,
                 "level_dimension": [self.level_dimensions[patch_level]] * npatch,
                 "tile_size": [patch_size] * npatch,
-                "x": list(filtered_results[:, 0]), # defined w.r.t level 0
-                "y": list(filtered_results[:, 1]), # defined w.r.t level 0
+                "x": list(filtered_results[:, 0]),  # defined w.r.t level 0
+                "y": list(filtered_results[:, 1]),  # defined w.r.t level 0
                 "tissue_pct": filtered_tissue_pcts,
             }
             tile_df = pd.DataFrame.from_dict(df_data)
@@ -665,7 +701,9 @@ class WholeSlideImage(object):
     def process_coord_candidate(
         coord, contour_holes, patch_size, cont_check_fn, drop_holes
     ):
-        keep_flag, tissue_pct = WholeSlideImage.isInContours(cont_check_fn, coord, contour_holes, drop_holes, patch_size)
+        keep_flag, tissue_pct = WholeSlideImage.isInContours(
+            cont_check_fn, coord, contour_holes, drop_holes, patch_size
+        )
         if keep_flag:
             return coord, tissue_pct
         else:

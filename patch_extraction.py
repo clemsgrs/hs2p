@@ -14,7 +14,9 @@ from source.utils import initialize_df
 from utils import initialize_wandb, seg_and_patch, seg_and_patch_slide
 
 
-@hydra.main(version_base="1.2.0", config_path="config/extraction", config_name="default")
+@hydra.main(
+    version_base="1.2.0", config_path="config/extraction", config_name="default"
+)
 def main(cfg: DictConfig):
 
     run_id = datetime.datetime.now().strftime("%Y-%m-%d_%H_%M")
@@ -119,7 +121,10 @@ def main(cfg: DictConfig):
                 cfg.backend,
             )
             for sid, slide_fp, mask_fp, spacing in zip(
-                slide_ids_to_process, slide_paths_to_process, mask_paths_to_process, spacings_to_process
+                slide_ids_to_process,
+                slide_paths_to_process,
+                mask_paths_to_process,
+                spacings_to_process,
             )
         ]
 
@@ -133,7 +138,7 @@ def main(cfg: DictConfig):
             "--fmt",
             "jpg",
             "--total",
-            f"{len(process_stack)}"
+            f"{len(process_stack)}",
         ]
         if cfg.wandb.enable:
             command_line = command_line + ["--log_to_wandb", "--id", f"{run_id}"]

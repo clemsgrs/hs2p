@@ -185,7 +185,7 @@ def seg_and_patch(
     process_list: Optional[Path] = None,
     verbose: bool = False,
     log_to_wandb: bool = False,
-    backend: str = 'asap',
+    backend: str = "asap",
 ):
     start_time = time.time()
     slide_paths = slide_df.slide_path.values.tolist()
@@ -198,7 +198,13 @@ def seg_and_patch(
 
     if process_list is None:
         df = initialize_df(
-            slide_paths, mask_paths, spacings, seg_params, filter_params, vis_params, patch_params
+            slide_paths,
+            mask_paths,
+            spacings,
+            seg_params,
+            filter_params,
+            vis_params,
+            patch_params,
         )
     else:
         df = pd.read_csv(process_list)
@@ -280,11 +286,19 @@ def seg_and_patch(
 
             if seg_params.save_mask:
                 import pyvips
+
                 tif_save_dir = Path(mask_save_dir, "tif")
                 tif_save_dir.mkdir(exist_ok=True)
                 mask_path = Path(tif_save_dir, f"{slide_id}.tif")
                 mask = pyvips.Image.new_from_array(wsi_object.binary_mask.tolist())
-                mask.tiffsave(mask_path, tile=True, compression='jpeg', bigtiff=True, pyramid=True, Q=70)
+                mask.tiffsave(
+                    mask_path,
+                    tile=True,
+                    compression="jpeg",
+                    bigtiff=True,
+                    pyramid=True,
+                    Q=70,
+                )
 
             if seg_params.visualize_mask:
                 mask = wsi_object.visWSI(
@@ -391,7 +405,7 @@ def seg_and_patch_slide(
     patch: bool = False,
     visu: bool = False,
     verbose: bool = False,
-    backend: str = 'asap',
+    backend: str = "asap",
 ):
     if verbose:
         print(f"Processing {slide_id}...")
@@ -455,11 +469,14 @@ def seg_and_patch_slide(
 
     if seg_params.save_mask:
         import pyvips
+
         tif_save_dir = Path(mask_save_dir, "tif")
         tif_save_dir.mkdir(exist_ok=True)
         mask_path = Path(tif_save_dir, f"{slide_id}.tif")
         mask = pyvips.Image.new_from_array(wsi_object.binary_mask.tolist())
-        mask.tiffsave(mask_path, tile=True, compression='jpeg', bigtiff=True, pyramid=True, Q=70)
+        mask.tiffsave(
+            mask_path, tile=True, compression="jpeg", bigtiff=True, pyramid=True, Q=70
+        )
 
     if seg_params.visualize_mask:
         mask = wsi_object.visWSI(

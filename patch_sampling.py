@@ -18,22 +18,27 @@ from omegaconf import DictConfig
 
 from utils import initialize_wandb, segment
 from source.wsi import WholeSlideImage
-from source.utils import VisualizeCoords, overlay_mask_on_slide, overlay_mask_on_tile, get_masked_tile
+from source.utils import (
+    VisualizeCoords,
+    overlay_mask_on_slide,
+    overlay_mask_on_tile,
+    get_masked_tile,
+)
 
 
 def get_mask_percent(mask, val=0):
-    '''
+    """
     Determine the percentage of a mask that is equal to gleason score gs
     input:
         mask: mask as a PIL Image
         val: given value we want to check for
     output:
         percentage of the numpy array that is equal to val
-    '''
+    """
     mask_arr = np.array(mask)
     w, h = mask_arr.shape
     binary_mask = mask_arr == val
-    mask_percentage = np.sum(binary_mask) / (w*h)
+    mask_percentage = np.sum(binary_mask) / (w * h)
     return mask_percentage
 
 
@@ -45,14 +50,16 @@ def extract_top_tiles(
     tile_size: int,
     downsample: int,
     pixel_val: int,
-    threshold: float = 0.,
+    threshold: float = 0.0,
     sort: bool = False,
     topk: Optional[int] = None,
 ):
 
     wsi_spacing_level = wsi_object.get_best_level_for_spacing(spacing)
     x_mask = mask_object.level_dimensions[0][0]
-    mask_min_level = np.argmin([abs(x_wsi-x_mask) for x_wsi,_ in wsi_object.level_dimensions])
+    mask_min_level = np.argmin(
+        [abs(x_wsi - x_mask) for x_wsi, _ in wsi_object.level_dimensions]
+    )
 
     assert x_mask == wsi_object.level_dimensions[mask_min_level][0]
 
@@ -64,12 +71,20 @@ def extract_top_tiles(
     assert wsi_spacing_level <= wsi_downsample_level
     mask_downsample_level = wsi_downsample_level - mask_min_level
 
-    wsi_scale = tuple(a / b for a, b in zip(wsi_object.level_downsamples[wsi_downsample_level], wsi_object.level_downsamples[wsi_spacing_level]))
-    downsampled_tile_size = tuple(int(tile_size * 1. / s) for s in wsi_scale)
+    wsi_scale = tuple(
+        a / b
+        for a, b in zip(
+            wsi_object.level_downsamples[wsi_downsample_level],
+            wsi_object.level_downsamples[wsi_spacing_level],
+        )
+    )
+    downsampled_tile_size = tuple(int(tile_size * 1.0 / s) for s in wsi_scale)
 
     mask_downsample_spacing = mask_object.spacings[mask_downsample_level]
     mask_width, mask_height = mask_object.level_dimensions[mask_downsample_level]
-    mask_data = mask_object.wsi.get_patch(0, 0, mask_width, mask_height, spacing=mask_downsample_spacing, center=False)
+    mask_data = mask_object.wsi.get_patch(
+        0, 0, mask_width, mask_height, spacing=mask_downsample_spacing, center=False
+    )
     if mask_data.shape[-1] == 1:
         mask_data = np.squeeze(mask_data, axis=-1)
     mask_data = Image.fromarray(mask_data)
@@ -82,21 +97,32 @@ def extract_top_tiles(
 
         # in tile_df, x & y coordinates are defined w.r.t level 0 in the slide
         # need to downsample them to match input downsample value
-        for x, y in tile_df[['x', 'y']].values:
+        for x, y in tile_df[["x", "y"]].values:
             downsample_factor = wsi_object.level_downsamples[wsi_downsample_level]
-            x_downsampled, y_downsampled = int(x * 1. / downsample_factor[0]), int(y * 1. / downsample_factor[1])
+            x_downsampled, y_downsampled = int(x * 1.0 / downsample_factor[0]), int(
+                y * 1.0 / downsample_factor[1]
+            )
             # crop mask tile
-            coords = x_downsampled, y_downsampled, x_downsampled+downsampled_tile_size[0], y_downsampled+downsampled_tile_size[1]
+            coords = (
+                x_downsampled,
+                y_downsampled,
+                x_downsampled + downsampled_tile_size[0],
+                y_downsampled + downsampled_tile_size[1],
+            )
             masked_tile = mask_data.crop(coords)
             pct = get_mask_percent(masked_tile, pixel_val)
             if pct > threshold:
                 # scale coordinates back to input spacing_level
-                filtered_grid.append((int(x),int(y)))
+                filtered_grid.append((int(x), int(y)))
                 tile_percentages.append(pct)
 
         if sort:
             sorted_tile_percentages = sorted(tile_percentages, reverse=True)
-            sorted_idxs = sorted(range(len(tile_percentages)), key=lambda k: tile_percentages[k], reverse=True)
+            sorted_idxs = sorted(
+                range(len(tile_percentages)),
+                key=lambda k: tile_percentages[k],
+                reverse=True,
+            )
             filtered_grid = [filtered_grid[idx] for idx in sorted_idxs]
             tile_percentages = sorted_tile_percentages
 
@@ -112,7 +138,7 @@ def sample_patches(
     slide_fp: Path,
     annot_mask_fp: Path,
     output_dir: Path,
-    pixel_mapping: Dict[str,int],
+    pixel_mapping: Dict[str, int],
     visu: bool,
     seg_params,
     vis_params,
@@ -121,15 +147,15 @@ def sample_patches(
     spacing: Optional[float] = None,
     seg_mask_fp: Optional[str] = None,
     enable_mp: bool = False,
-    color_mapping: Optional[Dict[str,int]] = None,
-    filtering_threshold: float = 0.,
+    color_mapping: Optional[Dict[str, int]] = None,
+    filtering_threshold: float = 0.0,
     skip: List[str] = [],
     sort: bool = False,
     topk: Optional[int] = None,
     alpha: float = 0.5,
     seg_mask_save_dir: Optional[Path] = None,
     overlay_mask_save_dir: Optional[Path] = None,
-    backend: str = 'asap',
+    backend: str = "asap",
     eps: float = 1e-5,
 ):
 
@@ -198,14 +224,14 @@ def sample_patches(
 
     slide_ids, coordinates, percentages, categories = [], [], [], []
 
-    patch_dir = Path(output_dir, 'patches')
+    patch_dir = Path(output_dir, "patches")
 
-    h5_dir = Path(patch_dir, 'h5')
+    h5_dir = Path(patch_dir, "h5")
     h5_dir.mkdir(exist_ok=True, parents=True)
     hdf5_file_path = Path(h5_dir, f"{slide_id}.h5")
 
-    raw_tile_dir = Path(patch_dir, 'raw')
-    overlay_tile_dir = Path(patch_dir, 'mask')
+    raw_tile_dir = Path(patch_dir, "raw")
+    overlay_tile_dir = Path(patch_dir, "mask")
 
     # loop over annotation categories and extract top scoring patches
     # among previously extracted tissue patches
@@ -225,10 +251,10 @@ def sample_patches(
                 sort,
                 topk,
             )
-            slide_ids.extend([slide_id]*len(coords))
+            slide_ids.extend([slide_id] * len(coords))
             coordinates.extend(coords)
             percentages.extend(pct)
-            categories.extend([cat]*len(coords))
+            categories.extend([cat] * len(coords))
 
             # save coords to h5py file
             h5_file = h5py.File(hdf5_file_path, "a")
@@ -246,7 +272,9 @@ def sample_patches(
             )
             dset[:] = cat_coords
             dset.attrs["patch_size"] = patch_params.patch_size
-            dset.attrs["patch_level"] = wsi_object.get_best_level_for_spacing(patch_params.spacing)
+            dset.attrs["patch_level"] = wsi_object.get_best_level_for_spacing(
+                patch_params.spacing
+            )
             h5_file.close()
 
             if patch_params.save_patches_to_disk:
@@ -264,10 +292,19 @@ def sample_patches(
 
                     for x, y in t:
 
-                        tile = wsi_object.wsi.get_patch(x, y, patch_params.patch_size, patch_params.patch_size, spacing=patch_params.spacing, center=False)
+                        tile = wsi_object.wsi.get_patch(
+                            x,
+                            y,
+                            patch_params.patch_size,
+                            patch_params.patch_size,
+                            spacing=patch_params.spacing,
+                            center=False,
+                        )
                         tile = Image.fromarray(tile).convert("RGB")
-                        fname = f'{slide_id}_{x}_{y}'
-                        tile_fp = Path(raw_tile_dir, cat_, f'{fname}.{patch_params.fmt}')
+                        fname = f"{slide_id}_{x}_{y}"
+                        tile_fp = Path(
+                            raw_tile_dir, cat_, f"{fname}.{patch_params.fmt}"
+                        )
                         tile_fp.parent.mkdir(exist_ok=True, parents=True)
                         tile.save(tile_fp)
 
@@ -283,8 +320,18 @@ def sample_patches(
                                 (patch_params.patch_size, patch_params.patch_size),
                             )
 
-                            overlayed_tile = overlay_mask_on_tile(tile, masked_tile, pixel_mapping, color_mapping, alpha=alpha)
-                            overlayed_tile_fp = Path(overlay_tile_dir, cat_, f'{fname}_mask.{patch_params.fmt}')
+                            overlayed_tile = overlay_mask_on_tile(
+                                tile,
+                                masked_tile,
+                                pixel_mapping,
+                                color_mapping,
+                                alpha=alpha,
+                            )
+                            overlayed_tile_fp = Path(
+                                overlay_tile_dir,
+                                cat_,
+                                f"{fname}_mask.{patch_params.fmt}",
+                            )
                             overlayed_tile_fp.parent.mkdir(exist_ok=True, parents=True)
                             overlayed_tile.save(overlayed_tile_fp)
 
@@ -306,7 +353,7 @@ def sample_patches(
         overlay_mask.save(overlay_mask_path)
 
     if visu and hdf5_file_path.exists():
-        visu_save_dir = Path(output_dir, 'visualization')
+        visu_save_dir = Path(output_dir, "visualization")
         visu_save_dir.mkdir(exist_ok=True)
         heatmaps = [None]
         for cat in pixel_mapping.keys():
@@ -333,18 +380,22 @@ def sample_patches(
         x, y = list(map(list, zip(*coordinates)))
     else:
         x, y = [], []
-    sampled_tiles_df = pd.DataFrame.from_dict({
-        'slide_id': slide_ids,
-        'category': categories,
-        'x': x,
-        'y': y,
-        'pct': percentages,
-    })
+    sampled_tiles_df = pd.DataFrame.from_dict(
+        {
+            "slide_id": slide_ids,
+            "category": categories,
+            "x": x,
+            "y": y,
+            "pct": percentages,
+        }
+    )
 
     return sampled_tiles_df
 
 
-@hydra.main(version_base="1.2.0", config_path="config/sampling", config_name="witali_liver")
+@hydra.main(
+    version_base="1.2.0", config_path="config/sampling", config_name="witali_liver"
+)
 def main(cfg: DictConfig):
 
     run_id = datetime.datetime.now().strftime("%Y-%m-%d_%H_%M")
@@ -364,19 +415,19 @@ def main(cfg: DictConfig):
     output_dir = Path(cfg.output_dir, cfg.experiment_name, run_id)
     output_dir.mkdir(exist_ok=True, parents=True)
 
-    seg_mask_save_dir = Path(output_dir, 'segmentation_mask')
-    overlay_mask_save_dir = Path(output_dir, 'annotation_mask')
+    seg_mask_save_dir = Path(output_dir, "segmentation_mask")
+    overlay_mask_save_dir = Path(output_dir, "annotation_mask")
     seg_mask_save_dir.mkdir(exist_ok=True)
     overlay_mask_save_dir.mkdir(exist_ok=True)
 
     df = pd.read_csv(cfg.csv)
 
-    slide_ids = df['slide_id'].values.tolist()
-    slide_fps = df['slide_path'].values.tolist()
+    slide_ids = df["slide_id"].values.tolist()
+    slide_fps = df["slide_path"].values.tolist()
     seg_mask_fps = [None] * len(slide_fps)
     if "segmentation_mask_path" in df.columns:
-        seg_mask_fps = df['segmentation_mask_path'].values.tolist()
-    annot_mask_fps = df['annotation_mask_path'].values.tolist()
+        seg_mask_fps = df["segmentation_mask_path"].values.tolist()
+    annot_mask_fps = df["annotation_mask_path"].values.tolist()
 
     spacings = [None] * len(slide_ids)
     if "spacing" in df.columns:
@@ -409,7 +460,9 @@ def main(cfg: DictConfig):
                 overlay_mask_save_dir,
                 cfg.backend,
             )
-            for sid, slide_fp, seg_mask_fp, annot_mask_fp, spacing in zip(slide_ids, slide_fps, seg_mask_fps, annot_mask_fps, spacings)
+            for sid, slide_fp, seg_mask_fp, annot_mask_fp, spacing in zip(
+                slide_ids, slide_fps, seg_mask_fps, annot_mask_fps, spacings
+            )
         ]
 
         wd = Path(__file__).parent
@@ -422,7 +475,7 @@ def main(cfg: DictConfig):
             "--fmt",
             "jpg",
             "--total",
-            f"{len(slide_ids)}"
+            f"{len(slide_ids)}",
         ]
         if cfg.wandb.enable:
             command_line = command_line + ["--log_to_wandb", "--id", f"{run_id}"]
@@ -439,7 +492,7 @@ def main(cfg: DictConfig):
             wandb.log({"processed": len(dfs)})
 
         tile_df = pd.concat(dfs, ignore_index=True)
-        tiles_fp = Path(output_dir, f'sampled_patches.csv')
+        tiles_fp = Path(output_dir, f"sampled_patches.csv")
         tile_df.to_csv(tiles_fp, index=False)
 
     else:
@@ -488,9 +541,8 @@ def main(cfg: DictConfig):
                     wandb.log({"processed": i + 1})
 
             df = pd.concat(dfs, ignore_index=True)
-            tiles_fp = Path(output_dir, f'sampled_patches.csv')
+            tiles_fp = Path(output_dir, f"sampled_patches.csv")
             df.to_csv(tiles_fp, index=False)
-
 
 
 if __name__ == "__main__":
