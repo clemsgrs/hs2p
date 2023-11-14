@@ -10,7 +10,7 @@ from PIL import Image
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
-from source.utils import save_hdf5, save_patch, compute_time
+from source.utils import save_hdf5, save_patch, compute_time, find_common_spacings
 from source.util_classes import (
     Contour_Checking_fn,
     isInContourV1,
@@ -19,6 +19,10 @@ from source.util_classes import (
     isInContourV3_Hard,
     isInContour_pct,
 )
+
+import warnings
+# ignore all warnings from wholeslidedata
+warnings.filterwarnings("ignore", module="wholeslidedata")
 
 Image.MAX_IMAGE_PIXELS = 933120000
 
@@ -113,11 +117,7 @@ class WholeSlideImage(object):
         mask = WholeSlideImage(mask_fp, backend=self.backend)
 
         # ensure mask and slide have at least one common spacing
-        common_spacings = list(
-            set([round(s, 3) for s in self.spacings]).intersection(
-                set([round(s, 3) for s in mask.spacings])
-            )
-        )
+        common_spacings = find_common_spacings(self.spacings, mask.spacings, tolerance=0.1)
         assert (
             len(common_spacings) >= 1
         ), f"The provided segmentation mask (spacings={mask.spacings}) has no common spacing with the slide (spacings={self.spacings}). A minimum of 1 common spacing is required."
@@ -126,11 +126,11 @@ class WholeSlideImage(object):
         seg_spacing = self.get_level_spacing(seg_level)
 
         # check if this spacing is present in common spacings
-        is_in_common_spacings = round(seg_spacing, 3) in common_spacings
+        is_in_common_spacings = seg_spacing in [s for s,_ in common_spacings]
         if not is_in_common_spacings:
             # find spacing that is common to slide and mask and that is the closest to seg_spacing
-            closest = np.argmin([abs(seg_spacing - s) for s in common_spacings])
-            closest_common_spacing = common_spacings[closest]
+            closest = np.argmin([abs(seg_spacing - s) for s,_ in common_spacings])
+            closest_common_spacing = common_spacings[closest][0]
             seg_spacing = closest_common_spacing
             seg_level = self.get_best_level_for_spacing(seg_spacing)
 

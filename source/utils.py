@@ -154,6 +154,16 @@ def save_hdf5(output_path, asset_dict, attr_dict=None, mode="a"):
     return output_path
 
 
+def find_common_spacings(spacings_1, spacings_2, tolerance: float = 0.05):
+    common_spacings = []
+    for s1 in spacings_1:
+        for s2 in spacings_2:
+            # check how far appart these two spacings are
+            if abs(s1 - s2) / s1 <= tolerance:
+                common_spacings.append((s1, s2))
+    return common_spacings
+
+
 def save_patch(
     wsi,
     spacing: float,
@@ -519,21 +529,17 @@ def DrawMapFromCoords(
 
         if mask_object is not None:
             # ensure mask and slide have at least one common spacing
-            common_spacings = list(
-                set([round(s, 3) for s in wsi_object.spacings]).intersection(
-                    set([round(s, 3) for s in mask_object.spacings])
-                )
-            )
+            common_spacings = find_common_spacings(wsi_object.spacings, mask_object.spacings, tolerance=0.1)
             assert (
                 len(common_spacings) >= 1
             ), f"The provided segmentation mask (spacings={mask_object.spacings}) has no common spacing with the slide (spacings={wsi_object.spacings}). A minimum of 1 common spacing is required."
 
             # check if this spacing is present in common spacings
-            is_in_common_spacings = round(vis_spacing, 3) in common_spacings
+            is_in_common_spacings = vis_spacing in [s for s,_ in common_spacings]
             if not is_in_common_spacings:
                 # find spacing that is common to slide and mask and that is the closest to seg_spacing
-                closest = np.argmin([abs(vis_spacing - s) for s in common_spacings])
-                closest_common_spacing = common_spacings[closest]
+                closest = np.argmin([abs(vis_spacing - s) for s,_ in common_spacings])
+                closest_common_spacing = common_spacings[closest][0]
                 vis_spacing = closest_common_spacing
                 vis_level = wsi_object.get_best_level_for_spacing(vis_spacing)
 

@@ -19,6 +19,7 @@ from omegaconf import DictConfig
 from utils import initialize_wandb, segment
 from source.wsi import WholeSlideImage
 from source.utils import (
+    find_common_spacings,
     VisualizeCoords,
     overlay_mask_on_slide,
     overlay_mask_on_tile,
@@ -55,40 +56,41 @@ def extract_top_tiles(
     topk: Optional[int] = None,
 ):
 
-    wsi_spacing_level = wsi_object.get_best_level_for_spacing(spacing)
-    x_mask = mask_object.level_dimensions[0][0]
-    mask_min_level = np.argmin(
-        [abs(x_wsi - x_mask) for x_wsi, _ in wsi_object.level_dimensions]
-    )
-
-    assert x_mask == wsi_object.level_dimensions[mask_min_level][0]
+    common_spacings = find_common_spacings(wsi_object.spacings, mask_object.spacings, tolerance=0.1)
+    assert len(common_spacings) >= 1, f"The provided segmentation mask (spacings={mask_object.spacings}) has no common spacing with the slide (spacings={wsi_object.spacings}). A minimum of 1 common spacing is required."
 
     if downsample == -1:
-        wsi_downsample_level = max(wsi_spacing_level, mask_min_level)
+        overlay_spacing = spacing
+        overlay_level = wsi_object.get_best_level_for_spacing(overlay_spacing)
     else:
-        downsample_level = wsi_object.get_best_level_for_downsample_custom(downsample)
-        wsi_downsample_level = max(downsample_level, mask_min_level)
-    assert wsi_spacing_level <= wsi_downsample_level
-    mask_downsample_level = wsi_downsample_level - mask_min_level
+        overlay_level = wsi_object.get_best_level_for_downsample_custom(downsample)
+        overlay_spacing = wsi_object.get_level_spacing(overlay_level)
 
-    wsi_scale = tuple(
-        a / b
-        for a, b in zip(
-            wsi_object.level_downsamples[wsi_downsample_level],
-            wsi_object.level_downsamples[wsi_spacing_level],
-        )
-    )
-    downsampled_tile_size = tuple(int(tile_size * 1.0 / s) for s in wsi_scale)
+    # check if this spacing is present in common spacings
+    is_in_common_spacings = overlay_spacing in [s for s,_ in common_spacings]
+    if not is_in_common_spacings:
+        # find spacing that is common to slide and mask and that is the closest to overlay_spacing
+        closest = np.argmin([abs(overlay_spacing-s) for s,_ in common_spacings])
+        closest_common_spacing = common_spacings[closest][0]
+        overlay_spacing = closest_common_spacing
+        overlay_level = wsi_object.get_best_level_for_spacing(overlay_spacing)
 
-    mask_downsample_spacing = mask_object.spacings[mask_downsample_level]
-    mask_width, mask_height = mask_object.level_dimensions[mask_downsample_level]
-    mask_data = mask_object.wsi.get_patch(
-        0, 0, mask_width, mask_height, spacing=mask_downsample_spacing, center=False
-    )
+    mask_data = mask_object.wsi.get_slide(spacing=overlay_spacing)
     if mask_data.shape[-1] == 1:
         mask_data = np.squeeze(mask_data, axis=-1)
     mask_data = Image.fromarray(mask_data)
     mask_data = mask_data.split()[0]
+
+
+    spacing_level = wsi_object.get_best_level_for_spacing(spacing)
+    wsi_scale = tuple(
+        a / b
+        for a, b in zip(
+            wsi_object.level_downsamples[overlay_level],
+            wsi_object.level_downsamples[spacing_level],
+        )
+    )
+    downsampled_tile_size = tuple(int(tile_size * 1.0 / s) for s in wsi_scale)
 
     filtered_grid = []
     tile_percentages = []
@@ -98,7 +100,7 @@ def extract_top_tiles(
         # in tile_df, x & y coordinates are defined w.r.t level 0 in the slide
         # need to downsample them to match input downsample value
         for x, y in tile_df[["x", "y"]].values:
-            downsample_factor = wsi_object.level_downsamples[wsi_downsample_level]
+            downsample_factor = wsi_object.level_downsamples[overlay_level]
             x_downsampled, y_downsampled = int(x * 1.0 / downsample_factor[0]), int(
                 y * 1.0 / downsample_factor[1]
             )
@@ -251,6 +253,7 @@ def sample_patches(
                 sort,
                 topk,
             )
+
             slide_ids.extend([slide_id] * len(coords))
             coordinates.extend(coords)
             percentages.extend(pct)
@@ -426,7 +429,7 @@ def main(cfg: DictConfig):
     slide_fps = df["slide_path"].values.tolist()
     seg_mask_fps = [None] * len(slide_fps)
     if "segmentation_mask_path" in df.columns:
-        seg_mask_fps = df["segmentation_mask_path"].values.tolist()
+        seg_mask_fps = [Path(f) for f in df["segmentation_mask_path"].values.tolist()]
     annot_mask_fps = df["annotation_mask_path"].values.tolist()
 
     spacings = [None] * len(slide_ids)
@@ -448,7 +451,7 @@ def main(cfg: DictConfig):
                 cfg.filter_params,
                 cfg.patch_params,
                 spacing,
-                Path(seg_mask_fp),
+                seg_mask_fp,
                 False,
                 color_mapping,
                 cfg.filtering_threshold,
@@ -522,7 +525,7 @@ def main(cfg: DictConfig):
                     cfg.filter_params,
                     cfg.patch_params,
                     spacing=spacing,
-                    seg_mask_fp=Path(seg_mask_fp),
+                    seg_mask_fp=seg_mask_fp,
                     enable_mp=True,
                     color_mapping=color_mapping,
                     filtering_threshold=cfg.filtering_threshold,
