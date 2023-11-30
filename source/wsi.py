@@ -433,7 +433,10 @@ class WholeSlideImage(object):
     ):
         save_flag = save_dir is not None
         if save_flag:
-            save_path_hdf5 = Path(save_dir, f"{self.name}.h5")
+            if save_patches_in_common_dir:
+                save_path_hdf5 = Path(save_dir.parent, "h5", f"{self.name}.h5")
+            else:
+                save_path_hdf5 = Path(save_dir, f"{self.name}.h5")
         else:
             save_path_hdf5 = None
         start_time = time.time()
@@ -488,7 +491,7 @@ class WholeSlideImage(object):
 
             if len(asset_dict) > 0 and save_flag:
                 if init:
-                    save_dir.mkdir(parents=True, exist_ok=True)
+                    save_path_hdf5.parent.mkdir(parents=True, exist_ok=True)
                     save_hdf5(save_path_hdf5, asset_dict, attr_dict, mode="w")
                     init = False
                 else:
@@ -509,6 +512,7 @@ class WholeSlideImage(object):
                         asset_dict,
                         attr_dict,
                         fmt=patch_format,
+                        save_patches_in_common_dir=save_patches_in_common_dir,
                     )
 
         end_time = time.time()
