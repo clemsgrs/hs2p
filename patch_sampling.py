@@ -479,7 +479,7 @@ def main(cfg: DictConfig):
             f"{len(slide_ids)}",
         ]
         if cfg.wandb.enable:
-            command_line = command_line + ["--log_to_wandb", "--id", f"{run_id}"]
+            command_line = command_line + ["--log_to_wandb", "--id", f"{run_id}", "--project", f"{cfg.wandb.project}", "--username", f"{cfg.wandb.username}"]
         subprocess.Popen(command_line)
 
         num_workers = mp.cpu_count()

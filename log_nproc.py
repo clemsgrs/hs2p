@@ -28,6 +28,14 @@ if __name__ == "__main__":
         help="id of the corresponding main experiment",
     )
     parser.add_argument(
+        "--project",
+        help="project name",
+    )
+    parser.add_argument(
+        "--username",
+        help="user name",
+    )
+    parser.add_argument(
         "--output_dir",
         help="directory where main experiment output is saved",
         required=True,
@@ -53,7 +61,7 @@ if __name__ == "__main__":
     args = vars(parser.parse_args())
 
     if args["log_to_wandb"]:
-        run = wandb.init(id=args["id"])
+        run = wandb.init(id=args["id"], project=args["project"], entity=args["username"])
         run.define_metric("processed", summary="max")
     print()
     stop = False
