@@ -171,6 +171,7 @@ def save_patch(
     asset_dict,
     attr_dict=None,
     fmt="png",
+    save_patches_in_common_dir: bool = False,
 ):
     coords = asset_dict["coords"]
     patch_size = attr_dict["coords"]["patch_size"]
@@ -185,7 +186,10 @@ def save_patch(
             x, y, patch_size, patch_size, spacing=spacing, center=False
         )
         pil_patch = Image.fromarray(patch).convert("RGB")
-        save_path = Path(save_dir, f"{int(x)}_{int(y)}.{fmt}")
+        save_name = f"{int(x)}_{int(y)}.{fmt}"
+        if save_patches_in_common_dir:
+            save_name = f"{wsi_name}_{save_name}"
+        save_path = Path(save_dir, save_name)
         pil_patch.save(save_path)
 
     end_time = time.time()

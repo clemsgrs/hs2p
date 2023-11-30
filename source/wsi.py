@@ -424,6 +424,7 @@ class WholeSlideImage(object):
         tissue_thresh: float = 0.01,
         use_padding: bool = True,
         save_patches_to_disk: bool = False,
+        save_patches_in_common_dir: bool = False,
         patch_format: str = "png",
         top_left: Optional[List[int]] = None,
         bot_right: Optional[List[int]] = None,
@@ -466,12 +467,20 @@ class WholeSlideImage(object):
             if tile_df is not None:
                 tile_df["contour"] = [i] * len(tile_df)
                 if save_patches_to_disk:
-                    tile_df["tile_path"] = tile_df.apply(
-                        lambda row: Path(
-                            save_dir, "imgs", f"{row.x}_{row.y}.{patch_format}"
-                        ).resolve(),
-                        axis=1,
-                    )
+                    if save_patches_in_common_dir:
+                        tile_df["tile_path"] = tile_df.apply(
+                            lambda row: Path(
+                                save_dir.parent, "imgs", f"{row.slide_id}_{row.x}_{row.y}.{patch_format}"
+                            ).resolve(),
+                            axis=1,
+                        )
+                    else:
+                        tile_df["tile_path"] = tile_df.apply(
+                            lambda row: Path(
+                                save_dir, "imgs", f"{row.x}_{row.y}.{patch_format}"
+                            ).resolve(),
+                            axis=1,
+                        )
                     cols = list(tile_df.columns)
                     cols = [cols[-1]] + cols[:-1]
                     tile_df = tile_df[cols]
@@ -485,7 +494,10 @@ class WholeSlideImage(object):
                 else:
                     save_hdf5(save_path_hdf5, asset_dict, mode="a")
                 if save_patches_to_disk:
-                    patch_save_dir = Path(save_dir, "imgs")
+                    if save_patches_in_common_dir:
+                        patch_save_dir = Path(save_dir.parent, "imgs")
+                    else:
+                        patch_save_dir = Path(save_dir, "imgs")
                     patch_save_dir.mkdir(parents=True, exist_ok=True)
                     patch_spacing = self.get_level_spacing(
                         attr_dict["coords"]["patch_level"]
