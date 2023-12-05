@@ -43,6 +43,8 @@ patch_params:
   tissue_thresh: 0.1 # if contour_fn = 'pct', threshold used to filter out patches that have less tissue than this value (percentage)
   drop_holes: False # whether or not to drop patches whose center pixel falls withing an identified holes
   save_patches_to_disk: False # whether or not to save patches as images to disk
+  save_patches_in_tarball: False # whether or not to save patches directly in a tarball file
+  compress_individually: False # whether or not to compress each patch individually when saving them in a tarball file
   save_patches_in_common_dir: False # whether to save patches from different slides in a single common directory
   format: 'jpg' # if save_patches_to_disk = True, then saves patches in this file format
   draw_grid: True # whether to draw the patch grid when visualizing patching results

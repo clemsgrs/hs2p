@@ -10,7 +10,7 @@ from PIL import Image
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
-from source.utils import save_hdf5, save_patch, compute_time, find_common_spacings
+from source.utils import save_hdf5, save_patch, save_tarball, compute_time, find_common_spacings
 from source.util_classes import (
     Contour_Checking_fn,
     isInContourV1,
@@ -424,6 +424,8 @@ class WholeSlideImage(object):
         tissue_thresh: float = 0.01,
         use_padding: bool = True,
         save_patches_to_disk: bool = False,
+        save_patches_in_tarball: bool = False,
+        compress_individually: bool = False,
         save_patches_in_common_dir: bool = False,
         patch_format: str = "png",
         top_left: Optional[List[int]] = None,
@@ -496,15 +498,13 @@ class WholeSlideImage(object):
                     init = False
                 else:
                     save_hdf5(save_path_hdf5, asset_dict, mode="a")
+                patch_spacing = self.get_level_spacing(attr_dict["coords"]["patch_level"])
                 if save_patches_to_disk:
                     if save_patches_in_common_dir:
                         patch_save_dir = Path(save_dir.parent, "imgs")
                     else:
                         patch_save_dir = Path(save_dir, "imgs")
                     patch_save_dir.mkdir(parents=True, exist_ok=True)
-                    patch_spacing = self.get_level_spacing(
-                        attr_dict["coords"]["patch_level"]
-                    )
                     npatch, mins, secs = save_patch(
                         self.wsi,
                         patch_spacing,
@@ -513,6 +513,17 @@ class WholeSlideImage(object):
                         attr_dict,
                         fmt=patch_format,
                         save_patches_in_common_dir=save_patches_in_common_dir,
+                    )
+                elif save_patches_in_tarball:
+                    save_tarball(
+                        self.wsi,
+                        patch_spacing,
+                        save_dir.parent,
+                        asset_dict,
+                        attr_dict,
+                        fmt=patch_format,
+                        save_patches_in_common_dir=save_patches_in_common_dir,
+                        compress_individually=compress_individually,
                     )
 
         end_time = time.time()

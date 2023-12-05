@@ -1,6 +1,9 @@
+import io
 import cv2
 import time
 import h5py
+import gzip
+import tarfile
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -194,6 +197,62 @@ def save_patch(
 
     end_time = time.time()
     patch_saving_mins, patch_saving_secs = compute_time(start_time, end_time)
+    return npatch, patch_saving_mins, patch_saving_secs
+
+
+def save_tarball(
+    wsi,
+    spacing: float,
+    save_dir,
+    asset_dict,
+    attr_dict=None,
+    fmt="png",
+    save_patches_in_common_dir: bool = False,
+    compress_individually: bool = False,
+):
+
+    coords = asset_dict["coords"]
+    patch_size = attr_dict["coords"]["patch_size"]
+    wsi_name = attr_dict["coords"]["wsi_name"]
+
+    npatch = len(coords)
+    start_time = time.time()
+
+    tarball_path = Path(save_dir, "patches.tar")
+    with tarfile.open(tarball_path, "a") as tar:
+        for coord in coords:
+            x, y = coord
+            patch = wsi.get_patch(
+                x, y, patch_size, patch_size, spacing=spacing, center=False
+            )
+            pil_patch = Image.fromarray(patch).convert("RGB")
+
+            # convert PIL.Image object to bytes
+            patch_bytes = io.BytesIO()
+            pil_patch.save(patch_bytes, format='JPEG')
+            patch_bytes.seek(0)
+
+            if compress_individually:
+                # compress the image bytes
+                with gzip.GzipFile(fileobj=patch_bytes, mode='wb') as gz:
+                    gz.write(patch_bytes.getvalue())
+                patch_bytes.seek(0)
+
+            # add bytes to the tarball with a unique filename
+            filename = f"{int(x)}_{int(y)}.{fmt}"
+            if save_patches_in_common_dir:
+                filename = f"{wsi_name}_{filename}"
+            if compress_individually:
+                filename = f"{filename}.gz"
+
+            # add the compressed image to the tarball
+            tarinfo = tarfile.TarInfo(filename)
+            tarinfo.size = len(patch_bytes.getvalue())
+            tar.addfile(tarinfo, patch_bytes)
+
+    end_time = time.time()
+    patch_saving_mins, patch_saving_secs = compute_time(start_time, end_time)
+
     return npatch, patch_saving_mins, patch_saving_secs
 
 
