@@ -137,8 +137,7 @@ class WholeSlideImage(object):
         m = mask.wsi.get_slide(spacing=seg_spacing)
         m = m[..., 0]
 
-        if tissue_val > 1:
-            m = m - tissue_val * np.ones_like(m)
+        m = (m == tissue_val).astype('uint8')
         if np.max(m) <= 1:
             m = m * sthresh_up
 
