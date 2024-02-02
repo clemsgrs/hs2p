@@ -373,9 +373,12 @@ def sample_patches(
                     alpha=alpha,
                 )
                 heatmaps.append(heatmap)
-        heatmap = [h for h in heatmaps if h is not None][-1]
-        visu_path = Path(visu_save_dir, f"{slide_id}.jpg")
-        heatmap.save(visu_path)
+        # the last heatmaps element contains the final visualization image
+        heatmap = [h for h in heatmaps if h is not None]
+        if len(heatmap) > 0:
+            heatmap = heatmap[-1]
+            visu_path = Path(visu_save_dir, f"{slide_id}.jpg")
+            heatmap.save(visu_path)
 
     if len(coordinates) > 0:
         x, y = list(map(list, zip(*coordinates)))
