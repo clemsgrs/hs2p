@@ -553,7 +553,7 @@ class WholeSlideImage(object):
                 self.level_dimensions[patch_level][1],
             )
 
-        # 256x256 patches at 20x are equivalent to 512x512 patches at 40x
+        # 256x256 patches at 1mpp are equivalent to 512x512 patches at 0.5mpp
         # ref_patch_size capture the patch size at level 0
         patch_downsample = (
             int(self.level_downsamples[patch_level][0]),

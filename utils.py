@@ -1,4 +1,5 @@
 import time
+import copy
 import tqdm
 import wandb
 import subprocess
@@ -420,6 +421,7 @@ def seg_and_patch_slide(
     wsi_object = WholeSlideImage(Path(slide_fp), spacing, backend)
 
     vis_level = vis_params.vis_level
+    best_vis_level = copy.deepcopy(vis_level)
     if vis_level < 0:
         if len(wsi_object.level_dimensions) == 1:
             vis_params.vis_level = 0
@@ -431,6 +433,7 @@ def seg_and_patch_slide(
             vis_params.vis_level = best_vis_level
 
     seg_level = seg_params.seg_level
+    best_seg_level = copy.deepcopy(seg_level)
     if seg_level < 0:
         if len(wsi_object.level_dimensions) == 1:
             seg_params.seg_level = 0
