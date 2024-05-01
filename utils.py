@@ -75,6 +75,17 @@ def initialize_wandb(
     return run
 
 
+def log_progress(processed_count, stop_logging, ntot):
+    previous_count = 0
+    while not stop_logging.is_set():
+        current_count = processed_count.value
+        if previous_count != current_count:
+            wandb.log({"processed": current_count})
+            previous_count = current_count
+        if current_count >= ntot:
+            break
+
+
 def segment(
     wsi_object: WholeSlideImage,
     spacing: float,

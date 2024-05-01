@@ -13,18 +13,7 @@ from pathlib import Path
 from omegaconf import DictConfig
 
 from source.utils import initialize_df
-from utils import initialize_wandb, seg_and_patch, seg_and_patch_slide_mp
-
-
-def log_progress(processed_count, stop_logging, ntot):
-    previous_count = 0
-    while not stop_logging.is_set():
-        current_count = processed_count.value
-        if previous_count != current_count:
-            wandb.log({"processed": current_count})
-            previous_count = current_count
-        if current_count >= ntot:
-            break
+from utils import initialize_wandb, log_progress, seg_and_patch, seg_and_patch_slide_mp
 
 
 @hydra.main(

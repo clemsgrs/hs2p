@@ -6,6 +6,7 @@ import time
 import wandb
 import hydra
 import datetime
+import threading
 import subprocess
 import pandas as pd
 import numpy as np
@@ -16,7 +17,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from omegaconf import DictConfig
 
-from utils import initialize_wandb, segment
+from utils import initialize_wandb, log_progress, segment
 from source.wsi import WholeSlideImage
 from source.utils import (
     find_common_spacings,
@@ -146,7 +147,7 @@ def sample_patches(
     patch_params,
     spacing: Optional[float] = None,
     seg_mask_fp: Optional[str] = None,
-    enable_mp: bool = False,
+    num_workers: int = 1,
     color_mapping: Optional[Dict[str, int]] = None,
     filtering_threshold: float = 0.0,
     skip: List[str] = [],
@@ -218,7 +219,7 @@ def sample_patches(
         drop_holes=patch_params.drop_holes,
         tissue_thresh=patch_params.tissue_thresh,
         use_padding=patch_params.use_padding,
-        enable_mp=enable_mp,
+        num_workers=num_workers,
     )
     patch_time_elapsed = time.time() - start_time
 
@@ -437,6 +438,10 @@ def main(cfg: DictConfig):
     if "spacing" in df.columns:
         spacings = df.spacing.values.tolist()
 
+    num_workers = min(mp.cpu_count(), cfg.speed.num_workers)
+    if "SLURM_JOB_CPUS_PER_NODE" in os.environ:
+        num_workers = min(num_workers, int(os.environ['SLURM_JOB_CPUS_PER_NODE']))
+
     if cfg.speed.multiprocessing:
 
         args = [
@@ -469,31 +474,26 @@ def main(cfg: DictConfig):
             )
         ]
 
-        wd = Path(__file__).parent
-        log_file = Path(wd, "log_nproc.py")
-        command_line = [
-            "python3",
-            f"{log_file}",
-            "--output_dir",
-            f"{overlay_mask_save_dir}",
-            "--fmt",
-            "jpg",
-            "--total",
-            f"{len(slide_ids)}",
-        ]
-        if cfg.wandb.enable:
-            command_line = command_line + ["--log_to_wandb", "--id", f"{run_id}", "--project", f"{cfg.wandb.project}", "--username", f"{cfg.wandb.username}"]
-        subprocess.Popen(command_line)
+        ntot = len(args)
+        processed_count = mp.Value('i', 0)
 
-        num_workers = mp.cpu_count()
-        if num_workers > cfg.speed.num_workers:
-            num_workers = cfg.speed.num_workers
+        # start the logging thread
+        if cfg.wandb.enable:
+            stop_logging = threading.Event()
+            logging_thread = threading.Thread(target=log_progress, args=(processed_count, stop_logging, ntot))
+            logging_thread.start()
+
         dfs = []
         with mp.Pool(num_workers) as pool:
             for i, r in enumerate(pool.starmap(sample_patches, args)):
                 dfs.append(r)
+                with processed_count.get_lock():
+                    processed_count.value += 1
+
         if cfg.wandb.enable:
-            wandb.log({"processed": len(dfs)})
+            stop_logging.set()
+            logging_thread.join()
+            wandb.log({"processed": processed_count.value})
 
         tile_df = pd.concat(dfs, ignore_index=True)
         tiles_fp = Path(output_dir, f"sampled_patches.csv")
@@ -527,7 +527,7 @@ def main(cfg: DictConfig):
                     cfg.patch_params,
                     spacing=spacing,
                     seg_mask_fp=seg_mask_fp,
-                    enable_mp=True,
+                    num_workers=num_workers,
                     color_mapping=color_mapping,
                     filtering_threshold=cfg.filtering_threshold,
                     skip=cfg.skip_category,
