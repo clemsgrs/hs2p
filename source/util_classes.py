@@ -15,10 +15,14 @@ class isInContourV1(Contour_Checking_fn):
     def __call__(self, pt):
         return (
             1,
-            -1
-            if cv2.pointPolygonTest(self.cont, tuple(np.array(pt).astype(float)), False)
-            >= 0
-            else 0,
+            (
+                -1
+                if cv2.pointPolygonTest(
+                    self.cont, tuple(np.array(pt).astype(float)), False
+                )
+                >= 0
+                else 0
+            ),
             -1,
         )
 
@@ -34,10 +38,14 @@ class isInContourV2(Contour_Checking_fn):
         ).astype(float)
         return (
             1,
-            -1
-            if cv2.pointPolygonTest(self.cont, tuple(np.array(pt).astype(float)), False)
-            >= 0
-            else 0,
+            (
+                -1
+                if cv2.pointPolygonTest(
+                    self.cont, tuple(np.array(pt).astype(float)), False
+                )
+                >= 0
+                else 0
+            ),
             -1,
         )
 

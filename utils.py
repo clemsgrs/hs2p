@@ -14,7 +14,15 @@ from omegaconf import DictConfig, OmegaConf
 from typing import Dict, List, Optional, Tuple
 
 from source.wsi import WholeSlideImage
-from source.utils import VisualizeCoords, find_common_spacings, overlay_mask_on_slide, overlay_mask_on_tile, get_masked_tile, compute_time, initialize_df
+from source.utils import (
+    VisualizeCoords,
+    find_common_spacings,
+    overlay_mask_on_slide,
+    overlay_mask_on_tile,
+    get_masked_tile,
+    compute_time,
+    initialize_df,
+)
 
 
 def write_dictconfig(d, f, child: bool = False, ntab=0):
@@ -581,22 +589,24 @@ def seg_and_patch_slide_mp(
         backend,
     ) = args
 
-    tile_df, slide_id, status, best_vis_level, best_seg_level, process_time = seg_and_patch_slide(
-        patch_save_dir,
-        mask_save_dir,
-        visu_save_dir,
-        seg_params,
-        filter_params,
-        vis_params,
-        patch_params,
-        slide_id,
-        slide_fp,
-        mask_fp,
-        spacing,
-        patch,
-        visu,
-        verbose,
-        backend,
+    tile_df, slide_id, status, best_vis_level, best_seg_level, process_time = (
+        seg_and_patch_slide(
+            patch_save_dir,
+            mask_save_dir,
+            visu_save_dir,
+            seg_params,
+            filter_params,
+            vis_params,
+            patch_params,
+            slide_id,
+            slide_fp,
+            mask_fp,
+            spacing,
+            patch,
+            visu,
+            verbose,
+            backend,
+        )
     )
 
     return tile_df, slide_id, status, best_vis_level, best_seg_level, process_time
@@ -630,8 +640,12 @@ def extract_top_tiles(
     topk: Optional[int] = None,
 ):
 
-    common_spacings = find_common_spacings(wsi_object.spacings, mask_object.spacings, tolerance=0.1)
-    assert len(common_spacings) >= 1, f"The provided segmentation mask (spacings={mask_object.spacings}) has no common spacing with the slide (spacings={wsi_object.spacings}). A minimum of 1 common spacing is required."
+    common_spacings = find_common_spacings(
+        wsi_object.spacings, mask_object.spacings, tolerance=0.1
+    )
+    assert (
+        len(common_spacings) >= 1
+    ), f"The provided segmentation mask (spacings={mask_object.spacings}) has no common spacing with the slide (spacings={wsi_object.spacings}). A minimum of 1 common spacing is required."
 
     if downsample == -1:
         overlay_spacing = spacing
@@ -641,10 +655,10 @@ def extract_top_tiles(
         overlay_spacing = wsi_object.get_level_spacing(overlay_level)
 
     # check if this spacing is present in common spacings
-    is_in_common_spacings = overlay_spacing in [s for s,_ in common_spacings]
+    is_in_common_spacings = overlay_spacing in [s for s, _ in common_spacings]
     if not is_in_common_spacings:
         # find spacing that is common to slide and mask and that is the closest to overlay_spacing
-        closest = np.argmin([abs(overlay_spacing-s) for s,_ in common_spacings])
+        closest = np.argmin([abs(overlay_spacing - s) for s, _ in common_spacings])
         closest_common_spacing = common_spacings[closest][0]
         overlay_spacing = closest_common_spacing
         overlay_level = wsi_object.get_best_level_for_spacing(overlay_spacing)

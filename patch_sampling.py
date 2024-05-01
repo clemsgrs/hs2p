@@ -55,7 +55,7 @@ def main(cfg: DictConfig):
 
     num_workers = min(mp.cpu_count(), cfg.speed.num_workers)
     if "SLURM_JOB_CPUS_PER_NODE" in os.environ:
-        num_workers = min(num_workers, int(os.environ['SLURM_JOB_CPUS_PER_NODE']))
+        num_workers = min(num_workers, int(os.environ["SLURM_JOB_CPUS_PER_NODE"]))
 
     if cfg.speed.multiprocessing:
 
@@ -90,17 +90,24 @@ def main(cfg: DictConfig):
         ]
 
         total = len(args)
-        processed_count = mp.Value('i', 0)
+        processed_count = mp.Value("i", 0)
 
         # start the logging thread
         if cfg.wandb.enable:
             stop_logging = threading.Event()
-            logging_thread = threading.Thread(target=log_progress, args=(processed_count, stop_logging, total))
+            logging_thread = threading.Thread(
+                target=log_progress, args=(processed_count, stop_logging, total)
+            )
             logging_thread.start()
 
         dfs = []
         with mp.Pool(num_workers) as pool:
-            for r in tqdm.tqdm(pool.imap_unordered(sample_patches_mp, args), desc="Patch sampling", unit=" slide", total=total):
+            for r in tqdm.tqdm(
+                pool.imap_unordered(sample_patches_mp, args),
+                desc="Patch sampling",
+                unit=" slide",
+                total=total,
+            ):
                 dfs.append(r)
                 with processed_count.get_lock():
                     processed_count.value += 1

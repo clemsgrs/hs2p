@@ -22,6 +22,7 @@ from source.util_classes import (
 )
 
 import warnings
+
 # ignore all warnings from wholeslidedata
 warnings.filterwarnings("ignore", module="wholeslidedata")
 
@@ -32,7 +33,6 @@ class WholeSlideImage(object):
     def __init__(
         self, path: Path, spacing: Optional[float] = None, backend: str = "asap"
     ):
-
         """
         Args:
             path (Path): fullpath to WSI file
@@ -121,7 +121,9 @@ class WholeSlideImage(object):
         mask = WholeSlideImage(mask_fp, backend=self.backend)
 
         # ensure mask and slide have at least one common spacing
-        common_spacings = find_common_spacings(self.spacings, mask.spacings, tolerance=0.1)
+        common_spacings = find_common_spacings(
+            self.spacings, mask.spacings, tolerance=0.1
+        )
         assert (
             len(common_spacings) >= 1
         ), f"The provided segmentation mask (spacings={mask.spacings}) has no common spacing with the slide (spacings={self.spacings}). A minimum of 1 common spacing is required."
@@ -130,18 +132,20 @@ class WholeSlideImage(object):
         seg_spacing = self.get_level_spacing(seg_level)
 
         # check if this spacing is present in common spacings
-        is_in_common_spacings = seg_spacing in [s for s,_ in common_spacings]
+        is_in_common_spacings = seg_spacing in [s for s, _ in common_spacings]
         if not is_in_common_spacings:
             # find spacing that is common to slide and mask and that is the closest to seg_spacing
-            closest = np.argmin([abs(seg_spacing - s) for s,_ in common_spacings])
+            closest = np.argmin([abs(seg_spacing - s) for s, _ in common_spacings])
             closest_common_spacing = common_spacings[closest][0]
             seg_spacing = closest_common_spacing
-            seg_level, _ = self.get_best_level_for_spacing(seg_spacing, ignore_warning=True)
+            seg_level, _ = self.get_best_level_for_spacing(
+                seg_spacing, ignore_warning=True
+            )
 
         m = mask.wsi.get_slide(spacing=seg_spacing)
         m = m[..., 0]
 
-        m = (m == tissue_val).astype('uint8')
+        m = (m == tissue_val).astype("uint8")
         if np.max(m) <= 1:
             m = m * sthresh_up
 
@@ -240,7 +244,9 @@ class WholeSlideImage(object):
 
             return foreground_contours, hole_contours
 
-        spacing_level, resize_factor = self.get_best_level_for_spacing(spacing, ignore_warning=True)
+        spacing_level, resize_factor = self.get_best_level_for_spacing(
+            spacing, ignore_warning=True
+        )
         current_scale = self.level_downsamples[spacing_level]
         target_scale = self.level_downsamples[seg_level]
         scale = tuple(a / b for a, b in zip(target_scale, current_scale))
@@ -476,7 +482,9 @@ class WholeSlideImage(object):
                     if save_patches_in_common_dir:
                         tile_df["tile_path"] = tile_df.apply(
                             lambda row: Path(
-                                save_dir.parent, "imgs", f"{row.slide_id}_{row.x}_{row.y}.{patch_format}"
+                                save_dir.parent,
+                                "imgs",
+                                f"{row.slide_id}_{row.x}_{row.y}.{patch_format}",
                             ).resolve(),
                             axis=1,
                         )
@@ -541,7 +549,9 @@ class WholeSlideImage(object):
         verbose: bool = False,
     ):
 
-        patch_level, resize_factor = self.get_best_level_for_spacing(spacing, ignore_warning=True)
+        patch_level, resize_factor = self.get_best_level_for_spacing(
+            spacing, ignore_warning=True
+        )
 
         patch_spacing = self.get_level_spacing(patch_level)
         resize_factor = int(spacing / patch_spacing)
@@ -646,7 +656,9 @@ class WholeSlideImage(object):
         if num_workers > 1:
             num_workers = min(mp.cpu_count(), num_workers)
             if "SLURM_JOB_CPUS_PER_NODE" in os.environ:
-                num_workers = min(num_workers, int(os.environ['SLURM_JOB_CPUS_PER_NODE']))
+                num_workers = min(
+                    num_workers, int(os.environ["SLURM_JOB_CPUS_PER_NODE"])
+                )
 
             pool = mp.Pool(num_workers)
 

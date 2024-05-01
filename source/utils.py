@@ -188,7 +188,9 @@ def save_patch(
         )
         pil_patch = Image.fromarray(patch).convert("RGB")
         if patch_size_resized != patch_size:
-            assert patch_size_resized % patch_size == 0, "patch_size_resized should be a multiple of patch_size"
+            assert (
+                patch_size_resized % patch_size == 0
+            ), "patch_size_resized should be a multiple of patch_size"
             pil_patch = pil_patch.resize((patch_size, patch_size))
         save_name = f"{int(x)}_{int(y)}.{fmt}"
         if save_patches_in_common_dir:
@@ -537,16 +539,18 @@ def DrawMapFromCoords(
 
         if mask_object is not None:
             # ensure mask and slide have at least one common spacing
-            common_spacings = find_common_spacings(wsi_object.spacings, mask_object.spacings, tolerance=0.1)
+            common_spacings = find_common_spacings(
+                wsi_object.spacings, mask_object.spacings, tolerance=0.1
+            )
             assert (
                 len(common_spacings) >= 1
             ), f"The provided segmentation mask (spacings={mask_object.spacings}) has no common spacing with the slide (spacings={wsi_object.spacings}). A minimum of 1 common spacing is required."
 
             # check if this spacing is present in common spacings
-            is_in_common_spacings = vis_spacing in [s for s,_ in common_spacings]
+            is_in_common_spacings = vis_spacing in [s for s, _ in common_spacings]
             if not is_in_common_spacings:
                 # find spacing that is common to slide and mask and that is the closest to seg_spacing
-                closest = np.argmin([abs(vis_spacing - s) for s,_ in common_spacings])
+                closest = np.argmin([abs(vis_spacing - s) for s, _ in common_spacings])
                 closest_common_spacing = common_spacings[closest][0]
                 vis_spacing = closest_common_spacing
                 vis_level = wsi_object.get_best_level_for_spacing(vis_spacing)

@@ -67,7 +67,7 @@ def main(cfg: DictConfig):
 
     num_workers = min(mp.cpu_count(), cfg.speed.num_workers)
     if "SLURM_JOB_CPUS_PER_NODE" in os.environ:
-        num_workers = min(num_workers, int(os.environ['SLURM_JOB_CPUS_PER_NODE']))
+        num_workers = min(num_workers, int(os.environ["SLURM_JOB_CPUS_PER_NODE"]))
 
     if cfg.speed.multiprocessing:
 
@@ -136,25 +136,47 @@ def main(cfg: DictConfig):
         ]
 
         total = len(args)
-        processed_count = mp.Value('i', 0)
+        processed_count = mp.Value("i", 0)
 
         # start the logging thread
         if cfg.wandb.enable:
             stop_logging = threading.Event()
-            logging_thread = threading.Thread(target=log_progress, args=(processed_count, stop_logging, total))
+            logging_thread = threading.Thread(
+                target=log_progress, args=(processed_count, stop_logging, total)
+            )
             logging_thread.start()
 
         results = []
         with mp.Pool(num_workers) as pool:
-            for r in tqdm.tqdm(pool.imap_unordered(seg_and_patch_slide_mp, args), desc="Patch extraction", unit=" slide", total=total):
+            for r in tqdm.tqdm(
+                pool.imap_unordered(seg_and_patch_slide_mp, args),
+                desc="Patch extraction",
+                unit=" slide",
+                total=total,
+            ):
                 results.append(r)
                 if r[0] is not None:
                     with processed_count.get_lock():
                         processed_count.value += 1
 
-        avg_process_time = round(np.mean([r[-1] for r in results if (r[0] is not None and r[-1] is not None)]), 2)
-        min_process_time = round(np.min([r[-1] for r in results if (r[0] is not None and r[-1] is not None)]), 2)
-        max_process_time = round(np.max([r[-1] for r in results if (r[0] is not None and r[-1] is not None)]), 2)
+        avg_process_time = round(
+            np.mean(
+                [r[-1] for r in results if (r[0] is not None and r[-1] is not None)]
+            ),
+            2,
+        )
+        min_process_time = round(
+            np.min(
+                [r[-1] for r in results if (r[0] is not None and r[-1] is not None)]
+            ),
+            2,
+        )
+        max_process_time = round(
+            np.max(
+                [r[-1] for r in results if (r[0] is not None and r[-1] is not None)]
+            ),
+            2,
+        )
         if cfg.wandb.enable:
             stop_logging.set()
             logging_thread.join()
