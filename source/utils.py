@@ -166,7 +166,6 @@ def find_common_spacings(spacings_1, spacings_2, tolerance: float = 0.05):
 
 def save_patch(
     wsi,
-    spacing: float,
     save_dir,
     asset_dict,
     attr_dict=None,
@@ -174,7 +173,9 @@ def save_patch(
     save_patches_in_common_dir: bool = False,
 ):
     coords = asset_dict["coords"]
+    spacing = attr_dict["coords"]["patch_spacing"]
     patch_size = attr_dict["coords"]["patch_size"]
+    patch_size_resized = attr_dict["coords"]["patch_size_resized"]
     wsi_name = attr_dict["coords"]["wsi_name"]
 
     npatch = len(coords)
@@ -183,9 +184,12 @@ def save_patch(
     for coord in coords:
         x, y = coord
         patch = wsi.get_patch(
-            x, y, patch_size, patch_size, spacing=spacing, center=False
+            x, y, patch_size_resized, patch_size_resized, spacing=spacing, center=False
         )
         pil_patch = Image.fromarray(patch).convert("RGB")
+        if patch_size_resized != patch_size:
+            assert patch_size_resized % patch_size == 0, "patch_size_resized should be a multiple of patch_size"
+            pil_patch = pil_patch.resize((patch_size, patch_size))
         save_name = f"{int(x)}_{int(y)}.{fmt}"
         if save_patches_in_common_dir:
             save_name = f"{wsi_name}_{save_name}"
@@ -616,7 +620,7 @@ def VisualizeCoords(
 
     w, h = wsi_object.level_dimensions[vis_level]
 
-    patch_size = dset.attrs["patch_size"]
+    patch_size = dset.attrs["patch_size_resized"]
     patch_level = dset.attrs["patch_level"]
     if verbose:
         print(f"downscaled size for stiching: {w} x {h}")

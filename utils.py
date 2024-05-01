@@ -84,7 +84,6 @@ def segment(
 ):
     start_time = time.time()
     if mask_fp is not None:
-        # print(f"Loading segmentation mask at: {mask_fp}")
         seg_level = wsi_object.loadSegmentation(
             mask_fp,
             spacing=spacing,
@@ -123,7 +122,7 @@ def patching(
     patch_format: str = "png",
     top_left: Optional[List[int]] = None,
     bot_right: Optional[List[int]] = None,
-    enable_mp: bool = True,
+    num_workers: int = 1,
     verbose: bool = False,
 ):
 
@@ -143,7 +142,7 @@ def patching(
         patch_format=patch_format,
         top_left=top_left,
         bot_right=bot_right,
-        enable_mp=enable_mp,
+        num_workers=num_workers,
         verbose=verbose,
     )
     patch_time_elapsed = time.time() - start_time
@@ -186,6 +185,7 @@ def seg_and_patch(
     visu: bool = False,
     patch: bool = False,
     process_list: Optional[Path] = None,
+    num_workers: int = 1,
     verbose: bool = False,
     log_to_wandb: bool = False,
     backend: str = "asap",
@@ -330,7 +330,7 @@ def seg_and_patch(
                     save_patches_to_disk=patch_params.save_patches_to_disk,
                     save_patches_in_common_dir=patch_params.save_patches_in_common_dir,
                     patch_format=patch_params.format,
-                    enable_mp=True,
+                    num_workers=num_workers,
                     verbose=verbose,
                 )
                 if tile_df is not None:
@@ -411,6 +411,7 @@ def seg_and_patch_slide(
     verbose: bool = False,
     backend: str = "asap",
 ):
+    start_time = time.time()
     if verbose:
         print(f"Processing {slide_id}...")
 
@@ -447,7 +448,7 @@ def seg_and_patch_slide(
     w, h = wsi_object.level_dimensions[seg_params.seg_level]
     if w * h > 1e8:
         print(
-            f"level dimensions {w} x {h} is likely too large for successful segmentation, aborting"
+            f"{slide_id}: level dimensions ({w},{h}) is likely too large for successful segmentation, aborting"
         )
         status = "failed_seg"
         tile_df = pd.DataFrame.from_dict(
@@ -462,7 +463,7 @@ def seg_and_patch_slide(
                 "contour": [],
             }
         )
-        return tile_df, slide_id, status, best_vis_level, best_seg_level
+        return tile_df, slide_id, status, best_vis_level, best_seg_level, None
 
     seg_time = -1
     wsi_object, seg_time = segment(
@@ -511,9 +512,12 @@ def seg_and_patch_slide(
             save_patches_to_disk=patch_params.save_patches_to_disk,
             save_patches_in_common_dir=patch_params.save_patches_in_common_dir,
             patch_format=patch_params.format,
-            enable_mp=False,
+            num_workers=1,
             verbose=verbose,
         )
+    end_time = time.time()
+    mins, secs = compute_time(start_time, end_time)
+    process_time = mins * 60 + secs
 
     visu_time = -1
     if visu:
@@ -537,4 +541,46 @@ def seg_and_patch_slide(
     vis_params.vis_level = vis_level
     seg_params.seg_level = seg_level
 
-    return tile_df, slide_id, status, best_vis_level, best_seg_level
+    return tile_df, slide_id, status, best_vis_level, best_seg_level, process_time
+
+
+def seg_and_patch_slide_mp(
+    args,
+):
+    (
+        patch_save_dir,
+        mask_save_dir,
+        visu_save_dir,
+        seg_params,
+        filter_params,
+        vis_params,
+        patch_params,
+        slide_id,
+        slide_fp,
+        mask_fp,
+        spacing,
+        patch,
+        visu,
+        verbose,
+        backend,
+    ) = args
+
+    tile_df, slide_id, status, best_vis_level, best_seg_level, process_time = seg_and_patch_slide(
+        patch_save_dir,
+        mask_save_dir,
+        visu_save_dir,
+        seg_params,
+        filter_params,
+        vis_params,
+        patch_params,
+        slide_id,
+        slide_fp,
+        mask_fp,
+        spacing,
+        patch,
+        visu,
+        verbose,
+        backend,
+    )
+
+    return tile_df, slide_id, status, best_vis_level, best_seg_level, process_time

@@ -1,9 +1,11 @@
 import os
+import tqdm
 import wandb
 import hydra
 import shutil
 import datetime
-import subprocess
+import threading
+import numpy as np
 import pandas as pd
 import multiprocessing as mp
 
@@ -11,7 +13,18 @@ from pathlib import Path
 from omegaconf import DictConfig
 
 from source.utils import initialize_df
-from utils import initialize_wandb, seg_and_patch, seg_and_patch_slide
+from utils import initialize_wandb, seg_and_patch, seg_and_patch_slide_mp
+
+
+def log_progress(processed_count, stop_logging, ntot):
+    previous_count = 0
+    while not stop_logging.is_set():
+        current_count = processed_count.value
+        if previous_count != current_count:
+            wandb.log({"processed": current_count})
+            previous_count = current_count
+        if current_count >= ntot:
+            break
 
 
 @hydra.main(
@@ -66,6 +79,10 @@ def main(cfg: DictConfig):
 
     print()
 
+    num_workers = min(mp.cpu_count(), cfg.speed.num_workers)
+    if "SLURM_JOB_CPUS_PER_NODE" in os.environ:
+        num_workers = min(num_workers, int(os.environ['SLURM_JOB_CPUS_PER_NODE']))
+
     if cfg.speed.multiprocessing:
 
         slide_paths = slide_df.slide_path.values.tolist()
@@ -94,14 +111,18 @@ def main(cfg: DictConfig):
 
         mask = df["process"] == 1
         process_stack = df[mask]
+
         slide_ids_to_process = process_stack.slide_id
         slide_paths_to_process = process_stack.slide_path
+
         mask_paths_to_process = [None] * len(slide_paths_to_process)
         if "segmentation_mask_path" in process_stack.columns:
             mask_paths_to_process = process_stack.segmentation_mask_path
+
         spacings_to_process = [None] * len(slide_paths_to_process)
         if "spacing" in process_stack.columns:
             spacings_to_process = process_stack.spacing
+
         args = [
             (
                 patch_save_dir,
@@ -128,48 +149,50 @@ def main(cfg: DictConfig):
             )
         ]
 
-        wd = Path(__file__).parent
-        log_file = Path(wd, "log_nproc.py")
-        command_line = [
-            "python3",
-            f"{log_file}",
-            "--output_dir",
-            f"{visu_save_dir}",
-            "--fmt",
-            "jpg",
-            "--total",
-            f"{len(process_stack)}",
-        ]
-        if cfg.wandb.enable:
-            command_line = command_line + ["--log_to_wandb", "--id", f"{run_id}", "--project", f"{cfg.wandb.project}", "--username", f"{cfg.wandb.username}"]
-        subprocess.Popen(command_line)
+        ntot = len(args)
+        processed_count = mp.Value('i', 0)
 
-        num_workers = mp.cpu_count()
-        if num_workers > cfg.speed.num_workers:
-            num_workers = cfg.speed.num_workers
+        # start the logging thread
+        if cfg.wandb.enable:
+            stop_logging = threading.Event()
+            logging_thread = threading.Thread(target=log_progress, args=(processed_count, stop_logging, ntot))
+            logging_thread.start()
+
         results = []
         with mp.Pool(num_workers) as pool:
-            for i, r in enumerate(pool.starmap(seg_and_patch_slide, args)):
+            for r in tqdm.tqdm(pool.imap_unordered(seg_and_patch_slide_mp, args), desc="Patch extraction", unit=" slide", total=len(args)):
                 results.append(r)
+                if r[0] is not None:
+                    with processed_count.get_lock():
+                        processed_count.value += 1
+
+        avg_process_time = round(np.mean([r[-1] for r in results if (r[0] is not None and r[-1] is not None)]), 2)
+        min_process_time = round(np.min([r[-1] for r in results if (r[0] is not None and r[-1] is not None)]), 2)
+        max_process_time = round(np.max([r[-1] for r in results if (r[0] is not None and r[-1] is not None)]), 2)
         if cfg.wandb.enable:
-            p = len([r for r in results if r[0] is not None])
-            wandb.log({"processed": p})
+            stop_logging.set()
+            logging_thread.join()
+            wandb.log({"processed": processed_count.value})
+            wandb.log({"avg_time_sec": avg_process_time})
+            wandb.log({"min_time_sec": min_process_time})
+            wandb.log({"max_time_sec": max_process_time})
 
         dfs = []
-        for t_df, sid, s, vl, sl in results:
+        for t_df, sid, s, vl, sl, pt in results:
 
             mask = df["slide_id"] == sid
             df.loc[mask, "status"] = s
             df.loc[mask, "process"] = 0
             df.loc[mask, "vis_level"] = vl
             df.loc[mask, "seg_level"] = sl
+            df.loc[mask, "process_time"] = pt
 
             dfs.append(t_df)
 
         df.to_csv(Path(output_dir, "process_list.csv"), index=False)
 
         tile_df = pd.concat(dfs, ignore_index=True)
-        tile_df.to_csv(Path(output_dir, f"tiles.csv"), index=False)
+        tile_df.to_csv(Path(output_dir, "tiles.csv"), index=False)
 
     else:
 
@@ -186,6 +209,7 @@ def main(cfg: DictConfig):
             filter_params=cfg.filter_params,
             vis_params=cfg.vis_params,
             patch_params=cfg.patch_params,
+            num_workers=num_workers,
             verbose=cfg.flags.verbose,
             log_to_wandb=cfg.wandb.enable,
             backend=cfg.backend,

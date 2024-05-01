@@ -1,3 +1,4 @@
+import os
 import cv2
 import time
 import math
@@ -74,21 +75,24 @@ class WholeSlideImage(object):
         self, target_spacing: float, ignore_warning: bool = False
     ):
         spacing = self.get_level_spacing(0)
-        downsample = target_spacing / spacing
+        target_downsample = target_spacing / spacing
         level, tol, above_tol = self.get_best_level_for_downsample_custom(
-            downsample, return_tol_status=True
+            target_downsample, return_tol_status=True
         )
+        level_spacing = self.get_level_spacing(level)
+        resize_factor = int(target_spacing / level_spacing)
         if above_tol and not ignore_warning:
             print(
-                f"WARNING! The natural spacing ({round(self.spacings[level],4)}) closest to the target spacing ({round(target_spacing,4)}) was more than {tol*100:.1f}% appart (slide {self.name})."
+                f"WARNING! The natural spacing ({round(self.spacings[level],4)}) closest to the target spacing ({round(target_spacing,4)}) was more than {tol*100:.1f}% appart ({self.name})."
             )
-        return level
+        return level, resize_factor
 
     def get_best_level_for_downsample_custom(
-        self, downsample, tol: float = 0.2, return_tol_status: bool = False
+        self, downsample, tol: float = 0.1, return_tol_status: bool = False
     ):
         level = int(np.argmin([abs(x - downsample) for x, _ in self.level_downsamples]))
-        above_tol = abs(self.level_downsamples[level][0] / downsample - 1) > tol
+        delta = abs(self.level_downsamples[level][0] / downsample - 1)
+        above_tol = delta > tol
         if return_tol_status:
             return level, tol, above_tol
         else:
@@ -132,7 +136,7 @@ class WholeSlideImage(object):
             closest = np.argmin([abs(seg_spacing - s) for s,_ in common_spacings])
             closest_common_spacing = common_spacings[closest][0]
             seg_spacing = closest_common_spacing
-            seg_level = self.get_best_level_for_spacing(seg_spacing)
+            seg_level, _ = self.get_best_level_for_spacing(seg_spacing, ignore_warning=True)
 
         m = mask.wsi.get_slide(spacing=seg_spacing)
         m = m[..., 0]
@@ -236,7 +240,7 @@ class WholeSlideImage(object):
 
             return foreground_contours, hole_contours
 
-        spacing_level = self.get_best_level_for_spacing(spacing)
+        spacing_level, resize_factor = self.get_best_level_for_spacing(spacing, ignore_warning=True)
         current_scale = self.level_downsamples[spacing_level]
         target_scale = self.level_downsamples[seg_level]
         scale = tuple(a / b for a, b in zip(target_scale, current_scale))
@@ -427,7 +431,7 @@ class WholeSlideImage(object):
         patch_format: str = "png",
         top_left: Optional[List[int]] = None,
         bot_right: Optional[List[int]] = None,
-        enable_mp: bool = True,
+        num_workers: int = 1,
         verbose: bool = False,
     ):
         save_flag = save_dir is not None
@@ -462,7 +466,7 @@ class WholeSlideImage(object):
                 use_padding,
                 top_left,
                 bot_right,
-                enable_mp=enable_mp,
+                num_workers=num_workers,
                 verbose=verbose,
             )
 
@@ -501,12 +505,8 @@ class WholeSlideImage(object):
                     else:
                         patch_save_dir = Path(save_dir, "imgs")
                     patch_save_dir.mkdir(parents=True, exist_ok=True)
-                    patch_spacing = self.get_level_spacing(
-                        attr_dict["coords"]["patch_level"]
-                    )
                     npatch, mins, secs = save_patch(
                         self.wsi,
-                        patch_spacing,
                         patch_save_dir,
                         asset_dict,
                         attr_dict,
@@ -537,12 +537,17 @@ class WholeSlideImage(object):
         use_padding: bool = True,
         top_left: Optional[List[int]] = None,
         bot_right: Optional[List[int]] = None,
-        enable_mp: bool = True,
+        num_workers: int = 1,
         verbose: bool = False,
     ):
 
-        step_size = int(patch_size * (1.0 - overlap))
-        patch_level = self.get_best_level_for_spacing(spacing, ignore_warning=True)
+        patch_level, resize_factor = self.get_best_level_for_spacing(spacing, ignore_warning=True)
+
+        patch_spacing = self.get_level_spacing(patch_level)
+        resize_factor = int(spacing / patch_spacing)
+        patch_size_resized = patch_size * resize_factor
+        step_size = int(patch_size_resized * (1.0 - overlap))
+
         if cont is not None:
             start_x, start_y, w, h = cv2.boundingRect(cont)
         else:
@@ -555,6 +560,7 @@ class WholeSlideImage(object):
 
         # 256x256 patches at 1mpp are equivalent to 512x512 patches at 0.5mpp
         # ref_patch_size capture the patch size at level 0
+        # assumes self.level_downsamples[0] is always (1, 1)
         patch_downsample = (
             int(self.level_downsamples[patch_level][0]),
             int(self.level_downsamples[patch_level][1]),
@@ -637,10 +643,11 @@ class WholeSlideImage(object):
             [x_coords.flatten(), y_coords.flatten()]
         ).transpose()
 
-        if enable_mp:
-            num_workers = mp.cpu_count()
-            if num_workers > 4:
-                num_workers = 4
+        if num_workers > 1:
+            num_workers = min(mp.cpu_count(), num_workers)
+            if "SLURM_JOB_CPUS_PER_NODE" in os.environ:
+                num_workers = min(num_workers, int(os.environ['SLURM_JOB_CPUS_PER_NODE']))
+
             pool = mp.Pool(num_workers)
 
             iterable = [
@@ -685,7 +692,9 @@ class WholeSlideImage(object):
             attr = {
                 "patch_size": patch_size,
                 "spacing": spacing,
+                "patch_size_resized": patch_size_resized,
                 "patch_level": patch_level,
+                "patch_spacing": patch_spacing,
                 "ref_patch_size": ref_patch_size[0],
                 "downsample": self.level_downsamples[patch_level],
                 "downsampled_level_dim": tuple(
@@ -699,7 +708,8 @@ class WholeSlideImage(object):
             df_data = {
                 "slide_id": [self.name] * npatch,
                 "spacing": [spacing] * npatch,
-                "level": [patch_level] * npatch,
+                "patch_level": [patch_level] * npatch,
+                "patch_spacing": [patch_spacing] * npatch,
                 "level_dimension": [self.level_dimensions[patch_level]] * npatch,
                 "tile_size": [patch_size] * npatch,
                 "x": list(filtered_results[:, 0]),  # defined w.r.t level 0
