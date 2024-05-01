@@ -2,7 +2,6 @@ import os
 import tqdm
 import wandb
 import hydra
-import shutil
 import datetime
 import threading
 import numpy as np
@@ -49,8 +48,6 @@ def main(cfg: DictConfig):
 
     for dirname, dirpath in directories.items():
         if not cfg.resume:
-            if dirpath.exists():
-                shutil.rmtree(dirpath)
             dirpath.mkdir(parents=True)
         else:
             dirpath.mkdir(parents=True, exist_ok=True)
@@ -138,18 +135,18 @@ def main(cfg: DictConfig):
             )
         ]
 
-        ntot = len(args)
+        total = len(args)
         processed_count = mp.Value('i', 0)
 
         # start the logging thread
         if cfg.wandb.enable:
             stop_logging = threading.Event()
-            logging_thread = threading.Thread(target=log_progress, args=(processed_count, stop_logging, ntot))
+            logging_thread = threading.Thread(target=log_progress, args=(processed_count, stop_logging, total))
             logging_thread.start()
 
         results = []
         with mp.Pool(num_workers) as pool:
-            for r in tqdm.tqdm(pool.imap_unordered(seg_and_patch_slide_mp, args), desc="Patch extraction", unit=" slide", total=len(args)):
+            for r in tqdm.tqdm(pool.imap_unordered(seg_and_patch_slide_mp, args), desc="Patch extraction", unit=" slide", total=total):
                 results.append(r)
                 if r[0] is not None:
                     with processed_count.get_lock():
