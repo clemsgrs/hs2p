@@ -154,6 +154,29 @@ def save_hdf5(output_path, asset_dict, attr_dict=None, mode="a"):
     return output_path
 
 
+def save_npy(output_path, asset_dict, attr_dict, mode="a"):
+    coords = asset_dict["coords"]
+    x = list(coords[:, 0])  # defined w.r.t level 0
+    y = list(coords[:, 1])  # defined w.r.t level 0
+    npatch = len(x)
+    attr = attr_dict["coords"]
+    patch_level = attr["patch_level"]
+    patch_size = attr["patch_size"]
+    patch_size_resized = attr["patch_size_resized"]
+    resize_factor = int(patch_size_resized // patch_size)
+    data = []
+    for i in range(npatch):
+        data.append([x[i], y[i], patch_size_resized, patch_level, resize_factor])
+    data_arr = np.array(data, dtype=int)
+    if mode == "a":
+        existing_arr = np.load(output_path)
+        combined_arr = np.append(existing_arr, data_arr, axis=0)
+        np.save(output_path, combined_arr)
+    else:
+        np.save(output_path, data_arr)
+    return output_path
+
+
 def find_common_spacings(spacings_1, spacings_2, tolerance: float = 0.05):
     common_spacings = []
     for s1 in spacings_1:

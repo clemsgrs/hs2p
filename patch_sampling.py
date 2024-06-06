@@ -1,4 +1,5 @@
 import os
+import time
 import tqdm
 import wandb
 import hydra
@@ -10,7 +11,19 @@ import multiprocessing as mp
 from pathlib import Path
 from omegaconf import DictConfig
 
-from utils import initialize_wandb, log_progress, sample_patches, sample_patches_mp
+from utils import initialize_wandb, sample_patches, sample_patches_mp
+
+
+def log_progress(processed_count, stop_logging, ntot):
+    previous_count = 0
+    while not stop_logging.is_set():
+        time.sleep(1)
+        current_count = processed_count.value
+        if previous_count != current_count:
+            wandb.log({"processed": current_count})
+            previous_count = current_count
+        if current_count >= ntot:
+            break
 
 
 @hydra.main(

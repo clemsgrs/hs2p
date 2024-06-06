@@ -44,6 +44,7 @@ patch_params:
   drop_holes: False # whether or not to drop patches whose center pixel falls withing an identified holes
   save_patches_to_disk: False # whether or not to save patches as images to disk
   save_patches_in_common_dir: False # whether to save patches from different slides in a single common directory
+  save_npy: False # whether to save patch info in a .npy file
   format: 'jpg' # if save_patches_to_disk = True, then saves patches in this file format
   draw_grid: True # whether to draw the patch grid when visualizing patching results
   grid_thickness: 1 # sets the grid thickness ((in px) when visualizing patching results (256: 1, 4096: 2)

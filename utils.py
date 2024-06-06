@@ -88,17 +88,6 @@ def initialize_wandb(
     return run
 
 
-def log_progress(processed_count, stop_logging, ntot):
-    previous_count = 0
-    while not stop_logging.is_set():
-        current_count = processed_count.value
-        if previous_count != current_count:
-            wandb.log({"processed": current_count})
-            previous_count = current_count
-        if current_count >= ntot:
-            break
-
-
 def segment(
     wsi_object: WholeSlideImage,
     spacing: float,
@@ -147,11 +136,13 @@ def patching(
     top_left: Optional[List[int]] = None,
     bot_right: Optional[List[int]] = None,
     num_workers: int = 1,
+    save_hdf5_flag: bool = False,
+    save_npy_flag: bool = False,
     verbose: bool = False,
 ):
 
     start_time = time.time()
-    file_path, tile_df = wsi_object.process_contours(
+    hdf5_path, npy_path, tile_df = wsi_object.process_contours(
         save_dir=save_dir,
         seg_level=seg_level,
         spacing=spacing,
@@ -167,14 +158,16 @@ def patching(
         top_left=top_left,
         bot_right=bot_right,
         num_workers=num_workers,
+        save_hdf5_flag=save_hdf5_flag,
+        save_npy_flag=save_npy_flag,
         verbose=verbose,
     )
     patch_time_elapsed = time.time() - start_time
-    return file_path, tile_df, patch_time_elapsed
+    return hdf5_path, npy_path, tile_df, patch_time_elapsed
 
 
 def visualize(
-    file_path: Path,
+    hdf5_path: Path,
     wsi_object: WholeSlideImage,
     downscale: int = 64,
     bg_color: Tuple[int, int, int] = (255, 255, 255),
@@ -184,7 +177,7 @@ def visualize(
 ):
     start = time.time()
     heatmap = VisualizeCoords(
-        file_path,
+        hdf5_path,
         wsi_object,
         downscale=downscale,
         bg_color=bg_color,
@@ -340,7 +333,7 @@ def seg_and_patch(
             patch_time_elapsed = -1
             if patch:
                 slide_save_dir = Path(patch_save_dir, slide_id)
-                file_path, tile_df, patch_time_elapsed = patching(
+                hdf5_path, _, tile_df, patch_time_elapsed = patching(
                     wsi_object=wsi_object,
                     save_dir=slide_save_dir,
                     seg_level=seg_params.seg_level,
@@ -355,6 +348,8 @@ def seg_and_patch(
                     save_patches_in_common_dir=patch_params.save_patches_in_common_dir,
                     patch_format=patch_params.format,
                     num_workers=num_workers,
+                    save_hdf5_flag=visu,
+                    save_npy_flag=patch_params.save_npy,
                     verbose=verbose,
                 )
                 if tile_df is not None:
@@ -362,10 +357,10 @@ def seg_and_patch(
 
             visu_time_elapsed = -1
             if visu:
-                # if file_path exists, patches were extracted
-                if file_path.is_file():
+                # if hdf5_path exists, patches were extracted
+                if hdf5_path.is_file():
                     heatmap, visu_time_elapsed = visualize(
-                        file_path,
+                        hdf5_path,
                         wsi_object,
                         downscale=vis_params.downscale,
                         bg_color=tuple(patch_params.bg_color),
@@ -522,7 +517,7 @@ def seg_and_patch_slide(
     patch_time = -1
     if patch:
         slide_save_dir = Path(patch_save_dir, slide_id)
-        file_path, tile_df, patch_time = patching(
+        hdf5_path, _, tile_df, patch_time = patching(
             wsi_object=wsi_object,
             save_dir=slide_save_dir,
             seg_level=seg_params.seg_level,
@@ -537,6 +532,8 @@ def seg_and_patch_slide(
             save_patches_in_common_dir=patch_params.save_patches_in_common_dir,
             patch_format=patch_params.format,
             num_workers=1,
+            save_hdf5_flag=visu,
+            save_npy_flag=patch_params.save_npy,
             verbose=verbose,
         )
     end_time = time.time()
@@ -545,10 +542,10 @@ def seg_and_patch_slide(
 
     visu_time = -1
     if visu:
-        # if file_path exists, patches were extracted
-        if file_path.is_file():
+        # if hdf5_path exists, patches were extracted
+        if hdf5_path.is_file():
             heatmap, visu_time = visualize(
-                file_path,
+                hdf5_path,
                 wsi_object,
                 downscale=vis_params.downscale,
                 bg_color=tuple(patch_params.bg_color),
@@ -798,7 +795,7 @@ def sample_patches(
 
     # extract patches from identified tissue blobs
     start_time = time.time()
-    _, tile_df = wsi_object.process_contours(
+    _, _, tile_df = wsi_object.process_contours(
         seg_level=seg_params.seg_level,
         spacing=patch_params.spacing,
         patch_size=patch_params.patch_size,

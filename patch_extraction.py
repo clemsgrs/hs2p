@@ -1,4 +1,5 @@
 import os
+import time
 import tqdm
 import wandb
 import hydra
@@ -12,7 +13,19 @@ from pathlib import Path
 from omegaconf import DictConfig
 
 from source.utils import initialize_df
-from utils import initialize_wandb, log_progress, seg_and_patch, seg_and_patch_slide_mp
+from utils import initialize_wandb, seg_and_patch, seg_and_patch_slide_mp
+
+
+def log_progress(processed_count, stop_logging, ntot):
+    previous_count = 0
+    while not stop_logging.is_set():
+        time.sleep(1)
+        current_count = processed_count.value
+        if previous_count != current_count:
+            wandb.log({"processed": current_count})
+            previous_count = current_count
+        if current_count >= ntot:
+            break
 
 
 @hydra.main(
@@ -40,17 +53,15 @@ def main(cfg: DictConfig):
     )
     visu_save_dir = Path(output_dir, "visualization", f"{cfg.patch_params.patch_size}")
 
-    directories = {
-        "mask_save_dir": mask_save_dir,
-        "patch_save_dir": patch_save_dir,
-        "visu_save_dir": visu_save_dir,
-    }
-
-    for dirname, dirpath in directories.items():
-        if not cfg.resume:
-            dirpath.mkdir(parents=True)
-        else:
-            dirpath.mkdir(parents=True, exist_ok=True)
+    exist_ok = False
+    if cfg.resume:
+        exist_ok = True
+    if cfg.seg_params.visualize_mask:
+        mask_save_dir.mkdir(parents=True, exist_ok=exist_ok)
+    if cfg.flags.patch:
+        patch_save_dir.mkdir(parents=True, exist_ok=exist_ok)
+    if cfg.flags.visu:
+        visu_save_dir.mkdir(parents=True, exist_ok=exist_ok)
 
     if cfg.slide_csv.endswith(".txt"):
         with open(cfg.slide_csv, "r") as f:
