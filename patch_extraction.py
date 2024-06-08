@@ -2,7 +2,7 @@ import os
 import time
 import tqdm
 import wandb
-import hydra
+import argparse
 import datetime
 import threading
 import numpy as np
@@ -12,8 +12,27 @@ import multiprocessing as mp
 from pathlib import Path
 from omegaconf import DictConfig
 
-from source.utils import initialize_df
+from source.utils import setup, write_config, initialize_df
 from utils import initialize_wandb, seg_and_patch, seg_and_patch_slide_mp
+
+
+def get_args_parser(add_help: bool = True):
+    parser = argparse.ArgumentParser("HS2P", add_help=add_help)
+    parser.add_argument("--config-file", default="", metavar="FILE", help="path to config file")
+    parser.add_argument(
+        "opts",
+        help="Modify config options at the end of the command using 'path.key=value'",
+        default=None,
+        nargs=argparse.REMAINDER,
+    )
+    parser.add_argument(
+        "--output-dir",
+        "--output_dir",
+        default="output",
+        type=str,
+        help="Output directory to save logs and checkpoints",
+    )
+    return parser
 
 
 def log_progress(processed_count, stop_logging, ntot):
@@ -28,10 +47,9 @@ def log_progress(processed_count, stop_logging, ntot):
             break
 
 
-@hydra.main(
-    version_base="1.2.0", config_path="config/extraction", config_name="default"
-)
-def main(cfg: DictConfig):
+def main(args):
+
+    cfg = setup(args, "extraction")
 
     run_id = datetime.datetime.now().strftime("%Y-%m-%d_%H_%M")
     # set up wandb
@@ -43,6 +61,9 @@ def main(cfg: DictConfig):
 
     output_dir = Path(cfg.output_dir, cfg.experiment_name, run_id)
     output_dir.mkdir(parents=True, exist_ok=True)
+    cfg.output_dir = str(output_dir)
+
+    write_config(cfg, cfg.output_dir)
 
     mask_save_dir = Path(output_dir, "masks")
     patch_save_dir = Path(
@@ -63,12 +84,7 @@ def main(cfg: DictConfig):
     if cfg.flags.visu:
         visu_save_dir.mkdir(parents=True, exist_ok=exist_ok)
 
-    if cfg.slide_csv.endswith(".txt"):
-        with open(cfg.slide_csv, "r") as f:
-            slide_paths = [x.strip() for x in f.readlines()]
-        slide_df = pd.DataFrame.from_dict({"slide_path": slide_paths})
-    else:
-        slide_df = pd.read_csv(cfg.slide_csv)
+    slide_df = pd.read_csv(cfg.csv)
 
     process_list_fp = None
     if Path(output_dir, "process_list.csv").is_file() and cfg.resume:
@@ -82,19 +98,9 @@ def main(cfg: DictConfig):
 
     if cfg.speed.multiprocessing:
 
-        slide_paths = slide_df.slide_path.values.tolist()
-        mask_paths = []
-        if "segmentation_mask_path" in slide_df.columns:
-            mask_paths = slide_df.segmentation_mask_path.values.tolist()
-        spacings = []
-        if "spacing" in slide_df.columns:
-            spacings = slide_df.spacing.values.tolist()
-
         if process_list_fp is None:
             df = initialize_df(
-                slide_paths,
-                mask_paths,
-                spacings,
+                slide_df,
                 cfg.seg_params,
                 cfg.filter_params,
                 cfg.vis_params,
@@ -237,4 +243,5 @@ def main(cfg: DictConfig):
 
 if __name__ == "__main__":
 
-    main()
+    args = get_args_parser(add_help=True).parse_args()
+    main(args)

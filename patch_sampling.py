@@ -2,7 +2,6 @@ import os
 import time
 import tqdm
 import wandb
-import hydra
 import datetime
 import threading
 import pandas as pd
@@ -11,7 +10,27 @@ import multiprocessing as mp
 from pathlib import Path
 from omegaconf import DictConfig
 
+from source.utils import setup, write_config
 from utils import initialize_wandb, sample_patches, sample_patches_mp
+
+
+def get_args_parser(add_help: bool = True):
+    parser = argparse.ArgumentParser("HS2P", add_help=add_help)
+    parser.add_argument("--config-file", default="", metavar="FILE", help="path to config file")
+    parser.add_argument(
+        "opts",
+        help="Modify config options at the end of the command using 'path.key=value'",
+        default=None,
+        nargs=argparse.REMAINDER,
+    )
+    parser.add_argument(
+        "--output-dir",
+        "--output_dir",
+        default="output",
+        type=str,
+        help="Output directory to save logs and checkpoints",
+    )
+    return parser
 
 
 def log_progress(processed_count, stop_logging, ntot):
@@ -26,10 +45,9 @@ def log_progress(processed_count, stop_logging, ntot):
             break
 
 
-@hydra.main(
-    version_base="1.2.0", config_path="config/sampling", config_name="witali_liver"
-)
-def main(cfg: DictConfig):
+def main(args):
+
+    cfg = setup(args, "sampling")
 
     run_id = datetime.datetime.now().strftime("%Y-%m-%d_%H_%M")
     # set up wandb
@@ -186,4 +204,6 @@ def main(cfg: DictConfig):
 
 if __name__ == "__main__":
 
-    main()
+    args = get_args_parser(add_help=True).parse_args()
+    main(args)
+

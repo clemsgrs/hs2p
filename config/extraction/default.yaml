@@ -1,4 +1,4 @@
-slide_csv: '/data/pathology/projects/ais-cap/code/git/clemsgrs/hs2p/data/debug/panda_masks.csv' # path to the .csv / .txt file containing slides paths
+csv: '' # path to the .csv / .txt file containing slides paths
 
 output_dir: 'output/debug' # folder where to save algorithm output
 experiment_name: 'patch_extraction'
@@ -65,8 +65,3 @@ wandb:
   dir: '/home/user'
   group:
   tags: []
-
-# hydra
-hydra:
-  run:
-    dir: /tmp/hydra_output

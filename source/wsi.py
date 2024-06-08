@@ -39,7 +39,7 @@ class WholeSlideImage(object):
         """
 
         self.path = path
-        self.name = path.stem
+        self.name = path.stem.replace(" ", "_")
         self.fmt = path.suffix
         self.wsi = wsd.WholeSlideImage(path, backend=backend)
         self.level_dimensions = self.wsi.shapes
