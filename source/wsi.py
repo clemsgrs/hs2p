@@ -11,7 +11,7 @@ from PIL import Image
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
-from source.utils import save_hdf5, save_patch, compute_time, find_common_spacings
+from source.utils import save_hdf5, save_npy, save_patch, compute_time, find_common_spacings
 from source.util_classes import (
     Contour_Checking_fn,
     isInContourV1,
@@ -39,7 +39,7 @@ class WholeSlideImage(object):
         """
 
         self.path = path
-        self.name = path.stem
+        self.name = path.stem.replace(" ", "_")
         self.fmt = path.suffix
         self.wsi = wsd.WholeSlideImage(path, backend=backend)
         self.level_dimensions = self.wsi.shapes
@@ -438,16 +438,25 @@ class WholeSlideImage(object):
         top_left: Optional[List[int]] = None,
         bot_right: Optional[List[int]] = None,
         num_workers: int = 1,
+        save_hdf5_flag: bool = False,
+        save_npy_flag: bool = False,
         verbose: bool = False,
     ):
-        save_flag = save_dir is not None
+        save_flag = save_dir is not None and (save_hdf5_flag or save_npy_flag)
+        save_path_hdf5 = None
+        save_path_npy = None
         if save_flag:
             if save_patches_in_common_dir:
-                save_path_hdf5 = Path(save_dir.parent, "h5", f"{self.name}.h5")
+                if save_hdf5_flag:
+                    save_path_hdf5 = Path(save_dir.parent, "h5", f"{self.name}.h5")
+                if save_npy_flag:
+                    save_path_npy = Path(save_dir.parent, "npy", f"{self.name}.npy")
             else:
-                save_path_hdf5 = Path(save_dir, f"{self.name}.h5")
-        else:
-            save_path_hdf5 = None
+                if save_hdf5_flag:
+                    save_path_hdf5 = Path(save_dir, f"{self.name}.h5")
+                if save_npy_flag:
+                    save_path_npy = Path(save_dir, f"{self.name}.npy")
+
         start_time = time.time()
         n_contours = len(self.contours_tissue)
         if verbose:
@@ -502,11 +511,18 @@ class WholeSlideImage(object):
 
             if len(asset_dict) > 0 and save_flag:
                 if init:
-                    save_path_hdf5.parent.mkdir(parents=True, exist_ok=True)
-                    save_hdf5(save_path_hdf5, asset_dict, attr_dict, mode="w")
+                    if save_hdf5_flag:
+                        save_path_hdf5.parent.mkdir(parents=True, exist_ok=True)
+                        save_hdf5(save_path_hdf5, asset_dict, attr_dict, mode="w")
                     init = False
+                    if save_npy_flag:
+                        save_path_npy.parent.mkdir(parents=True, exist_ok=True)
+                        save_npy(save_path_npy, asset_dict, attr_dict, mode="w")
                 else:
-                    save_hdf5(save_path_hdf5, asset_dict, mode="a")
+                    if save_hdf5_flag:
+                        save_hdf5(save_path_hdf5, asset_dict, mode="a")
+                    if save_npy_flag:
+                        save_npy(save_path_npy, asset_dict, attr_dict, mode="a")
                 if save_patches_to_disk:
                     if save_patches_in_common_dir:
                         patch_save_dir = Path(save_dir.parent, "imgs")
@@ -528,7 +544,7 @@ class WholeSlideImage(object):
             df = pd.concat(dfs, ignore_index=True)
         else:
             df = None
-        return save_path_hdf5, df
+        return save_path_hdf5, save_path_npy, df
 
     def process_contour(
         self,

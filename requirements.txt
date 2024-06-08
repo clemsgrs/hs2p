@@ -7,4 +7,3 @@ Pillow
 seaborn
 opencv-python
 wholeslidedata
-hydra-core==1.2.0

@@ -1,3 +1,4 @@
+import os
 import cv2
 import time
 import h5py
@@ -7,7 +8,42 @@ import seaborn as sns
 
 from PIL import Image
 from pathlib import Path
+from omegaconf import OmegaConf
 from typing import Optional, Tuple, Dict, List
+
+from config import default_extraction_config
+
+
+def write_config(cfg, output_dir, name="config.yaml"):
+    print(OmegaConf.to_yaml(cfg))
+    saved_cfg_path = Path(output_dir, name)
+    with open(saved_cfg_path, "w") as f:
+        OmegaConf.save(config=cfg, f=f)
+    return saved_cfg_path
+
+
+def get_cfg_from_args(args, default_config):
+    args.output_dir = os.path.abspath(args.output_dir)
+    args.opts += [f"output_dir={args.output_dir}"]
+    default_cfg = OmegaConf.create(default_config)
+    cfg = OmegaConf.load(args.config_file)
+    cfg = OmegaConf.merge(default_cfg, cfg, OmegaConf.from_cli(args.opts))
+    OmegaConf.resolve(cfg)
+    return cfg
+
+
+def setup(args, task):
+    """
+    Create configs and perform basic setups.
+    """
+    if task == "extraction":
+        default_config = default_extraction_config
+    elif task == "sampling":
+        default_config = default_sampling_config
+    else:
+        raise ValueError(f"Unknown task: {task}")
+    cfg = get_cfg_from_args(args, default_config)
+    return cfg
 
 
 def compute_time(start_time, end_time):
@@ -18,9 +54,7 @@ def compute_time(start_time, end_time):
 
 
 def initialize_df(
-    slides,
-    masks,
-    spacings,
+    slide_df,
     seg_params,
     filter_params,
     vis_params,
@@ -30,29 +64,22 @@ def initialize_df(
     """
     initiate a pandas df describing a list of slides to process
     args:
-            slides (df or list): list of slide filepath
-                    if df, these paths assumed to be stored under the 'slide_path' column
-            masks (list): list of slides' segmentation masks filepath
-            spacings (list): list of slides' spacing at level 0
+            slide_df (pd.DataFrame): dataframe with slide ids and paths
             seg_params (dict): segmentation paramters
             filter_params (dict): filter parameters
             vis_params (dict): visualization paramters
             patch_params (dict): patching paramters
             use_heatmap_args (bool): whether to include heatmap arguments such as ROI coordinates
     """
-    total = len(slides)
-    if isinstance(slides, pd.DataFrame):
-        slide_ids = list(slides.slide_id.values)
-        slide_paths = list(slides.slide_path.values)
-        if "segmentation_mask_path" in slides.columns:
-            mask_paths = list(slides.segmentation_mask_path.values)
-        if "spacing" in slides.columns:
-            slide_spacings = list(slides.spacing.values)
-    else:
-        slide_ids = [Path(s).stem for s in slides]
-        slide_paths = slides.copy()
-        mask_paths = masks.copy()
-        slide_spacings = spacings.copy()
+    total = len(slide_df)
+    slide_ids = list(slide_df.slide_id.values)
+    slide_paths = list(slide_df.slide_path.values)
+    mask_paths = []
+    if "segmentation_mask_path" in slide_df.columns:
+        mask_paths = list(slide_df.segmentation_mask_path.values)
+    slide_spacings = []
+    if "spacing" in slide_df.columns:
+        slide_spacings = list(slide_df.spacing.values)
     default_df_dict = {
         "slide_id": slide_ids,
         "slide_path": slide_paths,
@@ -108,22 +135,19 @@ def initialize_df(
             }
         )
 
-    if isinstance(slides, pd.DataFrame):
-        temp_copy = pd.DataFrame(
-            default_df_dict
-        )  # temporary dataframe w/ default params
-        # find key in provided df
-        # if exist, fill empty fields w/ default values, else, insert the default values as a new column
-        for key in default_df_dict.keys():
-            if key in slides.columns:
-                mask = slides[key].isna()
-                slides.loc[mask, key] = temp_copy.loc[mask, key]
-            else:
-                slides.insert(len(slides.columns), key, default_df_dict[key])
-    else:
-        slides = pd.DataFrame(default_df_dict)
+    temp_copy = pd.DataFrame(
+        default_df_dict
+    )  # temporary dataframe w/ default params
+    # find key in provided df
+    # if exist, fill empty fields w/ default values, else, insert the default values as a new column
+    for key in default_df_dict.keys():
+        if key in slide_df.columns:
+            mask = slide_df[key].isna()
+            slide_df.loc[mask, key] = temp_copy.loc[mask, key]
+        else:
+            slide_df.insert(len(slide_df.columns), key, default_df_dict[key])
 
-    return slides
+    return slide_df
 
 
 def save_hdf5(output_path, asset_dict, attr_dict=None, mode="a"):
@@ -151,6 +175,29 @@ def save_hdf5(output_path, asset_dict, attr_dict=None, mode="a"):
             dset.resize(len(dset) + data_shape[0], axis=0)
             dset[-data_shape[0] :] = val
     file.close()
+    return output_path
+
+
+def save_npy(output_path, asset_dict, attr_dict, mode="a"):
+    coords = asset_dict["coords"]
+    x = list(coords[:, 0])  # defined w.r.t level 0
+    y = list(coords[:, 1])  # defined w.r.t level 0
+    npatch = len(x)
+    attr = attr_dict["coords"]
+    patch_level = attr["patch_level"]
+    patch_size = attr["patch_size"]
+    patch_size_resized = attr["patch_size_resized"]
+    resize_factor = int(patch_size_resized // patch_size)
+    data = []
+    for i in range(npatch):
+        data.append([x[i], y[i], patch_size_resized, patch_level, resize_factor])
+    data_arr = np.array(data, dtype=int)
+    if mode == "a":
+        existing_arr = np.load(output_path)
+        combined_arr = np.append(existing_arr, data_arr, axis=0)
+        np.save(output_path, combined_arr)
+    else:
+        np.save(output_path, data_arr)
     return output_path
 
 
