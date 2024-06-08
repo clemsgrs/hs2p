@@ -47,7 +47,7 @@ A good starting point is to use the default configuration file `config/extractio
 
 4. Run the following command to kick off the algorithm:
 
-`python3 patch_extraction.py --config-name <config_filename>`
+`python3 patch_extraction.py --config-file </path/to/config/file>`
 
 5. Depending on which flags have been set to True, it will produce (part of) the following results:
 
@@ -66,6 +66,7 @@ hs2p/
 │     ├── patches/<patch_size>/<format>/
 │     │     ├── slide_id_1/
 │     │     │     ├── slide_id_1.h5
+│     │     │     ├── slide_id_1.npy
 │     │     │     └── imgs/
 │     │     │         ├── x0_y0.<format>
 │     │     │         ├── x1_y0.<format>
@@ -123,7 +124,7 @@ A good starting point is to use the default configuration file `config/sampling/
 
 4. Run the following command to kick off the algorithm:
 
-`python3 patch_sampling.py --config-name <config_filename>`
+`python3 patch_sampling.py --config-file </path/to/config/file>`
 
 5. Depending on your config, it will produce (part of) the following results:
 
@@ -183,10 +184,6 @@ slide_id_1,category_1,3488,2512,0.8203125
 ```
 
 Again, extracted patches will be saved as `x_y.jpg` where `x` and `y` represent the true location in the slide **at level 0**.
-
-## Resuming experiment after crash / bug
-
-If, for some reason, the experiment crashes, you should be able to resume from last processed slide simply by turning the `resume` parameter in your config file to `True`, keeping all other parameters unchanged.
 
 ## Troubleshooting
 
