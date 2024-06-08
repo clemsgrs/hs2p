@@ -28,7 +28,7 @@ def get_args_parser(add_help: bool = True):
     parser.add_argument(
         "--output-dir",
         "--output_dir",
-        default="output",
+        default=None,
         type=str,
         help="Output directory to save logs and checkpoints",
     )

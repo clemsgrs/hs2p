@@ -23,8 +23,9 @@ def write_config(cfg, output_dir, name="config.yaml"):
 
 
 def get_cfg_from_args(args, default_config):
-    args.output_dir = os.path.abspath(args.output_dir)
-    args.opts += [f"output_dir={args.output_dir}"]
+    if args.output_dir is not None:
+        args.output_dir = os.path.abspath(args.output_dir)
+        args.opts += [f"output_dir={args.output_dir}"]
     default_cfg = OmegaConf.create(default_config)
     cfg = OmegaConf.load(args.config_file)
     cfg = OmegaConf.merge(default_cfg, cfg, OmegaConf.from_cli(args.opts))
