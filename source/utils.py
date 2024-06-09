@@ -98,6 +98,7 @@ def initialize_df(
         {
             "process": np.full((total), 1, dtype=np.uint8),
             "status": np.full((total), "tbp"),
+            "error": np.full((total), "none"),
             "has_patches": np.full((total), "tbd"),
             # seg params
             "seg_level": np.full((total), int(seg_params["seg_level"]), dtype=np.int8),

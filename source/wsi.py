@@ -437,6 +437,7 @@ class WholeSlideImage(object):
         patch_format: str = "png",
         top_left: Optional[List[int]] = None,
         bot_right: Optional[List[int]] = None,
+        spacing_tol: float = 0.1,
         num_workers: int = 1,
         save_hdf5_flag: bool = False,
         save_npy_flag: bool = False,
@@ -446,16 +447,10 @@ class WholeSlideImage(object):
         save_path_hdf5 = None
         save_path_npy = None
         if save_flag:
-            if save_patches_in_common_dir:
-                if save_hdf5_flag:
-                    save_path_hdf5 = Path(save_dir.parent, "h5", f"{self.name}.h5")
-                if save_npy_flag:
-                    save_path_npy = Path(save_dir.parent, "npy", f"{self.name}.npy")
-            else:
-                if save_hdf5_flag:
-                    save_path_hdf5 = Path(save_dir, f"{self.name}.h5")
-                if save_npy_flag:
-                    save_path_npy = Path(save_dir, f"{self.name}.npy")
+            if save_hdf5_flag:
+                save_path_hdf5 = Path(save_dir.parent, "h5", f"{self.name}.h5")
+            if save_npy_flag:
+                save_path_npy = Path(save_dir.parent, "npy", f"{self.name}.npy")
 
         start_time = time.time()
         n_contours = len(self.contours_tissue)
@@ -481,6 +476,7 @@ class WholeSlideImage(object):
                 use_padding,
                 top_left,
                 bot_right,
+                spacing_tol,
                 num_workers=num_workers,
                 verbose=verbose,
             )
@@ -561,6 +557,7 @@ class WholeSlideImage(object):
         use_padding: bool = True,
         top_left: Optional[List[int]] = None,
         bot_right: Optional[List[int]] = None,
+        spacing_tol: float = 0.1,
         num_workers: int = 1,
         verbose: bool = False,
     ):
@@ -571,6 +568,10 @@ class WholeSlideImage(object):
 
         patch_spacing = self.get_level_spacing(patch_level)
         resize_factor = int(spacing / patch_spacing)
+
+        if abs(resize_factor*patch_spacing/spacing - 1) > spacing_tol:
+            raise ValueError(f"ERROR: The natural spacing ({patch_spacing:.4f}) closest to the target spacing ({spacing:.4f}) was more than {spacing_tol*100}% apart.")
+
         patch_size_resized = patch_size * resize_factor
         step_size = int(patch_size_resized * (1.0 - overlap))
 

@@ -176,25 +176,27 @@ def main(args):
                     with processed_count.get_lock():
                         processed_count.value += 1
 
-        avg_process_time = round(
-            np.mean(
-                [r[-1] for r in results if (r[0] is not None and r[-1] is not None)]
-            ),
-            2,
-        )
-        min_process_time = round(
-            np.min(
-                [r[-1] for r in results if (r[0] is not None and r[-1] is not None)]
-            ),
-            2,
-        )
-        max_process_time = round(
-            np.max(
-                [r[-1] for r in results if (r[0] is not None and r[-1] is not None)]
-            ),
-            2,
-        )
-        if cfg.wandb.enable:
+        if processed_count.value > 0:
+            avg_process_time = round(
+                np.mean(
+                    [r[-1] for r in results if (r[0] is not None and r[-1] is not None)]
+                ),
+                2,
+            )
+            min_process_time = round(
+                np.min(
+                    [r[-1] for r in results if (r[0] is not None and r[-1] is not None)]
+                ),
+                2,
+            )
+            max_process_time = round(
+                np.max(
+                    [r[-1] for r in results if (r[0] is not None and r[-1] is not None)]
+                ),
+                2,
+            )
+
+        if cfg.wandb.enable and processed_count.value > 0:
             stop_logging.set()
             logging_thread.join()
             wandb.log({"processed": processed_count.value})
@@ -203,10 +205,11 @@ def main(args):
             wandb.log({"max_time_sec": max_process_time})
 
         dfs = []
-        for t_df, sid, s, vl, sl, pt in results:
+        for t_df, sid, s, e, vl, sl, pt in results:
 
             mask = df["slide_id"] == sid
             df.loc[mask, "status"] = s
+            df.loc[mask, "error"] = e
             df.loc[mask, "process"] = 0
             df.loc[mask, "vis_level"] = vl
             df.loc[mask, "seg_level"] = sl

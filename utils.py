@@ -135,6 +135,7 @@ def patching(
     patch_format: str = "png",
     top_left: Optional[List[int]] = None,
     bot_right: Optional[List[int]] = None,
+    spacing_tol: float = 0.1,
     num_workers: int = 1,
     save_hdf5_flag: bool = False,
     save_npy_flag: bool = False,
@@ -157,6 +158,7 @@ def patching(
         patch_format=patch_format,
         top_left=top_left,
         bot_right=bot_right,
+        spacing_tol=spacing_tol,
         num_workers=num_workers,
         save_hdf5_flag=save_hdf5_flag,
         save_npy_flag=save_npy_flag,
@@ -240,6 +242,7 @@ def seg_and_patch(
     visu_times = 0.0
 
     dfs = []
+    processed_count = 0
 
     with tqdm.tqdm(
         range(total),
@@ -264,132 +267,140 @@ def seg_and_patch(
                 spacing = float(process_stack.loc[idx, "spacing"])
             t.display(f"Processing {slide_id}", pos=2)
 
-            # Inialize WSI
-            wsi_object = WholeSlideImage(slide_path, spacing, backend)
+            try:
+                # inialize WSI
+                wsi_object = WholeSlideImage(slide_path, spacing, backend)
 
-            vis_level = vis_params.vis_level
-            if vis_level < 0:
-                if len(wsi_object.level_dimensions) == 1:
-                    vis_params.vis_level = 0
-                else:
-                    best_level = wsi_object.get_best_level_for_downsample_custom(
-                        vis_params.downsample
+                vis_level = vis_params.vis_level
+                if vis_level < 0:
+                    if len(wsi_object.level_dimensions) == 1:
+                        vis_params.vis_level = 0
+                    else:
+                        best_level = wsi_object.get_best_level_for_downsample_custom(
+                            vis_params.downsample
+                        )
+                        vis_params.vis_level = best_level
+
+                seg_level = seg_params.seg_level
+                if seg_level < 0:
+                    if len(wsi_object.level_dimensions) == 1:
+                        seg_params.seg_level = 0
+                    else:
+                        best_level = wsi_object.get_best_level_for_downsample_custom(
+                            seg_params.downsample
+                        )
+                        seg_params.seg_level = best_level
+
+                w, h = wsi_object.level_dimensions[seg_params.seg_level]
+                if w * h > 1e8:
+                    raise ValueError(
+                        f"ERROR: level dimensions ({w},{h}) likely too large for successful segmentation, aborting."
                     )
-                    vis_params.vis_level = best_level
 
-            seg_level = seg_params.seg_level
-            if seg_level < 0:
-                if len(wsi_object.level_dimensions) == 1:
-                    seg_params.seg_level = 0
-                else:
-                    best_level = wsi_object.get_best_level_for_downsample_custom(
-                        seg_params.downsample
-                    )
-                    seg_params.seg_level = best_level
-
-            w, h = wsi_object.level_dimensions[seg_params.seg_level]
-            if w * h > 1e8:
-                print(
-                    f"level dimensions {w} x {h} is likely too large for successful segmentation, aborting"
-                )
-                df.loc[idx, "status"] = "failed_seg"
-                continue
-
-            seg_time_elapsed = -1
-            wsi_object, seg_time_elapsed = segment(
-                wsi_object,
-                patch_params.spacing,
-                seg_params,
-                filter_params,
-                mask_path,
-            )
-
-            if seg_params.save_mask:
-                import pyvips
-
-                tif_save_dir = Path(mask_save_dir, "tif")
-                tif_save_dir.mkdir(exist_ok=True)
-                mask_path = Path(tif_save_dir, f"{slide_id}.tif")
-                mask = pyvips.Image.new_from_array(wsi_object.binary_mask.tolist())
-                mask.tiffsave(
+                seg_time_elapsed = -1
+                wsi_object, seg_time_elapsed = segment(
+                    wsi_object,
+                    patch_params.spacing,
+                    seg_params,
+                    filter_params,
                     mask_path,
-                    tile=True,
-                    compression="jpeg",
-                    bigtiff=True,
-                    pyramid=True,
-                    Q=70,
                 )
 
-            if seg_params.visualize_mask:
-                mask = wsi_object.visWSI(
-                    vis_level=vis_params.vis_level,
-                    line_thickness=vis_params.line_thickness,
-                )
-                jpg_save_dir = Path(mask_save_dir, "jpg")
-                jpg_save_dir.mkdir(exist_ok=True)
-                mask_path = Path(jpg_save_dir, f"{slide_id}.jpg")
-                mask.save(mask_path)
+                if seg_params.save_mask:
+                    import pyvips
 
-            patch_time_elapsed = -1
-            if patch:
-                slide_save_dir = Path(patch_save_dir, slide_id)
-                hdf5_path, _, tile_df, patch_time_elapsed = patching(
-                    wsi_object=wsi_object,
-                    save_dir=slide_save_dir,
-                    seg_level=seg_params.seg_level,
-                    spacing=patch_params.spacing,
-                    patch_size=patch_params.patch_size,
-                    overlap=patch_params.overlap,
-                    contour_fn=patch_params.contour_fn,
-                    drop_holes=patch_params.drop_holes,
-                    tissue_thresh=patch_params.tissue_thresh,
-                    use_padding=patch_params.use_padding,
-                    save_patches_to_disk=patch_params.save_patches_to_disk,
-                    save_patches_in_common_dir=patch_params.save_patches_in_common_dir,
-                    patch_format=patch_params.format,
-                    num_workers=num_workers,
-                    save_hdf5_flag=visu,
-                    save_npy_flag=patch_params.save_npy,
-                    verbose=verbose,
-                )
-                if tile_df is not None:
-                    dfs.append(tile_df)
+                    tif_save_dir = Path(mask_save_dir, "tif")
+                    tif_save_dir.mkdir(exist_ok=True)
+                    mask_path = Path(tif_save_dir, f"{slide_id}.tif")
+                    mask = pyvips.Image.new_from_array(wsi_object.binary_mask.tolist())
+                    mask.tiffsave(
+                        mask_path,
+                        tile=True,
+                        compression="jpeg",
+                        bigtiff=True,
+                        pyramid=True,
+                        Q=70,
+                    )
 
-            visu_time_elapsed = -1
-            if visu:
-                # if hdf5_path exists, patches were extracted
-                if hdf5_path.is_file():
-                    heatmap, visu_time_elapsed = visualize(
-                        hdf5_path,
-                        wsi_object,
-                        downscale=vis_params.downscale,
-                        bg_color=tuple(patch_params.bg_color),
-                        draw_grid=patch_params.draw_grid,
-                        thickness=patch_params.grid_thickness,
+                if seg_params.visualize_mask:
+                    mask = wsi_object.visWSI(
+                        vis_level=vis_params.vis_level,
+                        line_thickness=vis_params.line_thickness,
+                    )
+                    jpg_save_dir = Path(mask_save_dir, "jpg")
+                    jpg_save_dir.mkdir(exist_ok=True)
+                    mask_path = Path(jpg_save_dir, f"{slide_id}.jpg")
+                    mask.save(mask_path)
+
+                patch_time_elapsed = -1
+                if patch:
+                    slide_save_dir = Path(patch_save_dir, slide_id)
+                    hdf5_path, _, tile_df, patch_time_elapsed = patching(
+                        wsi_object=wsi_object,
+                        save_dir=slide_save_dir,
+                        seg_level=seg_params.seg_level,
+                        spacing=patch_params.spacing,
+                        patch_size=patch_params.patch_size,
+                        overlap=patch_params.overlap,
+                        contour_fn=patch_params.contour_fn,
+                        drop_holes=patch_params.drop_holes,
+                        tissue_thresh=patch_params.tissue_thresh,
+                        use_padding=patch_params.use_padding,
+                        save_patches_to_disk=patch_params.save_patches_to_disk,
+                        save_patches_in_common_dir=patch_params.save_patches_in_common_dir,
+                        patch_format=patch_params.format,
+                        num_workers=num_workers,
+                        save_hdf5_flag=visu,
+                        save_npy_flag=patch_params.save_npy,
                         verbose=verbose,
                     )
-                    visu_path = Path(visu_save_dir, f"{slide_id}.jpg")
-                    heatmap.save(visu_path)
-                    df.loc[idx, "has_patches"] = "yes"
-                else:
-                    df.loc[idx, "has_patches"] = "no"
+                    if tile_df is not None:
+                        dfs.append(tile_df)
 
-            df.loc[idx, "process"] = 0
-            df.loc[idx, "status"] = "processed"
-            df.loc[idx, "vis_level"] = vis_params.vis_level
-            df.loc[idx, "seg_level"] = seg_params.seg_level
-            df.to_csv(Path(output_dir, "process_list.csv"), index=False)
+                visu_time_elapsed = -1
+                if visu:
+                    # if hdf5_path exists, patches were extracted
+                    if hdf5_path.is_file():
+                        heatmap, visu_time_elapsed = visualize(
+                            hdf5_path,
+                            wsi_object,
+                            downscale=vis_params.downscale,
+                            bg_color=tuple(patch_params.bg_color),
+                            draw_grid=patch_params.draw_grid,
+                            thickness=patch_params.grid_thickness,
+                            verbose=verbose,
+                        )
+                        visu_path = Path(visu_save_dir, f"{slide_id}.jpg")
+                        heatmap.save(visu_path)
+                        df.loc[idx, "has_patches"] = "yes"
+                    else:
+                        df.loc[idx, "has_patches"] = "no"
 
-            seg_times += seg_time_elapsed
-            patch_times += patch_time_elapsed
-            visu_times += visu_time_elapsed
+                df.loc[idx, "process"] = 0
+                df.loc[idx, "status"] = "processed"
+                df.loc[idx, "vis_level"] = vis_params.vis_level
+                df.loc[idx, "seg_level"] = seg_params.seg_level
+                df.to_csv(Path(output_dir, "process_list.csv"), index=False)
 
-            if log_to_wandb:
-                wandb.log({"processed": already_processed + i + 1})
+                processed_count += 1
 
-            # restore original values
-            vis_params.vis_level = vis_level
-            seg_params.seg_level = seg_level
+                seg_times += seg_time_elapsed
+                patch_times += patch_time_elapsed
+                visu_times += visu_time_elapsed
+
+                if log_to_wandb:
+                    wandb.log({"processed": already_processed + processed_count})
+
+                # restore original values
+                vis_params.vis_level = vis_level
+                seg_params.seg_level = seg_level
+
+            except Exception as e:
+
+                df.loc[idx, "process"] = 0
+                df.loc[idx, "status"] = "failed"
+                df.loc[idx, "error"] = str(e)
+                df.to_csv(Path(output_dir, "process_list.csv"), index=False)
 
     end_time = time.time()
     mins, secs = compute_time(start_time, end_time)
@@ -437,132 +448,133 @@ def seg_and_patch_slide(
     if mask_fp is not None:
         mask_fp = Path(mask_fp)
 
-    # Inialize WSI
-    wsi_object = WholeSlideImage(Path(slide_fp), spacing, backend)
+    try:
+        # inialize WSI
+        wsi_object = WholeSlideImage(Path(slide_fp), spacing, backend)
 
-    vis_level = vis_params.vis_level
-    best_vis_level = copy.deepcopy(vis_level)
-    if vis_level < 0:
-        if len(wsi_object.level_dimensions) == 1:
-            vis_params.vis_level = 0
-            best_vis_level = 0
-        else:
-            best_vis_level = wsi_object.get_best_level_for_downsample_custom(
-                vis_params.downsample
+        vis_level = vis_params.vis_level
+        best_vis_level = copy.deepcopy(vis_level)
+        if vis_level < 0:
+            if len(wsi_object.level_dimensions) == 1:
+                vis_params.vis_level = 0
+                best_vis_level = 0
+            else:
+                best_vis_level = wsi_object.get_best_level_for_downsample_custom(
+                    vis_params.downsample
+                )
+                vis_params.vis_level = best_vis_level
+
+        seg_level = seg_params.seg_level
+        best_seg_level = copy.deepcopy(seg_level)
+        if seg_level < 0:
+            if len(wsi_object.level_dimensions) == 1:
+                seg_params.seg_level = 0
+                best_seg_level = 0
+            else:
+                best_seg_level = wsi_object.get_best_level_for_downsample_custom(
+                    seg_params.downsample
+                )
+                seg_params.seg_level = best_seg_level
+
+        w, h = wsi_object.level_dimensions[seg_params.seg_level]
+        if w * h > 1e9:
+            raise ValueError(
+                f"ERROR: level dimensions ({w},{h}) likely too large for successful segmentation, aborting."
             )
-            vis_params.vis_level = best_vis_level
 
-    seg_level = seg_params.seg_level
-    best_seg_level = copy.deepcopy(seg_level)
-    if seg_level < 0:
-        if len(wsi_object.level_dimensions) == 1:
-            seg_params.seg_level = 0
-            best_seg_level = 0
-        else:
-            best_seg_level = wsi_object.get_best_level_for_downsample_custom(
-                seg_params.downsample
+        seg_time = -1
+        wsi_object, seg_time = segment(
+            wsi_object,
+            patch_params.spacing,
+            seg_params,
+            filter_params,
+            mask_fp,
+        )
+
+        if seg_params.save_mask:
+            import pyvips
+
+            tif_save_dir = Path(mask_save_dir, "tif")
+            tif_save_dir.mkdir(exist_ok=True)
+            mask_path = Path(tif_save_dir, f"{slide_id}.tif")
+            mask = pyvips.Image.new_from_array(wsi_object.binary_mask.tolist())
+            mask.tiffsave(
+                mask_path, tile=True, compression="jpeg", bigtiff=True, pyramid=True, Q=70
             )
-            seg_params.seg_level = best_seg_level
 
-    w, h = wsi_object.level_dimensions[seg_params.seg_level]
-    if w * h > 1e8:
-        print(
-            f"{slide_id}: level dimensions ({w},{h}) is likely too large for successful segmentation, aborting"
-        )
-        status = "failed_seg"
-        tile_df = pd.DataFrame.from_dict(
-            {
-                "slide_id": [],
-                "tile_size": [],
-                "spacing": [],
-                "level": [],
-                "level_dimensions": [],
-                "x": [],
-                "y": [],
-                "contour": [],
-            }
-        )
-        return tile_df, slide_id, status, best_vis_level, best_seg_level, None
+        if seg_params.visualize_mask:
+            mask = wsi_object.visWSI(
+                vis_level=vis_params.vis_level,
+                line_thickness=vis_params.line_thickness,
+            )
+            jpg_save_dir = Path(mask_save_dir, "jpg")
+            jpg_save_dir.mkdir(exist_ok=True)
+            mask_path = Path(jpg_save_dir, f"{slide_id}.jpg")
+            mask.save(mask_path)
 
-    seg_time = -1
-    wsi_object, seg_time = segment(
-        wsi_object,
-        patch_params.spacing,
-        seg_params,
-        filter_params,
-        mask_fp,
-    )
-
-    if seg_params.save_mask:
-        import pyvips
-
-        tif_save_dir = Path(mask_save_dir, "tif")
-        tif_save_dir.mkdir(exist_ok=True)
-        mask_path = Path(tif_save_dir, f"{slide_id}.tif")
-        mask = pyvips.Image.new_from_array(wsi_object.binary_mask.tolist())
-        mask.tiffsave(
-            mask_path, tile=True, compression="jpeg", bigtiff=True, pyramid=True, Q=70
-        )
-
-    if seg_params.visualize_mask:
-        mask = wsi_object.visWSI(
-            vis_level=vis_params.vis_level,
-            line_thickness=vis_params.line_thickness,
-        )
-        jpg_save_dir = Path(mask_save_dir, "jpg")
-        jpg_save_dir.mkdir(exist_ok=True)
-        mask_path = Path(jpg_save_dir, f"{slide_id}.jpg")
-        mask.save(mask_path)
-
-    patch_time = -1
-    if patch:
-        slide_save_dir = Path(patch_save_dir, slide_id)
-        hdf5_path, _, tile_df, patch_time = patching(
-            wsi_object=wsi_object,
-            save_dir=slide_save_dir,
-            seg_level=seg_params.seg_level,
-            spacing=patch_params.spacing,
-            patch_size=patch_params.patch_size,
-            overlap=patch_params.overlap,
-            contour_fn=patch_params.contour_fn,
-            drop_holes=patch_params.drop_holes,
-            tissue_thresh=patch_params.tissue_thresh,
-            use_padding=patch_params.use_padding,
-            save_patches_to_disk=patch_params.save_patches_to_disk,
-            save_patches_in_common_dir=patch_params.save_patches_in_common_dir,
-            patch_format=patch_params.format,
-            num_workers=1,
-            save_hdf5_flag=visu,
-            save_npy_flag=patch_params.save_npy,
-            verbose=verbose,
-        )
-    end_time = time.time()
-    mins, secs = compute_time(start_time, end_time)
-    process_time = mins * 60 + secs
-
-    visu_time = -1
-    if visu:
-        # if hdf5_path exists, patches were extracted
-        if hdf5_path.is_file():
-            heatmap, visu_time = visualize(
-                hdf5_path,
-                wsi_object,
-                downscale=vis_params.downscale,
-                bg_color=tuple(patch_params.bg_color),
-                draw_grid=patch_params.draw_grid,
-                thickness=patch_params.grid_thickness,
+        patch_time = -1
+        if patch:
+            slide_save_dir = Path(patch_save_dir, slide_id)
+            hdf5_path, _, tile_df, patch_time = patching(
+                wsi_object=wsi_object,
+                save_dir=slide_save_dir,
+                seg_level=seg_params.seg_level,
+                spacing=patch_params.spacing,
+                patch_size=patch_params.patch_size,
+                overlap=patch_params.overlap,
+                contour_fn=patch_params.contour_fn,
+                drop_holes=patch_params.drop_holes,
+                tissue_thresh=patch_params.tissue_thresh,
+                use_padding=patch_params.use_padding,
+                save_patches_to_disk=patch_params.save_patches_to_disk,
+                save_patches_in_common_dir=patch_params.save_patches_in_common_dir,
+                patch_format=patch_params.format,
+                num_workers=1,
+                save_hdf5_flag=visu,
+                save_npy_flag=patch_params.save_npy,
                 verbose=verbose,
             )
-            visu_path = Path(visu_save_dir, f"{slide_id}.jpg")
-            heatmap.save(visu_path)
 
-    status = "processed"
+        end_time = time.time()
+        mins, secs = compute_time(start_time, end_time)
+        process_time = mins * 60 + secs
 
-    # restore original values
-    vis_params.vis_level = vis_level
-    seg_params.seg_level = seg_level
+        visu_time = -1
+        if visu:
+            # if hdf5_path exists, patches were extracted
+            if hdf5_path.is_file():
+                heatmap, visu_time = visualize(
+                    hdf5_path,
+                    wsi_object,
+                    downscale=vis_params.downscale,
+                    bg_color=tuple(patch_params.bg_color),
+                    draw_grid=patch_params.draw_grid,
+                    thickness=patch_params.grid_thickness,
+                    verbose=verbose,
+                )
+                visu_path = Path(visu_save_dir, f"{slide_id}.jpg")
+                heatmap.save(visu_path)
 
-    return tile_df, slide_id, status, best_vis_level, best_seg_level, process_time
+        status = "processed"
+        error = "none"
+
+        # restore original values
+        vis_params.vis_level = vis_level
+        seg_params.seg_level = seg_level
+
+    except Exception as e:
+
+        status = "failed"
+        error = str(e)
+        tile_df = None
+        best_vis_level = -1
+        best_seg_level = -1
+
+        end_time = time.time()
+        mins, secs = compute_time(start_time, end_time)
+        process_time = mins * 60 + secs
+
+    return tile_df, slide_id, status, error, best_vis_level, best_seg_level, process_time
 
 
 def seg_and_patch_slide_mp(
@@ -586,7 +598,7 @@ def seg_and_patch_slide_mp(
         backend,
     ) = args
 
-    tile_df, slide_id, status, best_vis_level, best_seg_level, process_time = (
+    tile_df, slide_id, status, error, best_vis_level, best_seg_level, process_time = (
         seg_and_patch_slide(
             patch_save_dir,
             mask_save_dir,
@@ -606,7 +618,7 @@ def seg_and_patch_slide_mp(
         )
     )
 
-    return tile_df, slide_id, status, best_vis_level, best_seg_level, process_time
+    return tile_df, slide_id, status, error, best_vis_level, best_seg_level, process_time
 
 
 def get_mask_percent(mask, val=0):
