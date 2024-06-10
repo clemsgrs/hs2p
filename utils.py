@@ -334,10 +334,9 @@ def seg_and_patch(
 
                 patch_time_elapsed = -1
                 if patch:
-                    slide_save_dir = Path(patch_save_dir, slide_id)
                     hdf5_path, _, tile_df, patch_time_elapsed = patching(
                         wsi_object=wsi_object,
-                        save_dir=slide_save_dir,
+                        save_dir=patch_save_dir,
                         seg_level=seg_params.seg_level,
                         spacing=patch_params.spacing,
                         patch_size=patch_params.patch_size,
@@ -514,10 +513,9 @@ def seg_and_patch_slide(
 
         patch_time = -1
         if patch:
-            slide_save_dir = Path(patch_save_dir, slide_id)
             hdf5_path, _, tile_df, patch_time = patching(
                 wsi_object=wsi_object,
-                save_dir=slide_save_dir,
+                save_dir=patch_save_dir,
                 seg_level=seg_params.seg_level,
                 spacing=patch_params.spacing,
                 patch_size=patch_params.patch_size,

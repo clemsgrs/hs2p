@@ -70,7 +70,6 @@ def main(args):
         output_dir,
         "patches",
         f"{cfg.patch_params.patch_size}",
-        f"{cfg.patch_params.format}",
     )
     visu_save_dir = Path(output_dir, "visualization", f"{cfg.patch_params.patch_size}")
 

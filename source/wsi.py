@@ -443,14 +443,21 @@ class WholeSlideImage(object):
         save_npy_flag: bool = False,
         verbose: bool = False,
     ):
-        save_flag = save_dir is not None and (save_hdf5_flag or save_npy_flag)
+        save_flag = save_dir is not None and (save_hdf5_flag or save_npy_flag or save_patches_to_disk)
         save_path_hdf5 = None
         save_path_npy = None
+        patch_save_dir = None
         if save_flag:
             if save_hdf5_flag:
-                save_path_hdf5 = Path(save_dir.parent, "h5", f"{self.name}.h5")
+                save_path_hdf5 = Path(save_dir, "h5", f"{self.name}.h5")
             if save_npy_flag:
-                save_path_npy = Path(save_dir.parent, "npy", f"{self.name}.npy")
+                save_path_npy = Path(save_dir, "npy", f"{self.name}.npy")
+            if save_patches_to_disk:
+                if save_patches_in_common_dir:
+                    patch_save_dir = Path(save_dir, "imgs")
+                else:
+                    patch_save_dir = Path(save_dir, f"{patch_format}", f"{self.name}")
+                patch_save_dir.mkdir(parents=True, exist_ok=True)
 
         start_time = time.time()
         n_contours = len(self.contours_tissue)
@@ -467,7 +474,7 @@ class WholeSlideImage(object):
                 self.holes_tissue[i],
                 seg_level,
                 spacing,
-                save_dir,
+                patch_save_dir,
                 patch_size,
                 overlap,
                 contour_fn,
@@ -487,8 +494,7 @@ class WholeSlideImage(object):
                     if save_patches_in_common_dir:
                         tile_df["tile_path"] = tile_df.apply(
                             lambda row: Path(
-                                save_dir.parent,
-                                "imgs",
+                                patch_save_dir,
                                 f"{row.slide_id}_{row.x}_{row.y}.{patch_format}",
                             ).resolve(),
                             axis=1,
@@ -496,7 +502,7 @@ class WholeSlideImage(object):
                     else:
                         tile_df["tile_path"] = tile_df.apply(
                             lambda row: Path(
-                                save_dir, "imgs", f"{row.x}_{row.y}.{patch_format}"
+                                patch_save_dir, f"{row.x}_{row.y}.{patch_format}"
                             ).resolve(),
                             axis=1,
                         )
@@ -520,11 +526,6 @@ class WholeSlideImage(object):
                     if save_npy_flag:
                         save_npy(save_path_npy, asset_dict, attr_dict, mode="a")
                 if save_patches_to_disk:
-                    if save_patches_in_common_dir:
-                        patch_save_dir = Path(save_dir.parent, "imgs")
-                    else:
-                        patch_save_dir = Path(save_dir, "imgs")
-                    patch_save_dir.mkdir(parents=True, exist_ok=True)
                     npatch, mins, secs = save_patch(
                         self.wsi,
                         patch_save_dir,
