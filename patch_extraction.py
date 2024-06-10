@@ -211,16 +211,17 @@ def main(args):
             df.loc[mask, "status"] = s
             df.loc[mask, "error"] = e
             df.loc[mask, "process"] = 0
-            df.loc[mask, "vis_level"] = vl
-            df.loc[mask, "seg_level"] = sl
             df.loc[mask, "process_time"] = pt
-
-            dfs.append(t_df)
+            if t_df is not None:
+                df.loc[mask, "vis_level"] = vl
+                df.loc[mask, "seg_level"] = sl
+                dfs.append(t_df)
 
         df.to_csv(Path(output_dir, "process_list.csv"), index=False)
 
-        tile_df = pd.concat(dfs, ignore_index=True)
-        tile_df.to_csv(Path(output_dir, "tiles.csv"), index=False)
+        if len(dfs) > 0:
+            tile_df = pd.concat(dfs, ignore_index=True)
+            tile_df.to_csv(Path(output_dir, "tiles.csv"), index=False)
 
     else:
 
