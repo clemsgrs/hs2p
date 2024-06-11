@@ -80,7 +80,7 @@ class WholeSlideImage(object):
             target_downsample, return_tol_status=True
         )
         level_spacing = self.get_level_spacing(level)
-        resize_factor = int(target_spacing / level_spacing)
+        resize_factor = int(round(target_spacing / level_spacing, 0))
         if above_tol and not ignore_warning:
             print(
                 f"WARNING! The natural spacing ({round(self.spacings[level],4)}) closest to the target spacing ({round(target_spacing,4)}) was more than {tol*100:.1f}% appart ({self.name})."
@@ -568,7 +568,7 @@ class WholeSlideImage(object):
         )
 
         patch_spacing = self.get_level_spacing(patch_level)
-        resize_factor = int(spacing / patch_spacing)
+        resize_factor = int(round(spacing / patch_spacing, 0))
 
         if abs(resize_factor*patch_spacing/spacing - 1) > spacing_tol:
             raise ValueError(f"ERROR: The natural spacing ({patch_spacing:.4f}) closest to the target spacing ({spacing:.4f}) was more than {spacing_tol*100}% apart.")
