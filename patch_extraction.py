@@ -195,13 +195,14 @@ def main(args):
                 2,
             )
 
-        if cfg.wandb.enable and processed_count.value > 0:
+        if cfg.wandb.enable:
             stop_logging.set()
             logging_thread.join()
             wandb.log({"processed": processed_count.value})
-            wandb.log({"avg_time_sec": avg_process_time})
-            wandb.log({"min_time_sec": min_process_time})
-            wandb.log({"max_time_sec": max_process_time})
+            if processed_count.value > 0:
+                wandb.log({"avg_time_sec": avg_process_time})
+                wandb.log({"min_time_sec": min_process_time})
+                wandb.log({"max_time_sec": max_process_time})
 
         dfs = []
         for t_df, sid, s, e, vl, sl, pt in results:
