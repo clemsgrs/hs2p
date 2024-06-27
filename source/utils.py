@@ -99,9 +99,10 @@ def initialize_df(
             "process": np.full((total), 1, dtype=np.uint8),
             "status": np.full((total), "tbp"),
             "error": np.full((total), "none"),
+            "traceback": np.full((total), "none"),
             "has_patches": np.full((total), "tbd"),
             # seg params
-            "seg_level": np.full((total), int(seg_params["seg_level"]), dtype=np.int8),
+            "seg_level": np.full((total), -1, dtype=np.int8),
             "sthresh": np.full((total), int(seg_params["sthresh"]), dtype=np.uint8),
             "mthresh": np.full((total), int(seg_params["mthresh"]), dtype=np.uint8),
             "close": np.full((total), int(seg_params["close"]), dtype=np.uint32),
@@ -113,7 +114,7 @@ def initialize_df(
                 (total), int(filter_params["max_n_holes"]), dtype=np.uint32
             ),
             # vis params
-            "vis_level": np.full((total), int(vis_params["vis_level"]), dtype=np.int8),
+            "vis_level": np.full((total), -1, dtype=np.int8),
             "line_thickness": np.full(
                 (total), int(vis_params["line_thickness"]), dtype=np.uint32
             ),
@@ -301,11 +302,10 @@ def initialize_hdf5_bag(first_patch, save_coord=False):
 def overlay_mask_on_slide(
     wsi_object,
     mask_object,
-    vis_level: int,
+    downsample: int,
     pixel_mapping: Dict[str, int],
     color_mapping: Optional[Dict[str, List[int]]] = None,
     alpha: float = 0.5,
-    downsample: int = -1,
 ):
     """
     Show a mask overlayed on a slide
@@ -318,15 +318,8 @@ def overlay_mask_on_slide(
 
     assert x_mask == wsi_object.level_dimensions[mask_min_level][0]
 
-    if vis_level < 0:
-        if len(wsi_object.level_dimensions) == 1:
-            vis_level = 0
-            assert mask_min_level == 0
-        else:
-            vis_level = wsi_object.get_best_level_for_downsample_custom(downsample)
-            vis_level = max(vis_level, mask_min_level)
-    else:
-        vis_level = max(vis_level, mask_min_level)
+    vis_level = wsi_object.get_best_level_for_downsample_custom(downsample)
+    vis_level = max(vis_level, mask_min_level)
 
     mask_vis_level = vis_level - mask_min_level
 

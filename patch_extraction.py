@@ -10,7 +10,6 @@ import pandas as pd
 import multiprocessing as mp
 
 from pathlib import Path
-from omegaconf import DictConfig
 
 from source.utils import setup, write_config, initialize_df
 from utils import initialize_wandb, seg_and_patch, seg_and_patch_slide_mp
@@ -106,20 +105,24 @@ def main(args):
                 cfg.patch_params,
             )
         else:
-            df = pd.read_csv(process_list_fp)
+            process_list_df = pd.read_csv(process_list_fp)
             df = initialize_df(
-                df, cfg.seg_params, cfg.filter_params, cfg.vis_params, cfg.patch_params
+                process_list_df, cfg.seg_params, cfg.filter_params, cfg.vis_params, cfg.patch_params
             )
 
         mask = df["process"] == 1
         process_stack = df[mask]
+        total = len(process_stack)
+        already_processed = len(df) - total
+
+        processed_count = mp.Value("i", already_processed)
 
         slide_ids_to_process = process_stack.slide_id
-        slide_paths_to_process = process_stack.slide_path
+        slide_paths_to_process = [Path(x) for x in process_stack.slide_path]
 
         mask_paths_to_process = [None] * len(slide_paths_to_process)
         if "segmentation_mask_path" in process_stack.columns:
-            mask_paths_to_process = process_stack.segmentation_mask_path
+            mask_paths_to_process = [Path(x) for x in process_stack.segmentation_mask_path]
 
         spacings_to_process = [None] * len(slide_paths_to_process)
         if "spacing" in process_stack.columns:
@@ -151,9 +154,6 @@ def main(args):
             )
         ]
 
-        total = len(args)
-        processed_count = mp.Value("i", 0)
-
         # start the logging thread
         if cfg.wandb.enable:
             stop_logging = threading.Event()
@@ -168,12 +168,24 @@ def main(args):
                 pool.imap_unordered(seg_and_patch_slide_mp, args),
                 desc="Patch extraction",
                 unit=" slide",
-                total=total,
+                initial=already_processed,
+                total=total+already_processed,
             ):
                 results.append(r)
                 if r[0] is not None:
                     with processed_count.get_lock():
                         processed_count.value += 1
+                t_df, sid, s, e, tb, vl, sl, pt = r
+                mask = df["slide_id"] == sid
+                df.loc[mask, "status"] = s
+                df.loc[mask, "error"] = e
+                df.loc[mask, "traceback"] = tb
+                df.loc[mask, "process"] = 0
+                df.loc[mask, "process_time"] = pt
+                if t_df is not None:
+                    df.loc[mask, "vis_level"] = vl
+                    df.loc[mask, "seg_level"] = sl
+                df.to_csv(Path(output_dir, f"process_list.csv"), index=False)
 
         if processed_count.value > 0:
             avg_process_time = round(
@@ -205,11 +217,12 @@ def main(args):
                 wandb.log({"max_time_sec": max_process_time})
 
         dfs = []
-        for t_df, sid, s, e, vl, sl, pt in results:
+        for t_df, sid, s, e, tb, vl, sl, pt in results:
 
             mask = df["slide_id"] == sid
             df.loc[mask, "status"] = s
             df.loc[mask, "error"] = e
+            df.loc[mask, "traceback"] = tb
             df.loc[mask, "process"] = 0
             df.loc[mask, "process_time"] = pt
             if t_df is not None:

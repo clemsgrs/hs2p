@@ -4,6 +4,7 @@ import time
 import copy
 import tqdm
 import wandb
+import traceback
 import subprocess
 import numpy as np
 import pandas as pd
@@ -69,16 +70,28 @@ def initialize_wandb(
     else:
         tags = [str(t) for t in cfg.wandb.tags]
     config = OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)
-    run = wandb.init(
-        project=cfg.wandb.project,
-        entity=cfg.wandb.username,
-        name=cfg.wandb.exp_name,
-        group=cfg.wandb.group,
-        dir=cfg.wandb.dir,
-        config=config,
-        tags=tags,
-        resume="allow",
-    )
+    if cfg.resume and cfg.resume_id is not None:
+        run = wandb.init(
+            project=cfg.wandb.project,
+            entity=cfg.wandb.username,
+            name=cfg.wandb.exp_name,
+            group=cfg.wandb.group,
+            dir=cfg.wandb.dir,
+            config=config,
+            tags=tags,
+            resume="allow",
+            id=cfg.resume_id,
+        )
+    else:
+        run = wandb.init(
+            project=cfg.wandb.project,
+            entity=cfg.wandb.username,
+            name=cfg.wandb.exp_name,
+            group=cfg.wandb.group,
+            dir=cfg.wandb.dir,
+            config=config,
+            tags=tags,
+        )
     config_file_path = Path(run.dir, "run_config.yaml")
     d = OmegaConf.to_container(cfg, resolve=True)
     with open(config_file_path, "w+") as f:
@@ -90,33 +103,24 @@ def initialize_wandb(
 
 def segment(
     wsi_object: WholeSlideImage,
-    spacing: float,
     seg_params: DictConfig,
-    filter_params: DictConfig,
-    mask_fp: Optional[Path] = None,
 ):
     start_time = time.time()
-    if mask_fp is not None:
-        seg_level = wsi_object.loadSegmentation(
-            mask_fp,
-            spacing=spacing,
+    if wsi_object.mask_path is not None:
+        seg_level = wsi_object.load_segmentation(
             downsample=seg_params.downsample,
-            filter_params=filter_params,
             tissue_val=seg_params.tissue_pixel_value,
         )
-        seg_params.seg_level = seg_level
     else:
-        wsi_object.segmentTissue(
-            spacing=spacing,
-            seg_level=seg_params.seg_level,
+        seg_level = wsi_object.segment_tissue(
+            downsample=seg_params.downsample,
             sthresh=seg_params.sthresh,
             mthresh=seg_params.mthresh,
             close=seg_params.close,
             use_otsu=seg_params.use_otsu,
-            filter_params=filter_params,
         )
     seg_time_elapsed = time.time() - start_time
-    return wsi_object, seg_time_elapsed
+    return wsi_object, seg_level, seg_time_elapsed
 
 
 def patching(
@@ -210,19 +214,9 @@ def seg_and_patch(
     backend: str = "asap",
 ):
     start_time = time.time()
-    slide_paths = slide_df.slide_path.values.tolist()
-    mask_paths = []
-    if "segmentation_mask_path" in slide_df.columns:
-        mask_paths = slide_df.segmentation_mask_path.values.tolist()
-    spacings = []
-    if "spacing" in slide_df.columns:
-        spacings = slide_df.spacing.values.tolist()
-
     if process_list is None:
         df = initialize_df(
-            slide_paths,
-            mask_paths,
-            spacings,
+            slide_df,
             seg_params,
             filter_params,
             vis_params,
@@ -230,7 +224,7 @@ def seg_and_patch(
         )
     else:
         df = pd.read_csv(process_list)
-        df = initialize_df(df, seg_params, filter_params, vis_params, patch_params)
+        df = initialize_df(slide_df, seg_params, filter_params, vis_params, patch_params)
 
     mask = df["process"] == 1
     process_stack = df[mask]
@@ -269,41 +263,20 @@ def seg_and_patch(
 
             try:
                 # inialize WSI
-                wsi_object = WholeSlideImage(slide_path, spacing, backend)
+                wsi_object = WholeSlideImage(slide_path, mask_path, spacing=spacing, backend=backend)
 
-                vis_level = vis_params.vis_level
-                if vis_level < 0:
-                    if len(wsi_object.level_dimensions) == 1:
-                        vis_params.vis_level = 0
-                    else:
-                        best_level = wsi_object.get_best_level_for_downsample_custom(
-                            vis_params.downsample
-                        )
-                        vis_params.vis_level = best_level
-
-                seg_level = seg_params.seg_level
-                if seg_level < 0:
-                    if len(wsi_object.level_dimensions) == 1:
-                        seg_params.seg_level = 0
-                    else:
-                        best_level = wsi_object.get_best_level_for_downsample_custom(
-                            seg_params.downsample
-                        )
-                        seg_params.seg_level = best_level
-
-                w, h = wsi_object.level_dimensions[seg_params.seg_level]
-                if w * h > 1e8:
-                    raise ValueError(
-                        f"ERROR: level dimensions ({w},{h}) likely too large for successful segmentation, aborting."
-                    )
-
+                # segment tissue
                 seg_time_elapsed = -1
-                wsi_object, seg_time_elapsed = segment(
+                wsi_object, seg_level, seg_time_elapsed = segment(
                     wsi_object,
-                    patch_params.spacing,
                     seg_params,
-                    filter_params,
-                    mask_path,
+                )
+
+                # detect contours
+                wsi_object.detect_contours(
+                    spacing=patch_params.spacing,
+                    seg_level=seg_level,
+                    filter_params=filter_params,
                 )
 
                 if seg_params.save_mask:
@@ -323,8 +296,8 @@ def seg_and_patch(
                     )
 
                 if seg_params.visualize_mask:
-                    mask = wsi_object.visWSI(
-                        vis_level=vis_params.vis_level,
+                    mask, vis_level = wsi_object.visualize_mask(
+                        downsample=vis_params.downsample,
                         line_thickness=vis_params.line_thickness,
                     )
                     jpg_save_dir = Path(mask_save_dir, "jpg")
@@ -337,7 +310,7 @@ def seg_and_patch(
                     hdf5_path, _, tile_df, patch_time_elapsed = patching(
                         wsi_object=wsi_object,
                         save_dir=patch_save_dir,
-                        seg_level=seg_params.seg_level,
+                        seg_level=seg_level,
                         spacing=patch_params.spacing,
                         patch_size=patch_params.patch_size,
                         overlap=patch_params.overlap,
@@ -377,8 +350,8 @@ def seg_and_patch(
 
                 df.loc[idx, "process"] = 0
                 df.loc[idx, "status"] = "processed"
-                df.loc[idx, "vis_level"] = vis_params.vis_level
-                df.loc[idx, "seg_level"] = seg_params.seg_level
+                df.loc[idx, "vis_level"] = vis_level
+                df.loc[idx, "seg_level"] = seg_level
                 df.to_csv(Path(output_dir, "process_list.csv"), index=False)
 
                 processed_count += 1
@@ -390,15 +363,13 @@ def seg_and_patch(
                 if log_to_wandb:
                     wandb.log({"processed": already_processed + processed_count})
 
-                # restore original values
-                vis_params.vis_level = vis_level
-                seg_params.seg_level = seg_level
-
             except Exception as e:
 
+                tb = traceback.format_exc()
                 df.loc[idx, "process"] = 0
                 df.loc[idx, "status"] = "failed"
                 df.loc[idx, "error"] = str(e)
+                df.loc[idx, "traceback"] = str(tb)
                 df.to_csv(Path(output_dir, "process_list.csv"), index=False)
 
     end_time = time.time()
@@ -444,50 +415,22 @@ def seg_and_patch_slide(
     if verbose:
         print(f"Processing {slide_id}...")
 
-    if mask_fp is not None:
-        mask_fp = Path(mask_fp)
-
     try:
         # inialize WSI
-        wsi_object = WholeSlideImage(Path(slide_fp), spacing, backend)
+        wsi_object = WholeSlideImage(slide_fp, mask_fp, spacing=spacing, backend=backend)
 
-        vis_level = vis_params.vis_level
-        best_vis_level = copy.deepcopy(vis_level)
-        if vis_level < 0:
-            if len(wsi_object.level_dimensions) == 1:
-                vis_params.vis_level = 0
-                best_vis_level = 0
-            else:
-                best_vis_level = wsi_object.get_best_level_for_downsample_custom(
-                    vis_params.downsample
-                )
-                vis_params.vis_level = best_vis_level
-
-        seg_level = seg_params.seg_level
-        best_seg_level = copy.deepcopy(seg_level)
-        if seg_level < 0:
-            if len(wsi_object.level_dimensions) == 1:
-                seg_params.seg_level = 0
-                best_seg_level = 0
-            else:
-                best_seg_level = wsi_object.get_best_level_for_downsample_custom(
-                    seg_params.downsample
-                )
-                seg_params.seg_level = best_seg_level
-
-        w, h = wsi_object.level_dimensions[seg_params.seg_level]
-        if w * h > 1e9:
-            raise ValueError(
-                f"ERROR: level dimensions ({w},{h}) likely too large for successful segmentation, aborting."
-            )
-
+        # segment tissue
         seg_time = -1
-        wsi_object, seg_time = segment(
+        wsi_object, seg_level, seg_time = segment(
             wsi_object,
-            patch_params.spacing,
             seg_params,
-            filter_params,
-            mask_fp,
+        )
+
+        # detect contours
+        wsi_object.detect_contours(
+            spacing=patch_params.spacing,
+            seg_level=seg_level,
+            filter_params=filter_params,
         )
 
         if seg_params.save_mask:
@@ -501,9 +444,10 @@ def seg_and_patch_slide(
                 mask_path, tile=True, compression="jpeg", bigtiff=True, pyramid=True, Q=70
             )
 
+        vis_level = -1
         if seg_params.visualize_mask:
-            mask = wsi_object.visWSI(
-                vis_level=vis_params.vis_level,
+            mask, vis_level = wsi_object.visualize_mask(
+                downsample=vis_params.downsample,
                 line_thickness=vis_params.line_thickness,
             )
             jpg_save_dir = Path(mask_save_dir, "jpg")
@@ -516,7 +460,7 @@ def seg_and_patch_slide(
             hdf5_path, _, tile_df, patch_time = patching(
                 wsi_object=wsi_object,
                 save_dir=patch_save_dir,
-                seg_level=seg_params.seg_level,
+                seg_level=seg_level,
                 spacing=patch_params.spacing,
                 patch_size=patch_params.patch_size,
                 overlap=patch_params.overlap,
@@ -555,24 +499,22 @@ def seg_and_patch_slide(
 
         status = "processed"
         error = "none"
-
-        # restore original values
-        vis_params.vis_level = vis_level
-        seg_params.seg_level = seg_level
+        tb = "none"
 
     except Exception as e:
 
         status = "failed"
         error = str(e)
+        tb = str(traceback.format_exc())
         tile_df = None
-        best_vis_level = -1
-        best_seg_level = -1
+        vis_level = -1
+        seg_level = -1
 
         end_time = time.time()
         mins, secs = compute_time(start_time, end_time)
         process_time = mins * 60 + secs
 
-    return tile_df, slide_id, status, error, best_vis_level, best_seg_level, process_time
+    return tile_df, slide_id, status, error, tb, vis_level, seg_level, process_time
 
 
 def seg_and_patch_slide_mp(
@@ -596,7 +538,7 @@ def seg_and_patch_slide_mp(
         backend,
     ) = args
 
-    tile_df, slide_id, status, error, best_vis_level, best_seg_level, process_time = (
+    tile_df, slide_id, status, error, tb, vis_level, seg_level, process_time = (
         seg_and_patch_slide(
             patch_save_dir,
             mask_save_dir,
@@ -616,7 +558,7 @@ def seg_and_patch_slide_mp(
         )
     )
 
-    return tile_df, slide_id, status, error, best_vis_level, best_seg_level, process_time
+    return tile_df, slide_id, status, error, tb, vis_level, seg_level, process_time
 
 
 def get_mask_percent(mask, val=0):
@@ -752,52 +694,29 @@ def sample_patches(
     seg_mask_save_dir: Optional[Path] = None,
     overlay_mask_save_dir: Optional[Path] = None,
     backend: str = "asap",
-    eps: float = 1e-5,
 ):
 
     # Inialize WSI & annotation mask
-    wsi_object = WholeSlideImage(slide_fp, spacing, backend)
+    wsi_object = WholeSlideImage(slide_fp, seg_mask_fp, spacing=spacing, backend=backend)
     annotation_mask = WholeSlideImage(annot_mask_fp, backend=backend)
 
-    vis_level = vis_params.vis_level
-    if vis_level < 0:
-        if len(wsi_object.level_dimensions) == 1:
-            best_vis_level = 0
-        else:
-            best_vis_level = wsi_object.get_best_level_for_downsample_custom(
-                vis_params.downsample
-            )
-        vis_params.vis_level = best_vis_level
-
-    seg_level = seg_params.seg_level
-    if seg_level < 0:
-        if len(wsi_object.level_dimensions) == 1:
-            best_seg_level = 0
-        else:
-            best_seg_level = wsi_object.get_best_level_for_downsample_custom(
-                seg_params.downsample
-            )
-        seg_params.seg_level = best_seg_level
-
-    w, h = wsi_object.level_dimensions[seg_params.seg_level]
-    if w * h > 1e8:
-        print(
-            f"level dimensions {w} x {h} is likely too large for successful segmentation, aborting"
-        )
-        return 0
-
+    # segment tissue
     seg_time = -1
-    wsi_object, seg_time = segment(
+    wsi_object, seg_level, seg_time = segment(
         wsi_object,
-        patch_params.spacing,
         seg_params,
-        filter_params,
-        seg_mask_fp,
+    )
+
+    # detect contours
+    wsi_object.detect_contours(
+        spacing=patch_params.spacing,
+        seg_level=seg_level,
+        filter_params=filter_params,
     )
 
     if seg_params.save_mask:
-        seg_mask = wsi_object.visWSI(
-            vis_level=vis_params.vis_level,
+        seg_mask, vis_level = wsi_object.visualize_mask(
+            downsample=vis_params.downsample,
             line_thickness=vis_params.line_thickness,
         )
         seg_mask_path = Path(seg_mask_save_dir, f"{slide_id}.jpg")
@@ -806,7 +725,7 @@ def sample_patches(
     # extract patches from identified tissue blobs
     start_time = time.time()
     _, _, tile_df = wsi_object.process_contours(
-        seg_level=seg_params.seg_level,
+        seg_level=seg_level,
         spacing=patch_params.spacing,
         patch_size=patch_params.patch_size,
         overlap=patch_params.overlap,
@@ -932,19 +851,14 @@ def sample_patches(
                             overlayed_tile_fp.parent.mkdir(exist_ok=True, parents=True)
                             overlayed_tile.save(overlayed_tile_fp)
 
-    # restore original values
-    vis_params.vis_level = vis_level
-    seg_params.seg_level = seg_level
-
     if vis_params.overlay_mask_on_slide:
         overlay_mask = overlay_mask_on_slide(
             wsi_object,
             annotation_mask,
-            vis_params.vis_level,
+            vis_params.downscale,
             pixel_mapping,
             color_mapping,
             alpha,
-            vis_params.downscale,
         )
         overlay_mask_path = Path(overlay_mask_save_dir, f"{slide_id}.jpg")
         overlay_mask.save(overlay_mask_path)
