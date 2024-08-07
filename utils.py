@@ -598,7 +598,7 @@ def extract_top_tiles(
 
     if downsample == -1:
         overlay_spacing = spacing
-        overlay_level = wsi_object.get_best_level_for_spacing(overlay_spacing)
+        overlay_level, _ = wsi_object.get_best_level_for_spacing(overlay_spacing)
     else:
         overlay_level = wsi_object.get_best_level_for_downsample_custom(downsample)
         overlay_spacing = wsi_object.get_level_spacing(overlay_level)
@@ -610,7 +610,7 @@ def extract_top_tiles(
         closest = np.argmin([abs(overlay_spacing - s) for s, _ in common_spacings])
         closest_common_spacing = common_spacings[closest][0]
         overlay_spacing = closest_common_spacing
-        overlay_level = wsi_object.get_best_level_for_spacing(overlay_spacing)
+        overlay_level, _ = wsi_object.get_best_level_for_spacing(overlay_spacing)
 
     mask_data = mask_object.wsi.get_slide(spacing=overlay_spacing)
     if mask_data.shape[-1] == 1:
@@ -618,7 +618,7 @@ def extract_top_tiles(
     mask_data = Image.fromarray(mask_data)
     mask_data = mask_data.split()[0]
 
-    spacing_level = wsi_object.get_best_level_for_spacing(spacing)
+    spacing_level, _ = wsi_object.get_best_level_for_spacing(spacing)
     wsi_scale = tuple(
         a / b
         for a, b in zip(
@@ -745,8 +745,8 @@ def sample_patches(
     h5_dir.mkdir(exist_ok=True, parents=True)
     hdf5_file_path = Path(h5_dir, f"{slide_id}.h5")
 
-    raw_tile_dir = Path(patch_dir, "raw")
-    overlay_tile_dir = Path(patch_dir, "mask")
+    raw_tile_dir = Path(patch_dir, patch_params.fmt, "raw")
+    overlay_tile_dir = Path(patch_dir, patch_params.fmt, "mask")
 
     # loop over annotation categories and extract top scoring patches
     # among previously extracted tissue patches
@@ -788,9 +788,14 @@ def sample_patches(
             )
             dset[:] = cat_coords
             dset.attrs["patch_size"] = patch_params.patch_size
-            dset.attrs["patch_level"] = wsi_object.get_best_level_for_spacing(
-                patch_params.spacing
+            patch_level, _ =  wsi_object.get_best_level_for_spacing(
+                patch_params.spacing, ignore_warning=True
             )
+            patch_spacing = wsi_object.get_level_spacing(patch_level)
+            resize_factor = int(round(spacing / patch_spacing, 0))
+            patch_size_resized = patch_params.patch_size * resize_factor
+            dset.attrs["patch_level"] = patch_level
+            dset.attrs["patch_size_resized"] = patch_size_resized
             h5_file.close()
 
             if patch_params.save_patches_to_disk:
@@ -811,12 +816,19 @@ def sample_patches(
                         tile = wsi_object.wsi.get_patch(
                             x,
                             y,
-                            patch_params.patch_size,
-                            patch_params.patch_size,
-                            spacing=patch_params.spacing,
+                            patch_size_resized,
+                            patch_size_resized,
+                            spacing=patch_spacing,
                             center=False,
                         )
                         tile = Image.fromarray(tile).convert("RGB")
+
+                        if patch_size_resized != patch_params.patch_size:
+                            assert (
+                                patch_size_resized % patch_params.patch_size == 0
+                            ), "patch_size_resized should be a multiple of patch_size"
+                            tile = tile.resize((patch_params.patch_size, patch_params.patch_size))
+
                         fname = f"{slide_id}_{x}_{y}"
                         tile_fp = Path(
                             raw_tile_dir, cat_, f"{fname}.{patch_params.fmt}"

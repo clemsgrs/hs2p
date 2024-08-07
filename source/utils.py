@@ -11,7 +11,7 @@ from pathlib import Path
 from omegaconf import OmegaConf
 from typing import Optional, Tuple, Dict, List
 
-from config import default_extraction_config
+from config import default_extraction_config, default_sampling_config
 
 
 def write_config(cfg, output_dir, name="config.yaml"):
@@ -415,7 +415,7 @@ def get_masked_tile(
     upsample: bool = True,
     eps: float = 1e-5,
 ):
-    wsi_spacing_level = wsi_object.get_best_level_for_spacing(
+    wsi_spacing_level, _ = wsi_object.get_best_level_for_spacing(
         spacing, ignore_warning=True
     )
 
@@ -423,9 +423,11 @@ def get_masked_tile(
     mask_min_level = int(
         np.argmin([abs(x_wsi - x_mask) for x_wsi, _ in wsi_object.level_dimensions])
     )
-    mask_spacing_level = mask_object.get_best_level_for_spacing(
+    mask_spacing_level, _ = mask_object.get_best_level_for_spacing(
         spacing, ignore_warning=True
     )
+    mask_spacing = mask_object.get_level_spacing(mask_spacing_level)
+    mask_resize_factor = int(round(spacing / mask_spacing, 0))
 
     assert x_mask == wsi_object.level_dimensions[mask_min_level][0]
 
@@ -439,6 +441,7 @@ def get_masked_tile(
         )
     )
     x_scaled, y_scaled = int(x * 1.0 / mask_scale[0]), int(y * 1.0 / mask_scale[1])
+
     # need to scale tile size from wsi_spacing_level to mask_spacing_level
     ts_scale = tuple(
         a / b
@@ -450,14 +453,23 @@ def get_masked_tile(
     ts_x, ts_y = int(patch_size[0] * 1.0 / ts_scale[0]), int(
         patch_size[1] * 1.0 / ts_scale[1]
     )
+
+    # further scale tile size with resize factor
+    ts_x_resized, ts_y_resized = ts_x * mask_resize_factor, ts_y * mask_resize_factor
+
     # read annotation tile from mask
     masked_tile = mask_object.wsi.get_patch(
-        x_scaled, y_scaled, ts_x, ts_y, spacing=spacing, center=False
+        x_scaled, y_scaled, ts_x_resized, ts_y_resized, spacing=mask_spacing, center=False
     )
     if masked_tile.shape[-1] == 1:
         masked_tile = np.squeeze(masked_tile, axis=-1)
     masked_tile = Image.fromarray(masked_tile)
     masked_tile = masked_tile.split()[0]
+
+    # may need to resize tile
+    if mask_resize_factor != 1:
+        masked_tile = masked_tile.resize((ts_x, ts_y))
+
     if ts_scale[0] > (1 + eps) or ts_scale[1] > (1 + eps):
         # 2 possible ways to go:
         # - upsample annotation tile to match true tile size
@@ -578,6 +590,7 @@ def DrawMapFromCoords(
         coord = coords[patch_id]
         x, y = coord
         vis_spacing = wsi_object.get_level_spacing(vis_level)
+        resize_factor = 1
 
         if mask_object is not None:
             # ensure mask and slide have at least one common spacing
@@ -594,13 +607,18 @@ def DrawMapFromCoords(
                 # find spacing that is common to slide and mask and that is the closest to seg_spacing
                 closest = np.argmin([abs(vis_spacing - s) for s, _ in common_spacings])
                 closest_common_spacing = common_spacings[closest][0]
-                vis_spacing = closest_common_spacing
-                vis_level = wsi_object.get_best_level_for_spacing(vis_spacing)
+                target_vis_spacing = closest_common_spacing
+                vis_level, _ = wsi_object.get_best_level_for_spacing(target_vis_spacing)
+                vis_spacing = wsi_object.get_level_spacing(vis_level)
+                resize_factor = int(round(target_vis_spacing / vis_spacing, 0))
 
-        width, height = patch_size
+        width, height = patch_size * resize_factor
         tile = wsi_object.wsi.get_patch(
             x, y, width, height, spacing=vis_spacing, center=False
         )
+        tile = Image.fromarray(tile).convert("RGB")
+        if resize_factor != 1:
+            tile = tile.resize((patch_size, patch_size))
 
         if mask_object is not None:
             tile, masked_tile = get_masked_tile(
@@ -615,7 +633,8 @@ def DrawMapFromCoords(
             tile = overlay_mask_on_tile(
                 tile, masked_tile, pixel_mapping, color_mapping, alpha=alpha
             )
-            tile = np.array(tile)
+
+        tile = np.array(tile)
 
         coord = np.ceil(
             tuple(coord[i] / downsamples[i] for i in range(len(coord)))
