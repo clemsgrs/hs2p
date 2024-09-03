@@ -182,7 +182,7 @@ def visualize(
     verbose: bool = False,
 ):
     start = time.time()
-    heatmap = VisualizeCoords(
+    canvas = VisualizeCoords(
         hdf5_path,
         wsi_object,
         downscale=downscale,
@@ -192,7 +192,7 @@ def visualize(
         verbose=verbose,
     )
     total_time = time.time() - start
-    return heatmap, total_time
+    return canvas, total_time
 
 
 def seg_and_patch(
@@ -333,7 +333,7 @@ def seg_and_patch(
                 if visu:
                     # if hdf5_path exists, patches were extracted
                     if hdf5_path.is_file():
-                        heatmap, visu_time_elapsed = visualize(
+                        canvas, visu_time_elapsed = visualize(
                             hdf5_path,
                             wsi_object,
                             downscale=vis_params.downscale,
@@ -343,7 +343,7 @@ def seg_and_patch(
                             verbose=verbose,
                         )
                         visu_path = Path(visu_save_dir, f"{slide_id}.jpg")
-                        heatmap.save(visu_path)
+                        canvas.save(visu_path)
                         df.loc[idx, "has_patches"] = "yes"
                     else:
                         df.loc[idx, "has_patches"] = "no"
@@ -485,7 +485,7 @@ def seg_and_patch_slide(
         if visu:
             # if hdf5_path exists, patches were extracted
             if hdf5_path.is_file():
-                heatmap, visu_time = visualize(
+                canvas, visu_time = visualize(
                     hdf5_path,
                     wsi_object,
                     downscale=vis_params.downscale,
@@ -495,7 +495,7 @@ def seg_and_patch_slide(
                     verbose=verbose,
                 )
                 visu_path = Path(visu_save_dir, f"{slide_id}.jpg")
-                heatmap.save(visu_path)
+                canvas.save(visu_path)
 
         status = "processed"
         error = "none"
@@ -714,7 +714,7 @@ def sample_patches(
         filter_params=filter_params,
     )
 
-    if seg_params.save_mask:
+    if seg_params.visualize_mask:
         seg_mask, vis_level = wsi_object.visualize_mask(
             downsample=vis_params.downsample,
             line_thickness=vis_params.line_thickness,
@@ -733,6 +733,7 @@ def sample_patches(
         drop_holes=patch_params.drop_holes,
         tissue_thresh=patch_params.tissue_thresh,
         use_padding=patch_params.use_padding,
+        save_patches_to_disk=False,
         num_workers=num_workers,
     )
     patch_time_elapsed = time.time() - start_time
@@ -792,7 +793,7 @@ def sample_patches(
                 patch_params.spacing, ignore_warning=True
             )
             patch_spacing = wsi_object.get_level_spacing(patch_level)
-            resize_factor = int(round(spacing / patch_spacing, 0))
+            resize_factor = int(round(patch_params.spacing / patch_spacing, 0))
             patch_size_resized = patch_params.patch_size * resize_factor
             dset.attrs["patch_level"] = patch_level
             dset.attrs["patch_size_resized"] = patch_size_resized
@@ -878,29 +879,29 @@ def sample_patches(
     if visu and hdf5_file_path.exists():
         visu_save_dir = Path(output_dir, "visualization")
         visu_save_dir.mkdir(exist_ok=True)
-        heatmaps = [None]
+        canvas_list = [None]
         for cat in pixel_mapping.keys():
             if cat not in skip:
-                heatmap = VisualizeCoords(
+                canvas = VisualizeCoords(
                     hdf5_file_path,
                     wsi_object,
                     downscale=vis_params.downscale,
                     draw_grid=True,
                     thickness=patch_params.grid_thickness,
                     key=cat,
-                    heatmap=heatmaps[-1],
+                    canvas=canvas_list[-1],
                     mask_object=annotation_mask,
                     pixel_mapping=pixel_mapping,
                     color_mapping=color_mapping,
                     alpha=alpha,
                 )
-                heatmaps.append(heatmap)
-        # the last heatmaps element contains the final visualization image
-        heatmap = [h for h in heatmaps if h is not None]
-        if len(heatmap) > 0:
-            heatmap = heatmap[-1]
+                canvas_list.append(canvas)
+        # the last canvas element contains the final visualization image
+        canvas = [h for h in canvas_list if h is not None]
+        if len(canvas) > 0:
+            canvas = canvas[-1]
             visu_path = Path(visu_save_dir, f"{slide_id}.jpg")
-            heatmap.save(visu_path)
+            canvas.save(visu_path)
 
     if len(coordinates) > 0:
         x, y = list(map(list, zip(*coordinates)))

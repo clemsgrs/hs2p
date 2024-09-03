@@ -561,7 +561,7 @@ def DrawMapFromCoords(
     canvas,
     wsi_object,
     coords,
-    patch_size,
+    patch_size_at_0,
     vis_level: int,
     indices: Optional[List[int]] = None,
     draw_grid: bool = True,
@@ -579,8 +579,8 @@ def DrawMapFromCoords(
     total = len(indices)
 
     patch_size = tuple(
-        np.ceil((np.array(patch_size) / np.array(downsamples))).astype(np.int32)
-    )
+        np.ceil((np.array(patch_size_at_0) / np.array(downsamples))).astype(np.int32)
+    ) # defined w.r.t vis_level
     if verbose:
         print(f"downscaled patch size: {patch_size}")
 
@@ -589,7 +589,9 @@ def DrawMapFromCoords(
         patch_id = indices[idx]
         coord = coords[patch_id]
         x, y = coord
-        vis_spacing = wsi_object.get_level_spacing(vis_level)
+        target_vis_spacing = wsi_object.get_level_spacing(vis_level)
+
+        vis_spacing = target_vis_spacing
         resize_factor = 1
 
         if mask_object is not None:
@@ -602,13 +604,13 @@ def DrawMapFromCoords(
             ), f"The provided segmentation mask (spacings={mask_object.spacings}) has no common spacing with the slide (spacings={wsi_object.spacings}). A minimum of 1 common spacing is required."
 
             # check if this spacing is present in common spacings
-            is_in_common_spacings = vis_spacing in [s for s, _ in common_spacings]
+            is_in_common_spacings = target_vis_spacing in [s for s, _ in common_spacings]
             if not is_in_common_spacings:
                 # find spacing that is common to slide and mask and that is the closest to seg_spacing
-                closest = np.argmin([abs(vis_spacing - s) for s, _ in common_spacings])
+                closest = np.argmin([abs(target_vis_spacing - s) for s, _ in common_spacings])
                 closest_common_spacing = common_spacings[closest][0]
-                target_vis_spacing = closest_common_spacing
-                vis_level, _ = wsi_object.get_best_level_for_spacing(target_vis_spacing)
+                vis_spacing = closest_common_spacing
+                vis_level, _ = wsi_object.get_best_level_for_spacing(vis_spacing)
                 vis_spacing = wsi_object.get_level_spacing(vis_level)
                 resize_factor = int(round(target_vis_spacing / vis_spacing, 0))
 
@@ -624,7 +626,7 @@ def DrawMapFromCoords(
             tile, masked_tile = get_masked_tile(
                 wsi_object,
                 mask_object,
-                Image.fromarray(tile).convert("RGB"),
+                tile,
                 x,
                 y,
                 vis_spacing,
@@ -664,7 +666,7 @@ def VisualizeCoords(
     bg_color: Tuple[int] = (0, 0, 0),
     verbose: bool = False,
     key: str = "coords",
-    heatmap: Optional[Image.Image] = None,
+    canvas: Optional[Image.Image] = None,
     mask_object=None,
     pixel_mapping: Optional[Dict[str, int]] = None,
     color_mapping: Optional[Dict[str, int]] = None,
@@ -678,60 +680,56 @@ def VisualizeCoords(
     w, h = wsi_object.level_dimensions[0]
 
     if len(coords) == 0:
-        return heatmap
+        return canvas
 
     if verbose:
         print(f"original size: {w} x {h}")
 
     w, h = wsi_object.level_dimensions[vis_level]
 
-    patch_size = dset.attrs["patch_size_resized"]
     patch_level = dset.attrs["patch_level"]
+    patch_size = dset.attrs["patch_size_resized"] # defined w.r.t patch_level
     if verbose:
         print(f"downscaled size for stiching: {w} x {h}")
         print(f"number of patches: {len(coords)}")
-        print(f"patch size: {patch_size}")
         print(f"patch level: {patch_level}")
+        print(f"patch size: {patch_size}")
 
-    patch_size = tuple(
+    patch_size_at_0 = tuple(
         (
             np.array((patch_size, patch_size))
             * wsi_object.level_downsamples[patch_level]
         ).astype(np.int32)
-    )
-    if verbose:
-        print(f"ref patch size: {patch_size}")
+    ) # defined w.r.t level 0
 
     if w * h > Image.MAX_IMAGE_PIXELS:
         raise Image.DecompressionBombError(
             "Visualization Downscale %d is too large" % downscale
         )
 
-    if heatmap is None:
+    if canvas is None:
         if mask_object is not None:
-            heatmap = overlay_mask_on_slide(
+            canvas = overlay_mask_on_slide(
                 wsi_object,
                 mask_object,
-                vis_level,
+                downscale,
                 pixel_mapping,
                 color_mapping,
                 alpha=alpha,
             )
         elif display_slide:
             vis_spacing = wsi_object.spacings[vis_level]
-            heatmap = wsi_object.wsi.get_patch(
-                0, 0, w, h, spacing=vis_spacing, center=False
-            )
-            heatmap = Image.fromarray(heatmap).convert("RGB")
+            canvas = wsi_object.wsi.get_slide(spacing=vis_spacing)
+            canvas = Image.fromarray(canvas).convert("RGB")
         else:
-            heatmap = Image.new(size=(w, h), mode="RGB", color=bg_color)
+            canvas = Image.new(size=(w, h), mode="RGB", color=bg_color)
 
-    heatmap = np.array(heatmap)
-    heatmap = DrawMapFromCoords(
-        heatmap,
+    canvas = np.array(canvas)
+    canvas = DrawMapFromCoords(
+        canvas,
         wsi_object,
         coords,
-        patch_size,
+        patch_size_at_0,
         vis_level,
         indices=None,
         draw_grid=draw_grid,
@@ -744,4 +742,4 @@ def VisualizeCoords(
     )
 
     h5_file.close()
-    return heatmap
+    return canvas

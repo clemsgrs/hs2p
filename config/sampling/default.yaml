@@ -29,7 +29,7 @@ seg_params:
   mthresh: 7 # median filter size (positive, odd integer)
   close: 4 # additional morphological closing to apply following initial thresholding (positive integer)
   use_otsu: True # use otsu's method instead of simple binary thresholding
-  save_mask: True # save tissue mask to disk as a .jpg image
+  visualize_mask: true # save a visualization of the tissue mask as a .jpg image
   tissue_pixel_value: 1 # value of tissue pixel in pre-computed segmentation masks
 
 filter_params:
@@ -72,8 +72,3 @@ wandb:
   dir: '/home/user'
   group:
   tags: []
-
-# hydra
-hydra:
-  run:
-    dir: /tmp/hydra_output

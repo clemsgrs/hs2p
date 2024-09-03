@@ -69,8 +69,10 @@ def main(args):
 
     seg_mask_save_dir = Path(output_dir, "segmentation_mask")
     overlay_mask_save_dir = Path(output_dir, "annotation_mask")
-    seg_mask_save_dir.mkdir(exist_ok=True)
-    overlay_mask_save_dir.mkdir(exist_ok=True)
+    if cfg.seg_params.visualize_mask:
+        seg_mask_save_dir.mkdir(exist_ok=True)
+    if cfg.vis_params.overlay_mask_on_slide:
+        overlay_mask_save_dir.mkdir(exist_ok=True)
 
     df = pd.read_csv(cfg.csv)
 
@@ -159,7 +161,7 @@ def main(args):
 
         with tqdm.tqdm(
             zip(slide_ids, slide_fps, seg_mask_fps, annot_mask_fps, spacings),
-            desc=f"Patche sampling",
+            desc=f"Patch sampling",
             unit=" slide",
             initial=0,
             total=len(slide_ids),
