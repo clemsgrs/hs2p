@@ -14,11 +14,7 @@ from typing import Dict, List, Tuple, Optional, Union
 from source.utils import save_hdf5, save_npy, save_patch, compute_time, find_common_spacings
 from source.util_classes import (
     Contour_Checking_fn,
-    isInContourV1,
-    isInContourV2,
-    isInContourV3_Easy,
-    isInContourV3_Hard,
-    isInContour_pct,
+    HasEnoughTissue,
 )
 
 import warnings
@@ -603,8 +599,8 @@ class WholeSlideImage(object):
             int(self.level_downsamples[patch_level][1]),
         )
         ref_patch_size = (
-            patch_size * patch_downsample[0],
-            patch_size * patch_downsample[1],
+            patch_size_resized * patch_downsample[0],
+            patch_size_resized * patch_downsample[1],
         )
 
         img_w, img_h = self.level_dimensions[0]
@@ -636,24 +632,10 @@ class WholeSlideImage(object):
 
         # TODO: work with the ref_patch_size tuple instead of using ref_patch_size[0] to account for difference along x & y axes
         if isinstance(contour_fn, str):
-            if contour_fn == "four_pt":
-                cont_check_fn = isInContourV3_Easy(
-                    contour=cont, patch_size=ref_patch_size[0], center_shift=0.5
-                )
-            elif contour_fn == "four_pt_hard":
-                cont_check_fn = isInContourV3_Hard(
-                    contour=cont, patch_size=ref_patch_size[0], center_shift=0.5
-                )
-            elif contour_fn == "center":
-                cont_check_fn = isInContourV2(
-                    contour=cont, patch_size=ref_patch_size[0]
-                )
-            elif contour_fn == "basic":
-                cont_check_fn = isInContourV1(contour=cont)
-            elif contour_fn == "pct":
+            if contour_fn == "pct":
                 scale = self.level_downsamples[seg_level]
                 cont = self.scaleContourDim([cont], (1.0 / scale[0], 1.0 / scale[1]))[0]
-                cont_check_fn = isInContour_pct(
+                cont_check_fn = HasEnoughTissue(
                     contour=cont,
                     contour_holes=contour_holes,
                     tissue_mask=self.binary_mask,
