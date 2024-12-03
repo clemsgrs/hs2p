@@ -254,9 +254,9 @@ class WholeSlideImage(object):
         ref_patch_size = filter_params["ref_patch_size"]
         scaled_ref_patch_area = int(ref_patch_size**2 / (scale[0] * scale[1]))
 
-        filter_params = filter_params.copy()
-        filter_params["a_t"] = filter_params["a_t"] * scaled_ref_patch_area
-        filter_params["a_h"] = filter_params["a_h"] * scaled_ref_patch_area
+        _filter_params = filter_params.copy()
+        _filter_params["a_t"] = filter_params["a_t"] * scaled_ref_patch_area
+        _filter_params["a_h"] = filter_params["a_h"] * scaled_ref_patch_area
 
         # Find and filter contours
         contours, hierarchy = cv2.findContours(
@@ -270,7 +270,7 @@ class WholeSlideImage(object):
         if filter_params:
             # Necessary for filtering out artifacts
             foreground_contours, hole_contours = _filter_contours(
-                contours, hierarchy, filter_params
+                contours, hierarchy, _filter_params
             )
 
         # scale detected contours to level 0
