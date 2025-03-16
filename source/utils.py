@@ -190,10 +190,9 @@ def save_npy(output_path, asset_dict, attr_dict, mode="a"):
     patch_level = attr["patch_level"]
     patch_size = attr["patch_size"]
     patch_size_resized = attr["patch_size_resized"]
-    resize_factor = int(patch_size_resized // patch_size)
     data = []
     for i in range(npatch):
-        data.append([x[i], y[i], patch_size_resized, patch_level, resize_factor])
+        data.append([x[i], y[i], patch_size_resized, patch_level, patch_size])
     data_arr = np.array(data, dtype=int)
     if mode == "a":
         existing_arr = np.load(output_path)
@@ -238,9 +237,6 @@ def save_patch(
         )
         pil_patch = Image.fromarray(patch).convert("RGB")
         if patch_size_resized != patch_size:
-            assert (
-                patch_size_resized % patch_size == 0
-            ), "patch_size_resized should be a multiple of patch_size"
             pil_patch = pil_patch.resize((patch_size, patch_size))
         save_name = f"{int(x)}_{int(y)}.{fmt}"
         if save_patches_in_common_dir:
@@ -251,52 +247,6 @@ def save_patch(
     end_time = time.time()
     patch_saving_mins, patch_saving_secs = compute_time(start_time, end_time)
     return npatch, patch_saving_mins, patch_saving_secs
-
-
-def initialize_hdf5_bag(first_patch, save_coord=False):
-    (
-        x,
-        y,
-        cont_idx,
-        patch_size,
-        patch_level,
-        downsample,
-        downsampled_level_dim,
-        level_dimensions,
-        img_patch,
-        name,
-        save_path,
-    ) = tuple(first_patch.values())
-    file_path = Path(save_path, f"{name}.h5")
-    file = h5py.File(file_path, "w")
-    img_patch = np.array(img_patch)[np.newaxis, ...]
-    dtype = img_patch.dtype
-
-    # Initialize a resizable dataset to hold the output
-    img_shape = img_patch.shape
-    maxshape = (None,) + img_shape[
-        1:
-    ]  # maximum dimensions up to which dataset maybe resized (None means unlimited)
-    dset = file.create_dataset(
-        "imgs", shape=img_shape, maxshape=maxshape, chunks=img_shape, dtype=dtype
-    )
-
-    dset[:] = img_patch
-    dset.attrs["patch_size"] = patch_size
-    dset.attrs["patch_level"] = patch_level
-    dset.attrs["wsi_name"] = name
-    dset.attrs["downsample"] = downsample
-    dset.attrs["level_dimensions"] = level_dimensions
-    dset.attrs["downsampled_level_dim"] = downsampled_level_dim
-
-    if save_coord:
-        coord_dset = file.create_dataset(
-            "coords", shape=(1, 2), maxshape=(None, 2), chunks=(1, 2), dtype=np.int32
-        )
-        coord_dset[:] = (x, y)
-
-    file.close()
-    return file_path
 
 
 def overlay_mask_on_slide(
@@ -415,19 +365,15 @@ def get_masked_tile(
     upsample: bool = True,
     eps: float = 1e-5,
 ):
-    wsi_spacing_level, _ = wsi_object.get_best_level_for_spacing(
-        spacing, ignore_warning=True
-    )
+    wsi_spacing_level = wsi_object.get_best_level_for_spacing(spacing)
 
     x_mask = mask_object.level_dimensions[0][0]
     mask_min_level = int(
         np.argmin([abs(x_wsi - x_mask) for x_wsi, _ in wsi_object.level_dimensions])
     )
-    mask_spacing_level, _ = mask_object.get_best_level_for_spacing(
-        spacing, ignore_warning=True
-    )
+    mask_spacing_level = mask_object.get_best_level_for_spacing(spacing)
     mask_spacing = mask_object.get_level_spacing(mask_spacing_level)
-    mask_resize_factor = int(round(spacing / mask_spacing, 0))
+    mask_resize_factor = spacing / mask_spacing
 
     assert x_mask == wsi_object.level_dimensions[mask_min_level][0]
 
@@ -455,7 +401,7 @@ def get_masked_tile(
     )
 
     # further scale tile size with resize factor
-    ts_x_resized, ts_y_resized = ts_x * mask_resize_factor, ts_y * mask_resize_factor
+    ts_x_resized, ts_y_resized = int(round(ts_x * mask_resize_factor, 0)), int(round(ts_y * mask_resize_factor, 0))
 
     # read annotation tile from mask
     masked_tile = mask_object.wsi.get_patch(
@@ -467,7 +413,7 @@ def get_masked_tile(
     masked_tile = masked_tile.split()[0]
 
     # may need to resize tile
-    if mask_resize_factor != 1:
+    if ts_x_resized != ts_x or ts_y_resized != ts_y:
         masked_tile = masked_tile.resize((ts_x, ts_y))
 
     if ts_scale[0] > (1 + eps) or ts_scale[1] > (1 + eps):
@@ -610,16 +556,16 @@ def DrawMapFromCoords(
                 closest = np.argmin([abs(target_vis_spacing - s) for s, _ in common_spacings])
                 closest_common_spacing = common_spacings[closest][0]
                 vis_spacing = closest_common_spacing
-                vis_level, _ = wsi_object.get_best_level_for_spacing(vis_spacing)
+                vis_level = wsi_object.get_best_level_for_spacing(vis_spacing)
                 vis_spacing = wsi_object.get_level_spacing(vis_level)
-                resize_factor = int(round(target_vis_spacing / vis_spacing, 0))
+                resize_factor = target_vis_spacing / vis_spacing
 
-        width, height = patch_size * resize_factor
+        width, height = int(round(patch_size * resize_factor, 0))
         tile = wsi_object.wsi.get_patch(
             x, y, width, height, spacing=vis_spacing, center=False
         )
         tile = Image.fromarray(tile).convert("RGB")
-        if resize_factor != 1:
+        if width != patch_size or height != patch_size:
             tile = tile.resize((patch_size, patch_size))
 
         if mask_object is not None:
