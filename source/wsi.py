@@ -1,6 +1,5 @@
 import os
 import cv2
-import time
 import math
 import numpy as np
 import pandas as pd
@@ -11,7 +10,7 @@ from PIL import Image
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Union
 
-from source.utils import save_hdf5, save_npy, save_patch, compute_time, find_common_spacings
+from source.utils import save_hdf5, save_npy, save_patch, find_common_spacings
 from source.util_classes import (
     Contour_Checking_fn,
     HasEnoughTissue,
@@ -87,31 +86,18 @@ class WholeSlideImage(object):
         return self.spacings[level]
 
     def get_best_level_for_spacing(
-        self, target_spacing: float, ignore_warning: bool = False
+        self, target_spacing: float
     ):
         spacing = self.get_level_spacing(0)
         target_downsample = target_spacing / spacing
-        level, tol, above_tol = self.get_best_level_for_downsample_custom(
-            target_downsample, return_tol_status=True
-        )
-        level_spacing = self.get_level_spacing(level)
-        resize_factor = int(round(target_spacing / level_spacing, 0))
-        if above_tol and not ignore_warning:
-            print(
-                f"WARNING! The natural spacing ({resize_factor*self.spacings[level]:.4f}) closest to the target spacing ({target_spacing:.4f}) was more than {tol*100:.1f}% appart ({self.name})."
-            )
-        return level, resize_factor
+        level = self.get_best_level_for_downsample_custom(target_downsample)
+        return level
 
     def get_best_level_for_downsample_custom(
-        self, downsample, tol: float = 0.1, return_tol_status: bool = False
+        self, downsample
     ):
         level = int(np.argmin([abs(x - downsample) for x, _ in self.level_downsamples]))
-        delta = abs(self.level_downsamples[level][0] / downsample - 1)
-        above_tol = delta > tol
-        if return_tol_status:
-            return level, tol, above_tol
-        else:
-            return level
+        return level
 
     def load_segmentation(
         self,
@@ -137,9 +123,7 @@ class WholeSlideImage(object):
             closest = np.argmin([abs(seg_spacing - s) for s, _ in common_spacings])
             closest_common_spacing = common_spacings[closest][0]
             seg_spacing = closest_common_spacing
-            seg_level, _ = self.get_best_level_for_spacing(
-                seg_spacing, ignore_warning=True
-            )
+            seg_level = self.get_best_level_for_spacing(seg_spacing)
 
         m = self.mask.get_slide(spacing=seg_spacing)
         m = m[..., 0]
@@ -245,9 +229,7 @@ class WholeSlideImage(object):
 
             return foreground_contours, hole_contours
 
-        spacing_level, resize_factor = self.get_best_level_for_spacing(
-            spacing, ignore_warning=True
-        )
+        spacing_level = self.get_best_level_for_spacing(spacing)
         current_scale = self.level_downsamples[spacing_level]
         target_scale = self.level_downsamples[seg_level]
         scale = tuple(a / b for a, b in zip(target_scale, current_scale))
@@ -258,7 +240,7 @@ class WholeSlideImage(object):
         _filter_params["a_t"] = filter_params["a_t"] * scaled_ref_patch_area
         _filter_params["a_h"] = filter_params["a_h"] * scaled_ref_patch_area
 
-        # Find and filter contours
+        # find and filter contours
         contours, hierarchy = cv2.findContours(
             self.binary_mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE
         )  # Find contours
@@ -442,7 +424,6 @@ class WholeSlideImage(object):
         patch_format: str = "png",
         top_left: Optional[List[int]] = None,
         bot_right: Optional[List[int]] = None,
-        spacing_tol: float = 0.1,
         num_workers: int = 1,
         save_hdf5_flag: bool = False,
         save_npy_flag: bool = False,
@@ -464,7 +445,6 @@ class WholeSlideImage(object):
                     patch_save_dir = Path(save_dir, f"{patch_format}", f"{self.name}")
                 patch_save_dir.mkdir(parents=True, exist_ok=True)
 
-        start_time = time.time()
         n_contours = len(self.contours_tissue)
         if verbose:
             print(f"Total number of contours to process: {n_contours}")
@@ -488,7 +468,6 @@ class WholeSlideImage(object):
                 use_padding,
                 top_left,
                 bot_right,
-                spacing_tol,
                 num_workers=num_workers,
                 verbose=verbose,
             )
@@ -531,7 +510,7 @@ class WholeSlideImage(object):
                     if save_npy_flag:
                         save_npy(save_path_npy, asset_dict, attr_dict, mode="a")
                 if save_patches_to_disk:
-                    npatch, mins, secs = save_patch(
+                    save_patch(
                         self.wsi,
                         patch_save_dir,
                         asset_dict,
@@ -540,8 +519,6 @@ class WholeSlideImage(object):
                         save_patches_in_common_dir=save_patches_in_common_dir,
                     )
 
-        end_time = time.time()
-        patch_saving_mins, patch_saving_secs = compute_time(start_time, end_time)
         if len(dfs) > 0:
             df = pd.concat(dfs, ignore_index=True)
         else:
@@ -563,22 +540,15 @@ class WholeSlideImage(object):
         use_padding: bool = True,
         top_left: Optional[List[int]] = None,
         bot_right: Optional[List[int]] = None,
-        spacing_tol: float = 0.1,
         num_workers: int = 1,
         verbose: bool = False,
     ):
 
-        patch_level, resize_factor = self.get_best_level_for_spacing(
-            spacing, ignore_warning=True
-        )
-
+        patch_level = self.get_best_level_for_spacing(spacing)
         patch_spacing = self.get_level_spacing(patch_level)
-        resize_factor = int(round(spacing / patch_spacing, 0))
+        resize_factor = spacing / patch_spacing
 
-        if abs(resize_factor*patch_spacing/spacing - 1) > spacing_tol:
-            raise ValueError(f"ERROR: The natural spacing ({resize_factor*patch_spacing:.4f}) closest to the target spacing ({spacing:.4f}) was more than {spacing_tol*100}% apart.")
-
-        patch_size_resized = patch_size * resize_factor
+        patch_size_resized = int(round(patch_size * resize_factor, 0))
         step_size = int(patch_size_resized * (1.0 - overlap))
 
         if cont is not None:
