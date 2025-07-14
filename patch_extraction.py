@@ -25,11 +25,10 @@ def get_args_parser(add_help: bool = True):
         nargs=argparse.REMAINDER,
     )
     parser.add_argument(
-        "--output-dir",
-        "--output_dir",
-        default=None,
+        "--run-id",
         type=str,
-        help="Output directory to save logs and checkpoints",
+        default="",
+        help="Name of output subdirectory",
     )
     return parser
 
@@ -50,15 +49,13 @@ def main(args):
 
     cfg = setup(args, "extraction")
 
-    run_id = datetime.datetime.now().strftime("%Y-%m-%d_%H_%M")
     # set up wandb
     if cfg.wandb.enable:
         key = os.environ.get("WANDB_API_KEY")
         wandb_run = initialize_wandb(cfg, key=key)
         wandb_run.define_metric("processed", summary="max")
-        run_id = wandb_run.id
 
-    output_dir = Path(cfg.output_dir, cfg.experiment_name, run_id)
+    output_dir = Path(cfg.output_dir, args.run_id)
     output_dir.mkdir(parents=True, exist_ok=True)
     cfg.output_dir = str(output_dir)
 
@@ -106,6 +103,11 @@ def main(args):
             )
         else:
             process_list_df = pd.read_csv(process_list_fp)
+
+            # Add new slides from slide_df that are not in the process_list
+            new_slides = slide_df[~slide_df["slide_id"].isin(process_list_df["slide_id"])]
+            process_list_df = pd.concat([process_list_df, new_slides], ignore_index=True)
+
             df = initialize_df(
                 process_list_df, cfg.seg_params, cfg.filter_params, cfg.vis_params, cfg.patch_params
             )
