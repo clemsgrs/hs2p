@@ -9,7 +9,6 @@ import pandas as pd
 import multiprocessing as mp
 
 from pathlib import Path
-from omegaconf import DictConfig
 
 from source.utils import setup, write_config
 from utils import initialize_wandb, sample_patches, sample_patches_mp
@@ -64,6 +63,7 @@ def main(args):
     output_dir = Path(cfg.output_dir, args.run_id)
     output_dir.mkdir(exist_ok=True, parents=True)
     cfg.output_dir = str(output_dir)
+    write_config(cfg, cfg.output_dir)
 
     seg_mask_save_dir = Path(output_dir, "segmentation_mask")
     overlay_mask_save_dir = Path(output_dir, "annotation_mask")
