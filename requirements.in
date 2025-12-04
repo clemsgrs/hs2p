@@ -1,0 +1,10 @@
+omegaconf>=2.3.0
+h5py
+numpy<2
+pandas
+pillow
+tqdm
+wandb
+opencv-python
+wholeslidedata<0.0.16
+matplotlib

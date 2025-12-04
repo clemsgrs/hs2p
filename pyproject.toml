@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=42.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+addopts = "--cov=hs2p"
+testpaths = [
+    "tests",
+]
+
+[tool.mypy]
+mypy_path = "."
+check_untyped_defs = true
+disallow_any_generics = true
+ignore_missing_imports = true
+no_implicit_optional = true
+show_error_codes = true
+strict_equality = true
+warn_redundant_casts = true
+warn_return_any = true
+warn_unreachable = true
+warn_unused_configs = true
+no_implicit_reexport = true
+
+[tool.bumpver]
+current_version = "1.4.0"
+version_pattern = "MAJOR.MINOR.PATCH"
+commit = false       # We do version bumping in CI, not as a commit
+tag = false          # Git tag already exists — we don't auto-tag
+push = false         # Don't push anything in CI
+files = [
+    "setup.cfg",
+    "hs2p/__init__.py"
+]
+
+[tool.bumpver.file_patterns]
+"setup.cfg" = [
+    '^version = {version}$',
+]
+"hs2p/__init__.py" = [
+    '^__version__ = "{version}"$',
+]

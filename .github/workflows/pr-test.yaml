@@ -1,0 +1,93 @@
+name: Test WSI to coordinates consistency
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+jobs:
+  docker-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: write  # needed for Buildx GHA cache
+
+    # don't run secret-using job on forked PRs
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify required folders exist
+        run: |
+          set -euo pipefail
+          test -d test/input
+          test -d test/gt
+          mkdir -p test/output  # ensure host-mapped output exists
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Free disk space on runner
+        run: |
+          set -euxo pipefail
+          df -h
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}" || true
+          docker system prune -af || true
+          sudo apt-get clean
+          df -h
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          load: true
+          tags: hs2p:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Guard required secret (if needed)
+        if: ${{ github.event_name != 'pull_request' }}  # or drop the condition if PRs from same repo need it
+        run: |
+          set -euo pipefail
+          test -n "${HF_TOKEN:-}" || { echo "HF_TOKEN is required but not set"; exit 1; }
+
+      - name: Generate outputs in container
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -e HF_TOKEN="$HF_TOKEN" \
+            -v "$GITHUB_WORKSPACE/test/input:/input" \
+            -v "$GITHUB_WORKSPACE/test/output:/output" \
+            hs2p:${{ github.sha }} \
+            python hs2p/tiling.py \
+              --config-file /input/config.yaml \
+              --skip-datetime
+
+      - name: Verify output consistency (inside container)
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE/test/gt:/gt" \
+            -v "$GITHUB_WORKSPACE/test/output:/output" \
+            hs2p:${{ github.sha }} \
+            bash -lc "python - <<'PY'
+          import numpy as np
+          from numpy.testing import assert_array_equal
+
+          # coordinates must match exactly (deterministic tiling)
+          gt_coordinates = np.load('/gt/test-wsi.npy')
+          coordinates    = np.load('/output/coordinates/test-wsi.npy')
+          assert len(gt_coordinates) == len(coordinates), f'Number of coordinates mismatch: {len(coordinates)} vs {len(gt_coordinates)}'
+          assert_array_equal(coordinates, gt_coordinates), f'Coordinates mismatch: {coordinates} vs {gt_coordinates}'
+          PY"

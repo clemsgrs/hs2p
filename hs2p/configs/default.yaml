@@ -1,0 +1,72 @@
+csv: # path to csv containing slide paths
+
+output_dir: "output" # output directory
+resume: false # resume from a previous run
+resume_dirname: # directory name to resume from
+
+visualize: true # save a visualization of slide tiling in a .jpg
+
+seed: 0 # seed for reproducibility
+
+tiling:
+  read_coordinates_from: # path to a directory containing {wsi.stem}.npy files with tiles coordinates & associated metadata (leave empty to compute the coordinates)
+  backend: "asap" # backend to use for slide reading
+  params:
+    spacing: 0.5 # spacing at which to tile the slide, in microns per pixel
+    tolerance: 0.05 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)
+    tile_size: 256 # size of the tiles to extract, in pixels
+    overlap: 0.0 # percentage of overlap between two consecutive tiles (float between 0 and 1)
+    min_tissue_percentage: 0.01 # threshold used to filter out tiles that have less tissue than this value (percentage)
+    drop_holes: false # whether or not to drop tiles whose center pixel falls withing an identified holes
+    use_padding: true # whether to pad the border of the slide
+  seg_params:
+    downsample: 64 # find the closest downsample in the slide for tissue segmentation
+    sthresh: 8 # segmentation threshold (positive integer, using a higher threshold leads to less foreground and more background detection) (not used when use_otsu=True)
+    sthresh_up: 255 # upper threshold value for scaling the binary mask
+    mthresh: 7 # median filter size (positive, odd integer)
+    close: 4 # additional morphological closing to apply following initial thresholding (positive integer)
+    use_otsu: false # use otsu's method instead of simple binary thresholding
+    tissue_pixel_value: 1 # value of tissue pixel in pre-computed segmentation masks
+  filter_params:
+    ref_tile_size: 16 # reference tile size at spacing tiling.spacing
+    a_t: 4 # area filter threshold for tissue (positive integer, the minimum size of detected foreground contours to consider, relative to the reference tile size ref_tile_size, e.g. a value 10 means only detected foreground contours of size greater than 10 [ref_tile_size, ref_tile_size] tiles at spacing tiling.spacing will be kept)
+    a_h: 2 # area filter threshold for holes (positive integer, the minimum size of detected holes/cavities in foreground contours to avoid, once again relative to the reference tile size ref_tile_size)
+    max_n_holes: 8 # maximum of holes to consider per detected foreground contours (positive integer, higher values lead to more accurate patching but increase computational cost ; keeps the biggest holes)
+  visu_params:
+    downsample: 32 # downsample to use for tiling visualization
+
+sampling:
+  pixel_mapping: # map annotated categories to their corresponding pixel values
+    - 'background': 0
+    - 'tissue': 1
+    - 'tumor': 2
+  color_mapping: # [r,g,b] color code of overlayed annotation mask, leave blank if you don't want to overlay anything for a given category
+    - 'background':
+    - 'tissue': [255, 169, 154]
+    - 'tumor': [255, 47, 0]
+
+model:
+  level: "tile" # level at which to extract the features ("tile", "region" or "slide")
+  name: # foundation model name ["uni", "uni2", "virchow", "virchow2", "prov-gigapath", "h-optimus-0", "h-optimus-1", "titan", "prism"] (leave empty when using a custom model)
+  mode: "cls" # embedding mode ["cls", "full"]
+  arch: # architecture of custom model
+  pretrained_weights: # path to the pretrained weights when using a custom model
+  batch_size: 256
+  tile_size: ${tiling.params.tile_size}
+  patch_size: 256 # if level is "region", size used to unroll the region into patches
+  save_tile_embeddings: false # whether to save tile embeddings alongside the pooled slide embedding when level is "slide"
+  save_latents: false # whether to save the latent representations from the model alongside the slide embedding (only supported for 'prism')
+
+speed:
+  fp16: false # use mixed precision during model inference
+  num_workers: 8 # number of workers for tiling slides
+
+wandb:
+  enable: false
+  project: "" # wandb project name
+  username: "" # wandb username
+  exp_name: "" # wandb experiment name
+  tags: ["features", "${model.level}", "${tiling.params.tile_size}"] # wandb tags
+  dir: "/home/user/"
+  group:
+  resume_id: "${resume_dirname}"
