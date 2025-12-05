@@ -1,15 +1,10 @@
 import logging
 import os
-import torch
 import datetime
-import getpass
-from huggingface_hub import login
-import torch.distributed as dist
 
 from pathlib import Path
 from omegaconf import OmegaConf
 
-import hs2p.distributed as distributed
 from hs2p.utils import initialize_wandb, fix_random_seeds, get_sha, setup_logging
 from hs2p.configs import default_config
 
@@ -45,7 +40,7 @@ def get_cfg_from_args(args):
 
 def setup(args):
     """
-    Basic configuration setup without any distributed or GPU-specific initialization.
+    Basic configuration setup.
     This function:
       - Loads the config from file and command-line options.
       - Sets up logging.
@@ -68,8 +63,7 @@ def setup(args):
         run_id = wandb_run.id
 
     output_dir = Path(cfg.output_dir, run_id)
-    if distributed.is_main_process():
-        output_dir.mkdir(exist_ok=cfg.resume or args.skip_datetime, parents=True)
+    output_dir.mkdir(exist_ok=cfg.resume or args.skip_datetime, parents=True)
     cfg.output_dir = str(output_dir)
 
     fix_random_seeds(0)
@@ -79,30 +73,3 @@ def setup(args):
     if cfg.wandb.enable:
         wandb_run.save(cfg_path)
     return cfg
-
-
-def setup_distributed():
-    """
-    Distributed/GPU setup. This function handles:
-      - Enabling distributed mode.
-      - Distributed logging, seeding adjustments based on rank
-    """
-    distributed.enable(overwrite=True)
-
-    torch.distributed.barrier()
-
-    # update random seed using rank
-    rank = distributed.get_global_rank()
-    fix_random_seeds(rank)
-
-
-def hf_login():
-    if "HF_TOKEN" not in os.environ and distributed.is_main_process():
-        hf_token = getpass.getpass(
-            "Enter your Hugging Face API token (input will not be visible): "
-        )
-        os.environ["HF_TOKEN"] = hf_token
-    if distributed.is_enabled_and_multiple_gpus():
-        dist.barrier()
-    if distributed.is_main_process():
-        login(os.environ["HF_TOKEN"])

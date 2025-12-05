@@ -8,7 +8,7 @@ import multiprocessing as mp
 from pathlib import Path
 
 from hs2p.utils import setup, load_csv, fix_random_seeds
-from hs2p.wsi import extract_coordinates, save_coordinates, visualize_coordinates
+from hs2p.wsi import extract_coordinates, save_coordinates, visualize_coordinates, SamplingParameters
 
 
 def get_args_parser(add_help: bool = True):
@@ -44,6 +44,7 @@ def process_slide(
     cfg,
     mask_visualize_dir,
     tile_visualize_dir,
+    sampling_params: SamplingParameters,
     disable_tqdm: bool = False,
     num_workers: int = 4,
 ):
@@ -62,6 +63,7 @@ def process_slide(
             tiling_params=cfg.tiling.params,
             segment_params=cfg.tiling.seg_params,
             filter_params=cfg.tiling.filter_params,
+            sampling_params=sampling_params,
             mask_visu_path=tissue_mask_visu_path,
             disable_tqdm=disable_tqdm,
             num_workers=num_workers,
@@ -127,6 +129,21 @@ def main(args):
 
     skip_tiling = process_df["tiling_status"].str.contains("success").all()
 
+    pixel_mapping = {k: v for e in cfg.tiling.sampling_params.pixel_mapping for k, v in e.items()}
+    tissue_percentage = {k: v for e in cfg.tiling.sampling_params.tissue_percentage for k, v in e.items()}
+    if "tissue" not in tissue_percentage:
+        tissue_percentage["tissue"] = cfg.tiling.params.min_tissue_percentage
+    if cfg.tiling.sampling_params.color_mapping is not None:
+        color_mapping = {k: v for e in cfg.tiling.sampling_params.color_mapping for k, v in e.items()}
+    else:
+        color_mapping = None
+    
+    sampling_params = SamplingParameters(
+        pixel_mapping=pixel_mapping,
+        color_mapping=color_mapping,
+        tissue_percentage=tissue_percentage,
+    )
+
     if not skip_tiling:
     
         mask = process_df["tiling_status"] != "success"
@@ -162,6 +179,7 @@ def main(args):
                     "cfg": cfg,
                     "mask_visualize_dir": mask_visualize_dir,
                     "tile_visualize_dir": tile_visualize_dir,
+                    "sampling_params": sampling_params,
                     "disable_tqdm": True,
                     "num_workers": parallel_workers,
                 }

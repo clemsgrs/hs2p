@@ -35,15 +35,15 @@ def commit_bump(version: str) -> None:
 def push_branch_and_tag(branch: str, version: str) -> None:
     run(f"git push origin {branch}")
 
-    tag = f"v{version}"
+    tag = f"{version}"
     print(f"🏷️ Creating and pushing tag {tag}...")
     run(f"git tag {tag}")
     run(f"git push origin {tag}")
 
 
 def push_tag_and_branch(version: str) -> str:
-    branch = f"release-v{version}"
-    tag = f"v{version}"
+    branch = f"release-{version}"
+    tag = f"{version}"
 
     print(f"🌿 Creating branch {branch}...")
     run(f"git checkout -b {branch}")
@@ -65,8 +65,8 @@ def push_tag_and_branch(version: str) -> str:
 def create_pull_request(branch: str, version: str) -> None:
     print(f"🔁 Creating pull request for {branch} → main...")
     run(
-        f'gh pr create --title "Release v{version}" '
-        f'--body "This PR bumps the version to v{version} and tags the release." '
+        f'gh pr create --title "Release {version}" '
+        f'--body "This PR bumps the version to {version} and tags the release." '
         f"--base main --head {branch}"
     )
 
@@ -96,7 +96,7 @@ if __name__ == "__main__":
     run("git pull origin main")  # make sure it's up-to-date
 
     version = bump_version(args.level)
-    branch = f"release-v{version}"
+    branch = f"release-{version}"
 
     create_branch(branch)
     commit_bump(version)
@@ -106,6 +106,6 @@ if __name__ == "__main__":
         create_pull_request(branch, version)
 
     if not args.no_draft:
-        open_release_draft(f"v{version}")
+        open_release_draft(f"{version}")
 
     print(f"\n✅ Release flow completed for version {version}!")

@@ -23,21 +23,18 @@ class SegmentationParameters(NamedTuple):
     """
     Parameters for filtering contours.
     """
-
     downsample: int  # dowsample factor for loading segmentation mask
     sthresh: int  # segmentation threshold (positive integer, using a higher threshold leads to less foreground and more background detection) (not used when use_otsu=True)
     sthresh_up: int  # upper threshold value for scaling the binary mask
     mthresh: int  # median filter size (positive, odd integer)
     close: int  # additional morphological closing to apply following initial thresholding (positive integer)
     use_otsu: bool  # whether to use Otsu's method for thresholding
-    tissue_pixel_value: int  # when loading mask from disk, what pixel value corresponds to tissue
 
 
 class FilterParameters(NamedTuple):
     """
     Parameters for filtering contours.
     """
-
     ref_tile_size: int  # reference tile size for filtering
     a_t: int  # contour area threshold for filtering
     a_h: int  # hole area threshold for filtering
@@ -48,14 +45,22 @@ class TilingParameters(NamedTuple):
     """
     Parameters for tiling.
     """
-
     spacing: float  # spacing at which to tile the slide, in microns per pixel
     tolerance: float  # for matching the spacing, deciding how much spacing can deviate from those specified in the slide metadata.
     tile_size: int  # size of the tiles to extract, in pixels
     overlap: float  # overlap between tiles
-    tissue_percentage: dict[str, float]  # minimum tissue percentage required for a tile for a given annotation
+    min_tissue_percentage: float  # minimum percentage of tissue required to keep a tile when no sampling is performed
     drop_holes: bool  # whether to drop tiles that fall within holes
     use_padding: bool  # whether to use padding for tiles at the edges
+
+
+class SamplingParameters(NamedTuple):
+    """
+    Parameters for sampling.
+    """
+    pixel_mapping: dict[str, int]  # mapping from annotation names to pixel values in the annotation mask
+    color_mapping: dict[str, list[int] | None]  # mapping from annotation names to RGB color codes for overlaying
+    tissue_percentage: dict[str, float | None]  # minimum percentage of tile coverage for each category required to sample tiles
 
 
 class WholeSlideImage(object):
@@ -121,12 +126,11 @@ class WholeSlideImage(object):
         if mask_path is not None:
             self.mask = wsd.WholeSlideImage(mask_path, backend=backend)
             self.seg_level = self.load_segmentation(segment_params, sampling_params=sampling_params)
-            self.annotation_pct = {
-                annotation: sampling_params.tissue_percentage.get(annotation, 0.0)
-                for annotation in sampling_params.pixel_mapping.keys()
-            }
         elif segment:
             self.seg_level = self.segment_tissue(segment_params)
+
+        if sampling_params is not None:
+            self.annotation_pct = sampling_params.tissue_percentage
 
     def get_slide(self, spacing: float):
         return self.wsi.get_slide(spacing=spacing)
@@ -634,9 +638,15 @@ class WholeSlideImage(object):
 
         # find and filter contours
         mask = self.annotation_mask["tissue"] if annotation is None else self.annotation_mask[annotation]
+        if mask.ndim == 3:  # If the mask has 3 channels
+            mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+
         contours, hierarchy = cv2.findContours(
             mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE
         )
+        if hierarchy is None or len(contours) == 0:
+            return [], []
+
         hierarchy = np.squeeze(hierarchy, axis=(0,))[:, 2:]
 
         foreground_contours, hole_contours = self.filter_contours(
