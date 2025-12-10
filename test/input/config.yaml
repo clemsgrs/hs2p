@@ -1,4 +1,4 @@
-csv: "/data/temporary/clement/code/hs2p/test/input/tmp.csv"
+csv: "/input/test.csv"
 
 output_dir: "/output"
 visualize: true
