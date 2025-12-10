@@ -16,9 +16,6 @@ jobs:
     # don't run secret-using job on forked PRs
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
 
-    env:
-      HF_TOKEN: ${{ secrets.HF_TOKEN }}
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -56,17 +53,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Guard required secret (if needed)
-        if: ${{ github.event_name != 'pull_request' }}  # or drop the condition if PRs from same repo need it
-        run: |
-          set -euo pipefail
-          test -n "${HF_TOKEN:-}" || { echo "HF_TOKEN is required but not set"; exit 1; }
-
       - name: Generate outputs in container
         run: |
           set -euo pipefail
           docker run --rm \
-            -e HF_TOKEN="$HF_TOKEN" \
             -v "$GITHUB_WORKSPACE/test/input:/input" \
             -v "$GITHUB_WORKSPACE/test/output:/output" \
             hs2p:${{ github.sha }} \
