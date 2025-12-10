@@ -295,6 +295,78 @@ def overlay_mask_on_tile(
     return overlayed_image
 
 
+def overlay_mask_on_slide(
+    wsi_path: Path,
+    annotation_mask_path: Path,
+    downsample: int,
+    palette: dict[str, int],
+    pixel_mapping: dict[str, int],
+    color_mapping: dict[str, list[int]] | None = None,
+    alpha: float = 0.5,
+):
+    """
+    Show a mask overlayed on a slide
+    """
+
+    wsi_object = WholeSlideImage(path=wsi_path, backend="asap")
+    mask_object = WholeSlideImage(path=annotation_mask_path, backend="asap")
+
+    vis_level = wsi_object.get_best_level_for_downsample_custom(downsample)
+    vis_spacing = wsi_object.spacings[vis_level]
+    wsi_arr = wsi_object.get_slide(spacing=vis_spacing)
+    _, width, _ = wsi_arr.shape
+
+    wsi = Image.fromarray(wsi_arr).convert("RGBA")
+    mask_width_at_level_0, _ = mask_object.level_dimensions[0]
+    mask_downsample = mask_width_at_level_0 / width
+    mask_level = int(
+        np.argmin([abs(x - mask_downsample) for x, _ in mask_object.level_downsamples])
+    )
+    mask_spacing = mask_object.spacings[mask_level]
+    mask_width, _ = mask_object.level_dimensions[mask_level]
+
+    scale = mask_width / width
+    while scale < 1 and mask_level > 0:
+        mask_level -= 1
+        mask_spacing = mask_object.spacings[mask_level]
+        mask_width, _ = mask_object.level_dimensions[mask_level]
+        scale = mask_width / width
+    
+    mask_arr = mask_object.get_slide(spacing=mask_spacing)
+    mask_arr = mask_arr[:, :, 0]
+    mask_height, mask_width = mask_arr.shape
+
+    # resize the mask to the size of the slide at seg_spacing
+    mask_arr = cv2.resize(
+        mask_arr.astype(np.uint8),
+        (int(round(mask_width / scale, 0)), int(round(mask_height / scale, 0))),
+        interpolation=cv2.INTER_NEAREST,
+    )
+    mask = Image.fromarray(mask_arr)
+
+    # create alpha mask
+    alpha_int = int(round(255 * alpha))
+    if color_mapping is not None:
+        alpha_content = np.zeros_like(mask_arr)
+        for k, v in pixel_mapping.items():
+            if color_mapping[k] is not None:
+                alpha_content += mask_arr == v
+        alpha_content = np.less(alpha_content, 1).astype("uint8") * alpha_int + (
+            255 - alpha_int
+        )
+    else:
+        alpha_content = np.less_equal(mask_arr, 0).astype("uint8") * alpha_int + (
+            255 - alpha_int
+        )
+    alpha_content = Image.fromarray(alpha_content)
+
+    mask.putpalette(data=palette.tolist())
+    mask_rgb = mask.convert(mode="RGB")
+
+    overlayed_image = Image.composite(image1=wsi, image2=mask_rgb, mask=alpha_content)
+    return overlayed_image
+
+
 def draw_grid(img, coord, shape, thickness=2, color=(0, 0, 0, 255)):
     cv2.rectangle(
         img,

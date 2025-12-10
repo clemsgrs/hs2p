@@ -9,7 +9,7 @@ import multiprocessing as mp
 from pathlib import Path
 
 from hs2p.utils import setup, load_csv, fix_random_seeds
-from hs2p.wsi import extract_coordinates, filter_coordinates, sample_coordinates, save_coordinates, visualize_coordinates, SamplingParameters
+from hs2p.wsi import extract_coordinates, filter_coordinates, sample_coordinates, save_coordinates, visualize_coordinates, overlay_mask_on_slide, SamplingParameters
 
 
 def get_args_parser(add_help: bool = True):
@@ -54,10 +54,39 @@ def process_slide(
     """
     wsi_name = wsi_path.stem.replace(" ", "_")
     try:
+
+        if cfg.visualize and sampling_visualize_dir is not None:
+            preview_palette = np.zeros(shape=768, dtype=int)
+            if sampling_params.color_mapping is None:
+                ncat = len(sampling_params.pixel_mapping)
+                if ncat <= 10:
+                    color_palette = sns.color_palette("tab10")[:ncat]
+                elif ncat <= 20:
+                    color_palette = sns.color_palette("tab20")[:ncat]
+                else:
+                    raise ValueError(
+                        f"Implementation supports up to 20 categories (provided pixel_mapping has {ncat})"
+                    )
+                color_mapping = {
+                    k: tuple(255 * x for x in color_palette[i])
+                    for i, k in enumerate(sampling_params.pixel_mapping.keys())
+                }
+            else:
+                color_mapping = sampling_params.color_mapping
+            p = [0] * 3 * len(color_mapping)
+            for k, v in sampling_params.pixel_mapping.items():
+                if color_mapping[k] is not None:
+                    p[v * 3 : v * 3 + 3] = color_mapping[k]
+            n = len(p)
+            preview_palette[0:n] = np.array(p).astype(int)
+        else:
+            color_mapping = None
+            preview_palette = None
+
         if not cfg.tiling.sampling_params.independant_sampling:
             tissue_mask_visu_path = None
             if cfg.visualize and mask_visualize_dir is not None:
-                tissue_mask_visu_path = Path(mask_visualize_dir, f"{wsi_name}.jpg")
+                tissue_mask_visu_path = Path(mask_visualize_dir, f"{wsi_name}-tissue.png")
             coordinates, tile_level, resize_factor, tile_size_lv0 = extract_coordinates(
                 wsi_path=wsi_path,
                 mask_path=mask_path,
@@ -97,29 +126,6 @@ def process_slide(
                     save_path=coordinates_path,
                 )
                 if cfg.visualize and sampling_visualize_dir is not None:
-                    preview_palette = np.zeros(shape=768, dtype=int)
-                    if sampling_params.color_mapping is None:
-                        ncat = len(sampling_params.pixel_mapping)
-                        if ncat <= 10:
-                            color_palette = sns.color_palette("tab10")[:ncat]
-                        elif ncat <= 20:
-                            color_palette = sns.color_palette("tab20")[:ncat]
-                        else:
-                            raise ValueError(
-                                f"Implementation supports up to 20 categories (provided pixel_mapping has {ncat})"
-                            )
-                        color_mapping = {
-                            k: tuple(255 * x for x in color_palette[i])
-                            for i, k in enumerate(sampling_params.pixel_mapping.keys())
-                        }
-                    else:
-                        color_mapping = sampling_params.color_mapping
-                    p = [0] * 3 * len(color_mapping)
-                    for k, v in sampling_params.pixel_mapping.items():
-                        if color_mapping[k] is not None:
-                            p[v * 3 : v * 3 + 3] = color_mapping[k]
-                    n = len(p)
-                    preview_palette[0:n] = np.array(p).astype(int)
                     visualize_coordinates(
                         wsi_path=wsi_path,
                         coordinates=coordinates,
@@ -168,29 +174,6 @@ def process_slide(
                     save_path=coordinates_path,
                 )
                 if cfg.visualize and sampling_visualize_dir is not None:
-                    preview_palette = np.zeros(shape=768, dtype=int)
-                    if sampling_params.color_mapping is None:
-                        ncat = len(sampling_params.pixel_mapping)
-                        if ncat <= 10:
-                            color_palette = sns.color_palette("tab10")[:ncat]
-                        elif ncat <= 20:
-                            color_palette = sns.color_palette("tab20")[:ncat]
-                        else:
-                            raise ValueError(
-                                f"Implementation supports up to 20 categories (provided pixel_mapping has {ncat})"
-                            )
-                        color_mapping = {
-                            k: tuple(255 * x for x in color_palette[i])
-                            for i, k in enumerate(sampling_params.pixel_mapping.keys())
-                        }
-                    else:
-                        color_mapping = sampling_params.color_mapping
-                    p = [0] * 3 * len(color_mapping)
-                    for k, v in sampling_params.pixel_mapping.items():
-                        if color_mapping[k] is not None:
-                            p[v * 3 : v * 3 + 3] = color_mapping[k]
-                    n = len(p)
-                    preview_palette[0:n] = np.array(p).astype(int)
                     visualize_coordinates(
                         wsi_path=wsi_path,
                         coordinates=coordinates,
@@ -202,6 +185,17 @@ def process_slide(
                         annotation=annotation,
                         palette=preview_palette,
                     )
+        if cfg.visualize and mask_visualize_dir is not None:
+            mask_visu_path = Path(mask_visualize_dir, f"{wsi_name}.png")
+            overlay_mask = overlay_mask_on_slide(
+                wsi_path=wsi_path,
+                annotation_mask_path=mask_path,
+                downsample=cfg.tiling.visu_params.downsample,
+                palette=preview_palette,
+                pixel_mapping=sampling_params.pixel_mapping,
+                color_mapping=color_mapping,
+            )
+            overlay_mask.save(mask_visu_path)
         return str(wsi_path), {"status": "success"}
 
     except Exception as e:
