@@ -32,7 +32,7 @@ Alternatively, you can install `hs2p` via pip:
 pip install hs2p
 ```
 
-## Patch Extraction: Step-by-step guide
+## Slide tiling
 
 <img src="illustrations/extraction_illu.png" width="1000px" align="center" />
 
@@ -55,7 +55,7 @@ pip install hs2p
     python3 -m hs2p.tiling --config-file </path/to/config.yaml>
     ```
 
-## Patch Sampling: Step-by-step guide
+## Tile sampling
 
 <img src="illustrations/sampling_illu.png" width="1000px" align="center" />
 
@@ -77,3 +77,33 @@ pip install hs2p
     ```shell
     python3 -m hs2p.sampling --config-file </path/to/config.yaml>
     ```
+
+## Output Structure
+
+Both `tiling.py` and `sampling.py` produce a similar output structure in the specified output directory.
+
+### Coordinates
+
+The `coordinates/` folder contains a `.npy` file for each successfully processed slide.  
+This file stores a numpy array of shape `(num_tiles, 7)` containing the following information for each tile:
+
+1. **`x`**: x-coordinate of the tile at level 0
+2. **`y`**: y-coordinate of the tile at level 0
+3. **`tile_level`**: pyramid level at which the tile was extracted
+4. **`tile_size_resized`**: size of the tile at the extraction level, which may differ from the requested tile size if the target spacing was not available
+5. **`resize_factor`**: ratio between `tile_size_resized` and the requested tile size, useful for resizing when loading the tile
+6. **`tile_size_lv0`**: tile size scaled to the slide's level 0
+7. **`target_spacing`**: spacing at which the user requested the tile (in microns per pixel)
+
+### Visualization (Optional)
+
+If `visualize` is set to `true`, a `visualization/` folder is created containing low-resolution images to verify the results:
+
+- **`mask/`**: visualizations of the provided tissue (or annotation) mask
+- **`tiling/`** (for `tiling.py`) or **`sampling/`** (for `sampling.py`): visualizations of the extracted or sampled tiles overlaid on the slide. For `sampling.py`, this includes subfolders for each category defined in the sampling parameters (e.g., tumor, stroma, etc.)
+
+These visualizations are useful for double-checking that the tiling or sampling process ran as expected.
+
+### Process summary
+
+- **`process_list.csv`**: a summary file listing each processed slide, indicating whether processing was successful or failed. If a failure occurred, the traceback is provided to help diagnose the issue.
