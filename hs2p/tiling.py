@@ -20,6 +20,9 @@ def get_args_parser(add_help: bool = True):
         "--skip-datetime", action="store_true", help="skip run id datetime prefix"
     )
     parser.add_argument(
+        "--skip-logging", action="store_true", help="skip logging configuration"
+    )
+    parser.add_argument(
         "--output-dir",
         type=str,
         help="output directory to save logs and checkpoints",
