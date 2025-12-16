@@ -109,7 +109,8 @@ def initialize_wandb(
 
 
 def load_csv(cfg):
-    df = pd.read_csv(cfg.csv)
+    csv_path = Path(cfg.csv).resolve()
+    df = pd.read_csv(csv_path)
     if "wsi_path" in df.columns:
         wsi_paths = [Path(x) for x in df.wsi_path.values.tolist()]
     elif "slide_path" in df.columns:
