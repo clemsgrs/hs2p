@@ -16,17 +16,29 @@ from .wsi import (
 
 
 def sort_coordinates_with_tissue(coordinates, tissue_percentages):
-    # mock region filenames
-    mocked_filenames = [f"{x}_{y}.jpg" for x, y in coordinates]
-    # combine mocked filenames with coordinates and tissue percentages
-    combined = list(zip(mocked_filenames, coordinates, tissue_percentages))
+    """
+    Deduplicate coordinates, then sort deterministically by mocked filename.
+    """
+    seen = set()
+    dedup_coordinates = []
+    dedup_tissue_percentages = []
+    # deduplicate
+    for (x, y), tissue in zip(coordinates, tissue_percentages):
+        key = (x, y)
+        if key in seen:
+            continue
+        seen.add(key)
+        dedup_coordinates.append((x, y))
+        dedup_tissue_percentages.append(tissue)
+    # mock filenames
+    mocked_filenames = [f"{x}_{y}.jpg" for x, y in dedup_coordinates]
     # sort combined list by mocked filenames
+    combined = list(zip(mocked_filenames, dedup_coordinates, dedup_tissue_percentages))
     sorted_combined = sorted(combined, key=lambda x: x[0])
     # extract sorted coordinates and tissue percentages
     sorted_coordinates = [coord for _, coord, _ in sorted_combined]
     sorted_tissue_percentages = [tissue for _, _, tissue in sorted_combined]
     return sorted_coordinates, sorted_tissue_percentages
-
 
 def get_mask_coverage(mask: np.ndarray, val: int):
     """

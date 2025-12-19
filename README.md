@@ -78,7 +78,7 @@ pip install hs2p
     python3 -m hs2p.sampling --config-file </path/to/config.yaml>
     ```
 
-## Output Structure
+## Output structure
 
 Both `tiling.py` and `sampling.py` produce a similar output structure in the specified output directory.
 
@@ -95,7 +95,7 @@ This file stores a numpy array of shape `(num_tiles, 7)` containing the followin
 6. **`tile_size_lv0`**: tile size scaled to the slide's level 0
 7. **`target_spacing`**: spacing at which the user requested the tile (in microns per pixel)
 
-### Visualization (Optional)
+### Visualization (optional)
 
 If `visualize` is set to `true`, a `visualization/` folder is created containing low-resolution images to verify the results:
 
