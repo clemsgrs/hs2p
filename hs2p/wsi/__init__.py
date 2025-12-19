@@ -40,6 +40,7 @@ def sort_coordinates_with_tissue(coordinates, tissue_percentages):
     sorted_tissue_percentages = [tissue for _, _, tissue in sorted_combined]
     return sorted_coordinates, sorted_tissue_percentages
 
+
 def get_mask_coverage(mask: np.ndarray, val: int):
     """
     Determine the percentage of a mask that is equal to value `val`.
