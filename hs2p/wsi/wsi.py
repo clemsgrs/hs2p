@@ -135,7 +135,7 @@ class WholeSlideImage(object):
     def get_slide(self, spacing: float):
         return self.wsi.get_slide(spacing=spacing)
 
-    def get_tile(self, x: int, y: int, width: int, height: int, spacing: float):
+    def get_tile(self, x: int, y: int, width: int, height: int, spacing: float, mask: np.ndarray = None):
         """
         Extracts a tile from a whole slide image at the specified coordinates, size, and spacing.
 
@@ -145,11 +145,12 @@ class WholeSlideImage(object):
             width (int): Tile width.
             height (int): Tile height.
             spacing (float): The spacing (resolution) at which the tile should be extracted.
+            mask (np.ndarray, optional): A binary mask to apply to the tile. Defaults to None.
 
         Returns:
             numpy.ndarray: The extracted tile as a numpy array.
         """
-        return self.wsi.get_patch(
+        tile = self.wsi.get_patch(
             x,
             y,
             width,
@@ -157,6 +158,14 @@ class WholeSlideImage(object):
             spacing=spacing,
             center=False,
         )
+
+        if mask is not None:
+            # ensure mask is the same size as the tile
+            assert mask.shape[:2] == tile.shape[:2], "Mask and tile shapes do not match"
+            # apply mask
+            tile = cv2.bitwise_and(tile, tile, mask=mask)
+
+        return tile
 
     def get_downsamples(self):
         """
@@ -497,6 +506,7 @@ class WholeSlideImage(object):
             tuple:
                 - tile_coordinates (list[tuple[int, int]]): List of (x, y) coordinates for the extracted tiles.
                 - tissue_percentages (list[float]): List of tissue percentages for each tile.
+                - contour_indices (list[int]): List of contour indices for each tile.
                 - tile_level (int): Level of the wsi used for tile extraction.
                 - resize_factor (float): The factor by which the tile size was resized.
                 - tile_size_lv0 (int): The tile size at level 0 of the wsi pyramid.
@@ -514,6 +524,7 @@ class WholeSlideImage(object):
             running_x_coords,
             running_y_coords,
             tissue_percentages,
+            contour_indices,
             tile_level,
             resize_factor,
         ) = self.process_contours(
@@ -535,6 +546,7 @@ class WholeSlideImage(object):
             holes,
             tile_coordinates,
             tissue_percentages,
+            contour_indices,
             tile_level,
             resize_factor,
             tile_size_lv0,
@@ -787,11 +799,13 @@ class WholeSlideImage(object):
                 - running_x_coords (list): The x-coordinates of the extracted tiles.
                 - running_y_coords (list): The y-coordinates of the extracted tiles.
                 - running_tissue_pct (list): List of tissue percentages for each extracted tile.
+                - running_contour_indices (list): List of contour indices for each extracted tile.
                 - tile_level (int): Level of the wsi used for tile extraction.
                 - resize_factor (float): The factor by which the tile size was resized.
         """
         running_x_coords, running_y_coords = [], []
         running_tissue_pct = []
+        running_contour_indices = []
         tile_level = None
         resize_factor = None
 
@@ -821,13 +835,13 @@ class WholeSlideImage(object):
                 )
             )
 
-        for (
+        for i, (
             x_coords,
             y_coords,
             tissue_pct,
             cont_tile_level,
             cont_resize_factor,
-        ) in results:
+        ) in enumerate(results):
             if len(x_coords) > 0:
                 if tile_level is not None:
                     assert (
@@ -838,11 +852,13 @@ class WholeSlideImage(object):
                 running_x_coords.extend(x_coords)
                 running_y_coords.extend(y_coords)
                 running_tissue_pct.extend(tissue_pct)
+                running_contour_indices.extend([i] * len(x_coords))
 
         return (
             running_x_coords,
             running_y_coords,
             running_tissue_pct,
+            running_contour_indices,
             tile_level,
             resize_factor,
         )

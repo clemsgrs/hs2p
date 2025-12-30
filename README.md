@@ -85,15 +85,16 @@ Both `tiling.py` and `sampling.py` produce a similar output structure in the spe
 ### Coordinates
 
 The `coordinates/` folder contains a `.npy` file for each successfully processed slide.  
-This file stores a numpy array of shape `(num_tiles, 7)` containing the following information for each tile:
+This file stores a numpy array of shape `(num_tiles, 8)` containing the following information for each tile:
 
 1. **`x`**: x-coordinate of the tile at level 0
 2. **`y`**: y-coordinate of the tile at level 0
-3. **`tile_level`**: pyramid level at which the tile was extracted
+3. **`contour_index`**: index of the contour containing the tile (useful for masking non-tissue content)
 4. **`tile_size_resized`**: size of the tile at the extraction level, which may differ from the requested tile size if the target spacing was not available
-5. **`resize_factor`**: ratio between `tile_size_resized` and the requested tile size, useful for resizing when loading the tile
-6. **`tile_size_lv0`**: tile size scaled to the slide's level 0
-7. **`target_spacing`**: spacing at which the user requested the tile (in microns per pixel)
+5. **`tile_level`**: pyramid level at which the tile was extracted
+6. **`resize_factor`**: ratio between `tile_size_resized` and the requested tile size, useful for resizing when loading the tile
+7. **`tile_size_lv0`**: tile size scaled to the slide's level 0
+8. **`target_spacing`**: spacing at which the user requested the tile (in microns per pixel)
 
 ### Visualization (optional)
 

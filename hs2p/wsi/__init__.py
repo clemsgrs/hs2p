@@ -15,30 +15,33 @@ from .wsi import (
 )
 
 
-def sort_coordinates_with_tissue(coordinates, tissue_percentages):
+def sort_coordinates_with_tissue(coordinates, tissue_percentages, contour_indices):
     """
     Deduplicate coordinates, then sort deterministically by mocked filename.
     """
     seen = set()
     dedup_coordinates = []
     dedup_tissue_percentages = []
+    dedup_contour_indices = []
     # deduplicate
-    for (x, y), tissue in zip(coordinates, tissue_percentages):
+    for (x, y), tissue, contour_idx in zip(coordinates, tissue_percentages, contour_indices):
         key = (x, y)
         if key in seen:
             continue
         seen.add(key)
         dedup_coordinates.append((x, y))
         dedup_tissue_percentages.append(tissue)
+        dedup_contour_indices.append(contour_idx)
     # mock filenames
     mocked_filenames = [f"{x}_{y}.jpg" for x, y in dedup_coordinates]
     # sort combined list by mocked filenames
-    combined = list(zip(mocked_filenames, dedup_coordinates, dedup_tissue_percentages))
+    combined = list(zip(mocked_filenames, dedup_coordinates, dedup_tissue_percentages, dedup_contour_indices))
     sorted_combined = sorted(combined, key=lambda x: x[0])
     # extract sorted coordinates and tissue percentages
-    sorted_coordinates = [coord for _, coord, _ in sorted_combined]
-    sorted_tissue_percentages = [tissue for _, _, tissue in sorted_combined]
-    return sorted_coordinates, sorted_tissue_percentages
+    sorted_coordinates = [coord for _, coord, _, _ in sorted_combined]
+    sorted_tissue_percentages = [tissue for _, _, tissue, _ in sorted_combined]
+    sorted_contour_indices = [idx for _, _, _, idx in sorted_combined]
+    return sorted_coordinates, sorted_tissue_percentages, sorted_contour_indices
 
 
 def get_mask_coverage(mask: np.ndarray, val: int):
@@ -90,6 +93,7 @@ def extract_coordinates(
         holes,
         coordinates,
         tissue_percentages,
+        contour_indices,
         tile_level,
         resize_factor,
         tile_size_lv0,
@@ -99,13 +103,14 @@ def extract_coordinates(
         disable_tqdm=disable_tqdm,
         num_workers=num_workers,
     )
-    sorted_coordinates, _ = sort_coordinates_with_tissue(
-        coordinates, tissue_percentages
+    sorted_coordinates, _, sorted_contour_indices = sort_coordinates_with_tissue(
+        coordinates, tissue_percentages, contour_indices
     )
     if mask_visu_path is not None:
         wsi.visualize_mask(contours, holes).save(mask_visu_path)
     return (
         sorted_coordinates,
+        sorted_contour_indices,
         tile_level,
         resize_factor,
         tile_size_lv0,
@@ -148,6 +153,7 @@ def sample_coordinates(
         holes,
         coordinates,
         tissue_percentages,
+        contour_indices,
         tile_level,
         resize_factor,
         tile_size_lv0,
@@ -158,13 +164,14 @@ def sample_coordinates(
         disable_tqdm=disable_tqdm,
         num_workers=num_workers,
     )
-    sorted_coordinates, _ = sort_coordinates_with_tissue(
-        coordinates, tissue_percentages
+    sorted_coordinates, _, sorted_contour_indices = sort_coordinates_with_tissue(
+        coordinates, tissue_percentages, contour_indices
     )
     if mask_visu_path is not None:
         wsi.visualize_mask(contours, holes).save(mask_visu_path)
     return (
         sorted_coordinates,
+        sorted_contour_indices,
         tile_level,
         resize_factor,
         tile_size_lv0,
@@ -177,6 +184,7 @@ def filter_coordinates(
     mask_path: Path,
     backend: str,
     coordinates: np.ndarray,
+    contour_indices: list[int],
     tile_level: int,
     segment_params: SegmentationParameters,
     tiling_params: TilingParameters,
@@ -212,19 +220,21 @@ def filter_coordinates(
         scale = tile_spacing / mask_spacing
 
     filtered_coordinates = defaultdict(list)
+    filtered_contour_indices = defaultdict(list)
     for annotation, pct in sampling_params.tissue_percentage.items():
         if pct is None:
             continue
         if annotation not in sampling_params.pixel_mapping:
             continue
+        combined = list(zip(coordinates, contour_indices))
         with tqdm.tqdm(
-            coordinates,
+            combined,
             desc=f"Filtering coordinates for annotation '{annotation}' (min coverage {pct}%) on slide {wsi_path.stem}",
             unit=" tile",
             total=len(coordinates),
             disable=disable_tqdm,
         ) as t:
-            for coord in t:
+            for coord, contour_idx in t:
                 x, y = coord
                 # need to scale (x, y) defined w.r.t. slide level 0
                 # to mask level 0
@@ -244,12 +254,14 @@ def filter_coordinates(
                 mask_pct = get_mask_coverage(masked_tile, sampling_params.pixel_mapping[annotation])
                 if mask_pct >= pct:
                     filtered_coordinates[annotation].append(coord)
-    return filtered_coordinates     
+                    filtered_contour_indices[annotation].append(contour_idx)
+    return filtered_coordinates, filtered_contour_indices     
 
 
 def save_coordinates(
     *,
     coordinates: list[tuple[int, int]],
+    contour_indices: list[int],
     target_spacing: float,
     tile_level: int,
     tile_size: int,
@@ -264,6 +276,7 @@ def save_coordinates(
     dtype = [
         ("x", int),
         ("y", int),
+        ("contour_index", int),
         ("tile_size_resized", int),
         ("tile_level", int),
         ("resize_factor", float),
@@ -275,6 +288,7 @@ def save_coordinates(
         data[i] = (
             x[i],
             y[i],
+            contour_indices[i],
             tile_size_resized,
             tile_level,
             resize_factor,

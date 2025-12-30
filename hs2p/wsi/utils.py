@@ -11,6 +11,11 @@ class HasEnoughTissue(object):
         self.scale = scale
         self.pct = pct
 
+        self.downsampled_tile_size = int(round(self.tile_size * 1 / self.scale[0], 0))
+        assert (
+            self.downsampled_tile_size > 0
+        ), "downsampled tile_size is equal to zero, aborting; please consider using a smaller seg_params.downsample parameter"
+
         # Precompute the combined tissue mask
         self.precomputed_mask = self._precompute_tissue_mask()
 
@@ -32,39 +37,14 @@ class HasEnoughTissue(object):
         # Combine with the tissue mask
         return cv2.bitwise_and(self.mask, contour_mask)
 
-    def __call__(self, pt):
+    def _extract_sub_mask(self, x_tile, y_tile):
         """
-        Check if a single tile at the given point has enough tissue.
-
-        Args:
-            pt (tuple): The (x, y) coordinates of the top-left corner of the tile.
-
-        Returns:
-            tuple: (keep_flag, tissue_pct), where:
-                - keep_flag is 1 if the tile has enough tissue, otherwise 0.
-                - tissue_pct is the percentage of tissue in the tile.
+        Extract the sub-mask for a tile at the given downsampled coordinates.
         """
-        downsampled_tile_size = int(round(self.tile_size * 1 / self.scale[0], 0))
-        assert (
-            downsampled_tile_size > 0
-        ), "downsampled tile_size is equal to zero, aborting; please consider using a smaller seg_params.downsample parameter"
-        downsampled_pt = pt * 1 / self.scale[0]
-        x_tile, y_tile = map(int, downsampled_pt)
-
-        # Extract the sub-mask for the tile
-        sub_mask = self.precomputed_mask[
-            y_tile : y_tile + downsampled_tile_size,
-            x_tile : x_tile + downsampled_tile_size,
+        return self.precomputed_mask[
+            y_tile : y_tile + self.downsampled_tile_size,
+            x_tile : x_tile + self.downsampled_tile_size,
         ]
-
-        tile_area = downsampled_tile_size**2
-        tissue_area = np.sum(sub_mask)
-        tissue_pct = round(tissue_area / tile_area, 3)
-
-        if tissue_pct >= self.pct:
-            return 1, tissue_pct
-        else:
-            return 0, tissue_pct
 
     def check_coordinates(self, coords):
         """
@@ -78,12 +58,7 @@ class HasEnoughTissue(object):
                 - keep_flags is a list of 1s and 0s indicating whether each tile has enough tissue.
                 - tissue_pcts is a list of tissue percentages for each tile.
         """
-        downsampled_tile_size = int(round(self.tile_size * 1 / self.scale[0], 0))
-        assert (
-            downsampled_tile_size > 0
-        ), "downsampled tile_size is equal to zero, aborting; please consider using a smaller seg_params.downsample parameter"
-
-        # Downsample coordinates
+        # downsample coordinates
         downsampled_coords = coords * 1 / self.scale[0]
         downsampled_coords = downsampled_coords.astype(int)
 
@@ -91,13 +66,10 @@ class HasEnoughTissue(object):
         tissue_pcts = []
 
         for x_tile, y_tile in downsampled_coords:
-            # Extract the sub-mask for the tile
-            sub_mask = self.precomputed_mask[
-                y_tile : y_tile + downsampled_tile_size,
-                x_tile : x_tile + downsampled_tile_size,
-            ]
+            # extract the sub-mask for the tile
+            sub_mask = self._extract_sub_mask(x_tile, y_tile)
 
-            tile_area = downsampled_tile_size**2
+            tile_area = self.downsampled_tile_size**2
             tissue_area = np.sum(sub_mask)
             tissue_pct = round(tissue_area / tile_area, 3)
 
@@ -109,3 +81,31 @@ class HasEnoughTissue(object):
                 tissue_pcts.append(tissue_pct)
 
         return keep_flags, tissue_pcts
+
+    def get_tile_mask(self, x, y):
+        """
+        Get the binary mask for a single tile at the given coordinates.
+
+        Args:
+            x (int): The x-coordinate of the top-left corner of the tile.
+            y (int): The y-coordinate of the top-left corner of the tile.
+
+        Returns:
+            np.ndarray: The binary mask for the tile (0 or 1).
+        """
+        # downsample coordinates
+        x_tile = int(x / self.scale[0])
+        y_tile = int(y / self.scale[0])
+
+        # extract the sub-mask for the tile
+        sub_mask = self._extract_sub_mask(x_tile, y_tile)
+        
+        # handle edge cases where sub_mask is smaller than expected
+        if sub_mask.shape[0] != self.downsampled_tile_size or sub_mask.shape[1] != self.downsampled_tile_size:
+            padded_mask = np.zeros((self.downsampled_tile_size, self.downsampled_tile_size), dtype=sub_mask.dtype)
+            padded_mask[:sub_mask.shape[0], :sub_mask.shape[1]] = sub_mask
+            sub_mask = padded_mask
+        
+        # upsample the mask to the original tile size
+        mask = cv2.resize(sub_mask, (self.tile_size, self.tile_size), interpolation=cv2.INTER_NEAREST)
+        return mask
