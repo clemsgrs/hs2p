@@ -78,6 +78,19 @@ jobs:
           # coordinates must match exactly (deterministic tiling)
           gt_coordinates = np.load('/gt/test-wsi.npy')
           coordinates    = np.load('/output/coordinates/test-wsi.npy')
-          assert len(gt_coordinates) == len(coordinates), f'Number of coordinates mismatch: {len(coordinates)} vs {len(gt_coordinates)}'
-          assert_array_equal(coordinates, gt_coordinates), f'Coordinates mismatch: {coordinates} vs {gt_coordinates}'
+          assert len(gt_coordinates) == len(coordinates), f'Number of coordinates mismatch: {len(coordinates)} vs {len(gt_coordinates)} ❌'
+          x_gt, y_gt = gt_coordinates['x'], gt_coordinates['y']
+          x, y       = coordinates['x'], coordinates['y']
+          assert_array_equal(x, x_gt), 'x coordinates mismatch ❌'
+          assert_array_equal(y, y_gt), 'y coordinates mismatch ❌'
+          tile_level_gt = gt_coordinates['tile_level']
+          tile_level    = coordinates['tile_level']
+          assert_array_equal(tile_level, tile_level_gt), 'tile_level mismatch ❌'
+          tile_size_gt = gt_coordinates['tile_size_resized']
+          tile_size    = coordinates['tile_size_resized']
+          assert_array_equal(tile_size, tile_size_gt), 'tile_size_resized mismatch ❌'
+          resize_factor_gt = gt_coordinates['resize_factor']
+          resize_factor    = coordinates['resize_factor']
+          assert_array_equal(resize_factor, resize_factor_gt), 'resize_factor mismatch ❌'
+          print("All coordinate checks passed ✅")
           PY"

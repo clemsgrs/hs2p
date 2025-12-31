@@ -103,7 +103,7 @@ def process_slide(
 
 
 def main(args):
-    
+
     cfg = setup(args)
     output_dir = Path(cfg.output_dir)
 
