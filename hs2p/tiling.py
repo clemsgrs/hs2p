@@ -78,7 +78,7 @@ def process_slide(
             contour_indices=contour_indices,
             target_spacing=cfg.tiling.params.spacing,
             tile_level=tile_level,
-            tile_size=cfg.tiling.params.tile_size,
+            target_tile_size=cfg.tiling.params.tile_size,
             resize_factor=resize_factor,
             tile_size_lv0=tile_size_lv0,
             save_path=coordinates_path,

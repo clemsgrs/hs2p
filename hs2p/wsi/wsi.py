@@ -45,9 +45,9 @@ class TilingParameters(NamedTuple):
     """
     Parameters for tiling.
     """
-    spacing: float  # spacing at which to tile the slide, in microns per pixel
-    tolerance: float  # for matching the spacing, deciding how much spacing can deviate from those specified in the slide metadata.
-    tile_size: int  # size of the tiles to extract, in pixels
+    target_spacing: float  # spacing at which to tile the slide, in microns per pixel
+    tolerance: float  # for matching the target_spacing, deciding how much target_spacing can deviate from those specified in the slide metadata.
+    target_tile_size: int  # size of the tiles to extract, in pixels
     overlap: float  # overlap between tiles
     min_tissue_percentage: float  # minimum percentage of tissue required to keep a tile when no sampling is performed
     drop_holes: bool  # whether to drop tiles that fall within holes
@@ -281,8 +281,7 @@ class WholeSlideImage(object):
         """
         Load and process a segmentation mask for a whole slide image.
 
-        This method ensures that the segmentation mask and the slide have at least one
-        common spacing, determines the best level for the given downsample factor, and
+        This method determines the best level for the given downsample factor, and
         processes the segmentation mask to create a binary mask.
 
         Args:
@@ -478,10 +477,10 @@ class WholeSlideImage(object):
 
         Args:
             tiling_params (NamedTuple): Parameters for tiling, including:
-                - spacing (float): Desired spacing of the tiles.
-                - tolerance (float): Tolerance for matching the spacing, deciding how much
-                    spacing can deviate from those specified in the slide metadata.
-                - tile_size (int): Desired size of the tiles at the target spacing.
+                - target_spacing (float): Desired spacing of the tiles.
+                - tolerance (float): Tolerance for matching the target_spacing, deciding how much
+                    target_spacing can deviate from those specified in the slide metadata.
+                - target_tile_size (int): Desired size of the tiles at the target spacing.
                 - overlap (float, optional): Overlap between adjacent tiles. Defaults to 0.0.
                 - "drop_holes" (bool): If True, tiles falling within a hole will be excluded. Defaults to False.
                 - "tissue_percentage" (dict[str, float]): Minimum amount pixels covered with tissue required for a tile for a given annotation.
@@ -522,9 +521,9 @@ class WholeSlideImage(object):
         ) = self.process_contours(
             contours,
             holes,
-            spacing=tiling_params.spacing,
+            target_spacing=tiling_params.spacing,
             tolerance=tiling_params.tolerance,
-            tile_size=tiling_params.tile_size,
+            target_tile_size=tiling_params.tile_size,
             overlap=tiling_params.overlap,
             drop_holes=tiling_params.drop_holes,
             use_padding=tiling_params.use_padding,
@@ -611,8 +610,8 @@ class WholeSlideImage(object):
 
         Args:
             target_spacing (float): Desired spacing at which tiles should be extracted.
-            tolerance (float): Tolerance for matching the spacing, deciding how much
-                spacing can deviate from those specified in the slide metadata.
+            tolerance (float): Tolerance for matching the target_spacing, deciding how much
+                target_spacing can deviate from those specified in the slide metadata.
             filter_params (NamedTuple): A NamedTuple containing filtering parameters:
                 - "a_t" (int): Minimum area threshold for foreground contours.
                 - "a_h" (int): Minimum area threshold for holes within contours.
@@ -760,9 +759,9 @@ class WholeSlideImage(object):
         self,
         contours,
         holes,
-        spacing: float,
+        target_spacing: float,
         tolerance: float,
-        tile_size: int,
+        target_tile_size: int,
         overlap: float,
         drop_holes: bool,
         use_padding: bool,
@@ -777,10 +776,10 @@ class WholeSlideImage(object):
         Args:
             contours (list): List of contours representing tissue blobs in the wsi.
             holes (list): List of tissue holes in each contour.
-            spacing (float): Desired spacing for tiling.
-            tolerance (float): Tolerance for matching the spacing, deciding how much
-                spacing can deviate from those specified in the slide metadata.
-            tile_size (int): Desired tile size in pixels.
+            target_spacing (float): Desired spacing for tiling.
+            tolerance (float): Tolerance for matching the target_spacing, deciding how much
+                target_spacing can deviate from those specified in the slide metadata.
+            target_tile_size (int): Desired tile size in pixels.
             overlap (float): Overlap between adjacent tiles.
             drop_holes (bool): Whether to drop tiles that fall within holes.
             use_padding (bool): Whether to pad the tiles to ensure full coverage.
@@ -806,9 +805,9 @@ class WholeSlideImage(object):
             return self.process_contour(
                 contours[i],
                 holes[i],
-                spacing,
+                target_spacing,
                 tolerance,
-                tile_size,
+                target_tile_size,
                 overlap,
                 drop_holes,
                 use_padding,
@@ -860,9 +859,9 @@ class WholeSlideImage(object):
         self,
         contour,
         contour_holes,
-        spacing: float,
+        target_spacing: float,
         tolerance: float,
-        tile_size: int,
+        target_tile_size: int,
         overlap: float,
         drop_holes: bool,
         use_padding: bool,
@@ -874,10 +873,10 @@ class WholeSlideImage(object):
         Args:
             contour (numpy.ndarray): Contour to process, defined as a set of points.
             contour_holes (list): List of holes within the contour.
-            spacing (float): Target spacing for the tiles.
-            tolerance (float): Tolerance for matching the spacing, deciding how much
-                spacing can deviate from those specified in the slide metadata.
-            tile_size (int): Size of the tiles in pixels.
+            target_spacing (float): Target spacing for the tiles.
+            tolerance (float): Tolerance for matching the target_spacing, deciding how much
+                target_spacing can deviate from those specified in the slide metadata.
+            target_tile_size (int): Size of the tiles in pixels.
             overlap (float): Overlap between tiles.
             drop_holes (bool): Whether to drop tiles that fall within holes.
             use_padding (bool): Whether to pad the image to ensure full coverage.
@@ -892,10 +891,10 @@ class WholeSlideImage(object):
                 - resize_factor (float): The factor by which the tile size was resized.
         """
         tile_level, is_within_tolerance = self.get_best_level_for_spacing(
-            spacing, tolerance
+            target_spacing, tolerance
         )
         tile_spacing = self.get_level_spacing(tile_level)
-        resize_factor = spacing / tile_spacing
+        resize_factor = target_spacing / tile_spacing
         if is_within_tolerance:
             resize_factor = 1.0
 
@@ -903,7 +902,7 @@ class WholeSlideImage(object):
             resize_factor >= 1
         ), f"Resize factor should be greater than or equal to 1. Got {resize_factor}"
 
-        tile_size_resized = int(round(tile_size * resize_factor,0))
+        tile_size_resized = int(round(target_tile_size * resize_factor,0))
         step_size = int(tile_size_resized * (1.0 - overlap))
 
         if contour is not None:
@@ -943,7 +942,7 @@ class WholeSlideImage(object):
             contour=cont,
             contour_holes=contour_holes,
             tissue_mask=mask,
-            tile_size=tile_size,
+            target_tile_size=target_tile_size,
             tile_spacing=tile_spacing,
             resize_factor=resize_factor,
             seg_spacing=seg_spacing,
@@ -988,33 +987,3 @@ class WholeSlideImage(object):
 
         else:
             return [], [], [], None, None
-
-    @staticmethod
-    def process_coord_candidate(
-        coord, contour_holes, tile_size, cont_check_fn, drop_holes
-    ):
-        """
-        Processes a candidate coordinate to determine if it should be kept based on
-        its location relative to contours and the percentage of tissue it contains.
-
-        Args:
-            coord (tuple): (x, y) coordinate to be processed.
-            contour_holes (list): A list of contours and holes to check against.
-            tile_size (int): Size of the tile to consider.
-            cont_check_fn (callable): A function to check if the coordinate is within
-                the contours or holes.
-            drop_holes (bool): A flag indicating whether to drop tiles falling in holes during the check.
-
-        Returns:
-            tuple: A tuple containing:
-                - coord (tuple or None): Input coordinate if it passes the check,
-                otherwise None.
-                - tissue_pct (float): Percentage of tissue in the tile.
-        """
-        keep_flag, tissue_pct = WholeSlideImage.isInContours(
-            cont_check_fn, coord, contour_holes, drop_holes, tile_size
-        )
-        if keep_flag:
-            return coord, tissue_pct
-        else:
-            return None, tissue_pct
