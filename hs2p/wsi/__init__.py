@@ -81,12 +81,12 @@ def extract_coordinates(
     )
     tolerance = tiling_params.tolerance
     starting_spacing = wsi.spacings[0]
-    desired_spacing = tiling_params.spacing
-    if desired_spacing < starting_spacing:
-        relative_diff = abs(starting_spacing - desired_spacing) / desired_spacing
+    target_spacing = tiling_params.spacing
+    if target_spacing < starting_spacing:
+        relative_diff = abs(starting_spacing - target_spacing) / target_spacing
         if relative_diff > tolerance:
             raise ValueError(
-                f"Desired spacing ({desired_spacing}) is smaller than the whole-slide image starting spacing ({starting_spacing}) and does not fall within tolerance ({tolerance})"
+                f"Desired spacing ({target_spacing}) is smaller than the whole-slide image starting spacing ({starting_spacing}) and does not fall within tolerance ({tolerance})"
             )
     (
         contours,
@@ -141,12 +141,12 @@ def sample_coordinates(
     )
     tolerance = tiling_params.tolerance
     starting_spacing = wsi.spacings[0]
-    desired_spacing = tiling_params.spacing
-    if desired_spacing < starting_spacing:
-        relative_diff = abs(starting_spacing - desired_spacing) / desired_spacing
+    target_spacing = tiling_params.spacing
+    if target_spacing < starting_spacing:
+        relative_diff = abs(starting_spacing - target_spacing) / target_spacing
         if relative_diff > tolerance:
             raise ValueError(
-                f"Desired spacing ({desired_spacing}) is smaller than the whole-slide image starting spacing ({starting_spacing}) and does not fall within tolerance ({tolerance})"
+                f"Desired spacing ({target_spacing}) is smaller than the whole-slide image starting spacing ({starting_spacing}) and does not fall within tolerance ({tolerance})"
             )
     (
         contours,
@@ -264,7 +264,7 @@ def save_coordinates(
     contour_indices: list[int],
     target_spacing: float,
     tile_level: int,
-    tile_size: int,
+    target_tile_size: int,
     resize_factor: float,
     tile_size_lv0: int,
     save_path: Path,
@@ -272,16 +272,17 @@ def save_coordinates(
     x = [x for x, _ in coordinates]  # defined w.r.t level 0
     y = [y for _, y in coordinates]  # defined w.r.t level 0
     ntile = len(x)
-    tile_size_resized = int(round(tile_size * resize_factor, 0))
+    tile_size_resized = int(round(target_tile_size * resize_factor, 0))
     dtype = [
         ("x", int),
         ("y", int),
         ("contour_index", int),
-        ("tile_size_resized", int),
+        ("target_tile_size", int),
+        ("target_spacing", float),
         ("tile_level", int),
         ("resize_factor", float),
+        ("tile_size_resized", int),
         ("tile_size_lv0", int),
-        ("target_spacing", float),
     ]
     data = np.zeros(ntile, dtype=dtype)
     for i in range(ntile):
@@ -289,11 +290,12 @@ def save_coordinates(
             x[i],
             y[i],
             contour_indices[i],
-            tile_size_resized,
+            target_tile_size,
+            target_spacing,
             tile_level,
             resize_factor,
+            tile_size_resized,
             tile_size_lv0,
-            target_spacing,
         )
     data_arr = np.array(data)
     np.save(save_path, data_arr)
