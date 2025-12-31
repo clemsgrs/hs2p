@@ -135,7 +135,7 @@ class WholeSlideImage(object):
     def get_slide(self, spacing: float):
         return self.wsi.get_slide(spacing=spacing)
 
-    def get_tile(self, x: int, y: int, width: int, height: int, spacing: float, mask: np.ndarray = None):
+    def get_tile(self, x: int, y: int, width: int, height: int, spacing: float):
         """
         Extracts a tile from a whole slide image at the specified coordinates, size, and spacing.
 
@@ -145,7 +145,6 @@ class WholeSlideImage(object):
             width (int): Tile width.
             height (int): Tile height.
             spacing (float): The spacing (resolution) at which the tile should be extracted.
-            mask (np.ndarray, optional): A binary mask to apply to the tile. Defaults to None.
 
         Returns:
             numpy.ndarray: The extracted tile as a numpy array.
@@ -158,13 +157,6 @@ class WholeSlideImage(object):
             spacing=spacing,
             center=False,
         )
-
-        if mask is not None:
-            # ensure mask is the same size as the tile
-            assert mask.shape[:2] == tile.shape[:2], "Mask and tile shapes do not match"
-            # apply mask
-            tile = cv2.bitwise_and(tile, tile, mask=mask)
-
         return tile
 
     def get_downsamples(self):
@@ -638,8 +630,9 @@ class WholeSlideImage(object):
         current_scale = self.level_downsamples[spacing_level]
         target_scale = self.level_downsamples[self.seg_level]
         scale = tuple(a / b for a, b in zip(target_scale, current_scale))
-        ref_tile_size = filter_params.ref_tile_size
-        scaled_ref_tile_area = int(round(ref_tile_size**2 / (scale[0] * scale[1]),0))
+        ref_tile_size = (filter_params.ref_tile_size, filter_params.ref_tile_size)
+        ref_tile_size_at_target_scale = tuple(a / b for a, b in zip(ref_tile_size, scale))
+        scaled_ref_tile_area = int(ref_tile_size_at_target_scale[0] * ref_tile_size_at_target_scale[1])
 
         adjusted_filter_params = FilterParameters(
             ref_tile_size=filter_params.ref_tile_size,
@@ -927,7 +920,7 @@ class WholeSlideImage(object):
             int(self.level_downsamples[tile_level][0]),
             int(self.level_downsamples[tile_level][1]),
         )
-        ref_tile_size = (
+        tile_size_at_level_0 = (
             tile_size_resized * tile_downsample[0],
             tile_size_resized * tile_downsample[1],
         )
@@ -937,20 +930,24 @@ class WholeSlideImage(object):
             stop_y = int(start_y + h)
             stop_x = int(start_x + w)
         else:
-            stop_y = min(start_y + h, img_h - ref_tile_size[1] + 1)
-            stop_x = min(start_x + w, img_w - ref_tile_size[0] + 1)
+            stop_y = min(start_y + h, img_h - tile_size_at_level_0[1] + 1)
+            stop_x = min(start_x + w, img_w - tile_size_at_level_0[0] + 1)
 
         scale = self.level_downsamples[self.seg_level]
         cont = self.scaleContourDim([contour], (1.0 / scale[0], 1.0 / scale[1]))[0]
 
         mask = self.annotation_mask["tissue"] if annotation is None else self.annotation_mask[annotation]
         pct = self.annotation_pct["tissue"] if annotation is None else self.annotation_pct[annotation]
+        seg_spacing = self.get_level_spacing(self.seg_level)
         tissue_checker = HasEnoughTissue(
             contour=cont,
             contour_holes=contour_holes,
             tissue_mask=mask,
-            tile_size=ref_tile_size[0],
-            scale=scale,
+            tile_size=tile_size,
+            tile_spacing=tile_spacing,
+            resize_factor=resize_factor,
+            seg_spacing=seg_spacing,
+            spacing_at_level_0=self.get_level_spacing(0),
             pct=pct,
         )
 
@@ -969,7 +966,7 @@ class WholeSlideImage(object):
 
         if drop_holes:
             keep_flags = [
-                flag and not self.isInHoles(contour_holes, coord, ref_tile_size[0])
+                flag and not self.isInHoles(contour_holes, coord, tile_size_at_level_0[0])
                 for flag, coord in zip(keep_flags, coord_candidates)
             ]
 
