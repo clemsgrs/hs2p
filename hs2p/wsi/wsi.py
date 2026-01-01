@@ -605,7 +605,6 @@ class WholeSlideImage(object):
                             ):
                                 keep = 0
                     except Exception:
-                        print(f"Warning: Could not process tile at ({x}, {y}). Marking as invalid.", file=sys.stderr)
                         pass
                 filtered_keep_flags.append(keep)
             return filtered_keep_flags
@@ -706,6 +705,11 @@ class WholeSlideImage(object):
             a_t=filter_params.a_t * scaled_ref_tile_area,
             a_h=filter_params.a_h * scaled_ref_tile_area,
             max_n_holes=filter_params.max_n_holes,
+            filter_white=filter_params.filter_white,
+            filter_black=filter_params.filter_black,
+            white_threshold=filter_params.white_threshold,
+            black_threshold=filter_params.black_threshold,
+            fraction_threshold=filter_params.fraction_threshold,
         )
 
         # find and filter contours
