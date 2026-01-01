@@ -40,6 +40,11 @@ class FilterParameters(NamedTuple):
     a_t: int  # contour area threshold for filtering
     a_h: int  # hole area threshold for filtering
     max_n_holes: int  # maximum number of holes allowed
+    filter_white: bool  # whether to filter out mostly white tiles
+    filter_black: bool  # whether to filter out mostly black tiles
+    white_threshold: int  # threshold for white pixels (0-255)
+    black_threshold: int  # threshold for black pixels (0-255)
+    fraction_threshold: float  # fraction of pixels that must be white/black to filter out the tile
 
 
 class TilingParameters(NamedTuple):
@@ -532,12 +537,8 @@ class WholeSlideImage(object):
         ) = self.process_contours(
             contours,
             holes,
-            target_spacing=tiling_params.spacing,
-            tolerance=tiling_params.tolerance,
-            target_tile_size=tiling_params.tile_size,
-            overlap=tiling_params.overlap,
-            drop_holes=tiling_params.drop_holes,
-            use_padding=tiling_params.use_padding,
+            tiling_params=tiling_params,
+            filter_params=filter_params,
             annotation=annotation,
             disable_tqdm=disable_tqdm,
             num_workers=num_workers,
@@ -553,6 +554,61 @@ class WholeSlideImage(object):
             resize_factor,
             tile_size_lv0,
         )
+
+    def filter_black_and_white_tiles(
+        self,
+        keep_flags,
+        coord_candidates,
+        tile_size,
+        tile_level,
+        filter_params,
+    ):
+        if filter_params.filter_white or filter_params.filter_black:
+            tile_spacing = self.get_level_spacing(tile_level)
+            downsample = tile_spacing / self.get_level_spacing(0)
+            img_w, img_h = self.level_dimensions[tile_level]
+            filtered_keep_flags = []
+            for keep, coord in zip(keep_flags, coord_candidates):
+                if keep:
+                    try:
+                        x, y = int(coord[0]), int(coord[1])
+                        tile = self.get_tile(
+                            x,
+                            y,
+                            tile_size,
+                            tile_size,
+                            spacing=tile_spacing,
+                        )
+                        # restrict coverage to valid portion of the slide
+                        x_downsample, y_downsample = int(x / downsample), int(y / downsample)
+                        valid_w = int(min(tile_size, img_w - x_downsample))
+                        valid_h = int(min(tile_size, img_h - y_downsample))
+                        valid_tile = tile[:valid_h, :valid_w, :]
+                        if filter_params.filter_white:
+                            white_pixels = np.all(
+                                valid_tile[:, :, :3] > filter_params.white_threshold,
+                                axis=-1,
+                            )
+                            if (
+                                np.mean(white_pixels)
+                                > filter_params.fraction_threshold
+                            ):
+                                keep = 0
+                        if keep and filter_params.filter_black:
+                            black_pixels = np.all(
+                                valid_tile[:, :, :3] < filter_params.black_threshold,
+                                axis=-1,
+                            )
+                            if (
+                                np.mean(black_pixels)
+                                > filter_params.fraction_threshold
+                            ):
+                                keep = 0
+                    except Exception:
+                        pass
+                filtered_keep_flags.append(keep)
+            return filtered_keep_flags
+        return keep_flags
 
     @staticmethod
     def filter_contours(contours, hierarchy, filter_params: FilterParameters):
@@ -649,6 +705,11 @@ class WholeSlideImage(object):
             a_t=filter_params.a_t * scaled_ref_tile_area,
             a_h=filter_params.a_h * scaled_ref_tile_area,
             max_n_holes=filter_params.max_n_holes,
+            filter_white=filter_params.filter_white,
+            filter_black=filter_params.filter_black,
+            white_threshold=filter_params.white_threshold,
+            black_threshold=filter_params.black_threshold,
+            fraction_threshold=filter_params.fraction_threshold,
         )
 
         # find and filter contours
@@ -770,12 +831,8 @@ class WholeSlideImage(object):
         self,
         contours,
         holes,
-        target_spacing: float,
-        tolerance: float,
-        target_tile_size: int,
-        overlap: float,
-        drop_holes: bool,
-        use_padding: bool,
+        tiling_params: TilingParameters,
+        filter_params: FilterParameters,
         annotation: str | None = None,
         disable_tqdm: bool = False,
         num_workers: int = 1,
@@ -787,13 +844,8 @@ class WholeSlideImage(object):
         Args:
             contours (list): List of contours representing tissue blobs in the wsi.
             holes (list): List of tissue holes in each contour.
-            target_spacing (float): Desired spacing for tiling.
-            tolerance (float): Tolerance for matching the target_spacing, deciding how much
-                target_spacing can deviate from those specified in the slide metadata.
-            target_tile_size (int): Desired tile size in pixels.
-            overlap (float): Overlap between adjacent tiles.
-            drop_holes (bool): Whether to drop tiles that fall within holes.
-            use_padding (bool): Whether to pad the tiles to ensure full coverage.
+            tiling_params (TilingParameters): Parameters for tiling.
+            filter_params (FilterParameters): Parameters for filtering.
             annotation (str, optional): annotation type to use for tile extraction.
             num_workers (int, optional): Number of workers to use for parallel processing. Defaults to 1.
 
@@ -816,12 +868,8 @@ class WholeSlideImage(object):
             return self.process_contour(
                 contours[i],
                 holes[i],
-                target_spacing,
-                tolerance,
-                target_tile_size,
-                overlap,
-                drop_holes,
-                use_padding,
+                tiling_params,
+                filter_params,
                 annotation,
             )
 
@@ -870,12 +918,8 @@ class WholeSlideImage(object):
         self,
         contour,
         contour_holes,
-        target_spacing: float,
-        tolerance: float,
-        target_tile_size: int,
-        overlap: float,
-        drop_holes: bool,
-        use_padding: bool,
+        tiling_params: TilingParameters,
+        filter_params: FilterParameters,
         annotation: str | None = None,
     ):
         """
@@ -884,13 +928,8 @@ class WholeSlideImage(object):
         Args:
             contour (numpy.ndarray): Contour to process, defined as a set of points.
             contour_holes (list): List of holes within the contour.
-            target_spacing (float): Target spacing for the tiles.
-            tolerance (float): Tolerance for matching the target_spacing, deciding how much
-                target_spacing can deviate from those specified in the slide metadata.
-            target_tile_size (int): Size of the tiles in pixels.
-            overlap (float): Overlap between tiles.
-            drop_holes (bool): Whether to drop tiles that fall within holes.
-            use_padding (bool): Whether to pad the image to ensure full coverage.
+            tiling_params (TilingParameters): Parameters for tiling.
+            filter_params (FilterParameters): Parameters for filtering.
             annotation (str, optional): Annotation type to use for tile extraction.
 
         Returns:
@@ -901,6 +940,13 @@ class WholeSlideImage(object):
                 - tile_level (int): Level of the image used for tile extraction.
                 - resize_factor (float): The factor by which the tile size was resized.
         """
+        target_spacing = tiling_params.spacing
+        tolerance = tiling_params.tolerance
+        target_tile_size = tiling_params.tile_size
+        overlap = tiling_params.overlap
+        drop_holes = tiling_params.drop_holes
+        use_padding = tiling_params.use_padding
+
         tile_level, is_within_tolerance = self.get_best_level_for_spacing(
             target_spacing, tolerance
         )
@@ -971,8 +1017,17 @@ class WholeSlideImage(object):
             [x_coords.flatten(), y_coords.flatten()]
         ).transpose()
 
-        # vectorized processing of coordinates using the tissue_checker
+        # filter coordinates based on tissue coverage
         keep_flags, tissue_pcts = tissue_checker.check_coordinates(coord_candidates)
+
+        # further filter coordinates based on black/white tile filtering
+        keep_flags = self.filter_black_and_white_tiles(
+            keep_flags,
+            coord_candidates,
+            tile_size_resized,
+            tile_level,
+            filter_params,
+        )
 
         if drop_holes:
             keep_flags = [

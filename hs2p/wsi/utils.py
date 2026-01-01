@@ -57,7 +57,7 @@ class HasEnoughTissue(object):
 
     def check_coordinates(self, coords):
         """
-        Check multiple tile coordinates for tissue coverage in a vectorized manner.
+        Check multiple tile coordinates for tissue coverage.
 
         Args:
             coords (np.ndarray): An array of shape (N, 2), where each row is (x, y).
