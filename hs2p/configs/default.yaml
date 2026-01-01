@@ -16,7 +16,7 @@ tiling:
     tolerance: 0.05 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)
     tile_size: 256 # size of the tiles to extract, in pixels
     overlap: 0.0 # percentage of overlap between two consecutive tiles (float between 0 and 1)
-    min_tissue_percentage: 0.01 # minimum percentage of tissue required to keep a tile when no sampling is performed (float between 0 and 1)
+    min_tissue_percentage: 0.01 # minimum fraction of pixels that must be tissue to keep a tile (float between 0 and 1)
     drop_holes: false # whether or not to drop tiles whose center pixel falls withing an identified holes
     use_padding: true # whether to pad the border of the slide
   seg_params:
@@ -32,6 +32,11 @@ tiling:
     a_t: 4 # area filter threshold for tissue (positive integer, the minimum size of detected foreground contours to consider, relative to the reference tile size ref_tile_size, e.g. a value 10 means only detected foreground contours of size greater than 10 [ref_tile_size, ref_tile_size] tiles at spacing tiling.spacing will be kept)
     a_h: 2 # area filter threshold for holes (positive integer, the minimum size of detected holes/cavities in foreground contours to avoid, once again relative to the reference tile size ref_tile_size)
     max_n_holes: 8 # maximum of holes to consider per detected foreground contours (positive integer, higher values lead to more accurate patching but increase computational cost ; keeps the biggest holes)
+    filter_white: false # whether to filter out mostly white tiles
+    filter_black: false # whether to filter out mostly black tiles
+    white_threshold: 220 # threshold for white pixels (0-255)
+    black_threshold: 25 # threshold for black pixels (0-255)
+    fraction_threshold: 0.9 # fraction of pixels that must be white/black to filter out the tile
   visu_params:
     downsample: 32 # downsample to use for tiling visualization
   sampling_params:
