@@ -26,6 +26,7 @@ tiling:
     mthresh: 7 # median filter size (positive, odd integer)
     close: 4 # additional morphological closing to apply following initial thresholding (positive integer)
     use_otsu: false # use otsu's method instead of simple binary thresholding
+    use_hsv: true # use HSV thresholding instead of simple binary thresholding
   filter_params:
     ref_tile_size: 16 # reference tile size at spacing tiling.spacing
     a_t: 4 # area filter threshold for tissue (positive integer, the minimum size of detected foreground contours to consider, relative to the reference tile size ref_tile_size, e.g. a value 10 means only detected foreground contours of size greater than 10 [ref_tile_size, ref_tile_size] tiles at spacing tiling.spacing will be kept)
