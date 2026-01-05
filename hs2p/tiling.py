@@ -55,6 +55,21 @@ def process_slide(
     Process a single slide: extract tile coordinates and visualize if needed.
     """
     wsi_name = wsi_path.stem.replace(" ", "_")
+    if cfg.tiling.read_coordinates_from is not None:
+        coordinates_path = Path(cfg.tiling.read_coordinates_from, f"{wsi_name}.npy")
+        if coordinates_path.is_file() and cfg.visualize and tile_visualize_dir is not None:
+            coordinates_arr = np.load(coordinates_path, allow_pickle=True)
+            coordinates = list(zip(coordinates_arr["x"], coordinates_arr["y"]))
+            tile_size_lv0 = coordinates_arr["tile_size_lv0"][0]
+            visualize_coordinates(
+                wsi_path=wsi_path,
+                coordinates=coordinates,
+                tile_size_lv0=tile_size_lv0,
+                save_dir=tile_visualize_dir,
+                downsample=cfg.tiling.visu_params.downsample,
+                backend=cfg.tiling.backend,
+            )
+        return str(wsi_path), {"status": "success"}
     try:
         tissue_mask_visu_path = None
         if cfg.visualize and mask_visualize_dir is not None:
@@ -141,7 +156,7 @@ def main(args):
         color_mapping = {k: v for e in cfg.tiling.sampling_params.color_mapping for k, v in e.items()}
     else:
         color_mapping = None
-    
+
     sampling_params = SamplingParameters(
         pixel_mapping=pixel_mapping,
         color_mapping=color_mapping,
@@ -149,7 +164,7 @@ def main(args):
     )
 
     if not skip_tiling:
-    
+
         mask = process_df["tiling_status"] != "success"
         process_stack = process_df[mask]
         total = len(process_stack)
@@ -158,13 +173,16 @@ def main(args):
             Path(x) for x in process_stack.wsi_path.values.tolist()
         ]
         mask_paths_to_process = [
-            Path(x) if x is not None else x
+            Path(x) if x is not None and not pd.isna(x) else x
             for x in process_stack.mask_path.values.tolist()
         ]
 
         # setup directories for coordinates and visualization
-        coordinates_dir = output_dir / "coordinates"
-        coordinates_dir.mkdir(exist_ok=True, parents=True)
+        if cfg.tiling.read_coordinates_from is not None:
+            coordinates_dir = Path(cfg.tiling.read_coordinates_from)
+        else:
+            coordinates_dir = output_dir / "coordinates"
+            coordinates_dir.mkdir(exist_ok=True, parents=True)
         mask_visualize_dir = None
         tile_visualize_dir = None
         if cfg.visualize:
