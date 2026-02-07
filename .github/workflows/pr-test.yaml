@@ -1,4 +1,4 @@
-name: Test WSI to coordinates consistency
+name: Test revamped suite
 
 on:
   pull_request:
@@ -23,9 +23,9 @@ jobs:
       - name: Verify required folders exist
         run: |
           set -euo pipefail
-          test -d test/input
-          test -d test/gt
-          mkdir -p test/output  # ensure host-mapped output exists
+          test -d test-revamped
+          test -f test/input/test-wsi.tif
+          test -f test/input/test-mask.tif
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -53,30 +53,11 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Generate outputs in container
+      - name: Run revamped tests in container
         run: |
           set -euo pipefail
           docker run --rm \
-            -v "$GITHUB_WORKSPACE/test/input:/input" \
-            -v "$GITHUB_WORKSPACE/test/output:/output" \
+            -v "$GITHUB_WORKSPACE:/workspace" \
+            -w /workspace \
             hs2p:${{ github.sha }} \
-            python hs2p/tiling.py \
-              --config-file /input/config.yaml \
-              --skip-datetime
-
-      - name: Verify output consistency (inside container)
-        run: |
-          set -euo pipefail
-          docker run --rm \
-            -v "$GITHUB_WORKSPACE/test/gt:/gt" \
-            -v "$GITHUB_WORKSPACE/test/output:/output" \
-            hs2p:${{ github.sha }} \
-            bash -lc "python - <<'PY'
-          import numpy as np
-          from numpy.testing import assert_array_equal
-
-          # coordinates must match exactly (deterministic tiling)
-          gt_coordinates = np.load('/gt/test-wsi.npy')
-          coordinates    = np.load('/output/coordinates/test-wsi.npy')
-          assert_array_equal(coordinates, gt_coordinates), f'Coordinates mismatch'
-          PY"
+            bash -lc "python -m pip install --no-cache-dir pytest pytest-cov && MPLCONFIGDIR=/tmp/mpl python -m pytest -q test-revamped"
