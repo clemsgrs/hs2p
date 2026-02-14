@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [tool.pytest.ini_options]
 addopts = "--cov=hs2p"
 testpaths = [
-    "tests",
+    "test",
 ]
 
 [tool.mypy]
