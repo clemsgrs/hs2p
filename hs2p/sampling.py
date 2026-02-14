@@ -183,10 +183,10 @@ def process_slide(
             for annotation in sampling_params.pixel_mapping.keys():
                 if sampling_params.tissue_percentage[annotation] is None:
                     continue
-                annotation_mask_dir = mask_visualize_dir / annotation
-                annotation_mask_dir.mkdir(exist_ok=True, parents=True)
                 tissue_mask_visu_path = None
                 if cfg.visualize and mask_visualize_dir is not None:
+                    annotation_mask_dir = mask_visualize_dir / annotation
+                    annotation_mask_dir.mkdir(exist_ok=True, parents=True)
                     tissue_mask_visu_path = Path(annotation_mask_dir, f"{wsi_name}.jpg")
                 coordinates, contour_indices, tile_level, resize_factor, tile_size_lv0 = sample_coordinates(
                     wsi_path=wsi_path,
