@@ -568,6 +568,8 @@ class WholeSlideImage(object):
             downsample = tile_spacing / self.get_level_spacing(0)
             img_w, img_h = self.level_dimensions[tile_level]
             filtered_keep_flags = []
+            error_count = 0
+            error_samples = []
             for keep, coord in zip(keep_flags, coord_candidates):
                 if keep:
                     try:
@@ -604,9 +606,19 @@ class WholeSlideImage(object):
                                 > filter_params.fraction_threshold
                             ):
                                 keep = 0
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        error_count += 1
+                        if len(error_samples) < 3:
+                            error_samples.append(str(e))
                 filtered_keep_flags.append(keep)
+            if error_count > 0:
+                slide_id = getattr(self, "path", "<unknown-slide>")
+                sample_msg = "; ".join(error_samples)
+                warnings.warn(
+                    f"Encountered {error_count} tile filtering error(s) on slide {slide_id}. "
+                    f"Keeping affected tile(s). Sample error(s): {sample_msg}",
+                    UserWarning,
+                )
             return filtered_keep_flags
         return keep_flags
 
