@@ -20,7 +20,7 @@ tiling:
     drop_holes: false # whether or not to drop tiles whose center pixel falls withing an identified holes
     use_padding: true # whether to pad the border of the slide
   seg_params:
-    downsample: 64 # find the closest downsample in the slide for tissue segmentation
+    downsample: 16 # find the closest downsample in the slide for tissue segmentation
     sthresh: 8 # segmentation threshold (positive integer, using a higher threshold leads to less foreground and more background detection) (not used when use_otsu=True)
     sthresh_up: 255 # upper threshold value for scaling the binary mask
     mthresh: 7 # median filter size (positive, odd integer)

@@ -135,6 +135,12 @@ def main(args):
     process_list = output_dir / "process_list.csv"
     if process_list.is_file() and cfg.resume:
         process_df = pd.read_csv(process_list)
+        if "mask_path" not in process_df.columns:
+            process_df["mask_path"] = [str(p) if p is not None else p for p in mask_paths]
+        else:
+            process_df["mask_path"] = process_df["mask_path"].apply(
+                lambda x: str(x) if pd.notna(x) else None
+            )
     else:
         data = {
             "wsi_name": [p.stem for p in wsi_paths],

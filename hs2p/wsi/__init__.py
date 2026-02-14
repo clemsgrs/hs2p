@@ -306,16 +306,18 @@ def overlay_mask_on_tile(
     tile: Image.Image,
     mask: Image.Image,
     palette: dict[str, int],
+    pixel_mapping: dict[str, int],
+    color_mapping: dict[str, list[int] | None],
     alpha=0.5,
 ):
 
-    # create alpha mask
     mask_arr = np.array(mask)
-    alpha_int = int(round(255 * alpha))
-    alpha_content = np.less_equal(mask_arr, 0).astype("uint8") * alpha_int + (
-        255 - alpha_int
+    alpha_content = _build_overlay_alpha(
+        mask_arr=mask_arr,
+        alpha=alpha,
+        pixel_mapping=pixel_mapping,
+        color_mapping=color_mapping,
     )
-    alpha_content = Image.fromarray(alpha_content)
 
     mask.putpalette(data=palette.tolist())
     mask_rgb = mask.convert(mode="RGB")
@@ -324,13 +326,33 @@ def overlay_mask_on_tile(
     return overlayed_image
 
 
+def _build_overlay_alpha(
+    *,
+    mask_arr: np.ndarray,
+    alpha: float,
+    pixel_mapping: dict[str, int],
+    color_mapping: dict[str, list[int] | None],
+) -> Image.Image:
+    alpha_int = int(round(255 * alpha))
+    active_labels = set()
+    for annotation, label_value in pixel_mapping.items():
+        if color_mapping.get(annotation) is not None:
+            active_labels.add(label_value)
+
+    overlay_mask = np.isin(mask_arr, list(active_labels)).astype("uint8")
+    alpha_content = np.less(overlay_mask, 1).astype("uint8") * alpha_int + (
+        255 - alpha_int
+    )
+    return Image.fromarray(alpha_content)
+
+
 def overlay_mask_on_slide(
     wsi_path: Path,
     annotation_mask_path: Path,
     downsample: int,
     palette: dict[str, int],
     pixel_mapping: dict[str, int],
-    color_mapping: dict[str, list[int]] | None = None,
+    color_mapping: dict[str, list[int] | None],
     alpha: float = 0.5,
 ):
     """
@@ -373,21 +395,12 @@ def overlay_mask_on_slide(
     )
     mask = Image.fromarray(mask_arr)
 
-    # create alpha mask
-    alpha_int = int(round(255 * alpha))
-    if color_mapping is not None:
-        alpha_content = np.zeros_like(mask_arr)
-        for k, v in pixel_mapping.items():
-            if color_mapping[k] is not None:
-                alpha_content += mask_arr == v
-        alpha_content = np.less(alpha_content, 1).astype("uint8") * alpha_int + (
-            255 - alpha_int
-        )
-    else:
-        alpha_content = np.less_equal(mask_arr, 0).astype("uint8") * alpha_int + (
-            255 - alpha_int
-        )
-    alpha_content = Image.fromarray(alpha_content)
+    alpha_content = _build_overlay_alpha(
+        mask_arr=mask_arr,
+        alpha=alpha,
+        pixel_mapping=pixel_mapping,
+        color_mapping=color_mapping,
+    )
 
     mask.putpalette(data=palette.tolist())
     mask_rgb = mask.convert(mode="RGB")
@@ -417,6 +430,8 @@ def draw_grid_from_coordinates(
     indices: list[int] | None = None,
     mask = None,
     palette: dict[str, int] | None = None,
+    pixel_mapping: dict[str, int] | None = None,
+    color_mapping: dict[str, list[int] | None] | None = None,
 ):
     downsamples = wsi.level_downsamples[vis_level]
     if indices is None:
@@ -478,6 +493,14 @@ def draw_grid_from_coordinates(
             valid_tile = Image.fromarray(valid_tile).convert("RGB")
 
             if mask is not None:
+                if (
+                    palette is None
+                    or pixel_mapping is None
+                    or color_mapping is None
+                ):
+                    raise ValueError(
+                        "palette, pixel_mapping, and color_mapping are required when mask overlay is enabled"
+                    )
                 # need to scale (x, y) defined w.r.t. slide level 0
                 # to mask level 0
                 downsample = wsi.spacings[0] / mask.spacings[0]
@@ -509,6 +532,8 @@ def draw_grid_from_coordinates(
                     valid_tile,
                     masked_tile,
                     palette,
+                    pixel_mapping,
+                    color_mapping,
                 )
 
                 # paste the valid part into the white tile
@@ -561,6 +586,8 @@ def visualize_coordinates(
     mask_path: Path | None = None,
     annotation: str | None = None,
     palette: dict[str, int] | None = None,
+    pixel_mapping: dict[str, int] | None = None,
+    color_mapping: dict[str, list[int] | None] | None = None,
 ):
     wsi = WholeSlideImage(wsi_path, backend=backend)
     vis_level = wsi.get_best_level_for_downsample_custom(downsample)
@@ -601,6 +628,8 @@ def visualize_coordinates(
         thickness=grid_thickness,
         mask=mask,
         palette=palette,
+        pixel_mapping=pixel_mapping,
+        color_mapping=color_mapping,
     )
     wsi_name = wsi_path.stem.replace(" ", "_")
     if annotation is not None:

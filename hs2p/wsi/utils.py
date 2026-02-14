@@ -41,7 +41,7 @@ class HasEnoughTissue(object):
         cv2.drawContours(contour_mask, [self.cont], 0, 255, -1)
 
         # Draw black filled holes on white filled contour
-        cv2.drawContours(contour_mask, self.holes, 0, 0, -1)
+        cv2.drawContours(contour_mask, self.holes, -1, 0, -1)
 
         # Combine with the tissue mask
         return cv2.bitwise_and(self.mask, contour_mask)
