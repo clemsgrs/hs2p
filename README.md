@@ -104,6 +104,8 @@ If `visualize` is set to `true`, a `visualization/` folder is created containing
 - **`mask/`**: visualizations of the provided tissue (or annotation) mask
 - **`tiling/`** (for `tiling.py`) or **`sampling/`** (for `sampling.py`): visualizations of the extracted or sampled tiles overlaid on the slide. For `sampling.py`, this includes subfolders for each category defined in the sampling parameters (e.g., tumor, stroma, etc.)
 
+Mask contour line thickness is automatically inferred from the whole-slide dimensions and the visualization level, so contour readability stays consistent across tiny biopsies and large resections.
+
 For sampling visualizations, overlays are drawn only for annotations that have a non-null color in `sampling_params.color_mapping`. Annotations with null color are left untouched (raw slide pixels, no darkening overlay).
 
 These visualizations are useful for double-checking that the tiling or sampling process ran as expected.

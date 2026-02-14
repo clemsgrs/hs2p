@@ -1,4 +1,4 @@
-name: Test revamped suite
+name: Test suite
 
 on:
   pull_request:
@@ -23,10 +23,10 @@ jobs:
       - name: Verify required folders exist
         run: |
           set -euo pipefail
-          test -d test
-          test -f test/fixtures/input/test-wsi.tif
-          test -f test/fixtures/input/test-mask.tif
-          test -f test/fixtures/gt/test-wsi.npy
+          test -d tests
+          test -f tests/fixtures/input/test-wsi.tif
+          test -f tests/fixtures/input/test-mask.tif
+          test -f tests/fixtures/gt/test-wsi.npy
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -61,4 +61,4 @@ jobs:
             -v "$GITHUB_WORKSPACE:/workspace" \
             -w /workspace \
             hs2p:${{ github.sha }} \
-            bash -lc "python -m pip install --no-cache-dir pytest pytest-cov && MPLCONFIGDIR=/tmp/mpl python -m pytest -q test"
+            bash -lc "python -m pip install --no-cache-dir pytest pytest-cov && MPLCONFIGDIR=/tmp/mpl python -m pytest -q tests"

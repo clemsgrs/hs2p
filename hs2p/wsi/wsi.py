@@ -406,7 +406,6 @@ class WholeSlideImage(object):
         downsample: int = 32,
         color: tuple[int] = (0, 255, 0),
         hole_color: tuple[int] = (0, 0, 255),
-        line_thickness: int = 250,
         max_size: int | None = None,
         number_contours: bool = False,
     ):
@@ -420,7 +419,10 @@ class WholeSlideImage(object):
             img = np.ascontiguousarray(img)
 
         offset = tuple(-(np.array((0, 0)) * scale).astype(int))
-        line_thickness = int(line_thickness * math.sqrt(scale[0] * scale[1]))
+        line_thickness = self._infer_contour_thickness(
+            level0_dimensions=self.level_dimensions[0],
+            scale=(scale[0], scale[1]),
+        )
         if contours is not None:
             if not number_contours:
                 cv2.drawContours(
@@ -478,6 +480,18 @@ class WholeSlideImage(object):
             img = img.resize((int(w * resizeFactor), int(h * resizeFactor)))
 
         return img
+
+    @staticmethod
+    def _infer_contour_thickness(
+        *,
+        level0_dimensions: tuple[int, int],
+        scale: tuple[float, float],
+    ) -> int:
+        level0_w, level0_h = level0_dimensions
+        scale_x, scale_y = scale
+        visual_max_dim = max(level0_w, level0_h) * math.sqrt(scale_x * scale_y)
+        thickness = round(15 * math.sqrt(visual_max_dim / 864))
+        return max(2, min(24, thickness))
 
     def get_tile_coordinates(
         self,
