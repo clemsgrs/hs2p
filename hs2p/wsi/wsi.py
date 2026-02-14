@@ -1017,10 +1017,13 @@ class WholeSlideImage(object):
             [x_coords.flatten(), y_coords.flatten()]
         ).transpose()
 
-        # filter coordinates based on tissue coverage
+        # filter coordinates based on tissue coverage (reads tissue mask for active contour only)
         keep_flags, tissue_pcts = tissue_checker.check_coordinates(coord_candidates)
 
         # further filter coordinates based on black/white tile filtering
+        # (reads RGB values from the wsi at the tile level)
+        # (note that this step is after the tissue mask filtering, so it only applies to tiles that have enough tissue coverage)
+        # (speed could improved by working at a lower resolution)
         keep_flags = self.filter_black_and_white_tiles(
             keep_flags,
             coord_candidates,

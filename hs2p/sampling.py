@@ -46,6 +46,9 @@ def get_args_parser(add_help: bool = True):
         "--skip-datetime", action="store_true", help="skip run id datetime prefix"
     )
     parser.add_argument(
+        "--skip-logging", action="store_true", help="skip logging configuration"
+    )
+    parser.add_argument(
         "--output-dir",
         type=str,
         help="output directory to save logs and checkpoints",
@@ -244,7 +247,7 @@ def process_slide(
 
 
 def main(args):
-    
+
     cfg = setup(args)
     output_dir = Path(cfg.output_dir)
 
@@ -276,13 +279,15 @@ def main(args):
 
     pixel_mapping = {k: v for e in cfg.tiling.sampling_params.pixel_mapping for k, v in e.items()}
     tissue_percentage = {k: v for e in cfg.tiling.sampling_params.tissue_percentage for k, v in e.items()}
+    tissue_key_present = True
     if "tissue" not in tissue_percentage:
+        tissue_key_present = False
         tissue_percentage["tissue"] = cfg.tiling.params.min_tissue_percentage
     if cfg.tiling.sampling_params.color_mapping is not None:
         color_mapping = {k: v for e in cfg.tiling.sampling_params.color_mapping for k, v in e.items()}
     else:
         color_mapping = None
-    
+
     sampling_params = SamplingParameters(
         pixel_mapping=pixel_mapping,
         color_mapping=color_mapping,
@@ -365,6 +370,8 @@ def main(args):
         print(f"Failed sampling: {len(failed_sampling)}")
         for annotation, pct in tissue_percentage.items():
             if pct is None:
+                continue
+            if not tissue_key_present and annotation == "tissue":
                 continue
             slides_with_tiles = [
                 str(p)
