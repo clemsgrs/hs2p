@@ -30,7 +30,7 @@ def fake_backend(monkeypatch):
 
 @pytest.fixture
 def real_fixture_paths() -> tuple[Path, Path]:
-    base = Path(__file__).resolve().parent.parent / "test" / "input"
+    base = Path(__file__).resolve().parent / "fixtures" / "input"
     wsi_path = base / "test-wsi.tif"
     mask_path = base / "test-mask.tif"
     if not wsi_path.is_file() or not mask_path.is_file():
