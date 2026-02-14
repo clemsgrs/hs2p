@@ -7,6 +7,7 @@ import pandas as pd
 import seaborn as sns
 import multiprocessing as mp
 from pathlib import Path
+from collections.abc import Sequence
 
 from hs2p.utils import setup, load_csv, fix_random_seeds
 from hs2p.wsi import extract_coordinates, filter_coordinates, sample_coordinates, save_coordinates, visualize_coordinates, overlay_mask_on_slide, SamplingParameters
@@ -15,7 +16,7 @@ from hs2p.wsi import extract_coordinates, filter_coordinates, sample_coordinates
 def _validate_visualization_color_mapping(
     *,
     pixel_mapping: dict[str, int],
-    color_mapping: dict[str, list[int] | None],
+    color_mapping: dict[str, Sequence[int] | None],
 ):
     missing_annotations = sorted(set(pixel_mapping.keys()) - set(color_mapping.keys()))
     if missing_annotations:
@@ -27,9 +28,13 @@ def _validate_visualization_color_mapping(
     for annotation, color in color_mapping.items():
         if color is None:
             continue
-        if not isinstance(color, (list, tuple)) or len(color) != 3:
+        if isinstance(color, (str, bytes)):
             raise ValueError(
-                f"color_mapping['{annotation}'] must be None or a length-3 RGB list/tuple"
+                f"color_mapping['{annotation}'] must be None or a length-3 RGB sequence"
+            )
+        if not isinstance(color, Sequence) or len(color) != 3:
+            raise ValueError(
+                f"color_mapping['{annotation}'] must be None or a length-3 RGB sequence"
             )
         if any((not isinstance(c, (int, np.integer)) or c < 0 or c > 255) for c in color):
             raise ValueError(
@@ -264,6 +269,12 @@ def main(args):
     process_list = output_dir / "process_list.csv"
     if process_list.is_file() and cfg.resume:
         process_df = pd.read_csv(process_list)
+        if "mask_path" not in process_df.columns:
+            process_df["mask_path"] = [str(p) if p is not None else p for p in mask_paths]
+        else:
+            process_df["mask_path"] = process_df["mask_path"].apply(
+                lambda x: str(x) if pd.notna(x) else None
+            )
     else:
         data = {
             "wsi_name": [p.stem for p in wsi_paths],
@@ -304,7 +315,7 @@ def main(args):
             Path(x) for x in process_stack.wsi_path.values.tolist()
         ]
         mask_paths_to_process = [
-            Path(x) if x is not None else x
+            Path(x) if x is not None and not pd.isna(x) else x
             for x in process_stack.mask_path.values.tolist()
         ]
 
