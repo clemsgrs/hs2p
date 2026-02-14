@@ -12,6 +12,31 @@ from hs2p.utils import setup, load_csv, fix_random_seeds
 from hs2p.wsi import extract_coordinates, filter_coordinates, sample_coordinates, save_coordinates, visualize_coordinates, overlay_mask_on_slide, SamplingParameters
 
 
+def _validate_visualization_color_mapping(
+    *,
+    pixel_mapping: dict[str, int],
+    color_mapping: dict[str, list[int] | None],
+):
+    missing_annotations = sorted(set(pixel_mapping.keys()) - set(color_mapping.keys()))
+    if missing_annotations:
+        raise ValueError(
+            "color_mapping is missing annotation keys required by pixel_mapping: "
+            + ", ".join(missing_annotations)
+        )
+
+    for annotation, color in color_mapping.items():
+        if color is None:
+            continue
+        if not isinstance(color, (list, tuple)) or len(color) != 3:
+            raise ValueError(
+                f"color_mapping['{annotation}'] must be None or a length-3 RGB list/tuple"
+            )
+        if any((not isinstance(c, (int, np.integer)) or c < 0 or c > 255) for c in color):
+            raise ValueError(
+                f"color_mapping['{annotation}'] must contain integers in [0, 255]"
+            )
+
+
 def get_args_parser(add_help: bool = True):
     parser = argparse.ArgumentParser("hs2p", add_help=add_help)
     parser.add_argument(
@@ -73,6 +98,10 @@ def process_slide(
                 }
             else:
                 color_mapping = sampling_params.color_mapping
+            _validate_visualization_color_mapping(
+                pixel_mapping=sampling_params.pixel_mapping,
+                color_mapping=color_mapping,
+            )
             p = [0] * 3 * len(color_mapping)
             for k, v in sampling_params.pixel_mapping.items():
                 if color_mapping[k] is not None:
@@ -139,6 +168,8 @@ def process_slide(
                         mask_path=mask_path,
                         annotation=annotation,
                         palette=preview_palette,
+                        pixel_mapping=sampling_params.pixel_mapping,
+                        color_mapping=color_mapping,
                     )
         else:
             for annotation in sampling_params.pixel_mapping.keys():
@@ -188,6 +219,8 @@ def process_slide(
                         mask_path=mask_path,
                         annotation=annotation,
                         palette=preview_palette,
+                        pixel_mapping=sampling_params.pixel_mapping,
+                        color_mapping=color_mapping,
                     )
         if cfg.visualize and mask_visualize_dir is not None:
             mask_visu_path = Path(mask_visualize_dir, f"{wsi_name}.png")
