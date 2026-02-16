@@ -113,3 +113,45 @@ These visualizations are useful for double-checking that the tiling or sampling 
 ### Process summary
 
 - **`process_list.csv`**: a summary file listing each processed slide, indicating whether processing was successful or failed. If a failure occurred, the traceback is provided to help diagnose the issue.
+
+## Standalone tissue segmentator
+
+For quick mask generation outside the full pipeline, use the standalone script:
+
+```shell
+# Single slide
+python scripts/generate_tissue_mask.py \
+    --wsi /path/to/slide.tif \
+    --output /path/to/tissue-mask-pyramid.tif \
+    --spacing 4.0 \
+    --tolerance 0.1
+
+# Multiple slides
+python scripts/generate_tissue_mask.py \
+    --wsi /path/to/slide_dir/*.tif \
+    --output-dir /path/to/output_dir \
+    --spacing 4.0 \
+    --tolerance 0.1
+```
+
+This script:
+- reads the WSI with `wholeslidedata` (OpenSlide backend by default),
+- computes a binary tissue mask using HSV thresholding (`0=background`, `1=tissue`),
+- writes a pyramidal TIFF mask where each level is downsampled from the previous one,
+- prints a final recap of how many slides succeeded, skipped, and failed.
+
+Useful options:
+- `--backend` to switch the wholeslidedata backend (default: `openslide`)
+- `--output` for single-slide mode and `--output-dir` for multi-slide mode
+- `--num-workers` to control parallelism
+- `--no-cache` to disable cache-based skipping and force recomputation
+- `--tolerance` to control how much a natural spacing can deviate from target spacing when selecting the best level for reading the whole slide
+- `--min-component-area-um2` to remove tiny tissue blobs
+- `--min-hole-area-um2` to fill small holes inside tissue
+- `--gaussian-sigma-um` to apply optional pre-threshold Gaussian smoothing
+- `--open-radius-um` / `--close-radius-um` for spacing-aware morphological smoothing
+- `--spacing-at-level-0` to override level-0 spacing when metadata is incorrect
+- `--compression` and `--tile-size` to tune TIFF output
+
+The summary file is saved as `summary.csv` in `--output-dir` (multi-slide mode) or next to `--output` (single-slide mode).
+The cache manifest used for skip inference is saved as `cache_manifest.json` in the same directory.
