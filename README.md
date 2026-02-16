@@ -119,6 +119,8 @@ These visualizations are useful for double-checking that the tiling or sampling 
 For quick mask generation outside the full pipeline, use the standalone script:
 
 ```shell
+python -m pip install tifffile # need extra tifffile deps
+
 # Single slide
 python scripts/generate_tissue_mask.py \
     --wsi /path/to/slide.tif \
