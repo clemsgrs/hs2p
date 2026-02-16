@@ -137,13 +137,13 @@ python scripts/generate_tissue_mask.py \
 ```
 
 This script:
-- reads the WSI with `wholeslidedata` (OpenSlide backend by default),
-- computes a binary tissue mask using HSV thresholding (`0=background`, `1=tissue`),
-- writes a pyramidal TIFF mask where each level is downsampled from the previous one,
-- prints a final recap of how many slides succeeded, skipped, and failed.
+- reads the WSI with `wholeslidedata`
+- computes a binary tissue mask using HSV thresholding (`0=background`, `1=tissue`)
+- writes a pyramidal TIFF mask at a desired `spacing`, where each level is downsampled from the previous one
+- prints a final recap of how many slides succeeded, skipped, and failed
 
 Useful options:
-- `--backend` to switch the wholeslidedata backend (default: `openslide`)
+- `--backend` to switch the wholeslidedata backend (default: `asap`)
 - `--output` for single-slide mode and `--output-dir` for multi-slide mode
 - `--num-workers` to control parallelism
 - `--no-cache` to disable cache-based skipping and force recomputation

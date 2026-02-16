@@ -91,7 +91,7 @@ def _parse_args() -> argparse.Namespace:
         default=2000.0,
         help=(
             "Remove tissue connected components smaller than this area in square microns "
-            "(default: 2000)."
+            "(default: 2000um2 ; 0 to disable)."
         ),
     )
     parser.add_argument(
@@ -100,26 +100,26 @@ def _parse_args() -> argparse.Namespace:
         default=5000.0,
         help=(
             "Fill holes inside tissue up to this area in square microns "
-            "(default: 5000)."
+            "(default: 5000um2 ; 0 to disable)."
         ),
     )
     parser.add_argument(
         "--open-radius-um",
         type=float,
         default=1.0,
-        help="Morphological opening radius in microns (default: 1.0).",
+        help="Morphological opening radius in microns (default: 1um ; 0 to disable).",
     )
     parser.add_argument(
         "--gaussian-sigma-um",
         type=float,
         default=1,
-        help="Optional Gaussian blur sigma in microns before HSV thresholding (default: 0 disables).",
+        help="Optional Gaussian blur sigma in microns before HSV thresholding (default: 1um ; 0 to disable).",
     )
     parser.add_argument(
         "--close-radius-um",
         type=float,
-        default=10.0,
-        help="Morphological closing radius in microns (default: 10.0).",
+        default=12.0,
+        help="Morphological closing radius in microns (default: 12um ; 0 to disable).",
     )
     parser.add_argument(
         "--compression",
