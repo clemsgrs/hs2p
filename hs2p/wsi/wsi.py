@@ -23,6 +23,7 @@ class SegmentationParameters(NamedTuple):
     """
     Parameters for filtering contours.
     """
+
     downsample: int  # dowsample factor for loading segmentation mask
     sthresh: int  # segmentation threshold (positive integer, using a higher threshold leads to less foreground and more background detection) (not used when use_otsu=True)
     sthresh_up: int  # upper threshold value for scaling the binary mask
@@ -36,6 +37,7 @@ class FilterParameters(NamedTuple):
     """
     Parameters for filtering contours.
     """
+
     ref_tile_size: int  # reference tile size for filtering
     a_t: int  # contour area threshold for filtering
     a_h: int  # hole area threshold for filtering
@@ -44,13 +46,16 @@ class FilterParameters(NamedTuple):
     filter_black: bool  # whether to filter out mostly black tiles
     white_threshold: int  # threshold for white pixels (0-255)
     black_threshold: int  # threshold for black pixels (0-255)
-    fraction_threshold: float  # fraction of pixels that must be white/black to filter out the tile
+    fraction_threshold: (
+        float  # fraction of pixels that must be white/black to filter out the tile
+    )
 
 
 class TilingParameters(NamedTuple):
     """
     Parameters for tiling.
     """
+
     target_spacing: float  # spacing at which to tile the slide, in microns per pixel
     tolerance: float  # for matching the target_spacing, deciding how much target_spacing can deviate from those specified in the slide metadata.
     target_tile_size: int  # size of the tiles to extract, in pixels
@@ -64,9 +69,16 @@ class SamplingParameters(NamedTuple):
     """
     Parameters for sampling.
     """
-    pixel_mapping: dict[str, int]  # mapping from annotation names to pixel values in the annotation mask
-    color_mapping: dict[str, list[int] | None]  # mapping from annotation names to RGB color codes for overlaying
-    tissue_percentage: dict[str, float | None]  # minimum percentage of tile coverage for each category required to sample tiles
+
+    pixel_mapping: dict[
+        str, int
+    ]  # mapping from annotation names to pixel values in the annotation mask
+    color_mapping: dict[
+        str, list[int] | None
+    ]  # mapping from annotation names to RGB color codes for overlaying
+    tissue_percentage: dict[
+        str, float | None
+    ]  # minimum percentage of tile coverage for each category required to sample tiles
 
 
 class WholeSlideImage(object):
@@ -131,7 +143,9 @@ class WholeSlideImage(object):
         self.mask_path = mask_path
         if mask_path is not None:
             self.mask = wsd.WholeSlideImage(mask_path, backend=backend)
-            self.seg_level = self.load_segmentation(segment_params, sampling_params=sampling_params)
+            self.seg_level = self.load_segmentation(
+                segment_params, sampling_params=sampling_params
+            )
         elif segment:
             self.seg_level = self.segment_tissue(segment_params)
 
@@ -221,9 +235,7 @@ class WholeSlideImage(object):
             self._level_spacing_cache[level] = self.spacings[level]
         return self._level_spacing_cache[level]
 
-    def get_best_level_for_spacing(
-        self, target_spacing: float, tolerance: float
-    ):
+    def get_best_level_for_spacing(self, target_spacing: float, tolerance: float):
         """
         Determines the best level in a multi-resolution image pyramid for a given target spacing.
 
@@ -331,8 +343,10 @@ class WholeSlideImage(object):
         self.annotation_mask = {"tissue": m}
         for annotation, val in sampling_params.pixel_mapping.items():
             if annotation != "background":
-                self.annotation_mask[annotation] = (mask == val).astype("uint8") * segment_params.sthresh_up
-       
+                self.annotation_mask[annotation] = (mask == val).astype(
+                    "uint8"
+                ) * segment_params.sthresh_up
+
         return seg_level
 
     def segment_tissue(
@@ -596,7 +610,9 @@ class WholeSlideImage(object):
                             spacing=tile_spacing,
                         )
                         # restrict coverage to valid portion of the slide
-                        x_downsample, y_downsample = int(x / downsample), int(y / downsample)
+                        x_downsample, y_downsample = int(x / downsample), int(
+                            y / downsample
+                        )
                         valid_w = int(min(tile_size, img_w - x_downsample))
                         valid_h = int(min(tile_size, img_h - y_downsample))
                         valid_tile = tile[:valid_h, :valid_w, :]
@@ -605,20 +621,14 @@ class WholeSlideImage(object):
                                 valid_tile[:, :, :3] > filter_params.white_threshold,
                                 axis=-1,
                             )
-                            if (
-                                np.mean(white_pixels)
-                                > filter_params.fraction_threshold
-                            ):
+                            if np.mean(white_pixels) > filter_params.fraction_threshold:
                                 keep = 0
                         if keep and filter_params.filter_black:
                             black_pixels = np.all(
                                 valid_tile[:, :, :3] < filter_params.black_threshold,
                                 axis=-1,
                             )
-                            if (
-                                np.mean(black_pixels)
-                                > filter_params.fraction_threshold
-                            ):
+                            if np.mean(black_pixels) > filter_params.fraction_threshold:
                                 keep = 0
                     except Exception as e:
                         error_count += 1
@@ -723,8 +733,12 @@ class WholeSlideImage(object):
         target_scale = self.level_downsamples[self.seg_level]
         scale = tuple(a / b for a, b in zip(target_scale, current_scale))
         ref_tile_size = (filter_params.ref_tile_size, filter_params.ref_tile_size)
-        ref_tile_size_at_target_scale = tuple(a / b for a, b in zip(ref_tile_size, scale))
-        scaled_ref_tile_area = int(ref_tile_size_at_target_scale[0] * ref_tile_size_at_target_scale[1])
+        ref_tile_size_at_target_scale = tuple(
+            a / b for a, b in zip(ref_tile_size, scale)
+        )
+        scaled_ref_tile_area = int(
+            ref_tile_size_at_target_scale[0] * ref_tile_size_at_target_scale[1]
+        )
 
         adjusted_filter_params = FilterParameters(
             ref_tile_size=filter_params.ref_tile_size,
@@ -739,7 +753,11 @@ class WholeSlideImage(object):
         )
 
         # find and filter contours
-        mask = self.annotation_mask["tissue"] if annotation is None else self.annotation_mask[annotation]
+        mask = (
+            self.annotation_mask["tissue"]
+            if annotation is None
+            else self.annotation_mask[annotation]
+        )
         if mask.ndim == 3:  # If the mask has 3 channels
             mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
 
@@ -985,7 +1003,7 @@ class WholeSlideImage(object):
             resize_factor >= 1
         ), f"Resize factor should be greater than or equal to 1. Got {resize_factor}"
 
-        tile_size_resized = int(round(target_tile_size * resize_factor,0))
+        tile_size_resized = int(round(target_tile_size * resize_factor, 0))
         step_size = int(tile_size_resized * (1.0 - overlap))
 
         if contour is not None:
@@ -1018,8 +1036,16 @@ class WholeSlideImage(object):
         scale = self.level_downsamples[self.seg_level]
         cont = self.scaleContourDim([contour], (1.0 / scale[0], 1.0 / scale[1]))[0]
 
-        mask = self.annotation_mask["tissue"] if annotation is None else self.annotation_mask[annotation]
-        pct = self.annotation_pct["tissue"] if annotation is None else self.annotation_pct[annotation]
+        mask = (
+            self.annotation_mask["tissue"]
+            if annotation is None
+            else self.annotation_mask[annotation]
+        )
+        pct = (
+            self.annotation_pct["tissue"]
+            if annotation is None
+            else self.annotation_pct[annotation]
+        )
         seg_spacing = self.get_level_spacing(self.seg_level)
         tissue_checker = HasEnoughTissue(
             contour=cont,
@@ -1060,7 +1086,8 @@ class WholeSlideImage(object):
 
         if drop_holes:
             keep_flags = [
-                flag and not self.isInHoles(contour_holes, coord, tile_size_at_level_0[0])
+                flag
+                and not self.isInHoles(contour_holes, coord, tile_size_at_level_0[0])
                 for flag, coord in zip(keep_flags, coord_candidates)
             ]
 

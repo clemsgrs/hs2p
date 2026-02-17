@@ -24,7 +24,9 @@ def sort_coordinates_with_tissue(coordinates, tissue_percentages, contour_indice
     dedup_tissue_percentages = []
     dedup_contour_indices = []
     # deduplicate
-    for (x, y), tissue, contour_idx in zip(coordinates, tissue_percentages, contour_indices):
+    for (x, y), tissue, contour_idx in zip(
+        coordinates, tissue_percentages, contour_indices
+    ):
         key = (x, y)
         if key in seen:
             continue
@@ -35,7 +37,14 @@ def sort_coordinates_with_tissue(coordinates, tissue_percentages, contour_indice
     # mock filenames
     mocked_filenames = [f"{x}_{y}.jpg" for x, y in dedup_coordinates]
     # sort combined list by mocked filenames
-    combined = list(zip(mocked_filenames, dedup_coordinates, dedup_tissue_percentages, dedup_contour_indices))
+    combined = list(
+        zip(
+            mocked_filenames,
+            dedup_coordinates,
+            dedup_tissue_percentages,
+            dedup_contour_indices,
+        )
+    )
     sorted_combined = sorted(combined, key=lambda x: x[0])
     # extract sorted coordinates and tissue percentages
     sorted_coordinates = [coord for _, coord, _, _ in sorted_combined]
@@ -251,11 +260,13 @@ def filter_coordinates(
                 )
                 if masked_tile.shape[-1] == 1:
                     masked_tile = np.squeeze(masked_tile, axis=-1)
-                mask_pct = get_mask_coverage(masked_tile, sampling_params.pixel_mapping[annotation])
+                mask_pct = get_mask_coverage(
+                    masked_tile, sampling_params.pixel_mapping[annotation]
+                )
                 if mask_pct >= pct:
                     filtered_coordinates[annotation].append(coord)
                     filtered_contour_indices[annotation].append(contour_idx)
-    return filtered_coordinates, filtered_contour_indices     
+    return filtered_coordinates, filtered_contour_indices
 
 
 def save_coordinates(
@@ -382,7 +393,7 @@ def overlay_mask_on_slide(
         mask_spacing = mask_object.spacings[mask_level]
         mask_width, _ = mask_object.level_dimensions[mask_level]
         scale = mask_width / width
-    
+
     mask_arr = mask_object.get_slide(spacing=mask_spacing)
     mask_arr = mask_arr[:, :, 0]
     mask_height, mask_width = mask_arr.shape
@@ -428,7 +439,7 @@ def draw_grid_from_coordinates(
     vis_level: int,
     thickness: int = 2,
     indices: list[int] | None = None,
-    mask = None,
+    mask=None,
     palette: dict[str, int] | None = None,
     pixel_mapping: dict[str, int] | None = None,
     color_mapping: dict[str, list[int] | None] | None = None,
@@ -493,11 +504,7 @@ def draw_grid_from_coordinates(
             valid_tile = Image.fromarray(valid_tile).convert("RGB")
 
             if mask is not None:
-                if (
-                    palette is None
-                    or pixel_mapping is None
-                    or color_mapping is None
-                ):
+                if palette is None or pixel_mapping is None or color_mapping is None:
                     raise ValueError(
                         "palette, pixel_mapping, and color_mapping are required when mask overlay is enabled"
                     )
@@ -538,7 +545,7 @@ def draw_grid_from_coordinates(
 
                 # paste the valid part into the white tile
                 tile[:valid_height, :valid_width, :] = overlayed_tile
-            
+
             else:
                 valid_tile = np.array(valid_tile)
                 # paste the valid part into the white tile

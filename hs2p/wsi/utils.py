@@ -3,7 +3,18 @@ import numpy as np
 
 
 class HasEnoughTissue(object):
-    def __init__(self, contour, contour_holes, tissue_mask, target_tile_size, tile_spacing, resize_factor, seg_spacing, spacing_at_level_0, pct=0.01):
+    def __init__(
+        self,
+        contour,
+        contour_holes,
+        tissue_mask,
+        target_tile_size,
+        tile_spacing,
+        resize_factor,
+        seg_spacing,
+        spacing_at_level_0,
+        pct=0.01,
+    ):
         self.cont = contour
         self.holes = contour_holes
         self.mask = tissue_mask // 255
@@ -23,7 +34,7 @@ class HasEnoughTissue(object):
             self.downsampled_tile_size > 0
         ), "downsampled tile_size is equal to zero, aborting; please consider using a smaller seg_params.downsample parameter"
 
-        self.tile_size_resized = int(round(target_tile_size * resize_factor,0))
+        self.tile_size_resized = int(round(target_tile_size * resize_factor, 0))
 
         # precompute the combined tissue mask
         self.precomputed_mask = self._precompute_tissue_mask()
@@ -112,11 +123,21 @@ class HasEnoughTissue(object):
         sub_mask = self._extract_sub_mask(x_tile, y_tile)
 
         # handle edge cases where sub_mask is smaller than expected
-        if sub_mask.shape[0] != self.downsampled_tile_size or sub_mask.shape[1] != self.downsampled_tile_size:
-            padded_mask = np.zeros((self.downsampled_tile_size, self.downsampled_tile_size), dtype=sub_mask.dtype)
-            padded_mask[:sub_mask.shape[0], :sub_mask.shape[1]] = sub_mask
+        if (
+            sub_mask.shape[0] != self.downsampled_tile_size
+            or sub_mask.shape[1] != self.downsampled_tile_size
+        ):
+            padded_mask = np.zeros(
+                (self.downsampled_tile_size, self.downsampled_tile_size),
+                dtype=sub_mask.dtype,
+            )
+            padded_mask[: sub_mask.shape[0], : sub_mask.shape[1]] = sub_mask
             sub_mask = padded_mask
 
         # upsample the mask to the original tile size
-        mask = cv2.resize(sub_mask, (self.tile_size_resized, self.tile_size_resized), interpolation=cv2.INTER_NEAREST)
+        mask = cv2.resize(
+            sub_mask,
+            (self.tile_size_resized, self.tile_size_resized),
+            interpolation=cv2.INTER_NEAREST,
+        )
         return mask

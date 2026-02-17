@@ -8,7 +8,12 @@ import multiprocessing as mp
 from pathlib import Path
 
 from hs2p.utils import setup, load_csv, fix_random_seeds
-from hs2p.wsi import extract_coordinates, save_coordinates, visualize_coordinates, SamplingParameters
+from hs2p.wsi import (
+    extract_coordinates,
+    save_coordinates,
+    visualize_coordinates,
+    SamplingParameters,
+)
 
 
 def get_args_parser(add_help: bool = True):
@@ -29,7 +34,7 @@ def get_args_parser(add_help: bool = True):
     )
     parser.add_argument(
         "opts",
-        help="Modify config options at the end of the command using \"path.key=value\".",
+        help='Modify config options at the end of the command using "path.key=value".',
         default=None,
         nargs=argparse.REMAINDER,
     )
@@ -57,7 +62,11 @@ def process_slide(
     wsi_name = wsi_path.stem.replace(" ", "_")
     if cfg.tiling.read_coordinates_from is not None:
         coordinates_path = Path(cfg.tiling.read_coordinates_from, f"{wsi_name}.npy")
-        if coordinates_path.is_file() and cfg.visualize and tile_visualize_dir is not None:
+        if (
+            coordinates_path.is_file()
+            and cfg.visualize
+            and tile_visualize_dir is not None
+        ):
             coordinates_arr = np.load(coordinates_path, allow_pickle=True)
             coordinates = list(zip(coordinates_arr["x"], coordinates_arr["y"]))
             tile_size_lv0 = coordinates_arr["tile_size_lv0"][0]
@@ -74,17 +83,19 @@ def process_slide(
         tissue_mask_visu_path = None
         if cfg.visualize and mask_visualize_dir is not None:
             tissue_mask_visu_path = Path(mask_visualize_dir, f"{wsi_name}.jpg")
-        coordinates, contour_indices, tile_level, resize_factor, tile_size_lv0 = extract_coordinates(
-            wsi_path=wsi_path,
-            mask_path=mask_path,
-            backend=cfg.tiling.backend,
-            tiling_params=cfg.tiling.params,
-            segment_params=cfg.tiling.seg_params,
-            filter_params=cfg.tiling.filter_params,
-            sampling_params=sampling_params,
-            mask_visu_path=tissue_mask_visu_path,
-            disable_tqdm=disable_tqdm,
-            num_workers=num_workers,
+        coordinates, contour_indices, tile_level, resize_factor, tile_size_lv0 = (
+            extract_coordinates(
+                wsi_path=wsi_path,
+                mask_path=mask_path,
+                backend=cfg.tiling.backend,
+                tiling_params=cfg.tiling.params,
+                segment_params=cfg.tiling.seg_params,
+                filter_params=cfg.tiling.filter_params,
+                sampling_params=sampling_params,
+                mask_visu_path=tissue_mask_visu_path,
+                disable_tqdm=disable_tqdm,
+                num_workers=num_workers,
+            )
         )
         coordinates_dir = Path(cfg.output_dir, "coordinates")
         coordinates_path = Path(coordinates_dir, f"{wsi_name}.npy")
@@ -136,7 +147,9 @@ def main(args):
     if process_list.is_file() and cfg.resume:
         process_df = pd.read_csv(process_list)
         if "mask_path" not in process_df.columns:
-            process_df["mask_path"] = [str(p) if p is not None else p for p in mask_paths]
+            process_df["mask_path"] = [
+                str(p) if p is not None else p for p in mask_paths
+            ]
         else:
             process_df["mask_path"] = process_df["mask_path"].apply(
                 lambda x: str(x) if pd.notna(x) else None
@@ -154,12 +167,18 @@ def main(args):
 
     skip_tiling = process_df["tiling_status"].str.contains("success").all()
 
-    pixel_mapping = {k: v for e in cfg.tiling.sampling_params.pixel_mapping for k, v in e.items()}
-    tissue_percentage = {k: v for e in cfg.tiling.sampling_params.tissue_percentage for k, v in e.items()}
+    pixel_mapping = {
+        k: v for e in cfg.tiling.sampling_params.pixel_mapping for k, v in e.items()
+    }
+    tissue_percentage = {
+        k: v for e in cfg.tiling.sampling_params.tissue_percentage for k, v in e.items()
+    }
     if "tissue" not in tissue_percentage:
         tissue_percentage["tissue"] = cfg.tiling.params.min_tissue_percentage
     if cfg.tiling.sampling_params.color_mapping is not None:
-        color_mapping = {k: v for e in cfg.tiling.sampling_params.color_mapping for k, v in e.items()}
+        color_mapping = {
+            k: v for e in cfg.tiling.sampling_params.color_mapping for k, v in e.items()
+        }
     else:
         color_mapping = None
 
@@ -175,9 +194,7 @@ def main(args):
         process_stack = process_df[mask]
         total = len(process_stack)
 
-        wsi_paths_to_process = [
-            Path(x) for x in process_stack.wsi_path.values.tolist()
-        ]
+        wsi_paths_to_process = [Path(x) for x in process_stack.wsi_path.values.tolist()]
         mask_paths_to_process = [
             Path(x) if x is not None and not pd.isna(x) else x
             for x in process_stack.mask_path.values.tolist()
@@ -211,9 +228,7 @@ def main(args):
                     "disable_tqdm": True,
                     "num_workers": parallel_workers,
                 }
-                for wsi_fp, mask_fp in zip(
-                    wsi_paths_to_process, mask_paths_to_process
-                )
+                for wsi_fp, mask_fp in zip(wsi_paths_to_process, mask_paths_to_process)
             ]
             results = list(
                 tqdm.tqdm(
@@ -228,16 +243,16 @@ def main(args):
             tiling_updates[wsi_path] = status_info
 
         for wsi_path, status_info in tiling_updates.items():
-            process_df.loc[
-                process_df["wsi_path"] == wsi_path, "tiling_status"
-            ] = status_info["status"]
+            process_df.loc[process_df["wsi_path"] == wsi_path, "tiling_status"] = (
+                status_info["status"]
+            )
             if "error" in status_info:
-                process_df.loc[
-                    process_df["wsi_path"] == wsi_path, "error"
-                ] = status_info["error"]
-                process_df.loc[
-                    process_df["wsi_path"] == wsi_path, "traceback"
-                ] = status_info["traceback"]
+                process_df.loc[process_df["wsi_path"] == wsi_path, "error"] = (
+                    status_info["error"]
+                )
+                process_df.loc[process_df["wsi_path"] == wsi_path, "traceback"] = (
+                    status_info["traceback"]
+                )
         process_df.to_csv(process_list, index=False)
 
         # summary logging
