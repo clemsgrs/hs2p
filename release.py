@@ -86,9 +86,18 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--level", choices=["patch", "minor", "major"], default="patch", help="Version bump level")
-    parser.add_argument("--no-pr", action="store_true", help="Don't create pull request")
-    parser.add_argument("--no-draft", action="store_true", help="Don't open GitHub release page")
+    parser.add_argument(
+        "--level",
+        choices=["patch", "minor", "major"],
+        default="patch",
+        help="Version bump level",
+    )
+    parser.add_argument(
+        "--no-pr", action="store_true", help="Don't create pull request"
+    )
+    parser.add_argument(
+        "--no-draft", action="store_true", help="Don't open GitHub release page"
+    )
     args = parser.parse_args()
 
     # always start from main branch
