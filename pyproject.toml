@@ -23,7 +23,7 @@ warn_unused_configs = true
 no_implicit_reexport = true
 
 [tool.bumpver]
-current_version = "1.1.0"
+current_version = "1.1.1"
 version_pattern = "MAJOR.MINOR.PATCH"
 commit = false       # We do version bumping in CI, not as a commit
 tag = false          # Git tag already exists — we don't auto-tag
