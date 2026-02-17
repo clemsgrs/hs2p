@@ -7,6 +7,7 @@ import hashlib
 import json
 import multiprocessing as mp
 import os
+import tempfile
 import traceback
 from pathlib import Path
 
@@ -65,7 +66,7 @@ def _parse_args() -> argparse.Namespace:
         "--tolerance",
         type=float,
         required=True,
-        help="Tolerance deciding how much a natural spacing can deviate from target spacing when selecting the best level for reading (expressed as a fraction of the target spacing, e.g. 0.1 for 10%).",
+        help="Tolerance deciding how much a natural spacing can deviate from target spacing when selecting the best level for reading (expressed as a fraction of the target spacing, e.g. 0.1 for 10%%).",
     )
     parser.add_argument(
         "--downsample-per-level",
@@ -154,6 +155,32 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         default=max(1, min(4, os.cpu_count() or 1)),
         help="Number of worker processes for slide processing (default: min(4, CPU count)).",
+    )
+    parser.add_argument(
+        "--disable-coarse-roi-shortcut",
+        action="store_true",
+        help=(
+            "Disable coarse-to-fine ROI shortcut and force full-frame loading at target spacing. "
+            "By default, the shortcut is enabled."
+        ),
+    )
+    parser.add_argument(
+        "--coarse-spacing",
+        type=float,
+        default=4.0,
+        help="Spacing used for coarse ROI pre-pass in microns per pixel (default: 4.0).",
+    )
+    parser.add_argument(
+        "--coarse-roi-margin-um",
+        type=float,
+        default=64.0,
+        help="ROI expansion margin in microns in target mask coordinates (default: 64).",
+    )
+    parser.add_argument(
+        "--processing-tile-size",
+        type=int,
+        default=2048,
+        help="Tile size (pixels) for high-resolution ROI processing (default: 2048).",
     )
     return parser.parse_args()
 
@@ -284,6 +311,49 @@ def load_wsi_at_spacing(
     return wsi_arr, effective_spacing
 
 
+def _get_spacings(
+    *,
+    wsi: wsd.WholeSlideImage,
+    spacing_at_level_0: float | None,
+) -> list[float]:
+    base_spacings = list(wsi.spacings)
+    if spacing_at_level_0 is None:
+        return base_spacings
+    return [spacing_at_level_0 * sp / base_spacings[0] for sp in base_spacings]
+
+
+def _resolve_spacing_plan(
+    *,
+    wsi: wsd.WholeSlideImage,
+    target_spacing: float,
+    tolerance: float,
+    spacing_at_level_0: float | None,
+) -> tuple[int, float, float, bool]:
+    spacings = _get_spacings(wsi=wsi, spacing_at_level_0=spacing_at_level_0)
+    target_downsample = target_spacing / spacings[0]
+    level_downsamples = get_downsamples(wsi)
+    level = get_best_level_for_downsample_custom(level_downsamples, target_downsample)
+    level_spacing = spacings[level]
+
+    if abs(level_spacing - target_spacing) / target_spacing <= tolerance:
+        return level, level_spacing, level_spacing, False
+
+    while level > 0 and level_spacing > target_spacing:
+        level -= 1
+        level_spacing = spacings[level]
+        if abs(level_spacing - target_spacing) / target_spacing <= tolerance:
+            return level, level_spacing, level_spacing, False
+
+    power = int(np.ceil(np.log2(target_spacing / level_spacing)))
+    effective_spacing = level_spacing * (2**power)
+    if abs(effective_spacing - target_spacing) / target_spacing > tolerance:
+        raise ValueError(
+            f"Unable to achieve target spacing within tolerance after downsampling. Closest achievable spacing is {effective_spacing:.2f} mpp, which is {abs(effective_spacing - target_spacing) / target_spacing:.2%} away from the target spacing. Consider increasing the tolerance or adjusting the target spacing."
+        )
+
+    return level, level_spacing, effective_spacing, True
+
+
 def segment_tissue_hsv(
     wsi_arr: np.ndarray,
     lower: np.ndarray = HSV_LOWER,
@@ -358,6 +428,171 @@ def _fill_small_holes(mask: np.ndarray, max_hole_area_px: int) -> np.ndarray:
             filled[labels == label] = 1
 
     return filled
+
+
+def _extract_roi_boxes(mask: np.ndarray) -> list[tuple[int, int, int, int]]:
+    binary = (mask > 0).astype(np.uint8)
+    if binary.sum() == 0:
+        return []
+
+    num_labels, _, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+    boxes: list[tuple[int, int, int, int]] = []
+    for label in range(1, num_labels):
+        x = int(stats[label, cv2.CC_STAT_LEFT])
+        y = int(stats[label, cv2.CC_STAT_TOP])
+        w = int(stats[label, cv2.CC_STAT_WIDTH])
+        h = int(stats[label, cv2.CC_STAT_HEIGHT])
+        boxes.append((x, y, x + w, y + h))
+    return boxes
+
+
+def _boxes_intersect(
+    box_a: tuple[int, int, int, int],
+    box_b: tuple[int, int, int, int],
+) -> bool:
+    ax0, ay0, ax1, ay1 = box_a
+    bx0, by0, bx1, by1 = box_b
+    return not (ax1 <= bx0 or bx1 <= ax0 or ay1 <= by0 or by1 <= ay0)
+
+
+def _coarse_boxes_to_target_boxes(
+    *,
+    coarse_boxes: list[tuple[int, int, int, int]],
+    coarse_shape: tuple[int, int],
+    target_shape: tuple[int, int],
+    margin_px: int,
+) -> list[tuple[int, int, int, int]]:
+    coarse_h, coarse_w = coarse_shape
+    target_h, target_w = target_shape
+    if coarse_h == 0 or coarse_w == 0:
+        return []
+
+    scale_x = target_w / float(coarse_w)
+    scale_y = target_h / float(coarse_h)
+    target_boxes: list[tuple[int, int, int, int]] = []
+    for x0, y0, x1, y1 in coarse_boxes:
+        tx0 = max(0, int(np.floor(x0 * scale_x)) - margin_px)
+        ty0 = max(0, int(np.floor(y0 * scale_y)) - margin_px)
+        tx1 = min(target_w, int(np.ceil(x1 * scale_x)) + margin_px)
+        ty1 = min(target_h, int(np.ceil(y1 * scale_y)) + margin_px)
+        if tx1 > tx0 and ty1 > ty0:
+            target_boxes.append((tx0, ty0, tx1, ty1))
+    return target_boxes
+
+
+def _compute_level0_mask_with_coarse_roi_shortcut(
+    *,
+    wsi_path: Path,
+    target_spacing: float,
+    tolerance: float,
+    backend: str,
+    spacing_at_level_0: float | None,
+    coarse_spacing: float,
+    coarse_roi_margin_um: float,
+    processing_tile_size: int,
+    min_component_area_um2: float,
+    min_hole_area_um2: float,
+    gaussian_sigma_um: float,
+    open_radius_um: float,
+    close_radius_um: float,
+) -> tuple[np.ndarray, float, str]:
+    wsi = wsd.WholeSlideImage(wsi_path, backend=backend)
+    spacing_at_l0 = _get_spacings(wsi=wsi, spacing_at_level_0=spacing_at_level_0)[0]
+    level, read_spacing, effective_spacing, needs_resampling = _resolve_spacing_plan(
+        wsi=wsi,
+        target_spacing=target_spacing,
+        tolerance=tolerance,
+        spacing_at_level_0=spacing_at_level_0,
+    )
+
+    coarse_arr, coarse_effective_spacing = load_wsi_at_spacing(
+        wsi_path=wsi_path,
+        target_spacing=coarse_spacing,
+        tolerance=tolerance,
+        backend=backend,
+        spacing_at_level_0=spacing_at_level_0,
+    )
+    coarse_sigma_px = _sigma_um_to_px(gaussian_sigma_um, coarse_effective_spacing)
+    coarse_mask = segment_tissue_hsv(wsi_arr=coarse_arr, gaussian_sigma_px=coarse_sigma_px)
+    coarse_mask = postprocess_mask(
+        mask=coarse_mask,
+        spacing_um_per_px=coarse_effective_spacing,
+        min_component_area_um2=min_component_area_um2,
+        min_hole_area_um2=min_hole_area_um2,
+        open_radius_um=open_radius_um,
+        close_radius_um=close_radius_um,
+    )
+
+    level_w, level_h = wsi.shapes[level]
+    spacing_ratio = read_spacing / effective_spacing
+    target_w = max(1, int(round(level_w * spacing_ratio)))
+    target_h = max(1, int(round(level_h * spacing_ratio)))
+    target_shape = (target_h, target_w)
+    margin_px = _radius_um_to_px(coarse_roi_margin_um, effective_spacing)
+    target_boxes = _coarse_boxes_to_target_boxes(
+        coarse_boxes=_extract_roi_boxes(coarse_mask),
+        coarse_shape=coarse_mask.shape[:2],
+        target_shape=target_shape,
+        margin_px=margin_px,
+    )
+
+    tmp_file = tempfile.NamedTemporaryFile(prefix="hs2p-mask-", suffix=".mmap", delete=False)
+    tmp_path = Path(tmp_file.name)
+    tmp_file.close()
+    try:
+        mask_l0 = np.memmap(tmp_path, dtype=np.uint8, mode="w+", shape=target_shape)
+        mask_l0[:] = 0
+
+        sigma_px = _sigma_um_to_px(gaussian_sigma_um, effective_spacing)
+        halo_px = max(
+            _radius_um_to_px(open_radius_um, effective_spacing),
+            _radius_um_to_px(close_radius_um, effective_spacing),
+            int(np.ceil(3.0 * sigma_px)),
+        )
+
+        for y0 in range(0, target_shape[0], processing_tile_size):
+            y1 = min(target_shape[0], y0 + processing_tile_size)
+            for x0 in range(0, target_shape[1], processing_tile_size):
+                x1 = min(target_shape[1], x0 + processing_tile_size)
+
+                rx0 = max(0, x0 - halo_px)
+                ry0 = max(0, y0 - halo_px)
+                rx1 = min(target_shape[1], x1 + halo_px)
+                ry1 = min(target_shape[0], y1 + halo_px)
+
+                rx0_l0 = int(round(rx0 * (effective_spacing / spacing_at_l0)))
+                ry0_l0 = int(round(ry0 * (effective_spacing / spacing_at_l0)))
+
+                tile = wsi.get_patch(
+                    rx0_l0,
+                    ry0_l0,
+                    rx1 - rx0,
+                    ry1 - ry0,
+                    spacing=effective_spacing,
+                    center=False,
+                )
+                tile_mask = segment_tissue_hsv(wsi_arr=tile, gaussian_sigma_px=sigma_px)
+
+                crop_x0 = x0 - rx0
+                crop_y0 = y0 - ry0
+                crop_x1 = crop_x0 + (x1 - x0)
+                crop_y1 = crop_y0 + (y1 - y0)
+                mask_l0[y0:y1, x0:x1] = tile_mask[crop_y0:crop_y1, crop_x0:crop_x1]
+
+        mask_l0 = postprocess_mask(
+            mask=np.asarray(mask_l0),
+            spacing_um_per_px=effective_spacing,
+            min_component_area_um2=min_component_area_um2,
+            min_hole_area_um2=min_hole_area_um2,
+            open_radius_um=open_radius_um,
+            close_radius_um=close_radius_um,
+        )
+
+        mode = "coarse-roi-resampled" if needs_resampling else "coarse-roi"
+        return np.asarray(mask_l0), effective_spacing, mode
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
 
 
 def postprocess_mask(
@@ -543,6 +778,10 @@ def build_command_signature(
     gaussian_sigma_um: float,
     open_radius_um: float,
     close_radius_um: float,
+    disable_coarse_roi_shortcut: bool,
+    coarse_spacing: float,
+    coarse_roi_margin_um: float,
+    processing_tile_size: int,
     compression: str,
     tile_size: int,
     min_size: int | None,
@@ -559,6 +798,10 @@ def build_command_signature(
         "gaussian_sigma_um": gaussian_sigma_um,
         "open_radius_um": open_radius_um,
         "close_radius_um": close_radius_um,
+        "disable_coarse_roi_shortcut": disable_coarse_roi_shortcut,
+        "coarse_spacing": coarse_spacing,
+        "coarse_roi_margin_um": coarse_roi_margin_um,
+        "processing_tile_size": processing_tile_size,
         "compression": compression,
         "tile_size": tile_size,
         "min_size": min_size,
@@ -656,23 +899,42 @@ def _process_slide_job(job: dict[str, object]) -> dict[str, object]:
     downsample_per_level = float(job["downsample_per_level"])
 
     try:
-        wsi_arr, effective_spacing = load_wsi_at_spacing(
-            wsi_path=input_wsi,
-            target_spacing=float(job["spacing"]),
-            tolerance=float(job["tolerance"]),
-            backend=str(job["backend"]),
-            spacing_at_level_0=job["spacing_at_level_0"],
-        )
-        gaussian_sigma_px = _sigma_um_to_px(float(job["gaussian_sigma_um"]), effective_spacing)
-        mask_l0 = segment_tissue_hsv(wsi_arr=wsi_arr, gaussian_sigma_px=gaussian_sigma_px)
-        mask_l0 = postprocess_mask(
-            mask=mask_l0,
-            spacing_um_per_px=effective_spacing,
-            min_component_area_um2=float(job["min_component_area_um2"]),
-            min_hole_area_um2=float(job["min_hole_area_um2"]),
-            open_radius_um=float(job["open_radius_um"]),
-            close_radius_um=float(job["close_radius_um"]),
-        )
+        if bool(job.get("disable_coarse_roi_shortcut", False)):
+            wsi_arr, effective_spacing = load_wsi_at_spacing(
+                wsi_path=input_wsi,
+                target_spacing=float(job["spacing"]),
+                tolerance=float(job["tolerance"]),
+                backend=str(job["backend"]),
+                spacing_at_level_0=job["spacing_at_level_0"],
+            )
+            gaussian_sigma_px = _sigma_um_to_px(float(job["gaussian_sigma_um"]), effective_spacing)
+            mask_l0 = segment_tissue_hsv(wsi_arr=wsi_arr, gaussian_sigma_px=gaussian_sigma_px)
+            mask_l0 = postprocess_mask(
+                mask=mask_l0,
+                spacing_um_per_px=effective_spacing,
+                min_component_area_um2=float(job["min_component_area_um2"]),
+                min_hole_area_um2=float(job["min_hole_area_um2"]),
+                open_radius_um=float(job["open_radius_um"]),
+                close_radius_um=float(job["close_radius_um"]),
+            )
+            processing_mode = "full"
+        else:
+            mask_l0, effective_spacing, processing_mode = _compute_level0_mask_with_coarse_roi_shortcut(
+                wsi_path=input_wsi,
+                target_spacing=float(job["spacing"]),
+                tolerance=float(job["tolerance"]),
+                backend=str(job["backend"]),
+                spacing_at_level_0=job["spacing_at_level_0"],
+                coarse_spacing=float(job["coarse_spacing"]),
+                coarse_roi_margin_um=float(job["coarse_roi_margin_um"]),
+                processing_tile_size=int(job["processing_tile_size"]),
+                min_component_area_um2=float(job["min_component_area_um2"]),
+                min_hole_area_um2=float(job["min_hole_area_um2"]),
+                gaussian_sigma_um=float(job["gaussian_sigma_um"]),
+                open_radius_um=float(job["open_radius_um"]),
+                close_radius_um=float(job["close_radius_um"]),
+            )
+
         resolved_min_size = job["min_size"] if job["min_size"] is not None else int(job["tile_size"])
         levels = build_mask_pyramid(
             level0_mask=mask_l0,
@@ -716,6 +978,7 @@ def _process_slide_job(job: dict[str, object]) -> dict[str, object]:
                 "output_fingerprint": get_file_fingerprint(output_path),
             },
             "level_info": level_info,
+            "processing_mode": processing_mode,
         }
     except Exception:
         return {
@@ -727,6 +990,7 @@ def _process_slide_job(job: dict[str, object]) -> dict[str, object]:
             "cache_key": str(input_wsi.resolve()),
             "cache_entry": None,
             "level_info": [],
+            "processing_mode": "failed",
         }
 
 
@@ -751,6 +1015,10 @@ def process_slides(
     gaussian_sigma_um: float = 0.0,
     open_radius_um: float = 0.0,
     close_radius_um: float = 0.0,
+    disable_coarse_roi_shortcut: bool = False,
+    coarse_spacing: float = 4.0,
+    coarse_roi_margin_um: float = 64.0,
+    processing_tile_size: int = 2048,
 ) -> list[dict[str, str]]:
     results: list[dict[str, str]] = []
     cache_manifest = load_cache_manifest(cache_manifest_path) if not no_cache else {
@@ -813,6 +1081,10 @@ def process_slides(
                 "gaussian_sigma_um": gaussian_sigma_um,
                 "open_radius_um": open_radius_um,
                 "close_radius_um": close_radius_um,
+                "disable_coarse_roi_shortcut": disable_coarse_roi_shortcut,
+                "coarse_spacing": coarse_spacing,
+                "coarse_roi_margin_um": coarse_roi_margin_um,
+                "processing_tile_size": processing_tile_size,
             }
         )
 
@@ -831,6 +1103,8 @@ def process_slides(
             if verbose:
                 print(f"[{index}/{len(output_mapping)}] {slide_path}")
                 level_info = result.get("level_info", [])
+                processing_mode = result.get("processing_mode", "unknown")
+                print(f"Processing mode: {processing_mode}")
                 if isinstance(level_info, list):
                     print(f"Generated mask pyramid with {len(level_info)} level(s):")
                     for info in level_info:
@@ -915,6 +1189,12 @@ def main() -> None:
         raise ValueError("min-hole-area-um2 must be >= 0")
     if args.gaussian_sigma_um < 0:
         raise ValueError("gaussian-sigma-um must be >= 0")
+    if args.coarse_spacing <= 0:
+        raise ValueError("coarse-spacing must be > 0")
+    if args.coarse_roi_margin_um < 0:
+        raise ValueError("coarse-roi-margin-um must be >= 0")
+    if args.processing_tile_size < 1:
+        raise ValueError("processing-tile-size must be >= 1")
     if args.open_radius_um < 0:
         raise ValueError("open-radius-um must be >= 0")
     if args.close_radius_um < 0:
@@ -937,6 +1217,10 @@ def main() -> None:
         gaussian_sigma_um=args.gaussian_sigma_um,
         open_radius_um=args.open_radius_um,
         close_radius_um=args.close_radius_um,
+        disable_coarse_roi_shortcut=args.disable_coarse_roi_shortcut,
+        coarse_spacing=args.coarse_spacing,
+        coarse_roi_margin_um=args.coarse_roi_margin_um,
+        processing_tile_size=args.processing_tile_size,
         compression=args.compression,
         tile_size=args.tile_size,
         min_size=args.min_size,
@@ -963,6 +1247,10 @@ def main() -> None:
         gaussian_sigma_um=args.gaussian_sigma_um,
         open_radius_um=args.open_radius_um,
         close_radius_um=args.close_radius_um,
+        disable_coarse_roi_shortcut=args.disable_coarse_roi_shortcut,
+        coarse_spacing=args.coarse_spacing,
+        coarse_roi_margin_um=args.coarse_roi_margin_um,
+        processing_tile_size=args.processing_tile_size,
     )
 
     summary_csv_path = get_summary_csv_path(output_path=args.output, output_dir=args.output_dir)

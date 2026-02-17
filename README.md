@@ -139,6 +139,7 @@ python scripts/generate_tissue_mask.py \
 This script:
 - reads the WSI with `wholeslidedata`
 - computes a binary tissue mask using HSV thresholding (`0=background`, `1=tissue`)
+- uses a coarse-to-fine ROI shortcut by default to avoid loading the full target-spacing WSI into memory
 - writes a pyramidal TIFF mask at a desired `spacing`, where each level is downsampled from the previous one
 - prints a final recap of how many slides succeeded, skipped, and failed
 
@@ -147,6 +148,8 @@ Useful options:
 - `--output` for single-slide mode and `--output-dir` for multi-slide mode
 - `--num-workers` to control parallelism
 - `--no-cache` to disable cache-based skipping and force recomputation
+- `--disable-coarse-roi-shortcut` to force legacy full-frame loading at target spacing
+- `--coarse-spacing`, `--coarse-roi-margin-um`, and `--processing-tile-size` to tune coarse-to-fine ROI processing
 - `--tolerance` to control how much a natural spacing can deviate from target spacing when selecting the best level for reading the whole slide
 - `--min-component-area-um2` to remove tiny tissue blobs
 - `--min-hole-area-um2` to fill small holes inside tissue

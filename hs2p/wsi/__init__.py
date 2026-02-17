@@ -255,7 +255,7 @@ def filter_coordinates(
                 if mask_pct >= pct:
                     filtered_coordinates[annotation].append(coord)
                     filtered_contour_indices[annotation].append(contour_idx)
-    return filtered_coordinates, filtered_contour_indices     
+    return filtered_coordinates, filtered_contour_indices
 
 
 def save_coordinates(
@@ -382,7 +382,7 @@ def overlay_mask_on_slide(
         mask_spacing = mask_object.spacings[mask_level]
         mask_width, _ = mask_object.level_dimensions[mask_level]
         scale = mask_width / width
-    
+
     mask_arr = mask_object.get_slide(spacing=mask_spacing)
     mask_arr = mask_arr[:, :, 0]
     mask_height, mask_width = mask_arr.shape
@@ -538,7 +538,7 @@ def draw_grid_from_coordinates(
 
                 # paste the valid part into the white tile
                 tile[:valid_height, :valid_width, :] = overlayed_tile
-            
+
             else:
                 valid_tile = np.array(valid_tile)
                 # paste the valid part into the white tile
