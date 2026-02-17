@@ -6,4 +6,4 @@ from hs2p.wsi import (
     visualize_coordinates,
 )
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
