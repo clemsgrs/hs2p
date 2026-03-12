@@ -52,8 +52,10 @@ from hs2p import (
     SegmentationConfig,
     TilingConfig,
     WholeSlide,
-    tile_slide,
+    overlay_mask_on_slide,
     save_tiling_result,
+    tile_slide,
+    write_tiling_preview,
 )
 
 result = tile_slide(
@@ -76,13 +78,26 @@ result = tile_slide(
 )
 
 artifacts = save_tiling_result(result, output_dir=Path("output"))
+tiling_preview_path = write_tiling_preview(
+    result=result,
+    output_dir=Path("output"),
+    downsample=32,
+)
+
+mask_overlay = overlay_mask_on_slide(
+    wsi_path=result.image_path,
+    annotation_mask_path=Path("/data/mask/slide-1.tif"),
+    downsample=32,
+    backend=result.backend,
+)
+mask_overlay.save("output/visualization/mask/slide-1.jpg")
+
 print(artifacts.tiles_npz_path)
 print(artifacts.tiles_meta_path)
+print(tiling_preview_path)
 ```
 
 `result` is a [`TilingResult`](hs2p/api.py#L144) for one slide. It gives downstream pipelines the tile coordinates plus the metadata needed to relate those coordinates back to the slide pyramid and persist them as reusable named artifacts.
-
-`tile_slide()` is compute-only. If you want standalone preview images in a single-slide workflow, use `write_tiling_preview()` for tile overlays or `overlay_mask_on_slide()` for mask overlays. Batch mask previews use the same overlay style, with tissue shown in green and background hidden.
 
 More API details: [docs/api.md](docs/api.md)
 

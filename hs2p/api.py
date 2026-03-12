@@ -626,9 +626,9 @@ def overlay_mask_on_slide(
     annotation_mask_path: Path | None,
     downsample: int,
     backend: str,
-    palette: np.ndarray,
-    pixel_mapping: dict[str, int],
-    color_mapping: dict[str, list[int] | None],
+    palette: np.ndarray | None = None,
+    pixel_mapping: dict[str, int] | None = None,
+    color_mapping: dict[str, list[int] | None] | None = None,
     alpha: float = 0.5,
     mask_arr: np.ndarray | None = None,
 ):

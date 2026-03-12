@@ -128,6 +128,27 @@ def _build_palette(
     return palette
 
 
+def _resolve_overlay_style(
+    *,
+    palette: np.ndarray | None,
+    pixel_mapping: dict[str, int] | None,
+    color_mapping: dict[str, list[int] | None] | None,
+) -> tuple[np.ndarray, dict[str, int], dict[str, list[int] | None]]:
+    if palette is None and pixel_mapping is None and color_mapping is None:
+        pixel_mapping = DEFAULT_TISSUE_PIXEL_MAPPING
+        color_mapping = DEFAULT_TISSUE_COLOR_MAPPING
+        palette = _build_palette(
+            pixel_mapping=pixel_mapping,
+            color_mapping=color_mapping,
+        )
+        return palette, pixel_mapping, color_mapping
+    if palette is None or pixel_mapping is None or color_mapping is None:
+        raise ValueError(
+            "Provide either all of palette, pixel_mapping, and color_mapping, or none of them"
+        )
+    return palette, pixel_mapping, color_mapping
+
+
 def _normalize_tissue_mask(mask_arr: np.ndarray) -> np.ndarray:
     if mask_arr.ndim == 3:
         mask_arr = mask_arr[:, :, 0]
@@ -149,12 +170,6 @@ def _save_tissue_overlay_preview(
         mask_arr=_normalize_tissue_mask(tissue_mask),
         downsample=downsample,
         backend=backend,
-        palette=_build_palette(
-            pixel_mapping=DEFAULT_TISSUE_PIXEL_MAPPING,
-            color_mapping=DEFAULT_TISSUE_COLOR_MAPPING,
-        ),
-        pixel_mapping=DEFAULT_TISSUE_PIXEL_MAPPING,
-        color_mapping=DEFAULT_TISSUE_COLOR_MAPPING,
     )
     overlay.save(mask_visu_path)
 
@@ -434,15 +449,21 @@ def overlay_mask_on_slide(
     annotation_mask_path: Path | None,
     downsample: int,
     backend: str,
-    palette: np.ndarray,
-    pixel_mapping: dict[str, int],
-    color_mapping: dict[str, list[int] | None],
+    palette: np.ndarray | None = None,
+    pixel_mapping: dict[str, int] | None = None,
+    color_mapping: dict[str, list[int] | None] | None = None,
     alpha: float = 0.5,
     mask_arr: np.ndarray | None = None,
 ):
     """
     Show a mask overlayed on a slide
     """
+
+    palette, pixel_mapping, color_mapping = _resolve_overlay_style(
+        palette=palette,
+        pixel_mapping=pixel_mapping,
+        color_mapping=color_mapping,
+    )
 
     wsi_object = WholeSlideImage(path=wsi_path, backend=backend)
 

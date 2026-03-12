@@ -110,9 +110,6 @@ mask_overlay = overlay_mask_on_slide(
     annotation_mask_path=Path("/data/slide-1-mask.tif"),
     downsample=32,
     backend=result.backend,
-    palette=palette,
-    pixel_mapping=pixel_mapping,
-    color_mapping=color_mapping,
 )
 mask_overlay.save("output/visualization/mask/slide-1.jpg")
 ```
