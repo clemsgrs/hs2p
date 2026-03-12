@@ -10,7 +10,7 @@ from typing import Any, Sequence
 import numpy as np
 import pandas as pd
 
-from hs2p.wsi import extract_coordinates, visualize_coordinates
+from hs2p.wsi import SamplingParameters, extract_coordinates, visualize_coordinates
 
 
 @dataclass(frozen=True)
@@ -128,6 +128,14 @@ def _validate_result_consistency(result: TilingResult) -> None:
         raise ValueError("tile_index must be a contiguous range from 0 to num_tiles-1")
 
 
+def _build_default_sampling_params(tiling: TilingConfig) -> SamplingParameters:
+    return SamplingParameters(
+        pixel_mapping={"background": 0, "tissue": 1},
+        color_mapping={"background": None, "tissue": None},
+        tissue_percentage={"background": None, "tissue": tiling.tissue_threshold},
+    )
+
+
 def _compute_tiling_result(
     whole_slide: WholeSlide,
     *,
@@ -137,6 +145,9 @@ def _compute_tiling_result(
     mask_visu_path: Path | None,
     num_workers: int,
 ) -> TilingResult:
+    sampling_params = None
+    if whole_slide.mask_path is not None:
+        sampling_params = _build_default_sampling_params(tiling)
     extraction = extract_coordinates(
         wsi_path=whole_slide.image_path,
         mask_path=whole_slide.mask_path,
@@ -144,7 +155,7 @@ def _compute_tiling_result(
         segment_params=segmentation,
         tiling_params=tiling,
         filter_params=filtering,
-        sampling_params=None,
+        sampling_params=sampling_params,
         mask_visu_path=mask_visu_path,
         disable_tqdm=True,
         num_workers=num_workers,

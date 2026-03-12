@@ -83,6 +83,38 @@ def _fake_extraction() -> CoordinateExtractionResult:
     )
 
 
+def test_tile_slide_builds_default_sampling_params_for_masked_slides(
+    monkeypatch, tiling_config, segmentation_config, filter_config
+):
+    captured = {}
+
+    def _fake_extract_coordinates(**kwargs):
+        captured["sampling_params"] = kwargs["sampling_params"]
+        return _fake_extraction()
+
+    monkeypatch.setattr("hs2p.api.extract_coordinates", _fake_extract_coordinates)
+
+    tile_slide(
+        WholeSlide(
+            sample_id="slide-with-mask",
+            image_path=Path("slide.svs"),
+            mask_path=Path("slide-mask.png"),
+        ),
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+    )
+
+    sampling_params = captured["sampling_params"]
+    assert sampling_params is not None
+    assert sampling_params.pixel_mapping == {"background": 0, "tissue": 1}
+    assert sampling_params.color_mapping == {"background": None, "tissue": None}
+    assert sampling_params.tissue_percentage == {
+        "background": None,
+        "tissue": tiling_config.tissue_threshold,
+    }
+
+
 def test_tile_slide_returns_named_arrays(monkeypatch, tiling_config, segmentation_config, filter_config):
     monkeypatch.setattr("hs2p.api.extract_coordinates", lambda **_: _fake_extraction())
 
