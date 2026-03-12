@@ -2,6 +2,7 @@ from hs2p.api import (
     FilterConfig,
     QCConfig,
     SegmentationConfig,
+    SlideSpec,
     TilingArtifacts,
     TilingConfig,
     TilingResult,

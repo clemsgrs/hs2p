@@ -2,7 +2,7 @@
 
 The Python API is the primary interface when you want to call `hs2p` from your own code instead of driving it through the CLI. It supports:
 
-- explicit slide objects through `WholeSlide`
+- explicit slide objects through `SlideSpec`
 - extraction at any requested spacing, whether or not that spacing exists natively in the slide pyramid
 - direct in-memory results through `TilingResult`
 - reusable persisted artifacts through `save_tiling_result()` / `load_tiling_result()`
@@ -13,7 +13,7 @@ The config dataclasses keep the main knobs explicit and fill secondary options f
 
 ## Main types
 
-- `WholeSlide`
+- `SlideSpec`
   - Identifies one sample through `sample_id`, `image_path`, and optional `mask_path`
   - If `mask_path` is omitted, HS2P can segment tissue directly from the slide
 - `TilingConfig`
@@ -42,14 +42,14 @@ from pathlib import Path
 from hs2p import (
     FilterConfig,
     SegmentationConfig,
+    SlideSpec,
     TilingConfig,
-    WholeSlide,
     save_tiling_result,
     tile_slide,
 )
 
 result = tile_slide(
-    WholeSlide(
+    SlideSpec(
         sample_id="slide-1",
         image_path=Path("/data/slide-1.tif"),
         mask_path=Path("/data/slide-1-mask.tif"),
@@ -125,18 +125,18 @@ from hs2p import (
     FilterConfig,
     QCConfig,
     SegmentationConfig,
+    SlideSpec,
     TilingConfig,
-    WholeSlide,
     tile_slides,
 )
 
 slides = [
-    WholeSlide(
+    SlideSpec(
         sample_id="slide-1",
         image_path=Path("/data/slide-1.tif"),
         mask_path=Path("/data/slide-1-mask.tif"),
     ),
-    WholeSlide(
+    SlideSpec(
         sample_id="slide-2",
         image_path=Path("/data/slide-2.tif"),
     ),

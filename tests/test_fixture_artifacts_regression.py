@@ -9,8 +9,8 @@ import pytest
 from hs2p.api import (
     FilterConfig,
     SegmentationConfig,
+    SlideSpec,
     TilingConfig,
-    WholeSlide,
     save_tiling_result,
     tile_slide,
 )
@@ -68,7 +68,7 @@ def _run_and_save_tiles(*, wsi_path: Path, mask_path: Path, backend: str, tissue
         tissue_pct=tissue_pct,
     )
     result = tile_slide(
-        WholeSlide(sample_id="test-wsi", image_path=wsi_path, mask_path=mask_path),
+        SlideSpec(sample_id="test-wsi", image_path=wsi_path, mask_path=mask_path),
         tiling=tiling,
         segmentation=segmentation,
         filtering=filtering,

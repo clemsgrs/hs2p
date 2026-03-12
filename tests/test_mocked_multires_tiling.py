@@ -81,7 +81,7 @@ def test_extract_coordinates_returns_exact_coordinates_for_rectangular_tissue(fa
         num_workers=1,
     )
 
-    assert result.coordinates == [(16, 16), (16, 8), (8, 16), (8, 8)]
+    assert result.coordinates == [(8, 8), (8, 16), (16, 8), (16, 16)]
     assert result.contour_indices == [0, 0, 0, 0]
     assert result.read_level == 0
     assert result.resize_factor == 1.0
@@ -119,8 +119,8 @@ def test_extract_coordinates_respects_50_vs_51_percent_tissue_threshold(fake_bac
         num_workers=1,
     )
 
-    assert result_50.coordinates == [(16, 16), (16, 8), (8, 16), (8, 8)]
-    assert result_51.coordinates == [(8, 16), (8, 8)]
+    assert result_50.coordinates == [(8, 8), (8, 16), (16, 8), (16, 16)]
+    assert result_51.coordinates == [(8, 8), (8, 16)]
     assert len(result_51.coordinates) < len(result_50.coordinates)
 
 
@@ -131,13 +131,13 @@ def test_extract_coordinates_match_expected_coordinates_across_spacings(fake_bac
 
     expected = {
         1.0: {
-            "coordinates": [(16, 16), (16, 8), (8, 16), (8, 8)],
+            "coordinates": [(8, 8), (8, 16), (16, 8), (16, 16)],
             "tile_level": 0,
             "resize_factor": 1.0,
             "tile_size_lv0": 8,
         },
         1.5: {
-            "coordinates": [(20, 20), (20, 8), (8, 20), (8, 8)],
+            "coordinates": [(8, 8), (8, 20), (20, 8), (20, 20)],
             "tile_level": 0,
             "resize_factor": 1.5,
             "tile_size_lv0": 12,
@@ -214,3 +214,61 @@ def test_extract_coordinates_segments_maskless_slides_without_annotation_pct_cra
 
     assert len(result.coordinates) > 0
     assert len(result.coordinates) == len(result.tissue_percentages)
+
+
+def test_extract_coordinates_returns_zero_tile_result_for_tissue_free_maskless_slide(monkeypatch):
+    slide_l0 = np.full((32, 32, 3), 255, dtype=np.uint8)
+    slide_l1 = slide_l0[::2, ::2, :]
+
+    def _fake_wholeslide(path: Path, backend: str = "asap"):
+        del path, backend
+        return FakePyramidWSI(PyramidSpec(spacings=[1.0, 2.0], levels=[slide_l0, slide_l1]))
+
+    monkeypatch.setattr(wsimod.wsd, "WholeSlideImage", _fake_wholeslide)
+
+    result = wsi_api.extract_coordinates(
+        wsi_path=Path("empty-slide.tif"),
+        mask_path=None,
+        backend="asap",
+        segment_params=_segmentation_config(),
+        tiling_params=_tiling_config(tissue_threshold=0.01),
+        filter_params=_filter_config(),
+        disable_tqdm=True,
+        num_workers=1,
+    )
+
+    assert result.coordinates == []
+    assert result.contour_indices == []
+    assert result.tissue_percentages == []
+    assert result.read_level == 0
+    assert result.read_spacing_um == 1.0
+    assert result.read_tile_size_px == 8
+    assert result.resize_factor == 1.0
+    assert result.tile_size_lv0 == 8
+
+
+def test_sample_coordinates_returns_zero_tile_result_for_tissue_free_annotation(fake_backend):
+    mask_l0 = np.zeros((16, 16, 1), dtype=np.uint8)
+    fake_backend(mask_l0)
+
+    result = wsi_api.sample_coordinates(
+        wsi_path=Path("synthetic-slide.tif"),
+        mask_path=Path("synthetic-mask.tif"),
+        backend="asap",
+        segment_params=_segmentation_config(),
+        tiling_params=_tiling_config(tissue_threshold=0.01),
+        filter_params=_filter_config(),
+        sampling_params=_sampling_parameters(tissue_threshold=0.01),
+        annotation="tissue",
+        disable_tqdm=True,
+        num_workers=1,
+    )
+
+    assert result.coordinates == []
+    assert result.contour_indices == []
+    assert result.tissue_percentages == []
+    assert result.read_level == 0
+    assert result.read_spacing_um == 1.0
+    assert result.read_tile_size_px == 8
+    assert result.resize_factor == 1.0
+    assert result.tile_size_lv0 == 8

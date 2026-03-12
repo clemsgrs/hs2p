@@ -33,3 +33,40 @@ def test_precomputed_mask_subtracts_all_holes():
     assert mask[5, 5] == 0
     assert mask[13, 13] == 0
     assert mask[9, 9] == 1
+
+
+def test_check_coordinates_returns_vectorized_outputs_with_expected_coverages():
+    contour = _rect(0, 0, 7, 7)
+    holes = []
+    tissue_mask = np.zeros((8, 8), dtype=np.uint8)
+    tissue_mask[:4, :4] = 255
+    tissue_mask[4:, :4] = 255
+
+    checker = utils_mod.HasEnoughTissue(
+        contour=contour,
+        contour_holes=holes,
+        tissue_mask=tissue_mask,
+        target_tile_size=4,
+        tile_spacing=1.0,
+        resize_factor=1.0,
+        seg_spacing=1.0,
+        spacing_at_level_0=1.0,
+        pct=0.5,
+    )
+
+    keep_flags, tissue_pcts = checker.check_coordinates(
+        np.array(
+            [
+                [0, 0],
+                [4, 0],
+                [0, 4],
+                [4, 4],
+            ],
+            dtype=np.int64,
+        )
+    )
+
+    assert isinstance(keep_flags, np.ndarray)
+    assert isinstance(tissue_pcts, np.ndarray)
+    np.testing.assert_array_equal(keep_flags, np.array([1, 0, 1, 0], dtype=np.uint8))
+    np.testing.assert_allclose(tissue_pcts, np.array([1.0, 0.0, 1.0, 0.0], dtype=np.float32))

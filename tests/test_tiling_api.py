@@ -13,10 +13,10 @@ from hs2p.api import (
     FilterConfig,
     QCConfig,
     SegmentationConfig,
+    SlideSpec,
     TilingArtifacts,
     TilingConfig,
     TilingResult,
-    WholeSlide,
     compute_config_hash,
     load_tiling_result,
     load_whole_slides_from_rows,
@@ -129,7 +129,7 @@ def test_tile_slide_builds_default_sampling_params_for_masked_slides(
     monkeypatch.setattr("hs2p.api.extract_coordinates", _fake_extract_coordinates)
 
     tile_slide(
-        WholeSlide(
+        SlideSpec(
             sample_id="slide-with-mask",
             image_path=Path("slide.svs"),
             mask_path=Path("slide-mask.png"),
@@ -153,7 +153,7 @@ def test_tile_slide_returns_named_arrays(monkeypatch, tiling_config, segmentatio
     monkeypatch.setattr("hs2p.api.extract_coordinates", lambda **_: _fake_extraction())
 
     result = tile_slide(
-        WholeSlide(
+        SlideSpec(
             sample_id="slide-1",
             image_path=Path("slide-1.svs"),
             mask_path=Path("slide-1-mask.png"),
@@ -201,7 +201,7 @@ def test_tile_slide_warns_when_preview_qc_is_requested(
         match="write_tiling_preview\\(\\).*overlay_mask_on_slide\\(\\)",
     ):
         tile_slide(
-            WholeSlide(sample_id="slide-qc", image_path=Path("slide-qc.svs")),
+            SlideSpec(sample_id="slide-qc", image_path=Path("slide-qc.svs")),
             tiling=tiling_config,
             segmentation=segmentation_config,
             filtering=filter_config,
@@ -371,6 +371,181 @@ def test_write_tiling_preview_writes_expected_preview(monkeypatch, tmp_path: Pat
     assert preview_path.is_file()
 
 
+def test_tile_slides_defers_preview_writes_until_after_next_slide_compute(
+    monkeypatch,
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    events: list[str] = []
+
+    def _fake_compute_tiling_result(
+        whole_slide,
+        *,
+        tiling,
+        segmentation,
+        filtering,
+        mask_visu_path,
+        num_workers,
+        config_hash=None,
+    ):
+        del tiling, segmentation, filtering, mask_visu_path, num_workers, config_hash
+        events.append(f"compute:{whole_slide.sample_id}")
+        return _build_result(
+            sample_id=whole_slide.sample_id,
+            image_path=str(whole_slide.image_path),
+            config_hash="hash",
+        )
+
+    def _fake_save_tiling_result(result, output_dir, coordinates_dir=None):
+        del coordinates_dir
+        coordinates_dir = Path(output_dir) / "coordinates"
+        coordinates_dir.mkdir(parents=True, exist_ok=True)
+        npz_path = coordinates_dir / f"{result.sample_id}.tiles.npz"
+        meta_path = coordinates_dir / f"{result.sample_id}.tiles.meta.json"
+        npz_path.write_bytes(b"npz")
+        meta_path.write_text("{}")
+        return TilingArtifacts(
+            sample_id=result.sample_id,
+            tiles_npz_path=npz_path,
+            tiles_meta_path=meta_path,
+            num_tiles=result.num_tiles,
+        )
+
+    def _fake_write_tiling_preview(*, result, output_dir, downsample):
+        del downsample
+        events.append(f"preview:{result.sample_id}")
+        save_dir = Path(output_dir) / "visualization" / "tiling"
+        save_dir.mkdir(parents=True, exist_ok=True)
+        path = save_dir / f"{result.sample_id}.jpg"
+        path.write_bytes(b"preview")
+        return path
+
+    class _FakeFuture:
+        def __init__(self, fn, kwargs):
+            self._fn = fn
+            self._kwargs = kwargs
+
+        def result(self):
+            return self._fn(**self._kwargs)
+
+    class _FakeThreadPoolExecutor:
+        def __init__(self, max_workers):
+            assert max_workers == 1
+
+        def submit(self, fn, **kwargs):
+            return _FakeFuture(fn, kwargs)
+
+        def shutdown(self, wait=True):
+            return None
+
+    monkeypatch.setattr("hs2p.api._compute_tiling_result", _fake_compute_tiling_result)
+    monkeypatch.setattr("hs2p.api.save_tiling_result", _fake_save_tiling_result)
+    monkeypatch.setattr("hs2p.api.write_tiling_preview", _fake_write_tiling_preview)
+    monkeypatch.setattr("hs2p.api.ThreadPoolExecutor", _FakeThreadPoolExecutor)
+
+    artifacts = tile_slides(
+        [
+            SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs")),
+            SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
+        ],
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        qc=QCConfig(save_tiling_preview=True),
+        output_dir=tmp_path,
+    )
+
+    assert [artifact.sample_id for artifact in artifacts] == ["slide-1", "slide-2"]
+    assert events == [
+        "compute:slide-1",
+        "compute:slide-2",
+        "preview:slide-1",
+        "preview:slide-2",
+    ]
+
+
+def test_tile_slides_uses_slide_level_pool_and_preserves_input_order(
+    monkeypatch,
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    seen = {"pool_processes": None, "inner_workers": []}
+
+    def _fake_compute_tiling_result(
+        whole_slide,
+        *,
+        tiling,
+        segmentation,
+        filtering,
+        mask_visu_path,
+        num_workers,
+        config_hash=None,
+    ):
+        del tiling, segmentation, filtering, mask_visu_path, config_hash
+        seen["inner_workers"].append(num_workers)
+        return _build_result(
+            sample_id=whole_slide.sample_id,
+            image_path=str(whole_slide.image_path),
+            config_hash="hash",
+        )
+
+    def _fake_save_tiling_result(result, output_dir, coordinates_dir=None):
+        del coordinates_dir
+        coordinates_dir = Path(output_dir) / "coordinates"
+        coordinates_dir.mkdir(parents=True, exist_ok=True)
+        npz_path = coordinates_dir / f"{result.sample_id}.tiles.npz"
+        meta_path = coordinates_dir / f"{result.sample_id}.tiles.meta.json"
+        npz_path.write_bytes(b"npz")
+        meta_path.write_text("{}")
+        return TilingArtifacts(
+            sample_id=result.sample_id,
+            tiles_npz_path=npz_path,
+            tiles_meta_path=meta_path,
+            num_tiles=result.num_tiles,
+        )
+
+    class _FakePool:
+        def __init__(self, processes):
+            seen["pool_processes"] = processes
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def imap(self, fn, args_list):
+            for args in args_list:
+                yield fn(args)
+
+    monkeypatch.setattr("hs2p.api._compute_tiling_result", _fake_compute_tiling_result)
+    monkeypatch.setattr("hs2p.api.save_tiling_result", _fake_save_tiling_result)
+    monkeypatch.setattr("hs2p.api.mp.Pool", _FakePool)
+
+    artifacts = tile_slides(
+        [
+            SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs")),
+            SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
+            SlideSpec(sample_id="slide-3", image_path=Path("slide-3.svs")),
+        ],
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        output_dir=tmp_path,
+        num_workers=2,
+    )
+
+    assert seen["pool_processes"] == 2
+    assert seen["inner_workers"] == [1, 1, 1]
+    assert [artifact.sample_id for artifact in artifacts] == ["slide-1", "slide-2", "slide-3"]
+    process_df = pd.read_csv(tmp_path / "process_list.csv")
+    assert process_df["sample_id"].tolist() == ["slide-1", "slide-2", "slide-3"]
+
+
 def test_save_tiling_result_rejects_invalid_tile_index(tmp_path: Path):
     invalid = TilingResult(
         sample_id="broken-slide",
@@ -444,7 +619,7 @@ def test_tile_slide_rejects_tissue_fraction_shape_mismatch(
 
     with pytest.raises(ValueError, match="tissue_percentages length mismatch"):
         tile_slide(
-            WholeSlide(sample_id="slide-bad-tissue", image_path=Path("slide.svs")),
+            SlideSpec(sample_id="slide-bad-tissue", image_path=Path("slide.svs")),
             tiling=tiling_config,
             segmentation=segmentation_config,
             filtering=filter_config,
@@ -457,7 +632,7 @@ def test_validate_tiling_artifacts_rejects_mismatched_hash(tmp_path: Path):
 
     with pytest.raises(ValueError, match="config_hash"):
         validate_tiling_artifacts(
-            whole_slide=WholeSlide(sample_id="slide-3", image_path=Path("slide-3.svs")),
+            whole_slide=SlideSpec(sample_id="slide-3", image_path=Path("slide-3.svs")),
             tiles_npz_path=artifacts.tiles_npz_path,
             tiles_meta_path=artifacts.tiles_meta_path,
             expected_config_hash="different-hash",
@@ -470,7 +645,7 @@ def test_validate_tiling_artifacts_rejects_mismatched_image_path(tmp_path: Path)
 
     with pytest.raises(ValueError, match="image_path mismatch"):
         validate_tiling_artifacts(
-            whole_slide=WholeSlide(sample_id="slide-4", image_path=Path("requested-slide.svs")),
+            whole_slide=SlideSpec(sample_id="slide-4", image_path=Path("requested-slide.svs")),
             tiles_npz_path=artifacts.tiles_npz_path,
             tiles_meta_path=artifacts.tiles_meta_path,
             expected_config_hash="actual-hash",
@@ -487,7 +662,7 @@ def test_validate_tiling_artifacts_rejects_mismatched_mask_path(tmp_path: Path):
 
     with pytest.raises(ValueError, match="mask_path mismatch"):
         validate_tiling_artifacts(
-            whole_slide=WholeSlide(
+            whole_slide=SlideSpec(
                 sample_id="slide-5",
                 image_path=Path("slide-5.svs"),
                 mask_path=Path("requested-mask.png"),
@@ -509,7 +684,7 @@ def test_tile_slides_writes_process_list_and_can_reuse_precomputed_tiles(
 
     precomputed_root = tmp_path / "precomputed"
     source_result = tile_slide(
-        WholeSlide(sample_id="slide-1", image_path=Path("slide-1.svs")),
+        SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs")),
         tiling=tiling_config,
         segmentation=segmentation_config,
         filtering=filter_config,
@@ -522,7 +697,7 @@ def test_tile_slides_writes_process_list_and_can_reuse_precomputed_tiles(
     monkeypatch.setattr("hs2p.api.extract_coordinates", _unexpected_extract)
 
     artifacts = tile_slides(
-        [WholeSlide(sample_id="slide-1", image_path=Path("slide-1.svs"))],
+        [SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs"))],
         tiling=tiling_config,
         segmentation=segmentation_config,
         filtering=filter_config,
@@ -590,7 +765,7 @@ def test_tile_slides_omits_tiling_preview_path_when_no_tiles(
     )
 
     artifacts = tile_slides(
-        [WholeSlide(sample_id="slide-0", image_path=Path("slide-0.svs"))],
+        [SlideSpec(sample_id="slide-0", image_path=Path("slide-0.svs"))],
         tiling=tiling_config,
         segmentation=segmentation_config,
         filtering=filter_config,
@@ -632,7 +807,7 @@ def test_tile_slides_writes_preview_paths_when_visualizations_are_saved(
     monkeypatch.setattr("hs2p.api.extract_coordinates", _fake_extract_with_mask_preview)
 
     artifacts = tile_slides(
-        [WholeSlide(sample_id="slide-preview", image_path=Path("slide-preview.svs"))],
+        [SlideSpec(sample_id="slide-preview", image_path=Path("slide-preview.svs"))],
         tiling=tiling_config,
         segmentation=segmentation_config,
         filtering=filter_config,
@@ -686,7 +861,7 @@ def test_tile_slides_resume_marks_stale_artifact_as_failed(
     )
 
     reused = tile_slides(
-        [WholeSlide(sample_id="slide-6", image_path=Path("requested-slide.svs"))],
+        [SlideSpec(sample_id="slide-6", image_path=Path("requested-slide.svs"))],
         tiling=tiling_config,
         segmentation=segmentation_config,
         filtering=filter_config,
@@ -719,7 +894,7 @@ def test_tile_slides_logs_failures_in_real_time(
     monkeypatch.setattr("hs2p.api.extract_coordinates", _raise_extract)
 
     artifacts = tile_slides(
-        [WholeSlide(sample_id="slide-log", image_path=Path("slide-log.svs"))],
+        [SlideSpec(sample_id="slide-log", image_path=Path("slide-log.svs"))],
         tiling=tiling_config,
         segmentation=segmentation_config,
         filtering=filter_config,
@@ -729,6 +904,112 @@ def test_tile_slides_logs_failures_in_real_time(
     assert artifacts == []
     captured = capsys.readouterr()
     assert "[tile_slides] FAILED slide-log: boom" in captured.out
+
+
+def test_tile_slides_computes_resume_hash_once_per_batch(
+    monkeypatch,
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    pd.DataFrame(
+        [
+            {
+                "sample_id": "slide-1",
+                "image_path": "slide-1.svs",
+                "mask_path": np.nan,
+                "tiling_status": "success",
+                "num_tiles": 1,
+                "tiles_npz_path": "slide-1.tiles.npz",
+                "tiles_meta_path": "slide-1.tiles.meta.json",
+                "error": np.nan,
+                "traceback": np.nan,
+            },
+            {
+                "sample_id": "slide-2",
+                "image_path": "slide-2.svs",
+                "mask_path": np.nan,
+                "tiling_status": "success",
+                "num_tiles": 1,
+                "tiles_npz_path": "slide-2.tiles.npz",
+                "tiles_meta_path": "slide-2.tiles.meta.json",
+                "error": np.nan,
+                "traceback": np.nan,
+            },
+        ]
+    ).to_csv(run_dir / "process_list.csv", index=False)
+
+    call_count = {"count": 0}
+
+    def _fake_compute_config_hash(**kwargs):
+        call_count["count"] += 1
+        return "expected-hash"
+
+    def _fake_validate_tiling_artifacts(**kwargs):
+        sample_id = kwargs["whole_slide"].sample_id
+        return TilingArtifacts(
+            sample_id=sample_id,
+            tiles_npz_path=Path(f"{sample_id}.tiles.npz"),
+            tiles_meta_path=Path(f"{sample_id}.tiles.meta.json"),
+            num_tiles=1,
+        )
+
+    monkeypatch.setattr("hs2p.api.compute_config_hash", _fake_compute_config_hash)
+    monkeypatch.setattr("hs2p.api.validate_tiling_artifacts", _fake_validate_tiling_artifacts)
+    monkeypatch.setattr(
+        "hs2p.api.extract_coordinates",
+        lambda **_: (_ for _ in ()).throw(AssertionError("resume path should not recompute tiles")),
+    )
+
+    artifacts = tile_slides(
+        [
+            SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs")),
+            SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
+        ],
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        output_dir=run_dir,
+        resume=True,
+    )
+
+    assert [artifact.sample_id for artifact in artifacts] == ["slide-1", "slide-2"]
+    assert call_count["count"] == 1
+
+
+def test_tile_slides_reuses_precomputed_hash_during_compute(
+    monkeypatch,
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    call_count = {"count": 0}
+
+    def _fake_compute_config_hash(**kwargs):
+        del kwargs
+        call_count["count"] += 1
+        return "expected-hash"
+
+    monkeypatch.setattr("hs2p.api.compute_config_hash", _fake_compute_config_hash)
+    monkeypatch.setattr("hs2p.api.extract_coordinates", lambda **_: _fake_extraction())
+
+    artifacts = tile_slides(
+        [
+            SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs")),
+            SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
+        ],
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        output_dir=tmp_path,
+    )
+
+    assert [artifact.sample_id for artifact in artifacts] == ["slide-1", "slide-2"]
+    assert call_count["count"] == 1
 
 
 def test_tile_slides_resume_rejects_unsupported_process_list_schema(
@@ -751,7 +1032,7 @@ def test_tile_slides_resume_rejects_unsupported_process_list_schema(
 
     with pytest.raises(ValueError, match="missing required columns: .*sample_id"):
         tile_slides(
-            [WholeSlide(sample_id="slide-7", image_path=Path("slide-7.svs"))],
+            [SlideSpec(sample_id="slide-7", image_path=Path("slide-7.svs"))],
             tiling=tiling_config,
             segmentation=segmentation_config,
             filtering=filter_config,
@@ -881,12 +1162,12 @@ def test_load_whole_slides_from_rows_parses_current_schema_rows():
     slides = load_whole_slides_from_rows(rows)
 
     assert slides == [
-        WholeSlide(
+        SlideSpec(
             sample_id="slide-1",
             image_path=Path("slide-1.svs"),
             mask_path=Path("slide-1-mask.png"),
         ),
-        WholeSlide(
+        SlideSpec(
             sample_id="slide-2",
             image_path=Path("slide-2.svs"),
             mask_path=None,
@@ -916,17 +1197,17 @@ def test_load_whole_slides_from_rows_treats_nan_like_mask_values_as_missing():
     slides = load_whole_slides_from_rows(rows)
 
     assert slides == [
-        WholeSlide(
+        SlideSpec(
             sample_id="slide-nan",
             image_path=Path("slide-nan.svs"),
             mask_path=None,
         ),
-        WholeSlide(
+        SlideSpec(
             sample_id="slide-none-string",
             image_path=Path("slide-none-string.svs"),
             mask_path=None,
         ),
-        WholeSlide(
+        SlideSpec(
             sample_id="slide-nan-string",
             image_path=Path("slide-nan-string.svs"),
             mask_path=None,
@@ -950,6 +1231,22 @@ def test_coordinate_extraction_result_is_not_tuple_iterable():
 
     with pytest.raises(TypeError, match="not iterable"):
         tuple(result)
+
+
+def test_coordinate_extraction_result_rebuilds_coordinates_from_x_and_y_arrays():
+    result = CoordinateExtractionResult(
+        contour_indices=[0, 1],
+        tissue_percentages=[0.25, 0.75],
+        x=np.array([10, 30], dtype=np.int64),
+        y=np.array([20, 40], dtype=np.int64),
+        read_level=0,
+        read_spacing_um=0.5,
+        read_tile_size_px=224,
+        resize_factor=1.0,
+        tile_size_lv0=224,
+    )
+
+    assert result.coordinates == [(10, 20), (30, 40)]
 
 
 def test_write_process_list_removes_temp_file_on_failure(monkeypatch, tmp_path: Path):

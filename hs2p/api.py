@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import multiprocessing as mp
 import tempfile
 import traceback
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Sequence
@@ -29,7 +31,7 @@ _DEFAULT_FILTERING = _DEFAULT_TILING.filter_params
 
 
 @dataclass(frozen=True)
-class WholeSlide:
+class SlideSpec:
     """Identify one slide and its optional mask.
 
     Attributes:
@@ -41,6 +43,10 @@ class WholeSlide:
     sample_id: str
     image_path: Path
     mask_path: Path | None = None
+
+
+# Backward-compatible alias for older callers that still import WholeSlide.
+WholeSlide = SlideSpec
 
 
 @dataclass(frozen=True)
@@ -256,13 +262,14 @@ def _optional_path(value: Any) -> Path | None:
 
 
 def _compute_tiling_result(
-    whole_slide: WholeSlide,
+    whole_slide: SlideSpec,
     *,
     tiling: TilingConfig,
     segmentation: SegmentationConfig,
     filtering: FilterConfig,
     mask_visu_path: Path | None,
     num_workers: int,
+    config_hash: str | None = None,
 ) -> TilingResult:
     sampling_params = None
     if whole_slide.mask_path is not None:
@@ -309,10 +316,14 @@ def _compute_tiling_result(
         overlap=tiling.overlap,
         tissue_threshold=tiling.tissue_threshold,
         num_tiles=num_tiles,
-        config_hash=compute_config_hash(
-            tiling=tiling,
-            segmentation=segmentation,
-            filtering=filtering,
+        config_hash=(
+            config_hash
+            if config_hash is not None
+            else compute_config_hash(
+                tiling=tiling,
+                segmentation=segmentation,
+                filtering=filtering,
+            )
         ),
     )
 
@@ -378,7 +389,7 @@ def _validate_required_columns(
 
 
 def tile_slide(
-    whole_slide: WholeSlide,
+    whole_slide: SlideSpec,
     *,
     tiling: TilingConfig,
     segmentation: SegmentationConfig,
@@ -400,6 +411,11 @@ def tile_slide(
         filtering=filtering,
         mask_visu_path=None,
         num_workers=num_workers,
+        config_hash=compute_config_hash(
+            tiling=tiling,
+            segmentation=segmentation,
+            filtering=filtering,
+        ),
     )
 
 
@@ -526,7 +542,7 @@ def load_tiling_result(
 
 def validate_tiling_artifacts(
     *,
-    whole_slide: WholeSlide,
+    whole_slide: SlideSpec,
     tiles_npz_path: Path,
     tiles_meta_path: Path,
     expected_config_hash: str,
@@ -560,7 +576,7 @@ def validate_tiling_artifacts(
     )
 
 
-def _validate_whole_slides(whole_slides: Sequence[WholeSlide]) -> None:
+def _validate_whole_slides(whole_slides: Sequence[SlideSpec]) -> None:
     seen: set[str] = set()
     duplicates: list[str] = []
     for whole_slide in whole_slides:
@@ -574,7 +590,7 @@ def _validate_whole_slides(whole_slides: Sequence[WholeSlide]) -> None:
 
 def _maybe_load_existing_artifacts(
     *,
-    whole_slide: WholeSlide,
+    whole_slide: SlideSpec,
     read_tiles_from: Path,
     expected_config_hash: str,
 ) -> TilingArtifacts | None:
@@ -677,8 +693,174 @@ def _write_process_list(process_rows: list[dict[str, Any]], process_list_path: P
             temp_path.unlink(missing_ok=True)
 
 
+@dataclass
+class _PendingTilingPreview:
+    whole_slide: SlideSpec
+    base_artifact: TilingArtifacts
+    mask_preview_path: Path | None
+    future: Any
+
+
+@dataclass(frozen=True)
+class _PlannedSlideWork:
+    whole_slide: SlideSpec
+    artifact: TilingArtifacts | None = None
+    compute_request: Any | None = None
+    error: str | None = None
+    traceback_text: str | None = None
+
+
+@dataclass(frozen=True)
+class _SlideComputeRequest:
+    whole_slide: SlideSpec
+    tiling: TilingConfig
+    segmentation: SegmentationConfig
+    filtering: FilterConfig
+    config_hash: str
+    mask_visu_path: Path | None
+    num_workers: int
+
+
+@dataclass(frozen=True)
+class _SlideComputeResponse:
+    whole_slide: SlideSpec
+    ok: bool
+    result: TilingResult | None = None
+    mask_preview_path: Path | None = None
+    error: str | None = None
+    traceback_text: str | None = None
+
+
+def _build_success_artifact(
+    *,
+    base_artifact: TilingArtifacts,
+    mask_preview_path: Path | None,
+    tiling_preview_path: Path | None,
+) -> TilingArtifacts:
+    return TilingArtifacts(
+        sample_id=base_artifact.sample_id,
+        tiles_npz_path=base_artifact.tiles_npz_path,
+        tiles_meta_path=base_artifact.tiles_meta_path,
+        num_tiles=base_artifact.num_tiles,
+        mask_preview_path=mask_preview_path,
+        tiling_preview_path=tiling_preview_path,
+    )
+
+
+def _build_success_process_row(
+    *,
+    whole_slide: SlideSpec,
+    artifact: TilingArtifacts,
+) -> dict[str, Any]:
+    return {
+        "sample_id": whole_slide.sample_id,
+        "image_path": str(whole_slide.image_path),
+        "mask_path": str(whole_slide.mask_path) if whole_slide.mask_path is not None else None,
+        "tiling_status": "success",
+        "num_tiles": artifact.num_tiles,
+        "tiles_npz_path": str(artifact.tiles_npz_path),
+        "tiles_meta_path": str(artifact.tiles_meta_path),
+        "error": np.nan,
+        "traceback": np.nan,
+    }
+
+
+def _build_failure_process_row(
+    *,
+    whole_slide: SlideSpec,
+    error: str,
+    traceback_text: str,
+) -> dict[str, Any]:
+    return {
+        "sample_id": whole_slide.sample_id,
+        "image_path": str(whole_slide.image_path),
+        "mask_path": str(whole_slide.mask_path) if whole_slide.mask_path is not None else None,
+        "tiling_status": "failed",
+        "num_tiles": 0,
+        "tiles_npz_path": np.nan,
+        "tiles_meta_path": np.nan,
+        "error": error,
+        "traceback": traceback_text,
+    }
+
+
+def _finalize_pending_tiling_preview(
+    *,
+    pending: _PendingTilingPreview,
+) -> tuple[TilingArtifacts | None, dict[str, Any]]:
+    tiling_preview_path = pending.future.result()
+    tiling_preview_path = (
+        tiling_preview_path
+        if tiling_preview_path is not None and tiling_preview_path.is_file()
+        else None
+    )
+    artifact = _build_success_artifact(
+        base_artifact=pending.base_artifact,
+        mask_preview_path=pending.mask_preview_path,
+        tiling_preview_path=tiling_preview_path,
+    )
+    row = _build_success_process_row(
+        whole_slide=pending.whole_slide,
+        artifact=artifact,
+    )
+    return artifact, row
+
+
+def _build_failure_process_row_from_exception(
+    *,
+    whole_slide: SlideSpec,
+    exc: Exception,
+) -> dict[str, Any]:
+    return _build_failure_process_row(
+        whole_slide=whole_slide,
+        error=str(exc),
+        traceback_text=traceback.format_exc(),
+    )
+
+
+def _compute_tiling_result_from_request(
+    request: _SlideComputeRequest,
+) -> _SlideComputeResponse:
+    try:
+        result = _compute_tiling_result(
+            request.whole_slide,
+            tiling=request.tiling,
+            segmentation=request.segmentation,
+            filtering=request.filtering,
+            mask_visu_path=request.mask_visu_path,
+            num_workers=request.num_workers,
+            config_hash=request.config_hash,
+        )
+        mask_preview_path = (
+            request.mask_visu_path
+            if request.mask_visu_path is not None and request.mask_visu_path.is_file()
+            else None
+        )
+        return _SlideComputeResponse(
+            whole_slide=request.whole_slide,
+            ok=True,
+            result=result,
+            mask_preview_path=mask_preview_path,
+        )
+    except Exception as exc:
+        return _SlideComputeResponse(
+            whole_slide=request.whole_slide,
+            ok=False,
+            error=str(exc),
+            traceback_text=traceback.format_exc(),
+        )
+
+
+def _should_use_slide_pool(*, num_workers: int, compute_count: int) -> bool:
+    return int(num_workers) > 1 and compute_count > 1
+
+
+def _pool_process_count(*, num_workers: int, compute_count: int) -> int:
+    return max(1, min(int(num_workers), int(compute_count)))
+
+
 def tile_slides(
-    whole_slides: Sequence[WholeSlide],
+    whole_slides: Sequence[SlideSpec],
     *,
     tiling: TilingConfig,
     segmentation: SegmentationConfig,
@@ -717,12 +899,14 @@ def tile_slides(
         for row in existing_df.to_dict(orient="records"):
             if row.get("tiling_status") == "success":
                 existing_successes[str(row["sample_id"])] = row
+    expected_hash = compute_config_hash(
+        tiling=tiling,
+        segmentation=segmentation,
+        filtering=filtering,
+    )
+    planned_work: list[_PlannedSlideWork] = []
+    compute_requests: list[_SlideComputeRequest] = []
     for whole_slide in whole_slides:
-        expected_hash = compute_config_hash(
-            tiling=tiling,
-            segmentation=segmentation,
-            filtering=filtering,
-        )
         try:
             artifact: TilingArtifacts | None = None
             if whole_slide.sample_id in existing_successes:
@@ -735,86 +919,216 @@ def tile_slides(
                     tiles_meta_path=meta_path,
                     expected_config_hash=expected_hash,
                 )
-            if read_tiles_from is not None:
-                if artifact is None:
-                    artifact = _maybe_load_existing_artifacts(
+            if read_tiles_from is not None and artifact is None:
+                artifact = _maybe_load_existing_artifacts(
+                    whole_slide=whole_slide,
+                    read_tiles_from=Path(read_tiles_from),
+                    expected_config_hash=expected_hash,
+                )
+            if artifact is not None:
+                planned_work.append(
+                    _PlannedSlideWork(
                         whole_slide=whole_slide,
-                        read_tiles_from=Path(read_tiles_from),
-                        expected_config_hash=expected_hash,
+                        artifact=artifact,
                     )
-            if artifact is None:
-                mask_visu_path = None
-                if qc is not None and qc.save_mask_preview:
-                    mask_dir = output_dir / "visualization" / "mask"
-                    mask_visu_path = mask_dir / f"{whole_slide.sample_id}.jpg"
-                result = _compute_tiling_result(
-                    whole_slide,
-                    tiling=tiling,
-                    segmentation=segmentation,
-                    filtering=filtering,
-                    mask_visu_path=mask_visu_path,
-                    num_workers=num_workers,
                 )
-                artifact = save_tiling_result(result, output_dir=output_dir)
-                mask_preview_path = mask_visu_path if mask_visu_path is not None and mask_visu_path.is_file() else None
-                tiling_preview_path = None
-                if qc is not None and qc.save_tiling_preview:
-                    tiling_preview_path = write_tiling_preview(
-                        result=result,
-                        output_dir=output_dir,
-                        downsample=qc.downsample,
-                    )
-                    tiling_preview_path = (
-                        tiling_preview_path
-                        if tiling_preview_path is not None and tiling_preview_path.is_file()
-                        else None
-                    )
-                artifact = TilingArtifacts(
-                    sample_id=artifact.sample_id,
-                    tiles_npz_path=artifact.tiles_npz_path,
-                    tiles_meta_path=artifact.tiles_meta_path,
-                    num_tiles=artifact.num_tiles,
-                    mask_preview_path=mask_preview_path,
-                    tiling_preview_path=tiling_preview_path,
-                )
-            artifacts.append(artifact)
-            process_rows.append(
-                {
-                    "sample_id": whole_slide.sample_id,
-                    "image_path": str(whole_slide.image_path),
-                    "mask_path": str(whole_slide.mask_path) if whole_slide.mask_path is not None else None,
-                    "tiling_status": "success",
-                    "num_tiles": artifact.num_tiles,
-                    "tiles_npz_path": str(artifact.tiles_npz_path),
-                    "tiles_meta_path": str(artifact.tiles_meta_path),
-                    "error": np.nan,
-                    "traceback": np.nan,
-                }
+                continue
+            mask_visu_path = None
+            if qc is not None and qc.save_mask_preview:
+                mask_dir = output_dir / "visualization" / "mask"
+                mask_visu_path = mask_dir / f"{whole_slide.sample_id}.jpg"
+            compute_request = _SlideComputeRequest(
+                whole_slide=whole_slide,
+                tiling=tiling,
+                segmentation=segmentation,
+                filtering=filtering,
+                config_hash=expected_hash,
+                mask_visu_path=mask_visu_path,
+                num_workers=1,
             )
+            planned_work.append(
+                _PlannedSlideWork(
+                    whole_slide=whole_slide,
+                    compute_request=compute_request,
+                )
+            )
+            compute_requests.append(compute_request)
         except Exception as exc:
-            print(f"[tile_slides] FAILED {whole_slide.sample_id}: {exc}", flush=True)
-            process_rows.append(
-                {
-                    "sample_id": whole_slide.sample_id,
-                    "image_path": str(whole_slide.image_path),
-                    "mask_path": str(whole_slide.mask_path) if whole_slide.mask_path is not None else None,
-                    "tiling_status": "failed",
-                    "num_tiles": 0,
-                    "tiles_npz_path": np.nan,
-                    "tiles_meta_path": np.nan,
-                    "error": str(exc),
-                    "traceback": traceback.format_exc(),
-                }
+            planned_work.append(
+                _PlannedSlideWork(
+                    whole_slide=whole_slide,
+                    error=str(exc),
+                    traceback_text=traceback.format_exc(),
+                )
             )
+    use_slide_pool = _should_use_slide_pool(
+        num_workers=num_workers,
+        compute_count=len(compute_requests),
+    )
+    preview_executor = (
+        ThreadPoolExecutor(max_workers=1)
+        if qc is not None and qc.save_tiling_preview
+        else None
+    )
+    pending_preview: _PendingTilingPreview | None = None
+    pool_processes = _pool_process_count(
+        num_workers=num_workers,
+        compute_count=len(compute_requests),
+    )
+
+    def _finalize_pending_preview_if_any() -> None:
+        nonlocal pending_preview
+        if pending_preview is None:
+            return
+        previous_pending = pending_preview
+        pending_preview = None
+        try:
+            finalized_artifact, finalized_row = _finalize_pending_tiling_preview(
+                pending=previous_pending
+            )
+            if finalized_artifact is not None:
+                artifacts.append(finalized_artifact)
+            process_rows.append(finalized_row)
+        except Exception as exc:
+            print(
+                f"[tile_slides] FAILED {previous_pending.whole_slide.sample_id}: {exc}",
+                flush=True,
+            )
+            process_rows.append(
+                _build_failure_process_row(
+                    whole_slide=previous_pending.whole_slide,
+                    error=str(exc),
+                    traceback_text=traceback.format_exc(),
+                )
+            )
+
+    def _process_compute_response(response: _SlideComputeResponse) -> None:
+        nonlocal pending_preview
+        if not response.ok:
+            _finalize_pending_preview_if_any()
+            print(
+                f"[tile_slides] FAILED {response.whole_slide.sample_id}: {response.error}",
+                flush=True,
+            )
+            process_rows.append(
+                _build_failure_process_row(
+                    whole_slide=response.whole_slide,
+                    error=response.error or "unknown error",
+                    traceback_text=response.traceback_text or "",
+                )
+            )
+            return
+
+        assert response.result is not None
+        base_artifact = save_tiling_result(response.result, output_dir=output_dir)
+        _finalize_pending_preview_if_any()
+        if (
+            preview_executor is not None
+            and qc is not None
+            and qc.save_tiling_preview
+            and response.result.num_tiles > 0
+        ):
+            pending_preview = _PendingTilingPreview(
+                whole_slide=response.whole_slide,
+                base_artifact=base_artifact,
+                mask_preview_path=response.mask_preview_path,
+                future=preview_executor.submit(
+                    write_tiling_preview,
+                    result=response.result,
+                    output_dir=output_dir,
+                    downsample=qc.downsample,
+                ),
+            )
+            return
+
+        artifact = _build_success_artifact(
+            base_artifact=base_artifact,
+            mask_preview_path=response.mask_preview_path,
+            tiling_preview_path=None,
+        )
+        artifacts.append(artifact)
+        process_rows.append(
+            _build_success_process_row(
+                whole_slide=response.whole_slide,
+                artifact=artifact,
+            )
+        )
+
+    def _drain_planned_work(compute_response_iter) -> None:
+        for planned in planned_work:
+            if planned.artifact is not None:
+                _finalize_pending_preview_if_any()
+                artifacts.append(planned.artifact)
+                process_rows.append(
+                    _build_success_process_row(
+                        whole_slide=planned.whole_slide,
+                        artifact=planned.artifact,
+                    )
+                )
+                continue
+            if planned.error is not None:
+                _finalize_pending_preview_if_any()
+                print(
+                    f"[tile_slides] FAILED {planned.whole_slide.sample_id}: {planned.error}",
+                    flush=True,
+                )
+                process_rows.append(
+                    _build_failure_process_row(
+                        whole_slide=planned.whole_slide,
+                        error=planned.error,
+                        traceback_text=planned.traceback_text or "",
+                    )
+                )
+                continue
+            assert planned.compute_request is not None
+            response = next(compute_response_iter)
+            _process_compute_response(response)
+
+    try:
+        if use_slide_pool:
+            pool_requests = [
+                _SlideComputeRequest(
+                    whole_slide=request.whole_slide,
+                    tiling=request.tiling,
+                    segmentation=request.segmentation,
+                    filtering=request.filtering,
+                    config_hash=request.config_hash,
+                    mask_visu_path=request.mask_visu_path,
+                    num_workers=1,
+                )
+                for request in compute_requests
+            ]
+            with mp.Pool(processes=pool_processes) as pool:
+                _drain_planned_work(iter(pool.imap(_compute_tiling_result_from_request, pool_requests)))
+        else:
+            serial_requests = [
+                _SlideComputeRequest(
+                    whole_slide=request.whole_slide,
+                    tiling=request.tiling,
+                    segmentation=request.segmentation,
+                    filtering=request.filtering,
+                    config_hash=request.config_hash,
+                    mask_visu_path=request.mask_visu_path,
+                    num_workers=max(1, int(num_workers)),
+                )
+                for request in compute_requests
+            ]
+            _drain_planned_work(
+                iter(_compute_tiling_result_from_request(request) for request in serial_requests)
+            )
+        _finalize_pending_preview_if_any()
+    finally:
+        if preview_executor is not None:
+            preview_executor.shutdown(wait=True)
     _write_process_list(process_rows, process_list_path)
     return artifacts
 
 
-def load_whole_slides_from_rows(rows: Sequence[dict[str, Any]]) -> list[WholeSlide]:
-    whole_slides: list[WholeSlide] = []
+def load_whole_slides_from_rows(rows: Sequence[dict[str, Any]]) -> list[SlideSpec]:
+    whole_slides: list[SlideSpec] = []
     for row in rows:
         whole_slides.append(
-            WholeSlide(
+            SlideSpec(
                 sample_id=str(row["sample_id"]),
                 image_path=Path(row["image_path"]),
                 mask_path=_optional_path(row.get("mask_path")),

@@ -25,7 +25,6 @@ from hs2p.wsi import (
     filter_coordinates,
     sample_coordinates,
     visualize_coordinates,
-    overlay_mask_on_slide,
     SamplingParameters,
 )
 
@@ -88,6 +87,14 @@ def get_args_parser(add_help: bool = True):
 
 def process_slide_wrapper(kwargs):
     return process_slide(**kwargs)
+
+
+def _resolve_inner_workers(cfg, parallel_workers: int) -> int:
+    inner_workers = getattr(cfg.speed, "inner_workers", 1)
+    inner_workers = int(inner_workers)
+    if inner_workers < 1:
+        raise ValueError("cfg.speed.inner_workers must be >= 1")
+    return min(inner_workers, parallel_workers)
 
 
 def _save_sampling_coordinates(
@@ -199,9 +206,7 @@ def process_slide(
         if not cfg.tiling.sampling_params.independant_sampling:
             tissue_mask_visu_path = None
             if cfg.visualize and mask_visualize_dir is not None:
-                tissue_mask_visu_path = Path(
-                    mask_visualize_dir, f"{wsi_name}-tissue.png"
-                )
+                tissue_mask_visu_path = Path(mask_visualize_dir, f"{wsi_name}.png")
             extraction = extract_coordinates(
                 wsi_path=wsi_path,
                 mask_path=mask_path,
@@ -211,6 +216,10 @@ def process_slide(
                 filter_params=filter_config,
                 sampling_params=sampling_params,
                 mask_visu_path=tissue_mask_visu_path,
+                preview_downsample=cfg.tiling.visu_params.downsample,
+                preview_palette=preview_palette,
+                preview_pixel_mapping=sampling_params.pixel_mapping,
+                preview_color_mapping=color_mapping,
                 disable_tqdm=disable_tqdm,
                 num_workers=num_workers,
             )
@@ -275,6 +284,7 @@ def process_slide(
                     sampling_params=sampling_params,
                     annotation=annotation,
                     mask_visu_path=tissue_mask_visu_path,
+                    preview_downsample=cfg.tiling.visu_params.downsample,
                     disable_tqdm=disable_tqdm,
                     num_workers=num_workers,
                 )
@@ -310,18 +320,6 @@ def process_slide(
                         pixel_mapping=sampling_params.pixel_mapping,
                         color_mapping=color_mapping,
                     )
-        if cfg.visualize and mask_visualize_dir is not None:
-            mask_visu_path = Path(mask_visualize_dir, f"{wsi_name}.png")
-            overlay_mask = overlay_mask_on_slide(
-                wsi_path=wsi_path,
-                annotation_mask_path=mask_path,
-                downsample=cfg.tiling.visu_params.downsample,
-                backend=cfg.tiling.backend,
-                palette=preview_palette,
-                pixel_mapping=sampling_params.pixel_mapping,
-                color_mapping=color_mapping,
-            )
-            overlay_mask.save(mask_visu_path)
         return sample_id, {"status": "success"}
 
     except Exception as e:
@@ -346,6 +344,7 @@ def main(args):
         parallel_workers = min(
             parallel_workers, int(os.environ["SLURM_JOB_CPUS_PER_NODE"])
         )
+    inner_workers = _resolve_inner_workers(cfg, parallel_workers)
 
     process_list = output_dir / "process_list.csv"
     if process_list.is_file() and cfg.resume:
@@ -443,7 +442,7 @@ def main(args):
                     "sampling_visualize_dir": sampling_visualize_dir,
                     "sampling_params": sampling_params,
                     "disable_tqdm": True,
-                    "num_workers": parallel_workers,
+                    "num_workers": inner_workers,
                 }
                 for wsi_fp, mask_fp, sample_id in zip(wsi_paths_to_process, mask_paths_to_process, sample_ids_to_process)
             ]

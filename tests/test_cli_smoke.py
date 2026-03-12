@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
-from hs2p.api import TilingArtifacts, WholeSlide
+from hs2p.api import SlideSpec, TilingArtifacts
 import hs2p.tiling as tiling_mod
 
 
@@ -140,7 +140,7 @@ def test_tiling_main_smoke_uses_current_schema_and_manifest(monkeypatch, tmp_pat
     tiling_mod.main(SimpleNamespace())
 
     assert captured["whole_slides"] == [
-        WholeSlide(
+        SlideSpec(
             sample_id="slide-1",
             image_path=Path("slide-1.svs"),
             mask_path=Path("slide-1-mask.png"),

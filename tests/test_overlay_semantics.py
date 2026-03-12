@@ -263,3 +263,149 @@ def test_extract_coordinates_uses_overlay_mask_preview_instead_of_line_rendering
     assert len(preview_calls) == 1
     np.testing.assert_array_equal(preview_calls[0]["mask_arr"], np.array([[0, 1], [1, 0]], dtype=np.uint8))
     assert preview_calls[0]["annotation_mask_path"] is None
+
+
+def test_extract_coordinates_preview_uses_in_memory_annotation_labels_when_style_is_provided(
+    monkeypatch, tmp_path: Path
+):
+    preview_calls = []
+
+    class FakeWSI:
+        def __init__(
+            self,
+            path,
+            backend="asap",
+            mask_path=None,
+            spacing_at_level_0=None,
+            segment=False,
+            segment_params=None,
+            sampling_params=None,
+            pixel_mapping=None,
+        ):
+            self.path = Path(path)
+            self.spacings = [0.5]
+            self.level_dimensions = [(2, 2)]
+            self.level_downsamples = [(1.0, 1.0)]
+            self.annotation_mask = {
+                "tissue": np.array([[0, 255], [255, 0]], dtype=np.uint8),
+                "tumor": np.array([[0, 255], [255, 0]], dtype=np.uint8),
+            }
+
+        def get_tile_coordinates(
+            self,
+            tiling_params,
+            filter_params,
+            annotation=None,
+            disable_tqdm=False,
+            num_workers=1,
+        ):
+            return (
+                [(0, 0)],
+                [1.0],
+                [0],
+                0,
+                1.0,
+                224,
+            )
+
+        def get_level_spacing(self, level):
+            return self.spacings[level]
+
+    def _fake_overlay_mask_on_slide(**kwargs):
+        preview_calls.append(kwargs)
+        return Image.fromarray(np.full((2, 2, 3), 200, dtype=np.uint8))
+
+    monkeypatch.setattr(wsi_mod, "WholeSlideImage", FakeWSI)
+    monkeypatch.setattr(wsi_mod, "overlay_mask_on_slide", _fake_overlay_mask_on_slide)
+
+    preview_path = tmp_path / "mask-preview.jpg"
+    palette = _build_palette({1: (255, 0, 0)})
+    result = wsi_mod.extract_coordinates(
+        wsi_path=Path("fake-wsi.tif"),
+        mask_path=Path("fake-mask.tif"),
+        backend="openslide",
+        segment_params=SimpleNamespace(
+            downsample=64,
+            sthresh=8,
+            sthresh_up=255,
+            mthresh=7,
+            close=4,
+            use_otsu=False,
+            use_hsv=True,
+        ),
+        tiling_params=SimpleNamespace(
+            spacing=0.5,
+            tolerance=0.05,
+            tile_size=224,
+            overlap=0.0,
+            min_tissue_percentage=0.1,
+            drop_holes=False,
+            use_padding=True,
+        ),
+        filter_params=SimpleNamespace(
+            ref_tile_size=16,
+            a_t=4,
+            a_h=2,
+            max_n_holes=8,
+            filter_white=False,
+            filter_black=False,
+            white_threshold=220,
+            black_threshold=25,
+            fraction_threshold=0.9,
+        ),
+        sampling_params=SimpleNamespace(
+            pixel_mapping={"background": 0, "tumor": 1},
+            color_mapping={"background": None, "tumor": [255, 0, 0]},
+            tissue_percentage={"background": None, "tumor": 0.1},
+        ),
+        mask_visu_path=preview_path,
+        preview_downsample=8,
+        preview_palette=palette,
+        preview_pixel_mapping={"background": 0, "tumor": 1},
+        preview_color_mapping={"background": None, "tumor": [255, 0, 0]},
+        disable_tqdm=True,
+        num_workers=1,
+    )
+
+    assert result.coordinates == [(0, 0)]
+    assert preview_path.is_file()
+    assert len(preview_calls) == 1
+    np.testing.assert_array_equal(preview_calls[0]["mask_arr"], np.array([[0, 1], [1, 0]], dtype=np.uint8))
+    assert preview_calls[0]["annotation_mask_path"] is None
+    assert preview_calls[0]["downsample"] == 8
+
+
+def test_draw_grid_from_coordinates_crops_loaded_canvas_instead_of_fetching_tiles():
+    class FakeWSI:
+        level_downsamples = [(1.0, 1.0)]
+        level_dimensions = [(2, 2)]
+        spacings = [1.0]
+
+        def get_level_spacing(self, level):
+            assert level == 0
+            return 1.0
+
+        def get_tile(self, *args, **kwargs):
+            raise AssertionError("draw_grid_from_coordinates should crop from the loaded canvas")
+
+    canvas = np.array(
+        [
+            [[10, 20, 30], [40, 50, 60]],
+            [[70, 80, 90], [100, 110, 120]],
+        ],
+        dtype=np.uint8,
+    )
+
+    image = wsi_mod.draw_grid_from_coordinates(
+        canvas.copy(),
+        FakeWSI(),
+        coords=[(0, 0)],
+        tile_size_at_0=(1, 1),
+        vis_level=0,
+        thickness=0,
+        indices=None,
+        mask=None,
+    )
+
+    rendered = np.array(image)
+    assert rendered.shape == canvas.shape

@@ -83,23 +83,22 @@ class HasEnoughTissue(object):
         downsampled_coords = coords * 1 / scale
         downsampled_coords = downsampled_coords.astype(int)
 
-        keep_flags = []
-        tissue_pcts = []
+        tile_area = float(self.downsampled_tile_size**2)
+        height, width = self.precomputed_mask.shape
+        x1 = np.clip(downsampled_coords[:, 0], 0, width)
+        y1 = np.clip(downsampled_coords[:, 1], 0, height)
+        x2 = np.clip(x1 + self.downsampled_tile_size, 0, width)
+        y2 = np.clip(y1 + self.downsampled_tile_size, 0, height)
 
-        for x_tile, y_tile in downsampled_coords:
-            # extract the sub-mask for the tile
-            sub_mask = self._extract_sub_mask(x_tile, y_tile)
-
-            tile_area = self.downsampled_tile_size**2
-            tissue_area = np.sum(sub_mask)
-            tissue_pct = round(tissue_area / tile_area, 3)
-
-            if tissue_pct >= self.pct:
-                keep_flags.append(1)
-                tissue_pcts.append(tissue_pct)
-            else:
-                keep_flags.append(0)
-                tissue_pcts.append(tissue_pct)
+        integral = cv2.integral(self.precomputed_mask.astype(np.uint8), sdepth=cv2.CV_32S)
+        tissue_area = (
+            integral[y2, x2]
+            - integral[y1, x2]
+            - integral[y2, x1]
+            + integral[y1, x1]
+        ).astype(np.float32)
+        tissue_pcts = np.round(tissue_area / tile_area, 3).astype(np.float32)
+        keep_flags = (tissue_pcts >= self.pct).astype(np.uint8)
 
         return keep_flags, tissue_pcts
 

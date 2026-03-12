@@ -9,7 +9,7 @@ from typing import Optional
 from pathlib import Path
 from omegaconf import DictConfig, OmegaConf
 
-from hs2p.api import WholeSlide
+from hs2p.api import SlideSpec
 
 
 def fix_random_seeds(seed=31):
@@ -99,7 +99,7 @@ def load_csv(cfg):
         mask_series.tolist(),
     ):
         whole_slides.append(
-            WholeSlide(
+            SlideSpec(
                 sample_id=sample_id,
                 image_path=Path(image_path),
                 mask_path=Path(mask_path) if mask_path is not None and not pd.isna(mask_path) else None,

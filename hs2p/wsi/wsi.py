@@ -369,8 +369,9 @@ class WholeSlideImage(object):
         seg_level = self.get_best_level_for_downsample_custom(segment_params.downsample)
         seg_spacing = self.get_level_spacing(seg_level)
 
-        img = self.wsi.get_slide(spacing=seg_spacing)
-        img = np.array(Image.fromarray(img).convert("RGBA"))
+        img = np.asarray(self.wsi.get_slide(spacing=seg_spacing))
+        if img.ndim == 3 and img.shape[2] == 4:
+            img = img[:, :, :3]
         img_hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)  # convert to HSV space
 
         if segment_params.use_hsv:
@@ -580,17 +581,17 @@ class WholeSlideImage(object):
         hole_contours = []
         for hole_ids in all_holes:
             unfiltered_holes = [contours[idx] for idx in hole_ids]
-            unfilered_holes = sorted(
+            unfiltered_holes = sorted(
                 unfiltered_holes, key=cv2.contourArea, reverse=True
             )
             # take max_n_holes largest holes by area
-            unfilered_holes = unfilered_holes[
+            unfiltered_holes = unfiltered_holes[
                 : filter_params.max_n_holes
             ]  # Use named tuple
             filtered_holes = []
 
             # filter these holes
-            for hole in unfilered_holes:
+            for hole in unfiltered_holes:
                 if cv2.contourArea(hole) > filter_params.a_h:  # Use named tuple
                     filtered_holes.append(hole)
 
@@ -802,11 +803,11 @@ class WholeSlideImage(object):
                 - tile_level (int): Level of the wsi used for tile extraction.
                 - resize_factor (float): The factor by which the tile size was resized.
         """
-        running_x_coords, running_y_coords = [], []
-        running_tissue_pct = []
-        running_contour_indices = []
-        tile_level = None
-        resize_factor = None
+        x_coord_chunks: list[np.ndarray] = []
+        y_coord_chunks: list[np.ndarray] = []
+        tissue_pct_chunks: list[np.ndarray] = []
+        contour_index_chunks: list[np.ndarray] = []
+        tile_level, _, resize_factor = self._resolve_tile_read_metadata(tiling_params)
 
         def process_single_contour(i):
             return self.process_contour(
@@ -837,17 +838,32 @@ class WholeSlideImage(object):
             cont_tile_level,
             cont_resize_factor,
         ) in enumerate(results):
-            if len(x_coords) > 0:
-                if tile_level is not None:
-                    assert (
-                        tile_level == cont_tile_level
-                    ), "Tile level should be the same for all contours"
-                tile_level = cont_tile_level
-                resize_factor = cont_resize_factor
-                running_x_coords.extend(x_coords)
-                running_y_coords.extend(y_coords)
-                running_tissue_pct.extend(tissue_pct)
-                running_contour_indices.extend([i] * len(x_coords))
+            assert (
+                cont_tile_level == tile_level
+            ), "Tile level should be the same for all contours"
+            assert (
+                cont_resize_factor == resize_factor
+            ), "Resize factor should be the same for all contours"
+            if x_coords.shape[0] > 0:
+                x_coord_chunks.append(x_coords.astype(np.int64, copy=False))
+                y_coord_chunks.append(y_coords.astype(np.int64, copy=False))
+                tissue_pct_chunks.append(
+                    np.asarray(tissue_pct, dtype=np.float32)
+                )
+                contour_index_chunks.append(
+                    np.full(x_coords.shape[0], i, dtype=np.int32)
+                )
+
+        if x_coord_chunks:
+            running_x_coords = np.concatenate(x_coord_chunks)
+            running_y_coords = np.concatenate(y_coord_chunks)
+            running_tissue_pct = np.concatenate(tissue_pct_chunks)
+            running_contour_indices = np.concatenate(contour_index_chunks)
+        else:
+            running_x_coords = np.array([], dtype=np.int64)
+            running_y_coords = np.array([], dtype=np.int64)
+            running_tissue_pct = np.array([], dtype=np.float32)
+            running_contour_indices = np.array([], dtype=np.int32)
 
         return (
             running_x_coords,
@@ -857,6 +873,22 @@ class WholeSlideImage(object):
             tile_level,
             resize_factor,
         )
+
+    def _resolve_tile_read_metadata(self, tiling_params: _SupportsTilingParams):
+        target_spacing = tiling_params.spacing
+        tolerance = tiling_params.tolerance
+        tile_level, is_within_tolerance = self.get_best_level_for_spacing(
+            target_spacing, tolerance
+        )
+        tile_spacing = self.get_level_spacing(tile_level)
+        resize_factor = target_spacing / tile_spacing
+        if is_within_tolerance:
+            resize_factor = 1.0
+
+        assert (
+            resize_factor >= 1
+        ), f"Resize factor should be greater than or equal to 1. Got {resize_factor}"
+        return tile_level, tile_spacing, resize_factor
 
     def process_contour(
         self,
@@ -884,25 +916,14 @@ class WholeSlideImage(object):
                 - tile_level (int): Level of the image used for tile extraction.
                 - resize_factor (float): The factor by which the tile size was resized.
         """
-        target_spacing = tiling_params.spacing
-        tolerance = tiling_params.tolerance
         target_tile_size = tiling_params.tile_size
         overlap = tiling_params.overlap
         drop_holes = tiling_params.drop_holes
         use_padding = tiling_params.use_padding
 
-        tile_level, is_within_tolerance = self.get_best_level_for_spacing(
-            target_spacing, tolerance
+        tile_level, tile_spacing, resize_factor = self._resolve_tile_read_metadata(
+            tiling_params
         )
-        tile_spacing = self.get_level_spacing(tile_level)
-        resize_factor = target_spacing / tile_spacing
-        if is_within_tolerance:
-            resize_factor = 1.0
-
-        assert (
-            resize_factor >= 1
-        ), f"Resize factor should be greater than or equal to 1. Got {resize_factor}"
-
         tile_size_resized = int(round(target_tile_size * resize_factor, 0))
         step_size = int(tile_size_resized * (1.0 - overlap))
 
@@ -997,15 +1018,21 @@ class WholeSlideImage(object):
         ntile = len(filtered_coordinates)
 
         if ntile > 0:
-            x_coords = list(filtered_coordinates[:, 0])
-            y_coords = list(filtered_coordinates[:, 1])
+            x_coords = filtered_coordinates[:, 0].astype(np.int64, copy=False)
+            y_coords = filtered_coordinates[:, 1].astype(np.int64, copy=False)
             return (
                 x_coords,
                 y_coords,
-                filtered_tissue_percentages,
+                filtered_tissue_percentages.astype(np.float32, copy=False),
                 tile_level,
                 resize_factor,
             )
 
         else:
-            return [], [], [], None, None
+            return (
+                np.array([], dtype=np.int64),
+                np.array([], dtype=np.int64),
+                np.array([], dtype=np.float32),
+                tile_level,
+                resize_factor,
+            )
