@@ -10,7 +10,7 @@ from collections import defaultdict
 from .wsi import (
     FilterParameters,
     SegmentationParameters,
-    TilingParameters,
+    _SupportsTilingParams,
     SamplingParameters,
     WholeSlideImage,
 )
@@ -50,14 +50,6 @@ class CoordinateExtractionResult:
     read_tile_size_px: int
     resize_factor: float
     tile_size_lv0: int
-
-    def __iter__(self):
-        yield self.coordinates
-        yield self.contour_indices
-        yield self.read_level
-        yield self.resize_factor
-        yield self.tile_size_lv0
-
 
 def sort_coordinates_with_tissue(coordinates, tissue_percentages, contour_indices):
     """
@@ -174,19 +166,34 @@ def _save_tissue_overlay_preview(
     overlay.save(mask_visu_path)
 
 
+def _build_default_tissue_sampling_params(
+    tiling_params: _SupportsTilingParams,
+) -> SamplingParameters:
+    return SamplingParameters(
+        pixel_mapping=DEFAULT_TISSUE_PIXEL_MAPPING,
+        color_mapping={"background": None, "tissue": None},
+        tissue_percentage={
+            "background": None,
+            "tissue": tiling_params.min_tissue_percentage,
+        },
+    )
+
+
 def extract_coordinates(
     *,
     wsi_path: Path,
-    mask_path: Path,
+    mask_path: Path | None,
     backend: str,
     segment_params: SegmentationParameters,
-    tiling_params: TilingParameters,
+    tiling_params: _SupportsTilingParams,
     filter_params: FilterParameters,
     sampling_params: SamplingParameters | None = None,
     mask_visu_path: Path | None = None,
     disable_tqdm: bool = False,
     num_workers: int = 1,
 ):
+    if sampling_params is None:
+        sampling_params = _build_default_tissue_sampling_params(tiling_params)
     wsi = WholeSlideImage(
         path=wsi_path,
         mask_path=mask_path,
@@ -248,10 +255,10 @@ def extract_coordinates(
 def sample_coordinates(
     *,
     wsi_path: Path,
-    mask_path: Path,
+    mask_path: Path | None,
     backend: str,
     segment_params: SegmentationParameters,
-    tiling_params: TilingParameters,
+    tiling_params: _SupportsTilingParams,
     filter_params: FilterParameters,
     sampling_params: SamplingParameters,
     annotation: str,
@@ -327,7 +334,7 @@ def filter_coordinates(
     contour_indices: list[int],
     tile_level: int,
     segment_params: SegmentationParameters,
-    tiling_params: TilingParameters,
+    tiling_params: _SupportsTilingParams,
     sampling_params: SamplingParameters,
     disable_tqdm: bool = False,
 ):

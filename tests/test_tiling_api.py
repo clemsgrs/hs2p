@@ -894,6 +894,64 @@ def test_load_whole_slides_from_rows_parses_current_schema_rows():
     ]
 
 
+def test_load_whole_slides_from_rows_treats_nan_like_mask_values_as_missing():
+    rows = [
+        {
+            "sample_id": "slide-nan",
+            "image_path": "slide-nan.svs",
+            "mask_path": np.nan,
+        },
+        {
+            "sample_id": "slide-none-string",
+            "image_path": "slide-none-string.svs",
+            "mask_path": "None",
+        },
+        {
+            "sample_id": "slide-nan-string",
+            "image_path": "slide-nan-string.svs",
+            "mask_path": "nan",
+        },
+    ]
+
+    slides = load_whole_slides_from_rows(rows)
+
+    assert slides == [
+        WholeSlide(
+            sample_id="slide-nan",
+            image_path=Path("slide-nan.svs"),
+            mask_path=None,
+        ),
+        WholeSlide(
+            sample_id="slide-none-string",
+            image_path=Path("slide-none-string.svs"),
+            mask_path=None,
+        ),
+        WholeSlide(
+            sample_id="slide-nan-string",
+            image_path=Path("slide-nan-string.svs"),
+            mask_path=None,
+        ),
+    ]
+
+
+def test_coordinate_extraction_result_is_not_tuple_iterable():
+    result = CoordinateExtractionResult(
+        coordinates=[(1, 2)],
+        contour_indices=[0],
+        tissue_percentages=[0.5],
+        x=np.array([1], dtype=np.int64),
+        y=np.array([2], dtype=np.int64),
+        read_level=0,
+        read_spacing_um=0.5,
+        read_tile_size_px=224,
+        resize_factor=1.0,
+        tile_size_lv0=224,
+    )
+
+    with pytest.raises(TypeError, match="not iterable"):
+        tuple(result)
+
+
 def test_write_process_list_removes_temp_file_on_failure(monkeypatch, tmp_path: Path):
     created_temp_paths: list[Path] = []
     original_named_temporary_file = tempfile.NamedTemporaryFile

@@ -6,7 +6,9 @@ import numpy as np
 
 from hs2p.api import FilterConfig, SegmentationConfig, TilingConfig
 import hs2p.wsi as wsi_api
+import hs2p.wsi.wsi as wsimod
 from hs2p.wsi import SamplingParameters
+from tests.helpers.fake_wsi_backend import FakePyramidWSI, PyramidSpec
 
 
 def _segmentation_config() -> SegmentationConfig:
@@ -171,3 +173,44 @@ def test_extract_coordinates_match_expected_coordinates_across_spacings(fake_bac
         assert result.read_level == exp["tile_level"]
         assert result.resize_factor == exp["resize_factor"]
         assert result.tile_size_lv0 == exp["tile_size_lv0"]
+
+
+def test_extract_coordinates_segments_maskless_slides_without_annotation_pct_crash(monkeypatch):
+    slide_l0 = np.full((32, 32, 3), 255, dtype=np.uint8)
+    slide_l1 = slide_l0[::2, ::2, :]
+    tissue_mask = np.zeros((32, 32), dtype=np.uint8)
+    tissue_mask[8:24, 8:24] = 255
+
+    def _fake_wholeslide(path: Path, backend: str = "asap"):
+        del path, backend
+        return FakePyramidWSI(PyramidSpec(spacings=[1.0, 2.0], levels=[slide_l0, slide_l1]))
+
+    def _fake_segment_tissue(self, segment_params):
+        del segment_params
+        self.annotation_mask = {"tissue": tissue_mask}
+        return 0
+
+    monkeypatch.setattr(wsimod.wsd, "WholeSlideImage", _fake_wholeslide)
+    monkeypatch.setattr(wsimod.WholeSlideImage, "segment_tissue", _fake_segment_tissue)
+
+    result = wsi_api.extract_coordinates(
+        wsi_path=Path("synthetic-slide.tif"),
+        mask_path=None,
+        backend="asap",
+        segment_params=SegmentationConfig(
+            downsample=2,
+            sthresh=8,
+            sthresh_up=255,
+            mthresh=3,
+            close=0,
+            use_otsu=False,
+            use_hsv=False,
+        ),
+        tiling_params=_tiling_config(tissue_threshold=0.0),
+        filter_params=_filter_config(),
+        disable_tqdm=True,
+        num_workers=1,
+    )
+
+    assert len(result.coordinates) > 0
+    assert len(result.coordinates) == len(result.tissue_percentages)

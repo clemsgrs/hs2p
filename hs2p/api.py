@@ -14,6 +14,7 @@ import pandas as pd
 
 from hs2p.configs import default_config
 from hs2p.wsi import (
+    _build_default_tissue_sampling_params,
     SamplingParameters,
     extract_coordinates,
     overlay_mask_on_slide as _overlay_mask_on_slide,
@@ -242,11 +243,16 @@ def _validate_result_consistency(result: TilingResult) -> None:
 
 
 def _build_default_sampling_params(tiling: TilingConfig) -> SamplingParameters:
-    return SamplingParameters(
-        pixel_mapping={"background": 0, "tissue": 1},
-        color_mapping={"background": None, "tissue": None},
-        tissue_percentage={"background": None, "tissue": tiling.tissue_threshold},
-    )
+    return _build_default_tissue_sampling_params(tiling)
+
+
+def _optional_path(value: Any) -> Path | None:
+    if value is None or pd.isna(value):
+        return None
+    text = str(value).strip()
+    if text == "" or text.lower() in {"none", "nan"}:
+        return None
+    return Path(text)
 
 
 def _compute_tiling_result(
@@ -811,7 +817,7 @@ def load_whole_slides_from_rows(rows: Sequence[dict[str, Any]]) -> list[WholeSli
             WholeSlide(
                 sample_id=str(row["sample_id"]),
                 image_path=Path(row["image_path"]),
-                mask_path=Path(row["mask_path"]) if row.get("mask_path") else None,
+                mask_path=_optional_path(row.get("mask_path")),
             )
         )
     return whole_slides

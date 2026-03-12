@@ -2,7 +2,7 @@ import sys
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import NamedTuple
+from typing import NamedTuple, Protocol
 
 import cv2
 import numpy as np
@@ -50,18 +50,14 @@ class FilterParameters(NamedTuple):
     )
 
 
-class TilingParameters(NamedTuple):
-    """
-    Parameters for tiling.
-    """
-
-    target_spacing: float  # spacing at which to tile the slide, in microns per pixel
-    tolerance: float  # for matching the target_spacing, deciding how much target_spacing can deviate from those specified in the slide metadata.
-    target_tile_size: int  # size of the tiles to extract, in pixels
-    overlap: float  # overlap between tiles
-    min_tissue_percentage: float  # minimum percentage of tissue required to keep a tile when no sampling is performed
-    drop_holes: bool  # whether to drop tiles that fall within holes
-    use_padding: bool  # whether to use padding for tiles at the edges
+class _SupportsTilingParams(Protocol):
+    spacing: float
+    tile_size: int
+    tolerance: float
+    overlap: float
+    min_tissue_percentage: float
+    drop_holes: bool
+    use_padding: bool
 
 
 class SamplingParameters(NamedTuple):
@@ -414,7 +410,7 @@ class WholeSlideImage(object):
 
     def get_tile_coordinates(
         self,
-        tiling_params: TilingParameters,
+        tiling_params: _SupportsTilingParams,
         filter_params: FilterParameters,
         annotation: str | None = None,
         disable_tqdm: bool = False,
@@ -425,7 +421,8 @@ class WholeSlideImage(object):
         and additional tiling and filtering parameters.
 
         Args:
-            tiling_params (NamedTuple): Parameters for tiling, including:
+            tiling_params: Tiling configuration with spacing, tile size, overlap,
+                tissue threshold, and padding/hole controls.
                 - target_spacing (float): Desired spacing of the tiles.
                 - tolerance (float): Tolerance for matching the target_spacing, deciding how much
                     target_spacing can deviate from those specified in the slide metadata.
@@ -778,7 +775,7 @@ class WholeSlideImage(object):
         self,
         contours,
         holes,
-        tiling_params: TilingParameters,
+        tiling_params: _SupportsTilingParams,
         filter_params: FilterParameters,
         annotation: str | None = None,
         disable_tqdm: bool = False,
@@ -791,7 +788,7 @@ class WholeSlideImage(object):
         Args:
             contours (list): List of contours representing tissue blobs in the wsi.
             holes (list): List of tissue holes in each contour.
-            tiling_params (TilingParameters): Parameters for tiling.
+            tiling_params: Tiling configuration for contour processing.
             filter_params (FilterParameters): Parameters for filtering.
             annotation (str, optional): annotation type to use for tile extraction.
             num_workers (int, optional): Number of workers to use for parallel processing. Defaults to 1.
@@ -865,7 +862,7 @@ class WholeSlideImage(object):
         self,
         contour,
         contour_holes,
-        tiling_params: TilingParameters,
+        tiling_params: _SupportsTilingParams,
         filter_params: FilterParameters,
         annotation: str | None = None,
     ):
@@ -875,7 +872,7 @@ class WholeSlideImage(object):
         Args:
             contour (numpy.ndarray): Contour to process, defined as a set of points.
             contour_holes (list): List of holes within the contour.
-            tiling_params (TilingParameters): Parameters for tiling.
+            tiling_params: Tiling configuration for contour processing.
             filter_params (FilterParameters): Parameters for filtering.
             annotation (str, optional): Annotation type to use for tile extraction.
 
