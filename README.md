@@ -4,6 +4,8 @@
 
 `hs2p` is a Python package for tiling and sampling whole-slide images at physically defined resolution. It is designed for computational pathology workflows that need reproducible coordinates, explicit artifact files, and support for masks that do not necessarily match the slide pyramid.
 
+It supports efficient slide tiling and tile sampling at any requested spacing, whether or not that spacing is natively present in the whole-slide image. If a mask is not provided, HS2P can segment tissue directly from the slide; if you want to precompute tissue masks, a standalone script is available.
+
 HS2P supports two main workflows:
 
 - a Python API for library-style integration
@@ -21,13 +23,19 @@ pip install hs2p
 
 <img src="illustrations/extraction_illu.png" alt="HS2P tiling workflow" width="1000" />
 
+Tiling computes a reproducible grid of tile coordinates for each slide and saves them as named artifacts with extraction metadata.
+
 ### Sampling
 
 <img src="illustrations/sampling_illu.png" alt="HS2P sampling workflow" width="1000" />
 
+Sampling filters or partitions tile coordinates by annotation coverage so you can keep only tiles relevant to a tissue class or label.
+
 ## Python API
 
 The public API is centered on `WholeSlide`, config dataclasses, and explicit save/load functions for named artifacts.
+
+If `mask_path` is omitted, HS2P segments tissue from the slide before extracting coordinates.
 
 Minimal tiling example:
 
@@ -55,30 +63,12 @@ result = tile_slide(
         tolerance=0.07,
         overlap=0.0,
         tissue_threshold=0.1,
+        backend="asap",
         drop_holes=False,
         use_padding=True,
-        backend="asap",
     ),
-    segmentation=SegmentationConfig(
-        downsample=64,
-        sthresh=8,
-        sthresh_up=255,
-        mthresh=7,
-        close=4,
-        use_otsu=False,
-        use_hsv=True,
-    ),
-    filtering=FilterConfig(
-        ref_tile_size=224,
-        a_t=4,
-        a_h=2,
-        max_n_holes=8,
-        filter_white=False,
-        filter_black=False,
-        white_threshold=220,
-        black_threshold=25,
-        fraction_threshold=0.9,
-    ),
+    segmentation=SegmentationConfig(downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4, use_otsu=False, use_hsv=True),
+    filtering=FilterConfig(ref_tile_size=224, a_t=4, a_h=2, max_n_holes=8, filter_white=False, filter_black=False, white_threshold=220, black_threshold=25, fraction_threshold=0.9),
     num_workers=1,
 )
 

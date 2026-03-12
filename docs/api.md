@@ -1,11 +1,12 @@
 # Python API
 
-The Python API is the primary public interface for programmatic use.
+The Python API is the primary public interface for programmatic use. It supports extraction at any requested spacing, whether or not that spacing exists natively in the slide pyramid.
 
 ## Main types
 
 - `WholeSlide`
   - Identifies one sample through `sample_id`, `image_path`, and optional `mask_path`
+  - If `mask_path` is omitted, HS2P can segment tissue directly from the slide
 - `TilingConfig`
   - Defines the requested tile spacing, tile size, overlap, tissue threshold, padding behavior, and backend
 - `SegmentationConfig`
@@ -45,48 +46,24 @@ from hs2p import (
     tile_slide,
 )
 
-tiling = TilingConfig(
-    target_spacing_um=0.5,
-    target_tile_size_px=224,
-    tolerance=0.07,
-    overlap=0.0,
-    tissue_threshold=0.1,
-    drop_holes=False,
-    use_padding=True,
-    backend="asap",
-)
-
-segmentation = SegmentationConfig(
-    downsample=64,
-    sthresh=8,
-    sthresh_up=255,
-    mthresh=7,
-    close=4,
-    use_otsu=False,
-    use_hsv=True,
-)
-
-filtering = FilterConfig(
-    ref_tile_size=224,
-    a_t=4,
-    a_h=2,
-    max_n_holes=8,
-    filter_white=False,
-    filter_black=False,
-    white_threshold=220,
-    black_threshold=25,
-    fraction_threshold=0.9,
-)
-
 result = tile_slide(
     WholeSlide(
         sample_id="slide-1",
         image_path=Path("/data/slide-1.tif"),
         mask_path=Path("/data/slide-1-mask.tif"),
     ),
-    tiling=tiling,
-    segmentation=segmentation,
-    filtering=filtering,
+    tiling=TilingConfig(
+        target_spacing_um=0.5,
+        target_tile_size_px=224,
+        tolerance=0.07,
+        overlap=0.0,
+        tissue_threshold=0.1,
+        backend="asap",
+        drop_holes=False,
+        use_padding=True,
+    ),
+    segmentation=SegmentationConfig(downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4, use_otsu=False, use_hsv=True),
+    filtering=FilterConfig(ref_tile_size=224, a_t=4, a_h=2, max_n_holes=8, filter_white=False, filter_black=False, white_threshold=220, black_threshold=25, fraction_threshold=0.9),
     num_workers=1,
 )
 
@@ -97,4 +74,5 @@ artifacts = save_tiling_result(result, output_dir=Path("output"))
 
 - `tile_slide()` is the right entry point when you want to stay fully in Python.
 - `tile_slides()` is the right entry point when you want batch processing, output manifests, resume support, or preview images.
+- If you want to create masks ahead of time instead of segmenting inside the tiling run, see [tissue-mask-generation.md](tissue-mask-generation.md).
 - Saved artifacts are intentionally explicit and named by `sample_id`; see [artifacts.md](artifacts.md).
