@@ -1,6 +1,10 @@
 # hs2p
 
-[![PyPI version](https://img.shields.io/pypi/v/hs2p?label=pypi&logo=pypi&color=3776AB)](https://pypi.org/project/hs2p/)
+<p>
+    <a href="https://pypi.org/project/hs2p"><img src="https://img.shields.io/pypi/v/hs2p.svg" alt="PyPI version"></a>
+    <a href="https://github.com/psf/black"><img alt="empty" src=https://img.shields.io/badge/code%20style-black-000000.svg></a>
+    <a href="https://github.com/PyCQA/pylint"><img alt="empty" src=https://img.shields.io/github/stars/clemsgrs/hs2p?style=social></a>
+</p>
 
 `hs2p` is a Python package for efficient slide tiling and tile sampling at any requested spacing, whether or not that spacing is natively present in the whole-slide image. It is designed for computational pathology workflows that need reproducible coordinates.
 
@@ -48,8 +52,8 @@ from hs2p import (
     SegmentationConfig,
     TilingConfig,
     WholeSlide,
-    save_tiling_result,
     tile_slide,
+    save_tiling_result,
 )
 
 result = tile_slide(
@@ -59,12 +63,12 @@ result = tile_slide(
         mask_path=Path("/data/mask/slide-1.tif"),
     ),
     tiling=TilingConfig(
+        backend="openslide",
         target_spacing_um=0.5,
         target_tile_size_px=224,
         tolerance=0.07,
         overlap=0.0,
         tissue_threshold=0.1,
-        backend="asap",
     ),
     segmentation=SegmentationConfig(downsample=64),
     filtering=FilterConfig(ref_tile_size=224, a_t=4, a_h=2),
@@ -75,6 +79,8 @@ artifacts = save_tiling_result(result, output_dir=Path("output"))
 print(artifacts.tiles_npz_path)
 print(artifacts.tiles_meta_path)
 ```
+
+`result` is a [`TilingResult`](hs2p/api.py) for one slide. It gives downstream pipelines the tile coordinates plus the metadata needed to relate those coordinates back to the slide pyramid and persist them as reusable named artifacts.
 
 More API details: [docs/api.md](docs/api.md)
 
@@ -123,6 +129,8 @@ More CLI details: [docs/cli.md](docs/cli.md)
 Artifact field reference: [docs/artifacts.md](docs/artifacts.md)
 
 ## Docker
+
+[![Docker Version](https://img.shields.io/docker/v/waticlems/hs2p?sort=semver&label=docker&logo=docker&color=2496ED)](https://hub.docker.com/r/waticlems/hs2p)
 
 If you prefer running `hs2p` in a container, a published Docker image is available:
 

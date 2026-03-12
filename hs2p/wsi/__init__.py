@@ -18,6 +18,21 @@ from .wsi import (
 
 @dataclass
 class CoordinateExtractionResult:
+    """Low-level coordinate extraction output for one slide.
+
+    Attributes:
+        coordinates: Tile origin coordinates as ``(x, y)`` pairs in level-0 pixels.
+        contour_indices: Contour index associated with each retained tile.
+        tissue_percentages: Per-tile tissue coverage values measured during extraction.
+        x_lv0: Tile origin x-coordinates in level-0 pixels.
+        y_lv0: Tile origin y-coordinates in level-0 pixels.
+        read_level: Pyramid level actually read from the slide.
+        read_spacing_um: Native spacing of the pyramid level that was read.
+        read_tile_size_px: Tile width and height at the read level.
+        resize_factor: Resize factor between the read level and requested spacing.
+        tile_size_lv0: Tile width and height expressed in level-0 pixels.
+    """
+
     coordinates: list[tuple[int, int]]
     contour_indices: list[int]
     tissue_percentages: list[float]
@@ -355,6 +370,7 @@ def overlay_mask_on_slide(
     wsi_path: Path,
     annotation_mask_path: Path,
     downsample: int,
+    backend: str,
     palette: dict[str, int],
     pixel_mapping: dict[str, int],
     color_mapping: dict[str, list[int] | None],
@@ -364,8 +380,8 @@ def overlay_mask_on_slide(
     Show a mask overlayed on a slide
     """
 
-    wsi_object = WholeSlideImage(path=wsi_path, backend="asap")
-    mask_object = WholeSlideImage(path=annotation_mask_path, backend="asap")
+    wsi_object = WholeSlideImage(path=wsi_path, backend=backend)
+    mask_object = WholeSlideImage(path=annotation_mask_path, backend=backend)
 
     vis_level = wsi_object.get_best_level_for_downsample_custom(downsample)
     vis_spacing = wsi_object.spacings[vis_level]
@@ -581,9 +597,9 @@ def visualize_coordinates(
     coordinates: list[tuple[int, int]],
     tile_size_lv0: int,
     save_dir: Path,
+    backend: str,
     sample_id: str | None = None,
     downsample: int = 64,
-    backend: str = "asap",
     grid_thickness: int = 1,
     mask_path: Path | None = None,
     annotation: str | None = None,

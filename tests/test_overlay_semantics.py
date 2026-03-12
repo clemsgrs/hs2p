@@ -79,6 +79,7 @@ def test_overlay_mask_on_slide_matches_tile_semantics(monkeypatch):
         wsi_path=Path("fake-wsi.tif"),
         annotation_mask_path=Path("fake-mask.tif"),
         downsample=1,
+        backend="openslide",
         palette=palette,
         pixel_mapping=pixel_mapping,
         color_mapping=color_mapping,

@@ -24,6 +24,14 @@ _DEFAULT_FILTERING = _DEFAULT_TILING.filter_params
 
 @dataclass(frozen=True)
 class WholeSlide:
+    """Identify one slide and its optional mask.
+
+    Attributes:
+        sample_id: Stable sample identifier used to name outputs.
+        image_path: Path to the whole-slide image.
+        mask_path: Optional path to a tissue or annotation mask.
+    """
+
     sample_id: str
     image_path: Path
     mask_path: Path | None = None
@@ -31,6 +39,20 @@ class WholeSlide:
 
 @dataclass(frozen=True)
 class TilingConfig:
+    """Control tile extraction at a target physical resolution.
+
+    Attributes:
+        backend: Slide-reading backend, for example ``openslide`` or ``asap``.
+        target_spacing_um: Requested spacing in microns per pixel.
+        target_tile_size_px: Requested tile width and height at the target spacing.
+        tolerance: Allowed relative spacing mismatch when choosing a pyramid level.
+        overlap: Fractional overlap between neighboring tiles.
+        tissue_threshold: Minimum tissue fraction required to keep a tile.
+        drop_holes: Whether tiles centered in detected tissue holes are discarded.
+        use_padding: Whether border tiles may extend beyond slide bounds and be padded.
+    """
+
+    backend: str
     target_spacing_um: float
     target_tile_size_px: int
     tolerance: float
@@ -38,7 +60,6 @@ class TilingConfig:
     tissue_threshold: float
     drop_holes: bool = bool(_DEFAULT_TILING_PARAMS.drop_holes)
     use_padding: bool = bool(_DEFAULT_TILING_PARAMS.use_padding)
-    backend: str = str(_DEFAULT_TILING.backend)
 
     # Legacy compatibility for wrapped core logic.
     @property
@@ -56,6 +77,18 @@ class TilingConfig:
 
 @dataclass(frozen=True)
 class SegmentationConfig:
+    """Control tissue segmentation before coordinate extraction.
+
+    Attributes:
+        downsample: Downsample factor used to choose the segmentation level.
+        sthresh: Foreground threshold used when Otsu thresholding is disabled.
+        sthresh_up: Upper threshold value used when scaling the binary mask.
+        mthresh: Median-filter kernel size applied before thresholding.
+        close: Morphological closing kernel size applied after thresholding.
+        use_otsu: Whether to use Otsu thresholding instead of a fixed threshold.
+        use_hsv: Whether to segment in HSV space instead of grayscale.
+    """
+
     downsample: int
     sthresh: int = int(_DEFAULT_SEGMENTATION.sthresh)
     sthresh_up: int = int(_DEFAULT_SEGMENTATION.sthresh_up)
@@ -67,6 +100,20 @@ class SegmentationConfig:
 
 @dataclass(frozen=True)
 class FilterConfig:
+    """Control contour and tile-level filtering after segmentation.
+
+    Attributes:
+        ref_tile_size: Reference tile size used to scale contour-area thresholds.
+        a_t: Minimum contour area threshold, relative to the reference tile size.
+        a_h: Minimum hole area threshold, relative to the reference tile size.
+        max_n_holes: Maximum number of holes retained per contour.
+        filter_white: Whether mostly white tiles are removed.
+        filter_black: Whether mostly black tiles are removed.
+        white_threshold: Pixel threshold used for white-tile rejection.
+        black_threshold: Pixel threshold used for black-tile rejection.
+        fraction_threshold: Fraction of white or black pixels required to reject a tile.
+    """
+
     ref_tile_size: int
     a_t: int
     a_h: int
@@ -80,6 +127,14 @@ class FilterConfig:
 
 @dataclass(frozen=True)
 class QCConfig:
+    """Control preview generation in batch tiling.
+
+    Attributes:
+        save_mask_preview: Whether a mask preview image is written.
+        save_tiling_preview: Whether a tiling preview image is written.
+        downsample: Downsample factor used for preview rendering.
+    """
+
     save_mask_preview: bool = False
     save_tiling_preview: bool = False
     downsample: int = 32
@@ -87,6 +142,29 @@ class QCConfig:
 
 @dataclass
 class TilingResult:
+    """In-memory tiling output for one slide.
+
+    Attributes:
+        sample_id: Sample identifier associated with the tiling run.
+        image_path: Slide path used to generate the coordinates.
+        mask_path: Mask path used during generation, if any.
+        backend: Slide-reading backend used during extraction.
+        x_lv0: Tile origin x-coordinates in level-0 pixels.
+        y_lv0: Tile origin y-coordinates in level-0 pixels.
+        tile_index: Stable per-tile ids aligned with the coordinate arrays.
+        target_spacing_um: Requested output spacing in microns per pixel.
+        target_tile_size_px: Requested tile width and height at the target spacing.
+        read_level: Pyramid level actually read from the slide.
+        read_spacing_um: Native spacing of the pyramid level that was read.
+        read_tile_size_px: Tile width and height at the read level.
+        tile_size_lv0: Tile width and height expressed in level-0 pixels.
+        overlap: Requested overlap fraction between neighboring tiles.
+        tissue_threshold: Minimum tissue fraction used to keep tiles.
+        num_tiles: Number of retained tiles.
+        config_hash: Hash of the effective tiling, segmentation, and filtering config.
+        tissue_fraction: Optional per-tile tissue coverage values.
+    """
+
     sample_id: str
     image_path: Path
     mask_path: Path | None
@@ -109,6 +187,17 @@ class TilingResult:
 
 @dataclass(frozen=True)
 class TilingArtifacts:
+    """Named on-disk artifacts produced by a tiling run.
+
+    Attributes:
+        sample_id: Sample identifier that names the artifact files.
+        tiles_npz_path: Path to the saved ``.tiles.npz`` coordinate artifact.
+        tiles_meta_path: Path to the saved ``.tiles.meta.json`` metadata artifact.
+        num_tiles: Number of tiles stored in the artifact pair.
+        mask_preview_path: Optional path to the saved mask preview image.
+        tiling_preview_path: Optional path to the saved tiling preview image.
+    """
+
     sample_id: str
     tiles_npz_path: Path
     tiles_meta_path: Path

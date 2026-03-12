@@ -103,9 +103,9 @@ class WholeSlideImage(object):
     def __init__(
         self,
         path: Path,
+        backend: str,
         mask_path: Path | None = None,
         spacing_at_level_0: float | None = None,
-        backend: str = "asap",
         segment: bool = False,
         segment_params: SegmentationParameters | None = None,
         sampling_params: SamplingParameters | None = None,
@@ -118,7 +118,7 @@ class WholeSlideImage(object):
             path (Path): Path to the wsi.
             mask_path (Path, optional): Path to the tissue mask, if available. Defaults to None.
             spacing_at_level_0 (float, optional): Manually set spacing at level 0, if speficied. Defaults to None.
-            backend (str): Backend to use for opening the wsi. Defaults to "asap".
+            backend (str): Backend to use for opening the wsi.
             segment (bool): Whether to segment the slide if tissue mask is not provided. Defaults to False.
             segment_params (NamedTuple, optional): Segmentation parameters. Used for either loading an existing tissue mask or segmenting the slide.
             sampling_params (NamedTuple, optional): Sampling parameters. Used for either loading an existing annotation mask.

@@ -318,6 +318,7 @@ def process_slide(
                 wsi_path=wsi_path,
                 annotation_mask_path=mask_path,
                 downsample=cfg.tiling.visu_params.downsample,
+                backend=cfg.tiling.backend,
                 palette=preview_palette,
                 pixel_mapping=sampling_params.pixel_mapping,
                 color_mapping=color_mapping,

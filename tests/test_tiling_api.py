@@ -868,7 +868,16 @@ def test_write_process_list_removes_temp_file_on_failure(monkeypatch, tmp_path: 
     with pytest.raises(OSError, match="disk full"):
         tile_slides(
             [],
-            tiling=TilingConfig(0.5, 224, 0.07, 0.1, 0.2, False, True, "asap"),
+            tiling=TilingConfig(
+                backend="asap",
+                target_spacing_um=0.5,
+                target_tile_size_px=224,
+                tolerance=0.07,
+                overlap=0.1,
+                tissue_threshold=0.2,
+                drop_holes=False,
+                use_padding=True,
+            ),
             segmentation=SegmentationConfig(64, 8, 255, 7, 4, False, True),
             filtering=FilterConfig(224, 4, 2, 8, False, False, 220, 25, 0.9),
             output_dir=tmp_path,
@@ -880,6 +889,7 @@ def test_write_process_list_removes_temp_file_on_failure(monkeypatch, tmp_path: 
 
 def test_config_dataclasses_apply_package_defaults_for_secondary_parameters():
     tiling = TilingConfig(
+        backend="openslide",
         target_spacing_um=0.5,
         target_tile_size_px=224,
         tolerance=0.07,
@@ -891,7 +901,7 @@ def test_config_dataclasses_apply_package_defaults_for_secondary_parameters():
 
     assert tiling.drop_holes == default_config.tiling.params.drop_holes
     assert tiling.use_padding == default_config.tiling.params.use_padding
-    assert tiling.backend == default_config.tiling.backend
+    assert tiling.backend == "openslide"
     assert segmentation.sthresh == default_config.tiling.seg_params.sthresh
     assert segmentation.sthresh_up == default_config.tiling.seg_params.sthresh_up
     assert segmentation.mthresh == default_config.tiling.seg_params.mthresh

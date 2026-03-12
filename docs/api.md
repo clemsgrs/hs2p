@@ -70,6 +70,8 @@ result = tile_slide(
 artifacts = save_tiling_result(result, output_dir=Path("output"))
 ```
 
+`result` is a `TilingResult` for one slide. It contains the tile coordinates plus the read-level metadata needed to extract patches, align model outputs back to tiles, or save the run as reusable artifacts.
+
 ## Notes
 
 - `tile_slide()` is the right entry point when you want to stay fully in Python.
