@@ -1,4 +1,5 @@
 from pathlib import Path
+from dataclasses import dataclass
 
 import cv2
 import tqdm
@@ -9,15 +10,99 @@ from collections import defaultdict
 from .wsi import (
     FilterParameters,
     SegmentationParameters,
-    TilingParameters,
+    _SupportsTilingParams,
     SamplingParameters,
     WholeSlideImage,
 )
 
 
+DEFAULT_TISSUE_PIXEL_MAPPING = {"background": 0, "tissue": 1}
+DEFAULT_TISSUE_COLOR_MAPPING = {
+    "background": None,
+    "tissue": [157, 219, 129],
+}
+
+
+@dataclass(init=False)
+class CoordinateExtractionResult:
+    """Low-level coordinate extraction output for one slide.
+
+    Attributes:
+        coordinates: Tile origin coordinates as ``(x, y)`` pairs in level-0 pixels.
+            This is reconstructed lazily from ``x`` and ``y``.
+        contour_indices: Contour index associated with each retained tile.
+        tissue_percentages: Per-tile tissue coverage values measured during extraction.
+        x: Tile origin x-coordinates in level-0 pixels.
+        y: Tile origin y-coordinates in level-0 pixels.
+        read_level: Pyramid level actually read from the slide.
+        read_spacing_um: Native spacing of the pyramid level that was read.
+        read_tile_size_px: Tile width and height at the read level.
+        resize_factor: Resize factor between the read level and requested spacing.
+        tile_size_lv0: Tile width and height expressed in level-0 pixels.
+    """
+
+    contour_indices: list[int]
+    tissue_percentages: list[float]
+    x: np.ndarray
+    y: np.ndarray
+    read_level: int
+    read_spacing_um: float
+    read_tile_size_px: int
+    resize_factor: float
+    tile_size_lv0: int
+
+    def __init__(
+        self,
+        *,
+        contour_indices: list[int],
+        tissue_percentages: list[float],
+        x: np.ndarray | None = None,
+        y: np.ndarray | None = None,
+        read_level: int,
+        read_spacing_um: float,
+        read_tile_size_px: int,
+        resize_factor: float,
+        tile_size_lv0: int,
+        coordinates: list[tuple[int, int]] | None = None,
+    ):
+        if x is None or y is None:
+            if coordinates is None:
+                raise TypeError("Provide x and y arrays or coordinates")
+            x = np.array([coord[0] for coord in coordinates], dtype=np.int64)
+            y = np.array([coord[1] for coord in coordinates], dtype=np.int64)
+        else:
+            x = np.asarray(x, dtype=np.int64)
+            y = np.asarray(y, dtype=np.int64)
+        if x.ndim != 1 or y.ndim != 1 or x.shape != y.shape:
+            raise ValueError("x and y must be one-dimensional arrays of equal length")
+        if coordinates is not None:
+            expected_x = np.array([coord[0] for coord in coordinates], dtype=np.int64)
+            expected_y = np.array([coord[1] for coord in coordinates], dtype=np.int64)
+            if not np.array_equal(x, expected_x) or not np.array_equal(y, expected_y):
+                raise ValueError("coordinates must match the provided x and y arrays")
+
+        self.contour_indices = list(contour_indices)
+        self.tissue_percentages = list(tissue_percentages)
+        self.x = x
+        self.y = y
+        self.read_level = read_level
+        self.read_spacing_um = read_spacing_um
+        self.read_tile_size_px = read_tile_size_px
+        self.resize_factor = resize_factor
+        self.tile_size_lv0 = tile_size_lv0
+
+    @property
+    def coordinates(self) -> list[tuple[int, int]]:
+        return list(zip(self.x.tolist(), self.y.tolist()))
+
 def sort_coordinates_with_tissue(coordinates, tissue_percentages, contour_indices):
     """
-    Deduplicate coordinates, then sort deterministically by mocked filename.
+    Deduplicate coordinates, then sort deterministically in column-major order.
+
+    The final order is numeric ``x`` first, then numeric ``y`` within each
+    shared ``x`` value. In other words, tiles are grouped by column before row.
+    This ordering defines the saved artifact row order for ``x``, ``y``, and
+    aligned arrays such as ``tile_index`` / ``tissue_fraction``.
     """
     seen = set()
     dedup_coordinates = []
@@ -34,22 +119,13 @@ def sort_coordinates_with_tissue(coordinates, tissue_percentages, contour_indice
         dedup_coordinates.append((x, y))
         dedup_tissue_percentages.append(tissue)
         dedup_contour_indices.append(contour_idx)
-    # mock filenames
-    mocked_filenames = [f"{x}_{y}.jpg" for x, y in dedup_coordinates]
-    # sort combined list by mocked filenames
-    combined = list(
-        zip(
-            mocked_filenames,
-            dedup_coordinates,
-            dedup_tissue_percentages,
-            dedup_contour_indices,
-        )
-    )
-    sorted_combined = sorted(combined, key=lambda x: x[0])
-    # extract sorted coordinates and tissue percentages
-    sorted_coordinates = [coord for _, coord, _, _ in sorted_combined]
-    sorted_tissue_percentages = [tissue for _, _, tissue, _ in sorted_combined]
-    sorted_contour_indices = [idx for _, _, _, idx in sorted_combined]
+    if not dedup_coordinates:
+        return [], [], []
+    coord_array = np.asarray(dedup_coordinates, dtype=np.int64)
+    order = np.lexsort((coord_array[:, 1], coord_array[:, 0]))
+    sorted_coordinates = [dedup_coordinates[idx] for idx in order]
+    sorted_tissue_percentages = [dedup_tissue_percentages[idx] for idx in order]
+    sorted_contour_indices = [dedup_contour_indices[idx] for idx in order]
     return sorted_coordinates, sorted_tissue_percentages, sorted_contour_indices
 
 
@@ -67,19 +143,181 @@ def get_mask_coverage(mask: np.ndarray, val: int):
     return mask_percentage
 
 
+def _build_palette(
+    *,
+    pixel_mapping: dict[str, int],
+    color_mapping: dict[str, list[int] | None],
+) -> np.ndarray:
+    palette = np.zeros(shape=768, dtype=np.uint8)
+    for annotation, label_value in pixel_mapping.items():
+        color = color_mapping.get(annotation)
+        if color is None:
+            continue
+        palette[label_value * 3 : label_value * 3 + 3] = np.asarray(
+            color,
+            dtype=np.uint8,
+        )
+    return palette
+
+
+def _resolve_overlay_style(
+    *,
+    palette: np.ndarray | None,
+    pixel_mapping: dict[str, int] | None,
+    color_mapping: dict[str, list[int] | None] | None,
+) -> tuple[np.ndarray, dict[str, int], dict[str, list[int] | None]]:
+    if palette is None and pixel_mapping is None and color_mapping is None:
+        pixel_mapping = DEFAULT_TISSUE_PIXEL_MAPPING
+        color_mapping = DEFAULT_TISSUE_COLOR_MAPPING
+        palette = _build_palette(
+            pixel_mapping=pixel_mapping,
+            color_mapping=color_mapping,
+        )
+        return palette, pixel_mapping, color_mapping
+    if palette is None or pixel_mapping is None or color_mapping is None:
+        raise ValueError(
+            "Provide either all of palette, pixel_mapping, and color_mapping, or none of them"
+        )
+    return palette, pixel_mapping, color_mapping
+
+
+def _normalize_tissue_mask(mask_arr: np.ndarray) -> np.ndarray:
+    if mask_arr.ndim == 3:
+        mask_arr = mask_arr[:, :, 0]
+    return (mask_arr > 0).astype(np.uint8)
+
+
+def _mask_level_downsamples(mask_obj) -> list[tuple[float, float]]:
+    if hasattr(mask_obj, "level_downsamples"):
+        return list(mask_obj.level_downsamples)
+    if hasattr(mask_obj, "downsamplings"):
+        return [(float(d), float(d)) for d in mask_obj.downsamplings]
+    raise AttributeError("Mask object must expose level_downsamples or downsamplings")
+
+def _read_aligned_mask(
+    *,
+    mask_obj,
+    slide_spacing: float,
+    slide_dimensions: tuple[int, int],
+) -> np.ndarray:
+    mask_spacings = list(mask_obj.spacings)
+    mask_level_downsamples = _mask_level_downsamples(mask_obj)
+    mask_spacing_at_level_0 = mask_spacings[0]
+    mask_downsample = slide_spacing / mask_spacing_at_level_0
+    mask_level = int(
+        np.argmin([abs(ds[0] - mask_downsample) for ds in mask_level_downsamples])
+    )
+    mask_spacing = mask_spacings[mask_level]
+    scale = slide_spacing / mask_spacing
+    while scale < 1 and mask_level > 0:
+        mask_level -= 1
+        mask_spacing = mask_spacings[mask_level]
+        scale = slide_spacing / mask_spacing
+
+    mask_arr = mask_obj.get_slide(spacing=mask_spacing)
+    target_width, target_height = slide_dimensions
+    return cv2.resize(
+        mask_arr.astype(np.uint8),
+        (int(target_width), int(target_height)),
+        interpolation=cv2.INTER_NEAREST,
+    )
+
+
+def _extract_padded_crop(
+    arr: np.ndarray,
+    *,
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+) -> np.ndarray:
+    if arr.ndim == 2:
+        crop = np.zeros((height, width), dtype=arr.dtype)
+        src = arr[y : y + height, x : x + width]
+        crop[: src.shape[0], : src.shape[1]] = src
+        return crop
+    crop = np.zeros((height, width, arr.shape[2]), dtype=arr.dtype)
+    src = arr[y : y + height, x : x + width, :]
+    crop[: src.shape[0], : src.shape[1], :] = src
+    return crop
+
+
+def _compose_overlay_mask_from_annotations(
+    *,
+    annotation_mask: dict[str, np.ndarray],
+    pixel_mapping: dict[str, int],
+) -> np.ndarray:
+    mask = np.full_like(
+        _normalize_tissue_mask(annotation_mask["tissue"]),
+        fill_value=pixel_mapping.get("background", 0),
+        dtype=np.uint8,
+    )
+    for annotation, label_value in pixel_mapping.items():
+        if annotation == "background":
+            continue
+        if annotation not in annotation_mask:
+            continue
+        mask[_normalize_tissue_mask(annotation_mask[annotation]) > 0] = label_value
+    return mask
+
+
+def _save_overlay_preview(
+    *,
+    wsi_path: Path,
+    backend: str,
+    mask_arr: np.ndarray,
+    mask_visu_path: Path,
+    downsample: int = 32,
+    palette: np.ndarray | None = None,
+    pixel_mapping: dict[str, int] | None = None,
+    color_mapping: dict[str, list[int] | None] | None = None,
+) -> None:
+    mask_visu_path.parent.mkdir(parents=True, exist_ok=True)
+    overlay = overlay_mask_on_slide(
+        wsi_path=wsi_path,
+        annotation_mask_path=None,
+        mask_arr=mask_arr,
+        downsample=downsample,
+        backend=backend,
+        palette=palette,
+        pixel_mapping=pixel_mapping,
+        color_mapping=color_mapping,
+    )
+    overlay.save(mask_visu_path)
+
+
+def _build_default_tissue_sampling_params(
+    tiling_params: _SupportsTilingParams,
+) -> SamplingParameters:
+    return SamplingParameters(
+        pixel_mapping=DEFAULT_TISSUE_PIXEL_MAPPING,
+        color_mapping={"background": None, "tissue": None},
+        tissue_percentage={
+            "background": None,
+            "tissue": tiling_params.min_tissue_percentage,
+        },
+    )
+
+
 def extract_coordinates(
     *,
     wsi_path: Path,
-    mask_path: Path,
+    mask_path: Path | None,
     backend: str,
     segment_params: SegmentationParameters,
-    tiling_params: TilingParameters,
+    tiling_params: _SupportsTilingParams,
     filter_params: FilterParameters,
     sampling_params: SamplingParameters | None = None,
     mask_visu_path: Path | None = None,
+    preview_downsample: int = 32,
+    preview_palette: np.ndarray | None = None,
+    preview_pixel_mapping: dict[str, int] | None = None,
+    preview_color_mapping: dict[str, list[int] | None] | None = None,
     disable_tqdm: bool = False,
     num_workers: int = 1,
 ):
+    if sampling_params is None:
+        sampling_params = _build_default_tissue_sampling_params(tiling_params)
     wsi = WholeSlideImage(
         path=wsi_path,
         mask_path=mask_path,
@@ -98,8 +336,6 @@ def extract_coordinates(
                 f"Desired spacing ({target_spacing}) is smaller than the whole-slide image starting spacing ({starting_spacing}) and does not fall within tolerance ({tolerance})"
             )
     (
-        contours,
-        holes,
         coordinates,
         tissue_percentages,
         contour_indices,
@@ -112,31 +348,55 @@ def extract_coordinates(
         disable_tqdm=disable_tqdm,
         num_workers=num_workers,
     )
-    sorted_coordinates, _, sorted_contour_indices = sort_coordinates_with_tissue(
+    sorted_coordinates, sorted_tissue_percentages, sorted_contour_indices = sort_coordinates_with_tissue(
         coordinates, tissue_percentages, contour_indices
     )
     if mask_visu_path is not None:
-        wsi.visualize_mask(contours, holes).save(mask_visu_path)
-    return (
-        sorted_coordinates,
-        sorted_contour_indices,
-        tile_level,
-        resize_factor,
-        tile_size_lv0,
+        preview_mask_arr = _normalize_tissue_mask(wsi.annotation_mask["tissue"])
+        if preview_pixel_mapping is not None and preview_color_mapping is not None:
+            preview_mask_arr = _compose_overlay_mask_from_annotations(
+                annotation_mask=wsi.annotation_mask,
+                pixel_mapping=preview_pixel_mapping,
+            )
+        _save_overlay_preview(
+            wsi_path=wsi_path,
+            backend=backend,
+            mask_arr=preview_mask_arr,
+            mask_visu_path=mask_visu_path,
+            downsample=preview_downsample,
+            palette=preview_palette,
+            pixel_mapping=preview_pixel_mapping,
+            color_mapping=preview_color_mapping,
+        )
+    tile_spacing = wsi.get_level_spacing(tile_level)
+    read_tile_size_px = int(round(tiling_params.tile_size * resize_factor, 0))
+    x = np.array([x for x, _ in sorted_coordinates], dtype=np.int64)
+    y = np.array([y for _, y in sorted_coordinates], dtype=np.int64)
+    return CoordinateExtractionResult(
+        contour_indices=sorted_contour_indices,
+        tissue_percentages=sorted_tissue_percentages,
+        x=x,
+        y=y,
+        read_level=tile_level,
+        read_spacing_um=tile_spacing,
+        read_tile_size_px=read_tile_size_px,
+        resize_factor=resize_factor,
+        tile_size_lv0=tile_size_lv0,
     )
 
 
 def sample_coordinates(
     *,
     wsi_path: Path,
-    mask_path: Path,
+    mask_path: Path | None,
     backend: str,
     segment_params: SegmentationParameters,
-    tiling_params: TilingParameters,
+    tiling_params: _SupportsTilingParams,
     filter_params: FilterParameters,
     sampling_params: SamplingParameters,
     annotation: str,
     mask_visu_path: Path | None = None,
+    preview_downsample: int = 32,
     disable_tqdm: bool = False,
     num_workers: int = 1,
 ):
@@ -158,8 +418,6 @@ def sample_coordinates(
                 f"Desired spacing ({target_spacing}) is smaller than the whole-slide image starting spacing ({starting_spacing}) and does not fall within tolerance ({tolerance})"
             )
     (
-        contours,
-        holes,
         coordinates,
         tissue_percentages,
         contour_indices,
@@ -173,33 +431,49 @@ def sample_coordinates(
         disable_tqdm=disable_tqdm,
         num_workers=num_workers,
     )
-    sorted_coordinates, _, sorted_contour_indices = sort_coordinates_with_tissue(
+    sorted_coordinates, sorted_tissue_percentages, sorted_contour_indices = sort_coordinates_with_tissue(
         coordinates, tissue_percentages, contour_indices
     )
     if mask_visu_path is not None:
-        wsi.visualize_mask(contours, holes).save(mask_visu_path)
-    return (
-        sorted_coordinates,
-        sorted_contour_indices,
-        tile_level,
-        resize_factor,
-        tile_size_lv0,
+        _save_overlay_preview(
+            wsi_path=wsi_path,
+            backend=backend,
+            mask_arr=_normalize_tissue_mask(wsi.annotation_mask["tissue"]),
+            mask_visu_path=mask_visu_path,
+            downsample=preview_downsample,
+        )
+    tile_spacing = wsi.get_level_spacing(tile_level)
+    read_tile_size_px = int(round(tiling_params.tile_size * resize_factor, 0))
+    x = np.array([x for x, _ in sorted_coordinates], dtype=np.int64)
+    y = np.array([y for _, y in sorted_coordinates], dtype=np.int64)
+    return CoordinateExtractionResult(
+        contour_indices=sorted_contour_indices,
+        tissue_percentages=sorted_tissue_percentages,
+        x=x,
+        y=y,
+        read_level=tile_level,
+        read_spacing_um=tile_spacing,
+        read_tile_size_px=read_tile_size_px,
+        resize_factor=resize_factor,
+        tile_size_lv0=tile_size_lv0,
     )
 
 
 def filter_coordinates(
     *,
     wsi_path: Path,
-    mask_path: Path,
+    mask_path: Path | None,
     backend: str,
-    coordinates: np.ndarray,
+    coordinates: list[tuple[int, int]],
     contour_indices: list[int],
     tile_level: int,
     segment_params: SegmentationParameters,
-    tiling_params: TilingParameters,
+    tiling_params: _SupportsTilingParams,
     sampling_params: SamplingParameters,
     disable_tqdm: bool = False,
 ):
+    if mask_path is None:
+        raise ValueError("mask_path is required for filter_coordinates()")
     wsi = WholeSlideImage(
         path=wsi_path,
         mask_path=mask_path,
@@ -211,22 +485,15 @@ def filter_coordinates(
     tile_spacing = wsi.get_level_spacing(tile_level)
     resize_factor = tiling_params.spacing / tile_spacing
     tile_size_resized = int(round(tiling_params.tile_size * resize_factor, 0))
-
-    mask = WholeSlideImage(
-        path=mask_path,
-        backend=backend,
+    combined = list(zip(coordinates, contour_indices))
+    slide_downsample_x, slide_downsample_y = wsi.level_downsamples[tile_level]
+    mask = _read_aligned_mask(
+        mask_obj=wsi.mask,
+        slide_spacing=tile_spacing,
+        slide_dimensions=wsi.level_dimensions[tile_level],
     )
-    mask_spacing_at_level_0 = mask.spacings[0]
-    mask_downsample = tile_spacing / mask_spacing_at_level_0
-    mask_level = int(
-        np.argmin([abs(x - mask_downsample) for x, _ in mask.level_downsamples])
-    )
-    mask_spacing = mask.spacings[mask_level]
-    scale = tile_spacing / mask_spacing
-    while scale < 1 and mask_level > 0:
-        mask_level -= 1
-        mask_spacing = mask.spacings[mask_level]
-        scale = tile_spacing / mask_spacing
+    if mask.ndim == 3 and mask.shape[2] == 1:
+        mask = np.squeeze(mask, axis=-1)
 
     filtered_coordinates = defaultdict(list)
     filtered_contour_indices = defaultdict(list)
@@ -235,7 +502,6 @@ def filter_coordinates(
             continue
         if annotation not in sampling_params.pixel_mapping:
             continue
-        combined = list(zip(coordinates, contour_indices))
         with tqdm.tqdm(
             combined,
             desc=f"Filtering coordinates for annotation '{annotation}' (min coverage {pct}%) on slide {wsi_path.stem}",
@@ -245,20 +511,16 @@ def filter_coordinates(
         ) as t:
             for coord, contour_idx in t:
                 x, y = coord
-                # need to scale (x, y) defined w.r.t. slide level 0
-                # to mask level 0
-                downsample = wsi.spacings[0] / mask.spacings[0]
-                x_downsampled = int(round(x * downsample, 0))
-                y_downsampled = int(round(y * downsample, 0))
-                tile_size_at_mask_spacing = int(round(tile_size_resized * scale, 0))
-                masked_tile = mask.get_tile(
-                    x_downsampled,
-                    y_downsampled,
-                    tile_size_at_mask_spacing,
-                    tile_size_at_mask_spacing,
-                    spacing=mask_spacing,
+                x_level = int(round(x / slide_downsample_x, 0))
+                y_level = int(round(y / slide_downsample_y, 0))
+                masked_tile = _extract_padded_crop(
+                    mask,
+                    x=x_level,
+                    y=y_level,
+                    width=tile_size_resized,
+                    height=tile_size_resized,
                 )
-                if masked_tile.shape[-1] == 1:
+                if masked_tile.ndim == 3 and masked_tile.shape[-1] == 1:
                     masked_tile = np.squeeze(masked_tile, axis=-1)
                 mask_pct = get_mask_coverage(
                     masked_tile, sampling_params.pixel_mapping[annotation]
@@ -267,50 +529,6 @@ def filter_coordinates(
                     filtered_coordinates[annotation].append(coord)
                     filtered_contour_indices[annotation].append(contour_idx)
     return filtered_coordinates, filtered_contour_indices
-
-
-def save_coordinates(
-    *,
-    coordinates: list[tuple[int, int]],
-    contour_indices: list[int],
-    target_spacing: float,
-    tile_level: int,
-    target_tile_size: int,
-    resize_factor: float,
-    tile_size_lv0: int,
-    save_path: Path,
-):
-    x = [x for x, _ in coordinates]  # defined w.r.t level 0
-    y = [y for _, y in coordinates]  # defined w.r.t level 0
-    ntile = len(x)
-    tile_size_resized = int(round(target_tile_size * resize_factor, 0))
-    dtype = [
-        ("x", int),
-        ("y", int),
-        ("contour_index", int),
-        ("target_tile_size", int),
-        ("target_spacing", float),
-        ("tile_level", int),
-        ("resize_factor", float),
-        ("tile_size_resized", int),
-        ("tile_size_lv0", int),
-    ]
-    data = np.zeros(ntile, dtype=dtype)
-    for i in range(ntile):
-        data[i] = (
-            x[i],
-            y[i],
-            contour_indices[i],
-            target_tile_size,
-            target_spacing,
-            tile_level,
-            resize_factor,
-            tile_size_resized,
-            tile_size_lv0,
-        )
-    data_arr = np.array(data)
-    np.save(save_path, data_arr)
-    return save_path
 
 
 def overlay_mask_on_tile(
@@ -359,51 +577,69 @@ def _build_overlay_alpha(
 
 def overlay_mask_on_slide(
     wsi_path: Path,
-    annotation_mask_path: Path,
+    annotation_mask_path: Path | None,
     downsample: int,
-    palette: dict[str, int],
-    pixel_mapping: dict[str, int],
-    color_mapping: dict[str, list[int] | None],
+    backend: str,
+    palette: np.ndarray | None = None,
+    pixel_mapping: dict[str, int] | None = None,
+    color_mapping: dict[str, list[int] | None] | None = None,
     alpha: float = 0.5,
+    mask_arr: np.ndarray | None = None,
 ):
     """
     Show a mask overlayed on a slide
     """
 
-    wsi_object = WholeSlideImage(path=wsi_path, backend="asap")
-    mask_object = WholeSlideImage(path=annotation_mask_path, backend="asap")
+    palette, pixel_mapping, color_mapping = _resolve_overlay_style(
+        palette=palette,
+        pixel_mapping=pixel_mapping,
+        color_mapping=color_mapping,
+    )
+
+    wsi_object = WholeSlideImage(path=wsi_path, backend=backend)
 
     vis_level = wsi_object.get_best_level_for_downsample_custom(downsample)
     vis_spacing = wsi_object.spacings[vis_level]
     wsi_arr = wsi_object.get_slide(spacing=vis_spacing)
-    _, width, _ = wsi_arr.shape
+    height, width, _ = wsi_arr.shape
 
     wsi = Image.fromarray(wsi_arr).convert("RGBA")
-    mask_width_at_level_0, _ = mask_object.level_dimensions[0]
-    mask_downsample = mask_width_at_level_0 / width
-    mask_level = int(
-        np.argmin([abs(x - mask_downsample) for x, _ in mask_object.level_downsamples])
-    )
-    mask_spacing = mask_object.spacings[mask_level]
-    mask_width, _ = mask_object.level_dimensions[mask_level]
-
-    scale = mask_width / width
-    while scale < 1 and mask_level > 0:
-        mask_level -= 1
+    if annotation_mask_path is not None:
+        mask_object = WholeSlideImage(path=annotation_mask_path, backend=backend)
+        mask_width_at_level_0, _ = mask_object.level_dimensions[0]
+        mask_downsample = mask_width_at_level_0 / width
+        mask_level = int(
+            np.argmin([abs(x - mask_downsample) for x, _ in mask_object.level_downsamples])
+        )
         mask_spacing = mask_object.spacings[mask_level]
         mask_width, _ = mask_object.level_dimensions[mask_level]
+
         scale = mask_width / width
+        while scale < 1 and mask_level > 0:
+            mask_level -= 1
+            mask_spacing = mask_object.spacings[mask_level]
+            mask_width, _ = mask_object.level_dimensions[mask_level]
+            scale = mask_width / width
 
-    mask_arr = mask_object.get_slide(spacing=mask_spacing)
-    mask_arr = mask_arr[:, :, 0]
-    mask_height, mask_width = mask_arr.shape
+        mask_arr = mask_object.get_slide(spacing=mask_spacing)
+        mask_arr = mask_arr[:, :, 0]
+        mask_height, mask_width = mask_arr.shape
+        mask_arr = cv2.resize(
+            mask_arr.astype(np.uint8),
+            (int(round(mask_width / scale, 0)), int(round(mask_height / scale, 0))),
+            interpolation=cv2.INTER_NEAREST,
+        )
+    elif mask_arr is not None:
+        if mask_arr.ndim == 3:
+            mask_arr = mask_arr[:, :, 0]
+        mask_arr = cv2.resize(
+            mask_arr.astype(np.uint8),
+            (width, height),
+            interpolation=cv2.INTER_NEAREST,
+        )
+    else:
+        raise ValueError("Provide annotation_mask_path or mask_arr to overlay_mask_on_slide()")
 
-    # resize the mask to the size of the slide at seg_spacing
-    mask_arr = cv2.resize(
-        mask_arr.astype(np.uint8),
-        (int(round(mask_width / scale, 0)), int(round(mask_height / scale, 0))),
-        interpolation=cv2.INTER_NEAREST,
-    )
     mask = Image.fromarray(mask_arr)
 
     alpha_content = _build_overlay_alpha(
@@ -445,6 +681,7 @@ def draw_grid_from_coordinates(
     color_mapping: dict[str, list[int] | None] | None = None,
 ):
     downsamples = wsi.level_downsamples[vis_level]
+    source_canvas = canvas[:, :, :3].copy()
     if indices is None:
         indices = np.arange(len(coords))
     total = len(indices)
@@ -458,18 +695,15 @@ def draw_grid_from_coordinates(
     ]  # retrieve slide dimension at level 0
 
     vis_spacing = wsi.get_level_spacing(vis_level)
+    aligned_mask = None
     if mask is not None:
-        mask_spacing_at_level_0 = mask.spacings[0]
-        mask_downsample = vis_spacing / mask_spacing_at_level_0
-        mask_level = int(
-            np.argmin([abs(x - mask_downsample) for x, _ in mask.level_downsamples])
+        aligned_mask = _read_aligned_mask(
+            mask_obj=mask,
+            slide_spacing=vis_spacing,
+            slide_dimensions=wsi.level_dimensions[vis_level],
         )
-        mask_spacing = mask.spacings[mask_level]
-        scale = vis_spacing / mask_spacing
-        while scale < 1 and mask_level > 0:
-            mask_level -= 1
-            mask_spacing = mask.spacings[mask_level]
-            scale = vis_spacing / mask_spacing
+        if aligned_mask.ndim == 3 and aligned_mask.shape[-1] == 1:
+            aligned_mask = np.squeeze(aligned_mask, axis=-1)
 
     for idx in range(total):
         tile_id = indices[idx]
@@ -496,33 +730,34 @@ def draw_grid_from_coordinates(
         else:
             valid_height = height
 
+        coord = np.ceil(
+            tuple(coord[i] / downsamples[i] for i in range(len(coord)))
+        ).astype(np.int32)
+
         # extract only the valid portion of the tile
         if valid_width > 0 and valid_height > 0:
-            valid_tile = wsi.get_tile(
-                x, y, valid_width, valid_height, spacing=vis_spacing
+            valid_tile = _extract_padded_crop(
+                source_canvas,
+                x=int(coord[0]),
+                y=int(coord[1]),
+                width=valid_width,
+                height=valid_height,
             )
             valid_tile = Image.fromarray(valid_tile).convert("RGB")
 
-            if mask is not None:
+            if aligned_mask is not None:
                 if palette is None or pixel_mapping is None or color_mapping is None:
                     raise ValueError(
                         "palette, pixel_mapping, and color_mapping are required when mask overlay is enabled"
                     )
-                # need to scale (x, y) defined w.r.t. slide level 0
-                # to mask level 0
-                downsample = wsi.spacings[0] / mask.spacings[0]
-                x_downsampled = int(round(x * downsample, 0))
-                y_downsampled = int(round(y * downsample, 0))
-                valid_width_at_mask_spacing = int(round(valid_width * scale, 0))
-                valid_height_at_mask_spacing = int(round(valid_height * scale, 0))
-                masked_tile = mask.get_tile(
-                    x_downsampled,
-                    y_downsampled,
-                    valid_width_at_mask_spacing,
-                    valid_height_at_mask_spacing,
-                    spacing=mask_spacing,
+                masked_tile = _extract_padded_crop(
+                    aligned_mask,
+                    x=int(coord[0]),
+                    y=int(coord[1]),
+                    width=valid_width,
+                    height=valid_height,
                 )
-                if masked_tile.shape[-1] == 1:
+                if masked_tile.ndim == 3 and masked_tile.shape[-1] == 1:
                     masked_tile = np.squeeze(masked_tile, axis=-1)
                 masked_tile = Image.fromarray(masked_tile)
                 masked_tile = masked_tile.split()[0]
@@ -551,9 +786,6 @@ def draw_grid_from_coordinates(
                 # paste the valid part into the white tile
                 tile[:valid_height, :valid_width, :] = valid_tile
 
-        coord = np.ceil(
-            tuple(coord[i] / downsamples[i] for i in range(len(coord)))
-        ).astype(np.int32)
         canvas_crop_shape = canvas[
             coord[1] : coord[1] + tile_size[1],
             coord[0] : coord[0] + tile_size[0],
@@ -587,8 +819,9 @@ def visualize_coordinates(
     coordinates: list[tuple[int, int]],
     tile_size_lv0: int,
     save_dir: Path,
+    backend: str,
+    sample_id: str | None = None,
     downsample: int = 64,
-    backend: str = "asap",
     grid_thickness: int = 1,
     mask_path: Path | None = None,
     annotation: str | None = None,
@@ -638,7 +871,7 @@ def visualize_coordinates(
         pixel_mapping=pixel_mapping,
         color_mapping=color_mapping,
     )
-    wsi_name = wsi_path.stem.replace(" ", "_")
+    wsi_name = sample_id if sample_id is not None else wsi_path.stem.replace(" ", "_")
     if annotation is not None:
         save_dir = Path(save_dir, annotation)
         save_dir.mkdir(parents=True, exist_ok=True)

@@ -1,162 +1,166 @@
-<h1 align="center">Histopathology Slide Pre-processing Pipeline</h1>
-
-[![PyPI version](https://img.shields.io/pypi/v/hs2p?label=pypi&logo=pypi&color=3776AB)](https://pypi.org/project/hs2p/)
-[![Docker Version](https://img.shields.io/docker/v/waticlems/hs2p?sort=semver&label=docker&logo=docker&color=2496ED)](https://hub.docker.com/r/waticlems/hs2p)
-
-
-HS2P is an open-source project largely based on [CLAM](https://github.com/mahmoodlab/CLAM) tissue segmentation and patching code.
+# hs2p
 
 <p>
-   <a href="https://github.com/psf/black"><img alt="empty" src=https://img.shields.io/badge/code%20style-black-000000.svg></a>
-   <a href="https://github.com/PyCQA/pylint"><img alt="empty" src=https://img.shields.io/github/stars/clemsgrs/hs2p?style=social></a>
+    <a href="https://pypi.org/project/hs2p"><img src="https://img.shields.io/pypi/v/hs2p.svg" alt="PyPI version"></a>
+    <a href="https://github.com/psf/black"><img alt="empty" src=https://img.shields.io/badge/code%20style-black-000000.svg></a>
+    <a href="https://github.com/PyCQA/pylint"><img alt="empty" src=https://img.shields.io/github/stars/clemsgrs/hs2p?style=social></a>
 </p>
 
-## 🛠️ Installation
+`hs2p` is a Python package for efficient slide tiling and tile sampling at any requested spacing, whether or not that spacing is natively present in the whole-slide image. It is designed for computational pathology workflows that need reproducible coordinates.
 
-System requirements: Linux-based OS (e.g., Ubuntu 22.04) with Python 3.11+ and Docker installed.
+We support two main workflows:
 
-We recommend running the script inside a container using the latest `hs2p` image from Docker Hub:
+- a Python API for library-style integration
+- a CLI for batch preprocessing from a CSV and YAML config
 
-```shell
-docker pull waticlems/hs2p:latest
-docker run --rm -it \
-    -v /path/to/your/data:/data \
-    waticlems/hs2p:latest
-```
+## Installation
 
-Replace `/path/to/your/data` with your local data directory.
-
-Alternatively, you can install `hs2p` via pip:
-
-```shell
+```bash
 pip install hs2p
 ```
 
-## Slide tiling
+ If a mask is not provided, `hs2p` can segment tissue directly from the slide; if you want to precompute tissue masks, a standalone script is available.
 
-<img src="illustrations/extraction_illu.png" width="1000px" align="center" />
+## Workflows
 
-1. Create a `.csv` file containing paths to the desired slides. Optionally, you can provide paths to pre-computed tissue masks under the 'mask_path' column
+### Tiling
 
-    ```csv
-    wsi_path,mask_path
-    /path/to/slide1.tif,/path/to/mask1.tif
-    /path/to/slide2.tif,/path/to/mask2.tif
-    ...
-    ```
+Tiling computes a reproducible grid of tile coordinates for each slide and saves them as named artifacts with extraction metadata, ready for downstream use.
 
-2. Create a configuration file
+<img src="illustrations/extraction_illu.png" alt="HS2P tiling workflow" width="1000" />
 
-    A good starting point is to look at the default configuration file under `hs2p/configs/default.yaml` where parameters are documented.
+### Sampling
 
-3. Kick off slide tiling
+Sampling filters or partitions tile coordinates by annotation coverage so you can keep only tiles relevant to a tissue class or label.
 
-    ```shell
-    python3 -m hs2p.tiling --config-file </path/to/config.yaml>
-    ```
+<img src="illustrations/sampling_illu.png" alt="HS2P sampling workflow" width="1000" />
 
-## Tile sampling
+## Python API
 
-<img src="illustrations/sampling_illu.png" width="1000px" align="center" />
+`hs2p` supports pre-extracted tissue masks. If you don't have such tissue masks, you can either:
 
-1. Create a `.csv` file containing paths to the desired slides & associated annotation masks:
+- use our standalone [tissue segmentation script](docs/tissue-mask-generation.md) (Recommended)
+- tune the SegmentationConfig parameters and let `hs2p` segments tissue on the fly
 
-    ```csv
-    wsi_path,mask_path
-    /path/to/slide1.tif,/path/to/mask1.tif
-    /path/to/slide2.tif,/path/to/mask2.tif
-    ...
-    ```
+Minimal tiling example:
 
-2. Create a configuration file
+```python
+from pathlib import Path
 
-    A good starting point is to look at the default configuration file under `hs2p/configs/default.yaml` where parameters are documented.
+from hs2p import (
+    FilterConfig,
+    SegmentationConfig,
+    TilingConfig,
+    WholeSlide,
+    overlay_mask_on_slide,
+    save_tiling_result,
+    tile_slide,
+    write_tiling_preview,
+)
 
-3. Kick off tile sampling
+result = tile_slide(
+    WholeSlide(
+        sample_id="slide-1",
+        image_path=Path("/data/wsi/slide-1.tif"),
+        mask_path=Path("/data/mask/slide-1.tif"),
+    ),
+    tiling=TilingConfig(
+        backend="openslide",
+        target_spacing_um=0.5,
+        target_tile_size_px=224,
+        tolerance=0.07,
+        overlap=0.0,
+        tissue_threshold=0.1,
+    ),
+    segmentation=SegmentationConfig(downsample=64),
+    filtering=FilterConfig(ref_tile_size=224, a_t=4, a_h=2),
+    num_workers=1,
+)
 
-    ```shell
-    python3 -m hs2p.sampling --config-file </path/to/config.yaml>
-    ```
+artifacts = save_tiling_result(result, output_dir=Path("output"))
+tiling_preview_path = write_tiling_preview(
+    result=result,
+    output_dir=Path("output"),
+    downsample=32,
+)
 
-## Output structure
+mask_overlay = overlay_mask_on_slide(
+    wsi_path=result.image_path,
+    annotation_mask_path=Path("/data/mask/slide-1.tif"),
+    downsample=32,
+    backend=result.backend,
+)
+mask_overlay.save("output/visualization/mask/slide-1.jpg")
 
-Both `tiling.py` and `sampling.py` produce a similar output structure in the specified output directory.
-
-### Coordinates
-
-The `coordinates/` folder contains a `.npy` file for each successfully processed slide.  
-This file stores a numpy array of shape `(num_tiles, 8)` containing the following information for each tile:
-
-1. **`x`**: x-coordinate of the tile at level 0
-2. **`y`**: y-coordinate of the tile at level 0
-3. **`contour_index`**: index of the contour containing the tile (useful for masking non-tissue content)
-4. **`target_tile_size`**: requested tile size (in pixels)
-5. **`target_spacing`**: spacing at which the user requested the tile (in microns per pixel)
-6. **`tile_level`**: pyramid level at which the tile was extracted
-7. **`resize_factor`**: ratio between `tile_size_resized` and the requested tile size (`target_tile_size`), useful for resizing when loading the tile
-8. **`tile_size_resized`**: size of the tile at the extraction level (`tile_level`), which may differ from the requested tile size (`target_tile_size`) if the target spacing was not available
-9. **`tile_size_lv0`**: tile size scaled to the slide's level 0
-
-### Visualization (optional)
-
-If `visualize` is set to `true`, a `visualization/` folder is created containing low-resolution images to verify the results:
-
-- **`mask/`**: visualizations of the provided tissue (or annotation) mask
-- **`tiling/`** (for `tiling.py`) or **`sampling/`** (for `sampling.py`): visualizations of the extracted or sampled tiles overlaid on the slide. For `sampling.py`, this includes subfolders for each category defined in the sampling parameters (e.g., tumor, stroma, etc.)
-
-Mask contour line thickness is automatically inferred from the whole-slide dimensions and the visualization level, so contour readability stays consistent across tiny biopsies and large resections.
-
-For sampling visualizations, overlays are drawn only for annotations that have a non-null color in `sampling_params.color_mapping`. Annotations with null color are left untouched (raw slide pixels, no darkening overlay).
-
-These visualizations are useful for double-checking that the tiling or sampling process ran as expected.
-
-### Process summary
-
-- **`process_list.csv`**: a summary file listing each processed slide, indicating whether processing was successful or failed. If a failure occurred, the traceback is provided to help diagnose the issue.
-
-## Standalone tissue segmentator
-
-For quick mask generation outside the full pipeline, use the standalone script:
-
-```shell
-python -m pip install tifffile # need extra tifffile deps
-
-# Single slide
-python scripts/generate_tissue_mask.py \
-    --wsi /path/to/slide.tif \
-    --output /path/to/tissue-mask-pyramid.tif \
-    --spacing 4.0 \
-    --tolerance 0.1
-
-# Multiple slides
-python scripts/generate_tissue_mask.py \
-    --wsi /path/to/slide_dir/*.tif \
-    --output-dir /path/to/output_dir \
-    --spacing 4.0 \
-    --tolerance 0.1
+print(artifacts.tiles_npz_path)
+print(artifacts.tiles_meta_path)
+print(tiling_preview_path)
 ```
 
-This script:
-- reads the WSI with `wholeslidedata`
-- computes a binary tissue mask using HSV thresholding (`0=background`, `1=tissue`)
-- uses a coarse-to-fine ROI shortcut by default to avoid loading the full target-spacing WSI into memory
-- writes a pyramidal TIFF mask at a desired `spacing`, where each level is downsampled from the previous one
-- prints a final recap of how many slides succeeded, skipped, and failed
+`result` is a [`TilingResult`](hs2p/api.py#L144) for one slide. It gives downstream pipelines the tile coordinates plus the metadata needed to relate those coordinates back to the slide pyramid and persist them as reusable named artifacts.
 
-Useful options:
-- `--backend` to switch the wholeslidedata backend (default: `asap`)
-- `--output` for single-slide mode and `--output-dir` for multi-slide mode
-- `--num-workers` to control parallelism
-- `--no-cache` to disable cache-based skipping and force recomputation
-- `--disable-coarse-roi-shortcut` to force legacy full-frame loading at target spacing
-- `--coarse-spacing`, `--coarse-roi-margin-um`, and `--processing-tile-size` to tune coarse-to-fine ROI processing
-- `--tolerance` to control how much a natural spacing can deviate from target spacing when selecting the best level for reading the whole slide
-- `--min-component-area-um2` to remove tiny tissue blobs
-- `--min-hole-area-um2` to fill small holes inside tissue
-- `--gaussian-sigma-um` to apply optional pre-threshold Gaussian smoothing
-- `--open-radius-um` / `--close-radius-um` for spacing-aware morphological smoothing
-- `--spacing-at-level-0` to override level-0 spacing when metadata is incorrect
-- `--compression` and `--tile-size` to tune TIFF output
+More API details: [docs/api.md](docs/api.md)
 
-The summary file is saved as `summary.csv` in `--output-dir` (multi-slide mode) or next to `--output` (single-slide mode).
-The cache manifest used for skip inference is saved as `cache_manifest.json` in the same directory.
+## CLI
+
+Both CLI entrypoints use the same input CSV schema:
+
+```csv
+sample_id,image_path,mask_path
+slide-1,/data/wsi/slide-1.tif,/data/mask/slide-1.tif
+slide-2,/data/wsi/slide-2.tif,
+```
+
+For a first run, start from [hs2p/configs/default.yaml](hs2p/configs/default.yaml) and edit only the essentials:
+
+- `csv`
+- `output_dir`
+- `tiling.backend`
+- `tiling.params.target_spacing_um`
+- `tiling.params.target_tile_size_px`
+
+Run tiling:
+
+```bash
+python -m hs2p.tiling --config-file /path/to/config.yaml
+```
+
+Run sampling:
+
+```bash
+python -m hs2p.sampling --config-file /path/to/config.yaml
+```
+
+For sampling, add `tiling.sampling_params.pixel_mapping` and `tiling.sampling_params.tissue_percentage` for the annotations you want to keep.
+
+More CLI details: [docs/cli.md](docs/cli.md)
+
+## Outputs
+
+`hs2p` writes explicit named artifacts rather than anonymous coordinate dumps.
+
+- Tiling writes `coordinates/{sample_id}.tiles.npz` and `coordinates/{sample_id}.tiles.meta.json`
+- Sampling writes the same pair under `coordinates/<annotation>/`
+- Batch runs also write `process_list.csv`
+- Saved coordinate arrays use a deterministic column-major order: numeric `x` first, then numeric `y` within each shared `x`
+
+Artifact field reference: [docs/artifacts.md](docs/artifacts.md)
+
+## Docker
+
+[![Docker Version](https://img.shields.io/docker/v/waticlems/hs2p?sort=semver&label=docker&logo=docker&color=2496ED)](https://hub.docker.com/r/waticlems/hs2p)
+
+If you prefer running `hs2p` in a container, a published Docker image is available:
+
+```bash
+docker pull waticlems/hs2p:latest
+docker run --rm -it -v /path/to/your/data:/data waticlems/hs2p:latest
+```
+
+## Documentation
+
+- [Documentation index](docs/README.md)
+- [Python API guide](docs/api.md)
+- [CLI guide](docs/cli.md)
+- [Artifact format reference](docs/artifacts.md)
+- [Tissue mask generation script](docs/tissue-mask-generation.md)

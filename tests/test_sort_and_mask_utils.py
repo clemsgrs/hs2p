@@ -16,9 +16,9 @@ def test_sort_coordinates_with_tissue_deduplicates_and_orders_deterministically(
         contour_indices,
     )
 
-    assert sorted_coords == [(10, 0), (1, 9), (2, 2)]
-    assert sorted_tissue == [0.1, 0.4, 0.2]
-    assert sorted_contours == [5, 8, 6]
+    assert sorted_coords == [(1, 9), (2, 2), (10, 0)]
+    assert sorted_tissue == [0.4, 0.2, 0.1]
+    assert sorted_contours == [8, 6, 5]
 
 
 def test_get_mask_coverage_returns_exact_fraction_for_label_value():
