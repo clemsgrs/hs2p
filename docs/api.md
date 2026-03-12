@@ -7,6 +7,7 @@ The Python API is the primary interface when you want to call `hs2p` from your o
 - direct in-memory results through `TilingResult`
 - reusable persisted artifacts through `save_tiling_result()` / `load_tiling_result()`
 - batch orchestration with optional previews through `tile_slides()`
+- explicit preview helpers for single-slide workflows through `write_tiling_preview()` and `overlay_mask_on_slide()`
 
 The config dataclasses keep the main knobs explicit and fill secondary options from the packaged defaults in `hs2p/configs/default.yaml`.
 
@@ -27,6 +28,7 @@ The config dataclasses keep the main knobs explicit and fill secondary options f
   - In-memory tile coordinates plus read-level metadata for one slide
 - `TilingArtifacts`
   - Paths to the saved `.tiles.npz` and `.tiles.meta.json` outputs
+  - Can also carry preview-image paths when batch QC is enabled in `tile_slides()`
 
 For field-by-field details, see the dataclass docstrings in [hs2p/api.py](../hs2p/api.py).
 
@@ -75,6 +77,45 @@ Typical downstream uses:
 - extracting image patches from the WSI at the returned `x` / `y` coordinates
 - joining model outputs back to tiles through `tile_index`
 - persisting one tiling pass and reusing it across later training, inference, or QC jobs
+
+`tile_slide()` is intentionally compute-only. Persist the coordinates with `save_tiling_result()`, then call `write_tiling_preview()` or `overlay_mask_on_slide()` if you want preview images in the same single-slide workflow.
+
+## Preview helpers for single-slide workflows
+
+When you are not using `tile_slides()`, the public preview helpers let you render the same kinds of QC assets explicitly:
+
+- `write_tiling_preview(result=..., output_dir=..., downsample=...)`
+  - Draws the returned tile grid on the slide overview and writes `visualization/tiling/{sample_id}.jpg`
+  - Useful after `tile_slide()` when you want a quick visual check of coverage without switching to the batch API
+- `overlay_mask_on_slide(...)`
+  - Overlays a tissue or annotation mask on the slide overview
+  - Useful when you want to inspect the mask itself, independently of the tiling grid
+  - The default tissue preview used by `tile_slides(..., qc=QCConfig(save_mask_preview=True, ...))` hides background and overlays tissue in `[157, 219, 129]`
+
+Example:
+
+```python
+from pathlib import Path
+
+from hs2p import overlay_mask_on_slide, write_tiling_preview
+
+tiling_preview_path = write_tiling_preview(
+    result=result,
+    output_dir=Path("output"),
+    downsample=32,
+)
+
+mask_overlay = overlay_mask_on_slide(
+    wsi_path=result.image_path,
+    annotation_mask_path=Path("/data/slide-1-mask.tif"),
+    downsample=32,
+    backend=result.backend,
+    palette=palette,
+    pixel_mapping=pixel_mapping,
+    color_mapping=color_mapping,
+)
+mask_overlay.save("output/visualization/mask/slide-1.jpg")
+```
 
 ## Batch flow with previews
 
@@ -126,7 +167,7 @@ artifacts = tile_slides(
 )
 ```
 
-In this mode, `QCConfig` is useful because preview rendering is handled by `tile_slides()`, not by `tile_slide()`.
+In this mode, `QCConfig` is useful because preview rendering is handled by `tile_slides()`, not by `tile_slide()`. Mask previews are rendered as tissue overlays rather than contour-and-hole line drawings.
 
 ## Results versus artifacts
 

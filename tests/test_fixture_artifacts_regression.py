@@ -80,10 +80,13 @@ def _run_and_save_tiles(*, wsi_path: Path, mask_path: Path, backend: str, tissue
     return result, artifacts, generated, meta
 
 
-def test_generated_tiles_match_legacy_golden(real_fixture_paths, tmp_path: Path):
+def test_generated_tiles_match_checked_in_artifacts(real_fixture_paths, tmp_path: Path):
     wsi_path, mask_path = real_fixture_paths
-    gt_path = wsi_path.parent.parent / "gt" / "test-wsi.npy"
-    assert gt_path.is_file(), f"Missing golden coordinates: {gt_path}"
+    gt_dir = wsi_path.parent.parent / "gt"
+    gt_npz_path = gt_dir / "test-wsi.tiles.npz"
+    gt_meta_path = gt_dir / "test-wsi.tiles.meta.json"
+    assert gt_npz_path.is_file(), f"Missing golden coordinates: {gt_npz_path}"
+    assert gt_meta_path.is_file(), f"Missing golden metadata: {gt_meta_path}"
 
     backend = _require_asap_backend(wsi_path)
     tissue_pct = 0.1
@@ -95,48 +98,30 @@ def test_generated_tiles_match_legacy_golden(real_fixture_paths, tmp_path: Path)
         output_dir=tmp_path,
     )
 
-    legacy = np.load(gt_path, allow_pickle=False)
+    golden_tiles = np.load(gt_npz_path, allow_pickle=False)
+    golden_meta = json.loads(gt_meta_path.read_text())
 
-    np.testing.assert_array_equal(generated["x_lv0"], legacy["x"])
-    np.testing.assert_array_equal(generated["y_lv0"], legacy["y"])
-    np.testing.assert_array_equal(
-        generated["tile_index"],
-        np.arange(legacy.shape[0], dtype=np.int32),
-    )
+    assert generated.files == golden_tiles.files
+    for key in generated.files:
+        np.testing.assert_array_equal(generated[key], golden_tiles[key])
 
-    assert set(meta) == {
-        "sample_id",
-        "image_path",
-        "mask_path",
-        "backend",
-        "target_spacing_um",
-        "target_tile_size_px",
-        "read_level",
-        "read_spacing_um",
-        "read_tile_size_px",
-        "tile_size_lv0",
-        "overlap",
-        "tissue_threshold",
-        "num_tiles",
-        "config_hash",
-    }
-    assert meta["sample_id"] == "test-wsi"
-    assert meta["image_path"] == str(wsi_path)
-    assert meta["mask_path"] == str(mask_path)
-    assert meta["backend"] == backend
-    assert meta["target_spacing_um"] == float(legacy["target_spacing"][0])
-    assert meta["target_tile_size_px"] == int(legacy["target_tile_size"][0])
-    assert meta["read_level"] == int(legacy["tile_level"][0])
-    assert meta["read_spacing_um"] == pytest.approx(
-        float(legacy["target_spacing"][0] / legacy["resize_factor"][0])
-    )
-    assert meta["read_tile_size_px"] == int(legacy["tile_size_resized"][0])
-    assert meta["tile_size_lv0"] == int(legacy["tile_size_lv0"][0])
-    assert meta["overlap"] == 0.0
-    assert meta["tissue_threshold"] == tissue_pct
-    assert meta["num_tiles"] == int(legacy.shape[0])
+    assert set(meta) == set(golden_meta)
+    assert meta["sample_id"] == golden_meta["sample_id"] == "test-wsi"
+    assert Path(meta["image_path"]).name == Path(golden_meta["image_path"]).name == wsi_path.name
+    assert Path(meta["mask_path"]).name == Path(golden_meta["mask_path"]).name == mask_path.name
+    assert meta["backend"] == golden_meta["backend"] == backend
+    assert meta["target_spacing_um"] == pytest.approx(golden_meta["target_spacing_um"])
+    assert meta["target_tile_size_px"] == golden_meta["target_tile_size_px"]
+    assert meta["read_level"] == golden_meta["read_level"]
+    assert meta["read_spacing_um"] == pytest.approx(golden_meta["read_spacing_um"])
+    assert meta["read_tile_size_px"] == golden_meta["read_tile_size_px"]
+    assert meta["tile_size_lv0"] == golden_meta["tile_size_lv0"]
+    assert meta["overlap"] == pytest.approx(golden_meta["overlap"])
+    assert meta["tissue_threshold"] == pytest.approx(golden_meta["tissue_threshold"])
+    assert meta["num_tiles"] == golden_meta["num_tiles"]
+    assert meta["config_hash"] == golden_meta["config_hash"]
     assert meta["config_hash"] == result.config_hash
-    assert artifacts.num_tiles == int(legacy.shape[0])
+    assert artifacts.num_tiles == golden_meta["num_tiles"]
 
 
 def test_repeated_tiling_run_writes_identical_artifacts(real_fixture_paths, tmp_path: Path):

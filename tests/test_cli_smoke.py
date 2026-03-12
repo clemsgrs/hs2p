@@ -198,8 +198,8 @@ def test_sampling_main_smoke_uses_current_schema_and_manifest(monkeypatch, tmp_p
         np.savez(
             annotation_dir / f"{kwargs['sample_id']}.tiles.npz",
             tile_index=np.array([0], dtype=np.int32),
-            x_lv0=np.array([10], dtype=np.int64),
-            y_lv0=np.array([20], dtype=np.int64),
+            x=np.array([10], dtype=np.int64),
+            y=np.array([20], dtype=np.int64),
         )
         return kwargs["sample_id"], {"status": "success"}
 

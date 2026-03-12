@@ -82,6 +82,8 @@ print(artifacts.tiles_meta_path)
 
 `result` is a [`TilingResult`](hs2p/api.py#L144) for one slide. It gives downstream pipelines the tile coordinates plus the metadata needed to relate those coordinates back to the slide pyramid and persist them as reusable named artifacts.
 
+`tile_slide()` is compute-only. If you want standalone preview images in a single-slide workflow, use `write_tiling_preview()` for tile overlays or `overlay_mask_on_slide()` for mask overlays. Batch mask previews use the same overlay style, with tissue shown in green and background hidden.
+
 More API details: [docs/api.md](docs/api.md)
 
 ## CLI

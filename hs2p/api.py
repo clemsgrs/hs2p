@@ -13,7 +13,12 @@ import numpy as np
 import pandas as pd
 
 from hs2p.configs import default_config
-from hs2p.wsi import SamplingParameters, extract_coordinates, visualize_coordinates
+from hs2p.wsi import (
+    SamplingParameters,
+    extract_coordinates,
+    overlay_mask_on_slide as _overlay_mask_on_slide,
+    visualize_coordinates,
+)
 
 
 _DEFAULT_TILING = default_config.tiling
@@ -149,8 +154,8 @@ class TilingResult:
         image_path: Slide path used to generate the coordinates.
         mask_path: Mask path used during generation, if any.
         backend: Slide-reading backend used during extraction.
-        x_lv0: Tile origin x-coordinates in level-0 pixels.
-        y_lv0: Tile origin y-coordinates in level-0 pixels.
+        x: Tile origin x-coordinates in level-0 pixels.
+        y: Tile origin y-coordinates in level-0 pixels.
         tile_index: Stable per-tile ids aligned with the coordinate arrays.
         target_spacing_um: Requested output spacing in microns per pixel.
         target_tile_size_px: Requested tile width and height at the target spacing.
@@ -169,8 +174,8 @@ class TilingResult:
     image_path: Path
     mask_path: Path | None
     backend: str
-    x_lv0: np.ndarray
-    y_lv0: np.ndarray
+    x: np.ndarray
+    y: np.ndarray
     tile_index: np.ndarray
     target_spacing_um: float
     target_tile_size_px: int
@@ -216,8 +221,8 @@ def _validate_vector(name: str, value: np.ndarray | None) -> int | None:
 
 def _validate_result_consistency(result: TilingResult) -> None:
     lengths = {
-        "x_lv0": _validate_vector("x_lv0", result.x_lv0),
-        "y_lv0": _validate_vector("y_lv0", result.y_lv0),
+        "x": _validate_vector("x", result.x),
+        "y": _validate_vector("y", result.y),
         "tile_index": _validate_vector("tile_index", result.tile_index),
     }
     if result.tissue_fraction is not None:
@@ -268,9 +273,9 @@ def _compute_tiling_result(
         disable_tqdm=True,
         num_workers=num_workers,
     )
-    x_lv0 = extraction.x_lv0.astype(np.int64, copy=False)
-    y_lv0 = extraction.y_lv0.astype(np.int64, copy=False)
-    num_tiles = int(x_lv0.shape[0])
+    x = extraction.x.astype(np.int64, copy=False)
+    y = extraction.y.astype(np.int64, copy=False)
+    num_tiles = int(x.shape[0])
     tissue_fraction = None
     if extraction.tissue_percentages is not None:
         tissue_fraction = np.asarray(extraction.tissue_percentages, dtype=np.float32)
@@ -285,8 +290,8 @@ def _compute_tiling_result(
         image_path=whole_slide.image_path,
         mask_path=whole_slide.mask_path,
         backend=tiling.backend,
-        x_lv0=x_lv0,
-        y_lv0=y_lv0,
+        x=x,
+        y=y,
         tile_index=np.arange(num_tiles, dtype=np.int32),
         tissue_fraction=tissue_fraction,
         target_spacing_um=tiling.target_spacing_um,
@@ -377,7 +382,9 @@ def tile_slide(
 ) -> TilingResult:
     if qc is not None and (qc.save_mask_preview or qc.save_tiling_preview):
         warnings.warn(
-            "tile_slide() does not write preview artifacts; use tile_slides() to save previews.",
+            "tile_slide() is compute-only and does not write preview artifacts; "
+            "use write_tiling_preview() for tiling overlays and "
+            "overlay_mask_on_slide() for mask overlays.",
             stacklevel=2,
         )
     return _compute_tiling_result(
@@ -404,8 +411,8 @@ def save_tiling_result(
 
     payload = {
         "tile_index": result.tile_index.astype(np.int32, copy=False),
-        "x_lv0": result.x_lv0.astype(np.int64, copy=False),
-        "y_lv0": result.y_lv0.astype(np.int64, copy=False),
+        "x": result.x.astype(np.int64, copy=False),
+        "y": result.y.astype(np.int64, copy=False),
     }
     if result.tissue_fraction is not None:
         payload["tissue_fraction"] = result.tissue_fraction.astype(np.float32, copy=False)
@@ -452,7 +459,7 @@ def load_tiling_result(
         raise ValueError(
             f"Unable to load tiling metadata artifact {tiles_meta_path}: {exc}"
         ) from exc
-    required_npz_keys = {"tile_index", "x_lv0", "y_lv0"}
+    required_npz_keys = {"tile_index", "x", "y"}
     missing_npz_keys = sorted(required_npz_keys - set(tiles.files))
     if missing_npz_keys:
         raise ValueError(
@@ -481,8 +488,8 @@ def load_tiling_result(
             f"Invalid tiling metadata artifact {tiles_meta_path}; missing keys: "
             + ", ".join(missing_meta_keys)
         )
-    x_lv0 = tiles["x_lv0"].astype(np.int64, copy=False)
-    y_lv0 = tiles["y_lv0"].astype(np.int64, copy=False)
+    x = tiles["x"].astype(np.int64, copy=False)
+    y = tiles["y"].astype(np.int64, copy=False)
     tile_index = tiles["tile_index"].astype(np.int32, copy=False)
     tissue_fraction = None
     if "tissue_fraction" in tiles:
@@ -492,8 +499,8 @@ def load_tiling_result(
         image_path=Path(meta["image_path"]),
         mask_path=Path(meta["mask_path"]) if meta.get("mask_path") else None,
         backend=meta["backend"],
-        x_lv0=x_lv0,
-        y_lv0=y_lv0,
+        x=x,
+        y=y,
         tile_index=tile_index,
         tissue_fraction=tissue_fraction,
         target_spacing_um=float(meta["target_spacing_um"]),
@@ -581,17 +588,27 @@ def _maybe_load_existing_artifacts(
     )
 
 
-def _write_tiling_preview(
+def write_tiling_preview(
     *,
     result: TilingResult,
     output_dir: Path,
     downsample: int,
 ) -> Path | None:
+    """Render a tiling preview image for a previously computed result.
+
+    Args:
+        result: Tiling coordinates and read metadata for one slide.
+        output_dir: Root output directory where ``visualization/tiling`` is created.
+        downsample: Visualization downsample passed to ``visualize_coordinates``.
+
+    Returns:
+        Path to the rendered preview image, or ``None`` when there are no tiles.
+    """
     if result.num_tiles == 0:
         return None
     save_dir = output_dir / "visualization" / "tiling"
     save_dir.mkdir(parents=True, exist_ok=True)
-    coordinates = list(zip(result.x_lv0.tolist(), result.y_lv0.tolist()))
+    coordinates = list(zip(result.x.tolist(), result.y.tolist()))
     visualize_coordinates(
         wsi_path=result.image_path,
         coordinates=coordinates,
@@ -602,6 +619,37 @@ def _write_tiling_preview(
         sample_id=result.sample_id,
     )
     return save_dir / f"{result.sample_id}.jpg"
+
+
+def overlay_mask_on_slide(
+    wsi_path: Path,
+    annotation_mask_path: Path | None,
+    downsample: int,
+    backend: str,
+    palette: np.ndarray,
+    pixel_mapping: dict[str, int],
+    color_mapping: dict[str, list[int] | None],
+    alpha: float = 0.5,
+    mask_arr: np.ndarray | None = None,
+):
+    """Render a mask overlay preview for a slide.
+
+    This is the public API counterpart to the batch QC preview written by
+    ``tile_slides(..., qc=QCConfig(save_mask_preview=True, ...))``. It can
+    overlay either a mask file from disk or an in-memory mask array.
+    """
+
+    return _overlay_mask_on_slide(
+        wsi_path=wsi_path,
+        annotation_mask_path=annotation_mask_path,
+        downsample=downsample,
+        backend=backend,
+        palette=palette,
+        pixel_mapping=pixel_mapping,
+        color_mapping=color_mapping,
+        alpha=alpha,
+        mask_arr=mask_arr,
+    )
 
 
 def _write_process_list(process_rows: list[dict[str, Any]], process_list_path: Path) -> None:
@@ -692,7 +740,6 @@ def tile_slides(
                 mask_visu_path = None
                 if qc is not None and qc.save_mask_preview:
                     mask_dir = output_dir / "visualization" / "mask"
-                    mask_dir.mkdir(parents=True, exist_ok=True)
                     mask_visu_path = mask_dir / f"{whole_slide.sample_id}.jpg"
                 result = _compute_tiling_result(
                     whole_slide,
@@ -706,7 +753,7 @@ def tile_slides(
                 mask_preview_path = mask_visu_path if mask_visu_path is not None and mask_visu_path.is_file() else None
                 tiling_preview_path = None
                 if qc is not None and qc.save_tiling_preview:
-                    tiling_preview_path = _write_tiling_preview(
+                    tiling_preview_path = write_tiling_preview(
                         result=result,
                         output_dir=output_dir,
                         downsample=qc.downsample,

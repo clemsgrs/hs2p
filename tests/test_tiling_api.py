@@ -24,6 +24,7 @@ from hs2p.api import (
     tile_slide,
     tile_slides,
     validate_tiling_artifacts,
+    write_tiling_preview,
 )
 from hs2p.configs import default_config
 from hs2p.utils import load_csv
@@ -77,8 +78,8 @@ def _fake_extraction() -> CoordinateExtractionResult:
         coordinates=[(100, 200), (300, 400)],
         contour_indices=[0, 0],
         tissue_percentages=[0.25, 0.75],
-        x_lv0=np.array([100, 300], dtype=np.int64),
-        y_lv0=np.array([200, 400], dtype=np.int64),
+        x=np.array([100, 300], dtype=np.int64),
+        y=np.array([200, 400], dtype=np.int64),
         read_level=1,
         read_spacing_um=1.0,
         read_tile_size_px=448,
@@ -99,8 +100,8 @@ def _build_result(
         image_path=Path(image_path),
         mask_path=Path(mask_path) if mask_path is not None else None,
         backend="asap",
-        x_lv0=np.array([10], dtype=np.int64),
-        y_lv0=np.array([20], dtype=np.int64),
+        x=np.array([10], dtype=np.int64),
+        y=np.array([20], dtype=np.int64),
         tile_index=np.array([0], dtype=np.int32),
         tissue_fraction=None,
         target_spacing_um=0.5,
@@ -164,8 +165,8 @@ def test_tile_slide_returns_named_arrays(monkeypatch, tiling_config, segmentatio
     )
 
     assert isinstance(result, TilingResult)
-    np.testing.assert_array_equal(result.x_lv0, np.array([100, 300], dtype=np.int64))
-    np.testing.assert_array_equal(result.y_lv0, np.array([200, 400], dtype=np.int64))
+    np.testing.assert_array_equal(result.x, np.array([100, 300], dtype=np.int64))
+    np.testing.assert_array_equal(result.y, np.array([200, 400], dtype=np.int64))
     np.testing.assert_array_equal(result.tile_index, np.array([0, 1], dtype=np.int32))
     np.testing.assert_array_equal(
         result.tissue_fraction,
@@ -195,7 +196,10 @@ def test_tile_slide_warns_when_preview_qc_is_requested(
 ):
     monkeypatch.setattr("hs2p.api.extract_coordinates", lambda **_: _fake_extraction())
 
-    with pytest.warns(UserWarning, match="does not write preview artifacts"):
+    with pytest.warns(
+        UserWarning,
+        match="write_tiling_preview\\(\\).*overlay_mask_on_slide\\(\\)",
+    ):
         tile_slide(
             WholeSlide(sample_id="slide-qc", image_path=Path("slide-qc.svs")),
             tiling=tiling_config,
@@ -211,8 +215,8 @@ def test_save_tiling_result_writes_expected_npz_and_json(tmp_path: Path):
         image_path=Path("slide-2.svs"),
         mask_path=None,
         backend="asap",
-        x_lv0=np.array([10, 30], dtype=np.int64),
-        y_lv0=np.array([20, 40], dtype=np.int64),
+        x=np.array([10, 30], dtype=np.int64),
+        y=np.array([20, 40], dtype=np.int64),
         tile_index=np.array([0, 1], dtype=np.int32),
         tissue_fraction=np.array([0.3, 0.7], dtype=np.float32),
         target_spacing_um=0.5,
@@ -239,10 +243,10 @@ def test_save_tiling_result_writes_expected_npz_and_json(tmp_path: Path):
     )
 
     tiles = np.load(artifacts.tiles_npz_path, allow_pickle=False)
-    assert set(tiles.files) == {"tile_index", "x_lv0", "y_lv0", "tissue_fraction"}
+    assert set(tiles.files) == {"tile_index", "x", "y", "tissue_fraction"}
     np.testing.assert_array_equal(tiles["tile_index"], np.array([0, 1], dtype=np.int32))
-    np.testing.assert_array_equal(tiles["x_lv0"], np.array([10, 30], dtype=np.int64))
-    np.testing.assert_array_equal(tiles["y_lv0"], np.array([20, 40], dtype=np.int64))
+    np.testing.assert_array_equal(tiles["x"], np.array([10, 30], dtype=np.int64))
+    np.testing.assert_array_equal(tiles["y"], np.array([20, 40], dtype=np.int64))
     np.testing.assert_array_equal(
         tiles["tissue_fraction"],
         np.array([0.3, 0.7], dtype=np.float32),
@@ -289,8 +293,8 @@ def test_save_and_load_tiling_result_round_trip(tmp_path: Path):
         image_path=Path("slide-roundtrip.svs"),
         mask_path=Path("slide-roundtrip-mask.png"),
         backend="asap",
-        x_lv0=np.array([10, 30], dtype=np.int64),
-        y_lv0=np.array([20, 40], dtype=np.int64),
+        x=np.array([10, 30], dtype=np.int64),
+        y=np.array([20, 40], dtype=np.int64),
         tile_index=np.array([0, 1], dtype=np.int32),
         tissue_fraction=np.array([0.3, 0.7], dtype=np.float32),
         target_spacing_um=0.5,
@@ -320,10 +324,51 @@ def test_save_and_load_tiling_result_round_trip(tmp_path: Path):
     assert loaded.tissue_threshold == result.tissue_threshold
     assert loaded.num_tiles == result.num_tiles
     assert loaded.config_hash == result.config_hash
-    np.testing.assert_array_equal(loaded.x_lv0, result.x_lv0)
-    np.testing.assert_array_equal(loaded.y_lv0, result.y_lv0)
+    np.testing.assert_array_equal(loaded.x, result.x)
+    np.testing.assert_array_equal(loaded.y, result.y)
     np.testing.assert_array_equal(loaded.tile_index, result.tile_index)
     np.testing.assert_array_equal(loaded.tissue_fraction, result.tissue_fraction)
+
+
+def test_write_tiling_preview_writes_expected_preview(monkeypatch, tmp_path: Path):
+    result = TilingResult(
+        sample_id="slide-preview",
+        image_path=Path("slide-preview.svs"),
+        mask_path=None,
+        backend="asap",
+        x=np.array([10, 30], dtype=np.int64),
+        y=np.array([20, 40], dtype=np.int64),
+        tile_index=np.array([0, 1], dtype=np.int32),
+        tissue_fraction=None,
+        target_spacing_um=0.5,
+        target_tile_size_px=224,
+        read_level=0,
+        read_spacing_um=0.5,
+        read_tile_size_px=224,
+        tile_size_lv0=224,
+        overlap=0.0,
+        tissue_threshold=0.1,
+        num_tiles=2,
+        config_hash="preview-hash",
+    )
+
+    def _fake_visualize_coordinates(**kwargs):
+        save_dir = Path(kwargs["save_dir"])
+        save_dir.mkdir(parents=True, exist_ok=True)
+        (save_dir / f"{kwargs['sample_id']}.jpg").write_bytes(b"preview")
+
+    monkeypatch.setattr("hs2p.api.visualize_coordinates", _fake_visualize_coordinates)
+
+    preview_path = write_tiling_preview(
+        result=result,
+        output_dir=tmp_path,
+        downsample=16,
+    )
+
+    assert preview_path == (
+        tmp_path / "visualization" / "tiling" / "slide-preview.jpg"
+    )
+    assert preview_path.is_file()
 
 
 def test_save_tiling_result_rejects_invalid_tile_index(tmp_path: Path):
@@ -332,8 +377,8 @@ def test_save_tiling_result_rejects_invalid_tile_index(tmp_path: Path):
         image_path=Path("broken.svs"),
         mask_path=None,
         backend="asap",
-        x_lv0=np.array([10], dtype=np.int64),
-        y_lv0=np.array([20], dtype=np.int64),
+        x=np.array([10], dtype=np.int64),
+        y=np.array([20], dtype=np.int64),
         tile_index=np.array([3], dtype=np.int32),
         tissue_fraction=None,
         target_spacing_um=0.5,
@@ -358,8 +403,8 @@ def test_save_tiling_result_rejects_non_vector_arrays(tmp_path: Path):
         image_path=Path("broken-shape.svs"),
         mask_path=None,
         backend="asap",
-        x_lv0=np.array([[10, 11]], dtype=np.int64),
-        y_lv0=np.array([20], dtype=np.int64),
+        x=np.array([[10, 11]], dtype=np.int64),
+        y=np.array([20], dtype=np.int64),
         tile_index=np.array([0], dtype=np.int32),
         tissue_fraction=None,
         target_spacing_um=0.5,
@@ -374,7 +419,7 @@ def test_save_tiling_result_rejects_non_vector_arrays(tmp_path: Path):
         config_hash="hash",
     )
 
-    with pytest.raises(ValueError, match="x_lv0 must be a 1D array"):
+    with pytest.raises(ValueError, match="x must be a 1D array"):
         save_tiling_result(invalid, output_dir=tmp_path)
 
 
@@ -386,8 +431,8 @@ def test_tile_slide_rejects_tissue_fraction_shape_mismatch(
             coordinates=[(100, 200), (300, 400)],
             contour_indices=[0, 0],
             tissue_percentages=[0.25],
-            x_lv0=np.array([100, 300], dtype=np.int64),
-            y_lv0=np.array([200, 400], dtype=np.int64),
+            x=np.array([100, 300], dtype=np.int64),
+            y=np.array([200, 400], dtype=np.int64),
             read_level=1,
             read_spacing_um=1.0,
             read_tile_size_px=448,
@@ -530,8 +575,8 @@ def test_tile_slides_omits_tiling_preview_path_when_no_tiles(
             coordinates=[],
             contour_indices=[],
             tissue_percentages=[],
-            x_lv0=np.array([], dtype=np.int64),
-            y_lv0=np.array([], dtype=np.int64),
+            x=np.array([], dtype=np.int64),
+            y=np.array([], dtype=np.int64),
             read_level=0,
             read_spacing_um=0.5,
             read_tile_size_px=224,
@@ -575,13 +620,12 @@ def test_tile_slides_writes_preview_paths_when_visualizations_are_saved(
 
     monkeypatch.setattr("hs2p.api.visualize_coordinates", _fake_visualize_coordinates)
 
-    mask_dir = tmp_path / "visualization" / "mask"
-    mask_dir.mkdir(parents=True, exist_ok=True)
-    expected_mask_path = mask_dir / "slide-preview.jpg"
+    expected_mask_path = tmp_path / "visualization" / "mask" / "slide-preview.jpg"
 
     def _fake_extract_with_mask_preview(**kwargs):
         mask_visu_path = kwargs["mask_visu_path"]
         if mask_visu_path is not None:
+            mask_visu_path.parent.mkdir(parents=True, exist_ok=True)
             mask_visu_path.write_bytes(b"mask-preview")
         return _fake_extraction()
 
@@ -732,7 +776,7 @@ def test_load_csv_rejects_duplicate_sample_id(tmp_path: Path):
 def test_load_tiling_result_rejects_missing_npz_keys(tmp_path: Path):
     npz_path = tmp_path / "broken.tiles.npz"
     meta_path = tmp_path / "broken.tiles.meta.json"
-    np.savez(npz_path, tile_index=np.array([0], dtype=np.int32), y_lv0=np.array([20], dtype=np.int64))
+    np.savez(npz_path, tile_index=np.array([0], dtype=np.int32), y=np.array([20], dtype=np.int64))
     meta_path.write_text(
         json.dumps(
             {
@@ -754,7 +798,7 @@ def test_load_tiling_result_rejects_missing_npz_keys(tmp_path: Path):
         )
     )
 
-    with pytest.raises(ValueError, match="missing keys: x_lv0"):
+    with pytest.raises(ValueError, match="missing keys: x"):
         load_tiling_result(npz_path, meta_path)
 
 
@@ -793,8 +837,8 @@ def test_load_tiling_result_rejects_missing_meta_keys(tmp_path: Path):
     np.savez(
         npz_path,
         tile_index=np.array([0], dtype=np.int32),
-        x_lv0=np.array([10], dtype=np.int64),
-        y_lv0=np.array([20], dtype=np.int64),
+        x=np.array([10], dtype=np.int64),
+        y=np.array([20], dtype=np.int64),
     )
     meta_path.write_text(
         json.dumps(

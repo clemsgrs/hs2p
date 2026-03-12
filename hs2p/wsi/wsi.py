@@ -1,4 +1,3 @@
-import math
 import sys
 import warnings
 from concurrent.futures import ThreadPoolExecutor
@@ -413,100 +412,6 @@ class WholeSlideImage(object):
         self.annotation_mask = {"tissue": img_thresh}
         return seg_level
 
-    def visualize_mask(
-        self,
-        contours,
-        holes,
-        downsample: int = 32,
-        color: tuple[int] = (0, 255, 0),
-        hole_color: tuple[int] = (0, 0, 255),
-        max_size: int | None = None,
-        number_contours: bool = False,
-    ):
-        vis_level = self.get_best_level_for_downsample_custom(downsample)
-        level_downsample = self.level_downsamples[vis_level]
-        scale = [1 / level_downsample[0], 1 / level_downsample[1]]
-
-        s = self.spacings[vis_level]
-        img = self.wsi.get_slide(spacing=s)
-        if self.backend == "openslide":
-            img = np.ascontiguousarray(img)
-
-        offset = tuple(-(np.array((0, 0)) * scale).astype(int))
-        line_thickness = self._infer_contour_thickness(
-            level0_dimensions=self.level_dimensions[0],
-            scale=(scale[0], scale[1]),
-        )
-        if contours is not None:
-            if not number_contours:
-                cv2.drawContours(
-                    img,
-                    self.scaleContourDim(contours, scale),
-                    -1,
-                    color,
-                    line_thickness,
-                    lineType=cv2.LINE_8,
-                    offset=offset,
-                )
-
-            else:
-                # add numbering to each contour
-                for idx, cont in enumerate(contours):
-                    contour = np.array(self.scaleContourDim(cont, scale))
-                    M = cv2.moments(contour)
-                    cX = int(M["m10"] / (M["m00"] + 1e-9))
-                    cY = int(M["m01"] / (M["m00"] + 1e-9))
-                    # draw the contour and put text next to center
-                    cv2.drawContours(
-                        img,
-                        [contour],
-                        -1,
-                        color,
-                        line_thickness,
-                        lineType=cv2.LINE_8,
-                        offset=offset,
-                    )
-                    cv2.putText(
-                        img,
-                        "{}".format(idx),
-                        (cX, cY),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        2,
-                        (255, 0, 0),
-                        10,
-                    )
-
-            for holes in holes:
-                cv2.drawContours(
-                    img,
-                    self.scaleContourDim(holes, scale),
-                    -1,
-                    hole_color,
-                    line_thickness,
-                    lineType=cv2.LINE_8,
-                )
-
-        img = Image.fromarray(img)
-
-        w, h = img.size
-        if max_size is not None and (w > max_size or h > max_size):
-            resizeFactor = max_size / w if w > h else max_size / h
-            img = img.resize((int(w * resizeFactor), int(h * resizeFactor)))
-
-        return img
-
-    @staticmethod
-    def _infer_contour_thickness(
-        *,
-        level0_dimensions: tuple[int, int],
-        scale: tuple[float, float],
-    ) -> int:
-        level0_w, level0_h = level0_dimensions
-        scale_x, scale_y = scale
-        visual_max_dim = max(level0_w, level0_h) * math.sqrt(scale_x * scale_y)
-        thickness = round(15 * math.sqrt(visual_max_dim / 864))
-        return max(2, min(24, thickness))
-
     def get_tile_coordinates(
         self,
         tiling_params: TilingParameters,
@@ -573,8 +478,6 @@ class WholeSlideImage(object):
         )
         tile_coordinates = list(zip(running_x_coords, running_y_coords))
         return (
-            contours,
-            holes,
             tile_coordinates,
             tissue_percentages,
             contour_indices,

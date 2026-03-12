@@ -105,15 +105,15 @@ def _save_sampling_coordinates(
     extraction,
     sampling_params: SamplingParameters,
 ):
-    x_lv0 = np.array([x for x, _ in coordinates], dtype=np.int64)
-    y_lv0 = np.array([y for _, y in coordinates], dtype=np.int64)
+    x = np.array([x for x, _ in coordinates], dtype=np.int64)
+    y = np.array([y for _, y in coordinates], dtype=np.int64)
     result = TilingResult(
         sample_id=sample_id,
         image_path=image_path,
         mask_path=mask_path,
         backend=backend,
-        x_lv0=x_lv0,
-        y_lv0=y_lv0,
+        x=x,
+        y=y,
         tile_index=np.arange(len(coordinates), dtype=np.int32),
         tissue_fraction=None,
         target_spacing_um=tiling_config.target_spacing_um,
@@ -264,9 +264,7 @@ def process_slide(
                     continue
                 tissue_mask_visu_path = None
                 if cfg.visualize and mask_visualize_dir is not None:
-                    annotation_mask_dir = mask_visualize_dir / annotation
-                    annotation_mask_dir.mkdir(exist_ok=True, parents=True)
-                    tissue_mask_visu_path = Path(annotation_mask_dir, f"{wsi_name}.jpg")
+                    tissue_mask_visu_path = mask_visualize_dir / annotation / f"{wsi_name}.jpg"
                 extraction = sample_coordinates(
                     wsi_path=wsi_path,
                     mask_path=mask_path,

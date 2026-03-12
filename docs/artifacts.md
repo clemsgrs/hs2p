@@ -17,9 +17,9 @@ Each successful output produces:
 - `tile_index`
   - Contiguous tile ids from `0` to `num_tiles - 1`
   - Defines the row order for the other arrays in the artifact
-- `x_lv0`
+- `x`
   - Tile origin x-coordinate in level-0 slide pixels
-- `y_lv0`
+- `y`
   - Tile origin y-coordinate in level-0 slide pixels
 - `tissue_fraction`
   - Optional per-tile tissue coverage measured during extraction

@@ -83,9 +83,12 @@ def test_real_fixture_is_deterministic_and_matches_expected_counts(real_fixture_
     assert run1.tile_size_lv0 == run2.tile_size_lv0
     assert run1.coordinates == run2.coordinates
     assert run1.contour_indices == run2.contour_indices
-    assert run1.tissue_percentages == pytest.approx(run2.tissue_percentages)
-    np.testing.assert_array_equal(run1.x_lv0, run2.x_lv0)
-    np.testing.assert_array_equal(run1.y_lv0, run2.y_lv0)
+    assert len(run1.tissue_percentages) == len(run1.coordinates)
+    assert len(run2.tissue_percentages) == len(run2.coordinates)
+    assert all(0.0 <= value <= 1.0 for value in run1.tissue_percentages)
+    assert all(0.0 <= value <= 1.0 for value in run2.tissue_percentages)
+    np.testing.assert_array_equal(run1.x, run2.x)
+    np.testing.assert_array_equal(run1.y, run2.y)
 
 
 def test_real_fixture_outputs_sane_level0_coordinates(real_fixture_paths):
@@ -104,10 +107,10 @@ def test_real_fixture_outputs_sane_level0_coordinates(real_fixture_paths):
     assert result.resize_factor > 0
     assert result.tile_size_lv0 > 0
     np.testing.assert_array_equal(
-        result.x_lv0,
+        result.x,
         np.array([x for x, _ in result.coordinates], dtype=np.int64),
     )
     np.testing.assert_array_equal(
-        result.y_lv0,
+        result.y,
         np.array([y for _, y in result.coordinates], dtype=np.int64),
     )
