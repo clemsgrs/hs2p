@@ -1,0 +1,16 @@
+{
+  "backend": "asap",
+  "config_hash": "f0f7962bd8dd90c397b192b5f41a132ff90ee14174f8ce54da80cb4a1cb39ef2",
+  "image_path": "/data/pathology/projects/clement/code/hs2p/tests/fixtures/input/test-wsi.tif",
+  "mask_path": "/data/pathology/projects/clement/code/hs2p/tests/fixtures/input/test-mask.tif",
+  "num_tiles": 459,
+  "overlap": 0.0,
+  "read_level": 0,
+  "read_spacing_um": 0.25200000393750005,
+  "read_tile_size_px": 444,
+  "sample_id": "test-wsi",
+  "target_spacing_um": 0.5,
+  "target_tile_size_px": 224,
+  "tile_size_lv0": 444,
+  "tissue_threshold": 0.1
+}
