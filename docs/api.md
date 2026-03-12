@@ -2,6 +2,8 @@
 
 The Python API is the primary public interface for programmatic use. It supports extraction at any requested spacing, whether or not that spacing exists natively in the slide pyramid.
 
+For convenience, the config dataclasses keep the main knobs explicit and fill the secondary ones from the packaged defaults in `hs2p/configs/default.yaml`.
+
 ## Main types
 
 - `WholeSlide`
@@ -59,11 +61,9 @@ result = tile_slide(
         overlap=0.0,
         tissue_threshold=0.1,
         backend="asap",
-        drop_holes=False,
-        use_padding=True,
     ),
-    segmentation=SegmentationConfig(downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4, use_otsu=False, use_hsv=True),
-    filtering=FilterConfig(ref_tile_size=224, a_t=4, a_h=2, max_n_holes=8, filter_white=False, filter_black=False, white_threshold=220, black_threshold=25, fraction_threshold=0.9),
+    segmentation=SegmentationConfig(downsample=64),
+    filtering=FilterConfig(ref_tile_size=224, a_t=4, a_h=2),
     num_workers=1,
 )
 

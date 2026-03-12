@@ -12,7 +12,14 @@ from typing import Any, Sequence
 import numpy as np
 import pandas as pd
 
+from hs2p.configs import default_config
 from hs2p.wsi import SamplingParameters, extract_coordinates, visualize_coordinates
+
+
+_DEFAULT_TILING = default_config.tiling
+_DEFAULT_TILING_PARAMS = _DEFAULT_TILING.params
+_DEFAULT_SEGMENTATION = _DEFAULT_TILING.seg_params
+_DEFAULT_FILTERING = _DEFAULT_TILING.filter_params
 
 
 @dataclass(frozen=True)
@@ -29,9 +36,9 @@ class TilingConfig:
     tolerance: float
     overlap: float
     tissue_threshold: float
-    drop_holes: bool
-    use_padding: bool
-    backend: str = "asap"
+    drop_holes: bool = bool(_DEFAULT_TILING_PARAMS.drop_holes)
+    use_padding: bool = bool(_DEFAULT_TILING_PARAMS.use_padding)
+    backend: str = str(_DEFAULT_TILING.backend)
 
     # Legacy compatibility for wrapped core logic.
     @property
@@ -50,12 +57,12 @@ class TilingConfig:
 @dataclass(frozen=True)
 class SegmentationConfig:
     downsample: int
-    sthresh: int
-    sthresh_up: int
-    mthresh: int
-    close: int
-    use_otsu: bool
-    use_hsv: bool
+    sthresh: int = int(_DEFAULT_SEGMENTATION.sthresh)
+    sthresh_up: int = int(_DEFAULT_SEGMENTATION.sthresh_up)
+    mthresh: int = int(_DEFAULT_SEGMENTATION.mthresh)
+    close: int = int(_DEFAULT_SEGMENTATION.close)
+    use_otsu: bool = bool(_DEFAULT_SEGMENTATION.use_otsu)
+    use_hsv: bool = bool(_DEFAULT_SEGMENTATION.use_hsv)
 
 
 @dataclass(frozen=True)
@@ -63,12 +70,12 @@ class FilterConfig:
     ref_tile_size: int
     a_t: int
     a_h: int
-    max_n_holes: int
-    filter_white: bool
-    filter_black: bool
-    white_threshold: int
-    black_threshold: int
-    fraction_threshold: float
+    max_n_holes: int = int(_DEFAULT_FILTERING.max_n_holes)
+    filter_white: bool = bool(_DEFAULT_FILTERING.filter_white)
+    filter_black: bool = bool(_DEFAULT_FILTERING.filter_black)
+    white_threshold: int = int(_DEFAULT_FILTERING.white_threshold)
+    black_threshold: int = int(_DEFAULT_FILTERING.black_threshold)
+    fraction_threshold: float = float(_DEFAULT_FILTERING.fraction_threshold)
 
 
 @dataclass(frozen=True)

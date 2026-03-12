@@ -25,6 +25,7 @@ from hs2p.api import (
     tile_slides,
     validate_tiling_artifacts,
 )
+from hs2p.configs import default_config
 from hs2p.utils import load_csv
 from hs2p.wsi import CoordinateExtractionResult
 
@@ -875,3 +876,33 @@ def test_write_process_list_removes_temp_file_on_failure(monkeypatch, tmp_path: 
 
     assert created_temp_paths
     assert all(not path.exists() for path in created_temp_paths)
+
+
+def test_config_dataclasses_apply_package_defaults_for_secondary_parameters():
+    tiling = TilingConfig(
+        target_spacing_um=0.5,
+        target_tile_size_px=224,
+        tolerance=0.07,
+        overlap=0.0,
+        tissue_threshold=0.1,
+    )
+    segmentation = SegmentationConfig(downsample=64)
+    filtering = FilterConfig(ref_tile_size=224, a_t=4, a_h=2)
+
+    assert tiling.drop_holes == default_config.tiling.params.drop_holes
+    assert tiling.use_padding == default_config.tiling.params.use_padding
+    assert tiling.backend == default_config.tiling.backend
+    assert segmentation.sthresh == default_config.tiling.seg_params.sthresh
+    assert segmentation.sthresh_up == default_config.tiling.seg_params.sthresh_up
+    assert segmentation.mthresh == default_config.tiling.seg_params.mthresh
+    assert segmentation.close == default_config.tiling.seg_params.close
+    assert segmentation.use_otsu == default_config.tiling.seg_params.use_otsu
+    assert segmentation.use_hsv == default_config.tiling.seg_params.use_hsv
+    assert filtering.max_n_holes == default_config.tiling.filter_params.max_n_holes
+    assert filtering.filter_white == default_config.tiling.filter_params.filter_white
+    assert filtering.filter_black == default_config.tiling.filter_params.filter_black
+    assert filtering.white_threshold == default_config.tiling.filter_params.white_threshold
+    assert filtering.black_threshold == default_config.tiling.filter_params.black_threshold
+    assert filtering.fraction_threshold == pytest.approx(
+        default_config.tiling.filter_params.fraction_threshold
+    )
