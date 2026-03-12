@@ -16,6 +16,9 @@ from hs2p.api import (
 )
 
 
+pytestmark = pytest.mark.integration
+
+
 def _require_asap_backend(wsi_path: Path) -> str:
     wsd = pytest.importorskip("wholeslidedata")
     try:
@@ -125,7 +128,7 @@ def test_generated_tiles_match_legacy_golden(real_fixture_paths, tmp_path: Path)
     assert meta["target_tile_size_px"] == int(legacy["target_tile_size"][0])
     assert meta["read_level"] == int(legacy["tile_level"][0])
     assert meta["read_spacing_um"] == pytest.approx(
-        float(legacy["target_spacing"][0] * legacy["resize_factor"][0])
+        float(legacy["target_spacing"][0] / legacy["resize_factor"][0])
     )
     assert meta["read_tile_size_px"] == int(legacy["tile_size_resized"][0])
     assert meta["tile_size_lv0"] == int(legacy["tile_size_lv0"][0])

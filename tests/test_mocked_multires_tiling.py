@@ -4,8 +4,62 @@ from pathlib import Path
 
 import numpy as np
 
+from hs2p.api import FilterConfig, SegmentationConfig, TilingConfig
 import hs2p.wsi as wsi_api
-from params import make_filter_params, make_sampling_params, make_segment_params, make_tiling_params
+from hs2p.wsi import SamplingParameters
+
+
+def _segmentation_config() -> SegmentationConfig:
+    return SegmentationConfig(
+        downsample=2,
+        sthresh=8,
+        sthresh_up=255,
+        mthresh=3,
+        close=0,
+        use_otsu=False,
+        use_hsv=False,
+    )
+
+
+def _filter_config() -> FilterConfig:
+    return FilterConfig(
+        ref_tile_size=4,
+        a_t=0,
+        a_h=0,
+        max_n_holes=8,
+        filter_white=False,
+        filter_black=False,
+        white_threshold=220,
+        black_threshold=25,
+        fraction_threshold=0.9,
+    )
+
+
+def _tiling_config(
+    *,
+    spacing: float = 1.0,
+    tolerance: float = 0.01,
+    tile_size: int = 8,
+    tissue_threshold: float = 0.0,
+) -> TilingConfig:
+    return TilingConfig(
+        target_spacing_um=spacing,
+        target_tile_size_px=tile_size,
+        tolerance=tolerance,
+        overlap=0.0,
+        tissue_threshold=tissue_threshold,
+        drop_holes=False,
+        use_padding=False,
+        backend="asap",
+    )
+
+
+def _sampling_parameters(*, tissue_threshold: float) -> SamplingParameters:
+    return SamplingParameters(
+        pixel_mapping={"background": 0, "tissue": 1},
+        color_mapping={"background": None, "tissue": None},
+        tissue_percentage={"background": None, "tissue": tissue_threshold},
+    )
 
 
 def test_extract_coordinates_returns_exact_coordinates_for_rectangular_tissue(fake_backend):
@@ -13,26 +67,23 @@ def test_extract_coordinates_returns_exact_coordinates_for_rectangular_tissue(fa
     mask_l0[4:12, 4:12, 0] = 1
     fake_backend(mask_l0)
 
-    coordinates, contour_indices, tile_level, resize_factor, tile_size_lv0 = wsi_api.extract_coordinates(
+    result = wsi_api.extract_coordinates(
         wsi_path=Path("synthetic-slide.tif"),
         mask_path=Path("synthetic-mask.tif"),
         backend="asap",
-        segment_params=make_segment_params(),
-        tiling_params=make_tiling_params(min_tissue_percentage=0.0),
-        filter_params=make_filter_params(),
-        sampling_params=make_sampling_params(
-            pixel_mapping={"background": 0, "tissue": 1},
-            tissue_percentage={"background": None, "tissue": 0.0},
-        ),
+        segment_params=_segmentation_config(),
+        tiling_params=_tiling_config(tissue_threshold=0.0),
+        filter_params=_filter_config(),
+        sampling_params=_sampling_parameters(tissue_threshold=0.0),
         disable_tqdm=True,
         num_workers=1,
     )
 
-    assert coordinates == [(16, 16), (16, 8), (8, 16), (8, 8)]
-    assert contour_indices == [0, 0, 0, 0]
-    assert tile_level == 0
-    assert resize_factor == 1.0
-    assert tile_size_lv0 == 8
+    assert result.coordinates == [(16, 16), (16, 8), (8, 16), (8, 8)]
+    assert result.contour_indices == [0, 0, 0, 0]
+    assert result.read_level == 0
+    assert result.resize_factor == 1.0
+    assert result.tile_size_lv0 == 8
 
 
 def test_extract_coordinates_respects_50_vs_51_percent_tissue_threshold(fake_backend):
@@ -40,41 +91,35 @@ def test_extract_coordinates_respects_50_vs_51_percent_tissue_threshold(fake_bac
     mask_l0[4:12, 4:10, 0] = 1  # produces two 100%-tissue tiles and two 50%-tissue tiles
     fake_backend(mask_l0)
 
-    sampling_at_50 = make_sampling_params(
-        pixel_mapping={"background": 0, "tissue": 1},
-        tissue_percentage={"background": None, "tissue": 0.50},
-    )
-    sampling_above_50 = make_sampling_params(
-        pixel_mapping={"background": 0, "tissue": 1},
-        tissue_percentage={"background": None, "tissue": 0.51},
-    )
+    sampling_at_50 = _sampling_parameters(tissue_threshold=0.50)
+    sampling_above_50 = _sampling_parameters(tissue_threshold=0.51)
 
-    coordinates_50, *_ = wsi_api.extract_coordinates(
+    result_50 = wsi_api.extract_coordinates(
         wsi_path=Path("synthetic-slide.tif"),
         mask_path=Path("synthetic-mask.tif"),
         backend="asap",
-        segment_params=make_segment_params(),
-        tiling_params=make_tiling_params(min_tissue_percentage=0.50),
-        filter_params=make_filter_params(),
+        segment_params=_segmentation_config(),
+        tiling_params=_tiling_config(tissue_threshold=0.50),
+        filter_params=_filter_config(),
         sampling_params=sampling_at_50,
         disable_tqdm=True,
         num_workers=1,
     )
-    coordinates_51, *_ = wsi_api.extract_coordinates(
+    result_51 = wsi_api.extract_coordinates(
         wsi_path=Path("synthetic-slide.tif"),
         mask_path=Path("synthetic-mask.tif"),
         backend="asap",
-        segment_params=make_segment_params(),
-        tiling_params=make_tiling_params(min_tissue_percentage=0.51),
-        filter_params=make_filter_params(),
+        segment_params=_segmentation_config(),
+        tiling_params=_tiling_config(tissue_threshold=0.51),
+        filter_params=_filter_config(),
         sampling_params=sampling_above_50,
         disable_tqdm=True,
         num_workers=1,
     )
 
-    assert coordinates_50 == [(16, 16), (16, 8), (8, 16), (8, 8)]
-    assert coordinates_51 == [(8, 16), (8, 8)]
-    assert len(coordinates_51) < len(coordinates_50)
+    assert result_50.coordinates == [(16, 16), (16, 8), (8, 16), (8, 8)]
+    assert result_51.coordinates == [(8, 16), (8, 8)]
+    assert len(result_51.coordinates) < len(result_50.coordinates)
 
 
 def test_extract_coordinates_match_expected_coordinates_across_spacings(fake_backend):
@@ -104,31 +149,25 @@ def test_extract_coordinates_match_expected_coordinates_across_spacings(fake_bac
     }
 
     for spacing, exp in expected.items():
-        coordinates, _, tile_level, resize_factor, tile_size_lv0 = wsi_api.extract_coordinates(
+        result = wsi_api.extract_coordinates(
             wsi_path=Path("synthetic-slide.tif"),
             mask_path=Path("synthetic-mask.tif"),
             backend="asap",
-            segment_params=make_segment_params(),
-            tiling_params=make_tiling_params(
+            segment_params=_segmentation_config(),
+            tiling_params=_tiling_config(
                 spacing=spacing,
                 tolerance=0.01,
                 tile_size=8,
-                overlap=0.0,
-                min_tissue_percentage=0.0,
-                drop_holes=False,
-                use_padding=False,
+                tissue_threshold=0.0,
             ),
-            filter_params=make_filter_params(),
-            sampling_params=make_sampling_params(
-                pixel_mapping={"background": 0, "tissue": 1},
-                tissue_percentage={"background": None, "tissue": 0.0},
-            ),
+            filter_params=_filter_config(),
+            sampling_params=_sampling_parameters(tissue_threshold=0.0),
             disable_tqdm=True,
             num_workers=1,
         )
 
-        assert coordinates == exp["coordinates"]
-        assert len(coordinates) == len(exp["coordinates"])
-        assert tile_level == exp["tile_level"]
-        assert resize_factor == exp["resize_factor"]
-        assert tile_size_lv0 == exp["tile_size_lv0"]
+        assert result.coordinates == exp["coordinates"]
+        assert len(result.coordinates) == len(exp["coordinates"])
+        assert result.read_level == exp["tile_level"]
+        assert result.resize_factor == exp["resize_factor"]
+        assert result.tile_size_lv0 == exp["tile_size_lv0"]

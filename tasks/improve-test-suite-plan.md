@@ -1,0 +1,7 @@
+- [x] Recenter fast tests on the public Python API and supported CLI entrypoints
+- [x] Add backend-free CLI smoke tests for `hs2p.tiling.main()` and strengthen `hs2p.sampling.main()` smoke coverage
+- [x] Expand `tests/test_tiling_api.py` with round-trip, preview-writing, and row-loading coverage
+- [x] Rewrite stale low-level tests to use current result objects/config dataclasses where practical
+- [x] Trim or replace stale real-fixture assumptions that no longer match guaranteed behavior
+- [x] Mark backend-dependent fixture tests as optional integration coverage and keep them out of default CI
+- [x] Update concise project documentation to reflect the test-suite structure

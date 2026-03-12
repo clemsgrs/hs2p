@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,6 +19,7 @@ from hs2p.api import (
     WholeSlide,
     compute_config_hash,
     load_tiling_result,
+    load_whole_slides_from_rows,
     save_tiling_result,
     tile_slide,
     tile_slides,
@@ -280,6 +282,49 @@ def test_save_tiling_result_writes_expected_npz_and_json(tmp_path: Path):
     }
 
 
+def test_save_and_load_tiling_result_round_trip(tmp_path: Path):
+    result = TilingResult(
+        sample_id="slide-roundtrip",
+        image_path=Path("slide-roundtrip.svs"),
+        mask_path=Path("slide-roundtrip-mask.png"),
+        backend="asap",
+        x_lv0=np.array([10, 30], dtype=np.int64),
+        y_lv0=np.array([20, 40], dtype=np.int64),
+        tile_index=np.array([0, 1], dtype=np.int32),
+        tissue_fraction=np.array([0.3, 0.7], dtype=np.float32),
+        target_spacing_um=0.5,
+        target_tile_size_px=224,
+        read_level=0,
+        read_spacing_um=0.5,
+        read_tile_size_px=224,
+        tile_size_lv0=224,
+        overlap=0.1,
+        tissue_threshold=0.2,
+        num_tiles=2,
+        config_hash="roundtrip-hash",
+    )
+
+    artifacts = save_tiling_result(result, output_dir=tmp_path)
+    loaded = load_tiling_result(artifacts.tiles_npz_path, artifacts.tiles_meta_path)
+
+    assert loaded.sample_id == result.sample_id
+    assert loaded.image_path == result.image_path
+    assert loaded.mask_path == result.mask_path
+    assert loaded.backend == result.backend
+    assert loaded.read_level == result.read_level
+    assert loaded.read_spacing_um == result.read_spacing_um
+    assert loaded.read_tile_size_px == result.read_tile_size_px
+    assert loaded.tile_size_lv0 == result.tile_size_lv0
+    assert loaded.overlap == result.overlap
+    assert loaded.tissue_threshold == result.tissue_threshold
+    assert loaded.num_tiles == result.num_tiles
+    assert loaded.config_hash == result.config_hash
+    np.testing.assert_array_equal(loaded.x_lv0, result.x_lv0)
+    np.testing.assert_array_equal(loaded.y_lv0, result.y_lv0)
+    np.testing.assert_array_equal(loaded.tile_index, result.tile_index)
+    np.testing.assert_array_equal(loaded.tissue_fraction, result.tissue_fraction)
+
+
 def test_save_tiling_result_rejects_invalid_tile_index(tmp_path: Path):
     invalid = TilingResult(
         sample_id="broken-slide",
@@ -512,6 +557,51 @@ def test_tile_slides_omits_tiling_preview_path_when_no_tiles(
     assert artifacts[0].tiling_preview_path is None
 
 
+def test_tile_slides_writes_preview_paths_when_visualizations_are_saved(
+    monkeypatch,
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    monkeypatch.setattr("hs2p.api.extract_coordinates", lambda **_: _fake_extraction())
+
+    def _fake_visualize_coordinates(**kwargs):
+        save_dir = Path(kwargs["save_dir"])
+        save_dir.mkdir(parents=True, exist_ok=True)
+        sample_id = kwargs.get("sample_id", "preview")
+        (save_dir / f"{sample_id}.jpg").write_bytes(b"preview")
+
+    monkeypatch.setattr("hs2p.api.visualize_coordinates", _fake_visualize_coordinates)
+
+    mask_dir = tmp_path / "visualization" / "mask"
+    mask_dir.mkdir(parents=True, exist_ok=True)
+    expected_mask_path = mask_dir / "slide-preview.jpg"
+
+    def _fake_extract_with_mask_preview(**kwargs):
+        mask_visu_path = kwargs["mask_visu_path"]
+        if mask_visu_path is not None:
+            mask_visu_path.write_bytes(b"mask-preview")
+        return _fake_extraction()
+
+    monkeypatch.setattr("hs2p.api.extract_coordinates", _fake_extract_with_mask_preview)
+
+    artifacts = tile_slides(
+        [WholeSlide(sample_id="slide-preview", image_path=Path("slide-preview.svs"))],
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        qc=QCConfig(save_mask_preview=True, save_tiling_preview=True),
+        output_dir=tmp_path,
+    )
+
+    assert len(artifacts) == 1
+    assert artifacts[0].mask_preview_path == expected_mask_path
+    assert artifacts[0].mask_preview_path.is_file()
+    assert artifacts[0].tiling_preview_path == tmp_path / "visualization" / "tiling" / "slide-preview.jpg"
+    assert artifacts[0].tiling_preview_path.is_file()
+
+
 def test_tile_slides_resume_marks_stale_artifact_as_failed(
     monkeypatch,
     tmp_path: Path,
@@ -667,6 +757,35 @@ def test_load_tiling_result_rejects_missing_npz_keys(tmp_path: Path):
         load_tiling_result(npz_path, meta_path)
 
 
+def test_load_tiling_result_wraps_corrupt_npz_errors_with_path(tmp_path: Path):
+    npz_path = tmp_path / "corrupt.tiles.npz"
+    meta_path = tmp_path / "corrupt.tiles.meta.json"
+    npz_path.write_bytes(b"not a valid npz")
+    meta_path.write_text(
+        json.dumps(
+            {
+                "sample_id": "corrupt",
+                "image_path": "corrupt.svs",
+                "mask_path": None,
+                "backend": "asap",
+                "target_spacing_um": 0.5,
+                "target_tile_size_px": 224,
+                "read_level": 0,
+                "read_spacing_um": 0.5,
+                "read_tile_size_px": 224,
+                "tile_size_lv0": 224,
+                "overlap": 0.0,
+                "tissue_threshold": 0.1,
+                "num_tiles": 1,
+                "config_hash": "hash",
+            }
+        )
+    )
+
+    with pytest.raises(ValueError, match=r"Unable to load tiling npz artifact .*corrupt\.tiles\.npz"):
+        load_tiling_result(npz_path, meta_path)
+
+
 def test_load_tiling_result_rejects_missing_meta_keys(tmp_path: Path):
     npz_path = tmp_path / "broken-meta.tiles.npz"
     meta_path = tmp_path / "broken-meta.tiles.meta.json"
@@ -698,3 +817,61 @@ def test_load_tiling_result_rejects_missing_meta_keys(tmp_path: Path):
 
     with pytest.raises(ValueError, match="missing keys: config_hash"):
         load_tiling_result(npz_path, meta_path)
+
+
+def test_load_whole_slides_from_rows_parses_current_schema_rows():
+    rows = [
+        {
+            "sample_id": "slide-1",
+            "image_path": "slide-1.svs",
+            "mask_path": "slide-1-mask.png",
+        },
+        {
+            "sample_id": "slide-2",
+            "image_path": "slide-2.svs",
+            "mask_path": None,
+        },
+    ]
+
+    slides = load_whole_slides_from_rows(rows)
+
+    assert slides == [
+        WholeSlide(
+            sample_id="slide-1",
+            image_path=Path("slide-1.svs"),
+            mask_path=Path("slide-1-mask.png"),
+        ),
+        WholeSlide(
+            sample_id="slide-2",
+            image_path=Path("slide-2.svs"),
+            mask_path=None,
+        ),
+    ]
+
+
+def test_write_process_list_removes_temp_file_on_failure(monkeypatch, tmp_path: Path):
+    created_temp_paths: list[Path] = []
+    original_named_temporary_file = tempfile.NamedTemporaryFile
+
+    def _tracking_named_temporary_file(*args, **kwargs):
+        handle = original_named_temporary_file(*args, **kwargs)
+        created_temp_paths.append(Path(handle.name))
+        return handle
+
+    def _raise_to_csv(self, *args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("hs2p.api.tempfile.NamedTemporaryFile", _tracking_named_temporary_file)
+    monkeypatch.setattr("hs2p.api.pd.DataFrame.to_csv", _raise_to_csv)
+
+    with pytest.raises(OSError, match="disk full"):
+        tile_slides(
+            [],
+            tiling=TilingConfig(0.5, 224, 0.07, 0.1, 0.2, False, True, "asap"),
+            segmentation=SegmentationConfig(64, 8, 255, 7, 4, False, True),
+            filtering=FilterConfig(224, 4, 2, 8, False, False, 220, 25, 0.9),
+            output_dir=tmp_path,
+        )
+
+    assert created_temp_paths
+    assert all(not path.exists() for path in created_temp_paths)

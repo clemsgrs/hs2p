@@ -344,8 +344,18 @@ def load_tiling_result(
     tiles_npz_path: Path,
     tiles_meta_path: Path,
 ) -> TilingResult:
-    tiles = np.load(tiles_npz_path, allow_pickle=False)
-    meta = json.loads(Path(tiles_meta_path).read_text())
+    try:
+        tiles = np.load(tiles_npz_path, allow_pickle=False)
+    except Exception as exc:
+        raise ValueError(
+            f"Unable to load tiling npz artifact {tiles_npz_path}: {exc}"
+        ) from exc
+    try:
+        meta = json.loads(Path(tiles_meta_path).read_text())
+    except Exception as exc:
+        raise ValueError(
+            f"Unable to load tiling metadata artifact {tiles_meta_path}: {exc}"
+        ) from exc
     required_npz_keys = {"tile_index", "x_lv0", "y_lv0"}
     missing_npz_keys = sorted(required_npz_keys - set(tiles.files))
     if missing_npz_keys:
@@ -500,15 +510,21 @@ def _write_tiling_preview(
 
 def _write_process_list(process_rows: list[dict[str, Any]], process_list_path: Path) -> None:
     process_list_path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        suffix=".csv",
-        dir=process_list_path.parent,
-        delete=False,
-    ) as handle:
-        temp_path = Path(handle.name)
-        pd.DataFrame(process_rows).to_csv(handle, index=False)
-    temp_path.replace(process_list_path)
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".csv",
+            dir=process_list_path.parent,
+            delete=False,
+        ) as handle:
+            temp_path = Path(handle.name)
+            pd.DataFrame(process_rows).to_csv(handle, index=False)
+        temp_path.replace(process_list_path)
+        temp_path = None
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
 
 
 def tile_slides(

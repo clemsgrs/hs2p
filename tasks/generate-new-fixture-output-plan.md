@@ -1,0 +1,3 @@
+- [x] Add a fixture-generation script that runs the public tiling API against the real test WSI/mask and writes current-format artifacts
+- [x] Add a lightweight test for the script's path/config wiring without requiring a real backend
+- [x] Document the script in project docs and verify the new test
