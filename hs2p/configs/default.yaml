@@ -9,14 +9,14 @@ visualize: true # save a visualization of slide tiling in a .jpg
 seed: 0 # seed for reproducibility
 
 tiling:
-  read_coordinates_from: # path to a directory containing {wsi.stem}.npy files with tiles coordinates & associated metadata (leave empty to compute the coordinates)
+  read_tiles_from: # path to a directory containing {sample_id}.tiles.npz and {sample_id}.tiles.meta.json (leave empty to compute tiles)
   backend: "asap" # backend to use for slide reading
   params:
-    spacing: 0.5 # spacing at which to tile the slide, in microns per pixel
+    target_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel
     tolerance: 0.05 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)
-    tile_size: 256 # size of the tiles to extract, in pixels
+    target_tile_size_px: 256 # size of the tiles to extract, in pixels
     overlap: 0.0 # percentage of overlap between two consecutive tiles (float between 0 and 1)
-    min_tissue_percentage: 0.01 # minimum fraction of pixels that must be tissue to keep a tile (float between 0 and 1)
+    tissue_threshold: 0.01 # minimum fraction of pixels that must be tissue to keep a tile (float between 0 and 1)
     drop_holes: false # whether or not to drop tiles whose center pixel falls withing an identified holes
     use_padding: true # whether to pad the border of the slide
   seg_params:
@@ -49,7 +49,7 @@ tiling:
       - 'tissue': [157, 219, 129]
     tissue_percentage: # minimum percentage of tile coverage for each category required to sample tiles, leave blank to not sample from a given category
       - 'background':
-      - 'tissue': ${tiling.params.min_tissue_percentage}
+      - 'tissue': ${tiling.params.tissue_threshold}
 
 speed:
   num_workers: 8 # number of workers for tiling slides
@@ -59,7 +59,7 @@ wandb:
   project: "" # wandb project name
   username: "" # wandb username
   exp_name: "" # wandb experiment name
-  tags: ["tiling", "${tiling.params.tile_size}"] # wandb tags
+  tags: ["tiling", "${tiling.params.target_tile_size_px}"] # wandb tags
   dir: "/home/user/"
   group:
   resume_id: "${resume_dirname}"

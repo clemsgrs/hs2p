@@ -1,4 +1,5 @@
 from pathlib import Path
+from dataclasses import dataclass
 
 import cv2
 import tqdm
@@ -13,6 +14,27 @@ from .wsi import (
     SamplingParameters,
     WholeSlideImage,
 )
+
+
+@dataclass
+class CoordinateExtractionResult:
+    coordinates: list[tuple[int, int]]
+    contour_indices: list[int]
+    tissue_percentages: list[float]
+    x_lv0: np.ndarray
+    y_lv0: np.ndarray
+    read_level: int
+    read_spacing_um: float
+    read_tile_size_px: int
+    resize_factor: float
+    tile_size_lv0: int
+
+    def __iter__(self):
+        yield self.coordinates
+        yield self.contour_indices
+        yield self.read_level
+        yield self.resize_factor
+        yield self.tile_size_lv0
 
 
 def sort_coordinates_with_tissue(coordinates, tissue_percentages, contour_indices):
@@ -112,17 +134,26 @@ def extract_coordinates(
         disable_tqdm=disable_tqdm,
         num_workers=num_workers,
     )
-    sorted_coordinates, _, sorted_contour_indices = sort_coordinates_with_tissue(
+    sorted_coordinates, sorted_tissue_percentages, sorted_contour_indices = sort_coordinates_with_tissue(
         coordinates, tissue_percentages, contour_indices
     )
     if mask_visu_path is not None:
         wsi.visualize_mask(contours, holes).save(mask_visu_path)
-    return (
-        sorted_coordinates,
-        sorted_contour_indices,
-        tile_level,
-        resize_factor,
-        tile_size_lv0,
+    tile_spacing = wsi.get_level_spacing(tile_level)
+    read_tile_size_px = int(round(tiling_params.tile_size * resize_factor, 0))
+    x_lv0 = np.array([x for x, _ in sorted_coordinates], dtype=np.int64)
+    y_lv0 = np.array([y for _, y in sorted_coordinates], dtype=np.int64)
+    return CoordinateExtractionResult(
+        coordinates=sorted_coordinates,
+        contour_indices=sorted_contour_indices,
+        tissue_percentages=sorted_tissue_percentages,
+        x_lv0=x_lv0,
+        y_lv0=y_lv0,
+        read_level=tile_level,
+        read_spacing_um=tile_spacing,
+        read_tile_size_px=read_tile_size_px,
+        resize_factor=resize_factor,
+        tile_size_lv0=tile_size_lv0,
     )
 
 
@@ -173,17 +204,26 @@ def sample_coordinates(
         disable_tqdm=disable_tqdm,
         num_workers=num_workers,
     )
-    sorted_coordinates, _, sorted_contour_indices = sort_coordinates_with_tissue(
+    sorted_coordinates, sorted_tissue_percentages, sorted_contour_indices = sort_coordinates_with_tissue(
         coordinates, tissue_percentages, contour_indices
     )
     if mask_visu_path is not None:
         wsi.visualize_mask(contours, holes).save(mask_visu_path)
-    return (
-        sorted_coordinates,
-        sorted_contour_indices,
-        tile_level,
-        resize_factor,
-        tile_size_lv0,
+    tile_spacing = wsi.get_level_spacing(tile_level)
+    read_tile_size_px = int(round(tiling_params.tile_size * resize_factor, 0))
+    x_lv0 = np.array([x for x, _ in sorted_coordinates], dtype=np.int64)
+    y_lv0 = np.array([y for _, y in sorted_coordinates], dtype=np.int64)
+    return CoordinateExtractionResult(
+        coordinates=sorted_coordinates,
+        contour_indices=sorted_contour_indices,
+        tissue_percentages=sorted_tissue_percentages,
+        x_lv0=x_lv0,
+        y_lv0=y_lv0,
+        read_level=tile_level,
+        read_spacing_um=tile_spacing,
+        read_tile_size_px=read_tile_size_px,
+        resize_factor=resize_factor,
+        tile_size_lv0=tile_size_lv0,
     )
 
 
@@ -267,52 +307,6 @@ def filter_coordinates(
                     filtered_coordinates[annotation].append(coord)
                     filtered_contour_indices[annotation].append(contour_idx)
     return filtered_coordinates, filtered_contour_indices
-
-
-def save_coordinates(
-    *,
-    coordinates: list[tuple[int, int]],
-    contour_indices: list[int],
-    target_spacing: float,
-    tile_level: int,
-    target_tile_size: int,
-    resize_factor: float,
-    tile_size_lv0: int,
-    save_path: Path,
-):
-    x = [x for x, _ in coordinates]  # defined w.r.t level 0
-    y = [y for _, y in coordinates]  # defined w.r.t level 0
-    ntile = len(x)
-    tile_size_resized = int(round(target_tile_size * resize_factor, 0))
-    dtype = [
-        ("x", int),
-        ("y", int),
-        ("contour_index", int),
-        ("target_tile_size", int),
-        ("target_spacing", float),
-        ("tile_level", int),
-        ("resize_factor", float),
-        ("tile_size_resized", int),
-        ("tile_size_lv0", int),
-    ]
-    data = np.zeros(ntile, dtype=dtype)
-    for i in range(ntile):
-        data[i] = (
-            x[i],
-            y[i],
-            contour_indices[i],
-            target_tile_size,
-            target_spacing,
-            tile_level,
-            resize_factor,
-            tile_size_resized,
-            tile_size_lv0,
-        )
-    data_arr = np.array(data)
-    np.save(save_path, data_arr)
-    return save_path
-
-
 def overlay_mask_on_tile(
     tile: Image.Image,
     mask: Image.Image,
@@ -587,6 +581,7 @@ def visualize_coordinates(
     coordinates: list[tuple[int, int]],
     tile_size_lv0: int,
     save_dir: Path,
+    sample_id: str | None = None,
     downsample: int = 64,
     backend: str = "asap",
     grid_thickness: int = 1,
@@ -638,7 +633,7 @@ def visualize_coordinates(
         pixel_mapping=pixel_mapping,
         color_mapping=color_mapping,
     )
-    wsi_name = wsi_path.stem.replace(" ", "_")
+    wsi_name = sample_id if sample_id is not None else wsi_path.stem.replace(" ", "_")
     if annotation is not None:
         save_dir = Path(save_dir, annotation)
         save_dir.mkdir(parents=True, exist_ok=True)

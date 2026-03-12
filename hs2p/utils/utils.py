@@ -9,6 +9,8 @@ from typing import Optional
 from pathlib import Path
 from omegaconf import DictConfig, OmegaConf
 
+from hs2p.api import WholeSlide
+
 
 def fix_random_seeds(seed=31):
     """
@@ -111,23 +113,32 @@ def initialize_wandb(
 def load_csv(cfg):
     csv_path = Path(cfg.csv).resolve()
     df = pd.read_csv(csv_path)
-    if "wsi_path" in df.columns:
-        wsi_paths = [Path(x) for x in df.wsi_path.values.tolist()]
-    elif "slide_path" in df.columns:
-        wsi_paths = [Path(x) for x in df.slide_path.values.tolist()]
-    if "mask_path" in df.columns:
-        mask_paths = [
-            Path(x) if x is not None and not pd.isna(x) else None
-            for x in df.mask_path.values.tolist()
-        ]
-    elif "segmentation_mask_path" in df.columns:
-        mask_paths = [
-            Path(x) if x is not None and not pd.isna(x) else None
-            for x in df.segmentation_mask_path.values.tolist()
-        ]
-    else:
-        mask_paths = [None for _ in wsi_paths]
-    return wsi_paths, mask_paths
+    required = {"sample_id", "image_path"}
+    missing = sorted(required - set(df.columns))
+    if missing:
+        raise ValueError(
+            "Input CSV is missing required columns: " + ", ".join(missing)
+        )
+    if df["sample_id"].duplicated().any():
+        duplicates = sorted(df.loc[df["sample_id"].duplicated(), "sample_id"].astype(str).unique())
+        raise ValueError(
+            "Duplicate sample_id values are not allowed: " + ", ".join(duplicates)
+        )
+    mask_series = df["mask_path"] if "mask_path" in df.columns else pd.Series([None] * len(df))
+    whole_slides = []
+    for sample_id, image_path, mask_path in zip(
+        df["sample_id"].astype(str).tolist(),
+        df["image_path"].tolist(),
+        mask_series.tolist(),
+    ):
+        whole_slides.append(
+            WholeSlide(
+                sample_id=sample_id,
+                image_path=Path(image_path),
+                mask_path=Path(mask_path) if mask_path is not None and not pd.isna(mask_path) else None,
+            )
+        )
+    return whole_slides
 
 
 def update_state_dict(

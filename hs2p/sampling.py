@@ -9,12 +9,19 @@ import multiprocessing as mp
 from pathlib import Path
 from collections.abc import Sequence
 
+from hs2p.api import (
+    FilterConfig,
+    SegmentationConfig,
+    TilingConfig,
+    TilingResult,
+    compute_config_hash,
+    save_tiling_result,
+)
 from hs2p.utils import setup, load_csv, fix_random_seeds
 from hs2p.wsi import (
     extract_coordinates,
     filter_coordinates,
     sample_coordinates,
-    save_coordinates,
     visualize_coordinates,
     overlay_mask_on_slide,
     SamplingParameters,
@@ -81,11 +88,68 @@ def process_slide_wrapper(kwargs):
     return process_slide(**kwargs)
 
 
+def _save_sampling_coordinates(
+    *,
+    sample_id: str,
+    image_path: Path,
+    mask_path: Path | None,
+    backend: str,
+    cfg,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+    annotation: str,
+    coordinates: list[tuple[int, int]],
+    extraction,
+    sampling_params: SamplingParameters,
+):
+    x_lv0 = np.array([x for x, _ in coordinates], dtype=np.int64)
+    y_lv0 = np.array([y for _, y in coordinates], dtype=np.int64)
+    result = TilingResult(
+        sample_id=sample_id,
+        image_path=image_path,
+        mask_path=mask_path,
+        backend=backend,
+        x_lv0=x_lv0,
+        y_lv0=y_lv0,
+        tile_index=np.arange(len(coordinates), dtype=np.int32),
+        tissue_fraction=None,
+        target_spacing_um=tiling_config.target_spacing_um,
+        target_tile_size_px=tiling_config.target_tile_size_px,
+        read_level=extraction.read_level,
+        read_spacing_um=extraction.read_spacing_um,
+        read_tile_size_px=extraction.read_tile_size_px,
+        tile_size_lv0=extraction.tile_size_lv0,
+        overlap=tiling_config.overlap,
+        tissue_threshold=tiling_config.tissue_threshold,
+        num_tiles=len(coordinates),
+        config_hash=compute_config_hash(
+            tiling=tiling_config,
+            segmentation=segmentation_config,
+            filtering=filter_config,
+            extra={
+                "annotation": annotation,
+                "sampling": {
+                    "pixel_mapping": sampling_params.pixel_mapping,
+                    "tissue_percentage": sampling_params.tissue_percentage,
+                },
+            },
+        ),
+    )
+    annotation_dir = Path(cfg.output_dir, "coordinates", annotation)
+    annotation_dir.mkdir(parents=True, exist_ok=True)
+    return save_tiling_result(result, output_dir=cfg.output_dir, coordinates_dir=annotation_dir)
+
+
 def process_slide(
     *,
+    sample_id: str,
     wsi_path: Path,
-    mask_path: Path,
+    mask_path: Path | None,
     cfg,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
     mask_visualize_dir,
     sampling_visualize_dir,
     sampling_params: SamplingParameters,
@@ -95,7 +159,7 @@ def process_slide(
     """
     Process a single slide: sample tile coordinates and visualize if needed.
     """
-    wsi_name = wsi_path.stem.replace(" ", "_")
+    wsi_name = sample_id
     try:
 
         if cfg.visualize and sampling_visualize_dir is not None:
@@ -136,55 +200,54 @@ def process_slide(
                 tissue_mask_visu_path = Path(
                     mask_visualize_dir, f"{wsi_name}-tissue.png"
                 )
-            coordinates, contour_indices, tile_level, resize_factor, tile_size_lv0 = (
-                extract_coordinates(
-                    wsi_path=wsi_path,
-                    mask_path=mask_path,
-                    backend=cfg.tiling.backend,
-                    tiling_params=cfg.tiling.params,
-                    segment_params=cfg.tiling.seg_params,
-                    filter_params=cfg.tiling.filter_params,
-                    sampling_params=sampling_params,
-                    mask_visu_path=tissue_mask_visu_path,
-                    disable_tqdm=disable_tqdm,
-                    num_workers=num_workers,
-                )
+            extraction = extract_coordinates(
+                wsi_path=wsi_path,
+                mask_path=mask_path,
+                backend=cfg.tiling.backend,
+                tiling_params=tiling_config,
+                segment_params=segmentation_config,
+                filter_params=filter_config,
+                sampling_params=sampling_params,
+                mask_visu_path=tissue_mask_visu_path,
+                disable_tqdm=disable_tqdm,
+                num_workers=num_workers,
             )
             filtered_coordinates, filtered_contour_indices = filter_coordinates(
                 wsi_path=wsi_path,
                 mask_path=mask_path,
                 backend=cfg.tiling.backend,
-                coordinates=coordinates,
-                contour_indices=contour_indices,
-                tile_level=tile_level,
-                segment_params=cfg.tiling.seg_params,
-                tiling_params=cfg.tiling.params,
+                coordinates=extraction.coordinates,
+                contour_indices=extraction.contour_indices,
+                tile_level=extraction.read_level,
+                segment_params=segmentation_config,
+                tiling_params=tiling_config,
                 sampling_params=sampling_params,
                 disable_tqdm=disable_tqdm,
             )  # a dict mapping annotation -> coordinates
             for annotation, coordinates in filtered_coordinates.items():
                 if len(coordinates) == 0:
                     continue
-                contour_indices = filtered_contour_indices[annotation]
-                coordinates_dir = Path(cfg.output_dir, "coordinates", annotation)
-                coordinates_dir.mkdir(exist_ok=True, parents=True)
-                coordinates_path = Path(coordinates_dir, f"{wsi_name}.npy")
-                save_coordinates(
+                _save_sampling_coordinates(
+                    sample_id=sample_id,
+                    image_path=wsi_path,
+                    mask_path=mask_path,
+                    backend=cfg.tiling.backend,
+                    cfg=cfg,
+                    tiling_config=tiling_config,
+                    segmentation_config=segmentation_config,
+                    filter_config=filter_config,
+                    annotation=annotation,
                     coordinates=coordinates,
-                    contour_indices=contour_indices,
-                    target_spacing=cfg.tiling.params.spacing,
-                    tile_level=tile_level,
-                    target_tile_size=cfg.tiling.params.tile_size,
-                    resize_factor=resize_factor,
-                    tile_size_lv0=tile_size_lv0,
-                    save_path=coordinates_path,
+                    extraction=extraction,
+                    sampling_params=sampling_params,
                 )
                 if cfg.visualize and sampling_visualize_dir is not None:
                     visualize_coordinates(
                         wsi_path=wsi_path,
                         coordinates=coordinates,
-                        tile_size_lv0=tile_size_lv0,
+                        tile_size_lv0=extraction.tile_size_lv0,
                         save_dir=sampling_visualize_dir,
+                        sample_id=sample_id,
                         downsample=cfg.tiling.visu_params.downsample,
                         backend=cfg.tiling.backend,
                         mask_path=mask_path,
@@ -202,46 +265,43 @@ def process_slide(
                     annotation_mask_dir = mask_visualize_dir / annotation
                     annotation_mask_dir.mkdir(exist_ok=True, parents=True)
                     tissue_mask_visu_path = Path(annotation_mask_dir, f"{wsi_name}.jpg")
-                (
-                    coordinates,
-                    contour_indices,
-                    tile_level,
-                    resize_factor,
-                    tile_size_lv0,
-                ) = sample_coordinates(
+                extraction = sample_coordinates(
                     wsi_path=wsi_path,
                     mask_path=mask_path,
                     backend=cfg.tiling.backend,
-                    tiling_params=cfg.tiling.params,
-                    segment_params=cfg.tiling.seg_params,
-                    filter_params=cfg.tiling.filter_params,
+                    tiling_params=tiling_config,
+                    segment_params=segmentation_config,
+                    filter_params=filter_config,
                     sampling_params=sampling_params,
                     annotation=annotation,
                     mask_visu_path=tissue_mask_visu_path,
                     disable_tqdm=disable_tqdm,
                     num_workers=num_workers,
                 )
+                coordinates = extraction.coordinates
                 if len(coordinates) == 0:
                     continue
-                coordinates_dir = Path(cfg.output_dir, "coordinates", annotation)
-                coordinates_dir.mkdir(exist_ok=True, parents=True)
-                coordinates_path = Path(coordinates_dir, f"{wsi_name}.npy")
-                save_coordinates(
+                _save_sampling_coordinates(
+                    sample_id=sample_id,
+                    image_path=wsi_path,
+                    mask_path=mask_path,
+                    backend=cfg.tiling.backend,
+                    cfg=cfg,
+                    tiling_config=tiling_config,
+                    segmentation_config=segmentation_config,
+                    filter_config=filter_config,
+                    annotation=annotation,
                     coordinates=coordinates,
-                    contour_indices=contour_indices,
-                    target_spacing=cfg.tiling.params.spacing,
-                    tile_level=tile_level,
-                    target_tile_size=cfg.tiling.params.tile_size,
-                    resize_factor=resize_factor,
-                    tile_size_lv0=tile_size_lv0,
-                    save_path=coordinates_path,
+                    extraction=extraction,
+                    sampling_params=sampling_params,
                 )
                 if cfg.visualize and sampling_visualize_dir is not None:
                     visualize_coordinates(
                         wsi_path=wsi_path,
                         coordinates=coordinates,
-                        tile_size_lv0=tile_size_lv0,
+                        tile_size_lv0=extraction.tile_size_lv0,
                         save_dir=sampling_visualize_dir,
+                        sample_id=sample_id,
                         downsample=cfg.tiling.visu_params.downsample,
                         backend=cfg.tiling.backend,
                         mask_path=mask_path,
@@ -261,10 +321,10 @@ def process_slide(
                 color_mapping=color_mapping,
             )
             overlay_mask.save(mask_visu_path)
-        return str(wsi_path), {"status": "success"}
+        return sample_id, {"status": "success"}
 
     except Exception as e:
-        return str(wsi_path), {
+        return sample_id, {
             "status": "failed",
             "error": str(e),
             "traceback": str(traceback.format_exc()),
@@ -278,7 +338,7 @@ def main(args):
 
     fix_random_seeds(cfg.seed)
 
-    wsi_paths, mask_paths = load_csv(cfg)
+    whole_slides = load_csv(cfg)
 
     parallel_workers = min(mp.cpu_count(), cfg.speed.num_workers)
     if "SLURM_JOB_CPUS_PER_NODE" in os.environ:
@@ -291,7 +351,8 @@ def main(args):
         process_df = pd.read_csv(process_list)
         if "mask_path" not in process_df.columns:
             process_df["mask_path"] = [
-                str(p) if p is not None else p for p in mask_paths
+                str(slide.mask_path) if slide.mask_path is not None else slide.mask_path
+                for slide in whole_slides
             ]
         else:
             process_df["mask_path"] = process_df["mask_path"].apply(
@@ -299,12 +360,12 @@ def main(args):
             )
     else:
         data = {
-            "wsi_name": [p.stem for p in wsi_paths],
-            "wsi_path": [str(p) for p in wsi_paths],
-            "mask_path": [str(p) if p is not None else p for p in mask_paths],
-            "sampling_status": ["tbp"] * len(wsi_paths),
-            "error": [str(np.nan)] * len(wsi_paths),
-            "traceback": [str(np.nan)] * len(wsi_paths),
+            "sample_id": [slide.sample_id for slide in whole_slides],
+            "image_path": [str(slide.image_path) for slide in whole_slides],
+            "mask_path": [str(slide.mask_path) if slide.mask_path is not None else slide.mask_path for slide in whole_slides],
+            "sampling_status": ["tbp"] * len(whole_slides),
+            "error": [str(np.nan)] * len(whole_slides),
+            "traceback": [str(np.nan)] * len(whole_slides),
         }
         process_df = pd.DataFrame(data)
 
@@ -319,7 +380,7 @@ def main(args):
     tissue_key_present = True
     if "tissue" not in tissue_percentage:
         tissue_key_present = False
-        tissue_percentage["tissue"] = cfg.tiling.params.min_tissue_percentage
+        tissue_percentage["tissue"] = cfg.tiling.params.tissue_threshold
     if cfg.tiling.sampling_params.color_mapping is not None:
         color_mapping = {
             k: v for e in cfg.tiling.sampling_params.color_mapping for k, v in e.items()
@@ -332,6 +393,18 @@ def main(args):
         color_mapping=color_mapping,
         tissue_percentage=tissue_percentage,
     )
+    tiling_config = TilingConfig(
+        target_spacing_um=tiling_config.target_spacing_um,
+        target_tile_size_px=tiling_config.target_tile_size_px,
+        tolerance=cfg.tiling.params.tolerance,
+        overlap=tiling_config.overlap,
+        tissue_threshold=tiling_config.tissue_threshold,
+        drop_holes=cfg.tiling.params.drop_holes,
+        use_padding=cfg.tiling.params.use_padding,
+        backend=cfg.tiling.backend,
+    )
+    segmentation_config = SegmentationConfig(**dict(cfg.tiling.seg_params))
+    filter_config = FilterConfig(**dict(cfg.tiling.filter_params))
 
     if not skip_sampling:
 
@@ -339,11 +412,12 @@ def main(args):
         process_stack = process_df[mask]
         total = len(process_stack)
 
-        wsi_paths_to_process = [Path(x) for x in process_stack.wsi_path.values.tolist()]
+        wsi_paths_to_process = [Path(x) for x in process_stack.image_path.values.tolist()]
         mask_paths_to_process = [
             Path(x) if x is not None and not pd.isna(x) else x
             for x in process_stack.mask_path.values.tolist()
         ]
+        sample_ids_to_process = process_stack.sample_id.astype(str).tolist()
 
         # setup directories for coordinates and visualization
         coordinates_dir = output_dir / "coordinates"
@@ -357,20 +431,24 @@ def main(args):
             mask_visualize_dir.mkdir(exist_ok=True, parents=True)
             sampling_visualize_dir.mkdir(exist_ok=True, parents=True)
 
-        sampling_updates = {}
+        sampling_updates: dict[str, dict[str, str]] = {}
         with mp.Pool(processes=parallel_workers) as pool:
             args_list = [
                 {
+                    "sample_id": sample_id,
                     "wsi_path": wsi_fp,
                     "mask_path": mask_fp,
                     "cfg": cfg,
+                    "tiling_config": tiling_config,
+                    "segmentation_config": segmentation_config,
+                    "filter_config": filter_config,
                     "mask_visualize_dir": mask_visualize_dir,
                     "sampling_visualize_dir": sampling_visualize_dir,
                     "sampling_params": sampling_params,
                     "disable_tqdm": True,
                     "num_workers": parallel_workers,
                 }
-                for wsi_fp, mask_fp in zip(wsi_paths_to_process, mask_paths_to_process)
+                for wsi_fp, mask_fp, sample_id in zip(wsi_paths_to_process, mask_paths_to_process, sample_ids_to_process)
             ]
             results = list(
                 tqdm.tqdm(
@@ -381,18 +459,18 @@ def main(args):
                     leave=True,
                 )
             )
-        for wsi_path, status_info in results:
-            sampling_updates[wsi_path] = status_info
+        for result_sample_id, status_info in results:
+            sampling_updates[result_sample_id] = status_info
 
-        for wsi_path, status_info in sampling_updates.items():
-            process_df.loc[process_df["wsi_path"] == wsi_path, "sampling_status"] = (
+        for result_sample_id, status_info in sampling_updates.items():
+            process_df.loc[process_df["sample_id"] == result_sample_id, "sampling_status"] = (
                 status_info["status"]
             )
             if "error" in status_info:
-                process_df.loc[process_df["wsi_path"] == wsi_path, "error"] = (
+                process_df.loc[process_df["sample_id"] == result_sample_id, "error"] = (
                     status_info["error"]
                 )
-                process_df.loc[process_df["wsi_path"] == wsi_path, "traceback"] = (
+                process_df.loc[process_df["sample_id"] == result_sample_id, "traceback"] = (
                     status_info["traceback"]
                 )
         process_df.to_csv(process_list, index=False)
@@ -409,11 +487,11 @@ def main(args):
             if not tissue_key_present and annotation == "tissue":
                 continue
             slides_with_tiles = [
-                str(p)
-                for p in wsi_paths
-                if Path(coordinates_dir, annotation, f"{p.stem}.npy").is_file()
+                slide.sample_id
+                for slide in whole_slides
+                if Path(coordinates_dir, annotation, f"{slide.sample_id}.tiles.npz").is_file()
             ]
-            no_tiles = process_df[~process_df["wsi_path"].isin(slides_with_tiles)]
+            no_tiles = process_df[~process_df["sample_id"].isin(slides_with_tiles)]
             print(f"No {annotation} tiles after sampling step: {len(no_tiles)}")
         print("=+=" * 10)
 
