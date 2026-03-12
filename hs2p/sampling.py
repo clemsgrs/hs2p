@@ -14,6 +14,8 @@ from hs2p.api import (
     SegmentationConfig,
     TilingConfig,
     TilingResult,
+    _build_cli_configs,
+    _validate_required_columns,
     compute_config_hash,
     save_tiling_result,
 )
@@ -349,15 +351,22 @@ def main(args):
     process_list = output_dir / "process_list.csv"
     if process_list.is_file() and cfg.resume:
         process_df = pd.read_csv(process_list)
-        if "mask_path" not in process_df.columns:
-            process_df["mask_path"] = [
-                str(slide.mask_path) if slide.mask_path is not None else slide.mask_path
-                for slide in whole_slides
-            ]
-        else:
-            process_df["mask_path"] = process_df["mask_path"].apply(
-                lambda x: str(x) if pd.notna(x) else None
-            )
+        _validate_required_columns(
+            process_df,
+            required_columns={
+                "sample_id",
+                "image_path",
+                "mask_path",
+                "sampling_status",
+                "error",
+                "traceback",
+            },
+            file_path=process_list,
+            file_label="sampling process_list.csv",
+        )
+        process_df["mask_path"] = process_df["mask_path"].apply(
+            lambda x: str(x) if pd.notna(x) else None
+        )
     else:
         data = {
             "sample_id": [slide.sample_id for slide in whole_slides],
@@ -369,7 +378,7 @@ def main(args):
         }
         process_df = pd.DataFrame(data)
 
-    skip_sampling = process_df["sampling_status"].str.contains("success").all()
+    skip_sampling = process_df.empty or process_df["sampling_status"].fillna("").astype(str).str.contains("success").all()
 
     pixel_mapping = {
         k: v for e in cfg.tiling.sampling_params.pixel_mapping for k, v in e.items()
@@ -393,18 +402,7 @@ def main(args):
         color_mapping=color_mapping,
         tissue_percentage=tissue_percentage,
     )
-    tiling_config = TilingConfig(
-        target_spacing_um=tiling_config.target_spacing_um,
-        target_tile_size_px=tiling_config.target_tile_size_px,
-        tolerance=cfg.tiling.params.tolerance,
-        overlap=tiling_config.overlap,
-        tissue_threshold=tiling_config.tissue_threshold,
-        drop_holes=cfg.tiling.params.drop_holes,
-        use_padding=cfg.tiling.params.use_padding,
-        backend=cfg.tiling.backend,
-    )
-    segmentation_config = SegmentationConfig(**dict(cfg.tiling.seg_params))
-    filter_config = FilterConfig(**dict(cfg.tiling.filter_params))
+    tiling_config, segmentation_config, filter_config = _build_cli_configs(cfg)
 
     if not skip_sampling:
 

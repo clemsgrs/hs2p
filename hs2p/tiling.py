@@ -4,10 +4,8 @@ from pathlib import Path
 import pandas as pd
 
 from hs2p.api import (
-    FilterConfig,
     QCConfig,
-    SegmentationConfig,
-    TilingConfig,
+    _build_cli_configs,
     tile_slides,
 )
 from hs2p.utils import setup, load_csv, fix_random_seeds
@@ -43,18 +41,7 @@ def main(args):
     output_dir = Path(cfg.output_dir)
     fix_random_seeds(cfg.seed)
     whole_slides = load_csv(cfg)
-    tiling = TilingConfig(
-        target_spacing_um=cfg.tiling.params.target_spacing_um,
-        target_tile_size_px=cfg.tiling.params.target_tile_size_px,
-        tolerance=cfg.tiling.params.tolerance,
-        overlap=cfg.tiling.params.overlap,
-        tissue_threshold=cfg.tiling.params.tissue_threshold,
-        drop_holes=cfg.tiling.params.drop_holes,
-        use_padding=cfg.tiling.params.use_padding,
-        backend=cfg.tiling.backend,
-    )
-    segmentation = SegmentationConfig(**dict(cfg.tiling.seg_params))
-    filtering = FilterConfig(**dict(cfg.tiling.filter_params))
+    tiling, segmentation, filtering = _build_cli_configs(cfg)
     qc = QCConfig(
         save_mask_preview=bool(cfg.visualize),
         save_tiling_preview=bool(cfg.visualize),

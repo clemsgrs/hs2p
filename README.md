@@ -32,87 +32,237 @@ Alternatively, you can install `hs2p` via pip:
 pip install hs2p
 ```
 
-## Slide tiling
+## Usage
+
+HS2P now exposes two complementary interfaces:
+
+- a **Python API** for library-style use inside your own code
+- a **CLI workflow** for batch preprocessing from a config file
+
+## Python API
+
+The top-level package exports the public Python-first tiling API:
+
+```python
+from pathlib import Path
+
+from hs2p import (
+    FilterConfig,
+    QCConfig,
+    SegmentationConfig,
+    TilingConfig,
+    WholeSlide,
+    tile_slide,
+    tile_slides,
+)
+```
+
+### Core types
+
+- `WholeSlide`: identifies one sample through `sample_id`, `image_path`, and optional `mask_path`
+- `TilingConfig`: describes the requested physical tile spacing, tile size, overlap, tissue threshold, padding behavior, and backend
+- `SegmentationConfig`: describes how foreground tissue is segmented before coordinate extraction
+- `FilterConfig`: describes contour-size and white/black filtering rules applied to candidate tiles
+- `QCConfig`: controls whether mask and tiling previews are saved and at what preview downsample
+- `TilingResult`: in-memory coordinates and metadata for one processed slide
+- `TilingArtifacts`: on-disk artifact paths and tile count for one processed slide
+
+### Core functions
+
+- `tile_slide(...)`: compute a `TilingResult` for one `WholeSlide`
+- `tile_slides(...)`: batch process multiple slides, write artifacts, and return `TilingArtifacts`
+- `save_tiling_result(...)`: persist a `TilingResult` to `.tiles.npz` and `.tiles.meta.json`
+- `load_tiling_result(...)`: reconstruct a `TilingResult` from named artifacts on disk
+
+Minimal example:
+
+```python
+from pathlib import Path
+
+from hs2p import (
+    FilterConfig,
+    QCConfig,
+    SegmentationConfig,
+    TilingConfig,
+    WholeSlide,
+    tile_slide,
+)
+
+result = tile_slide(
+    WholeSlide(sample_id="slide-1", image_path=Path("/data/slide1.tif")),
+    tiling=TilingConfig(
+        target_spacing_um=0.5,
+        target_tile_size_px=256,
+        tolerance=0.05,
+        overlap=0.0,
+        tissue_threshold=0.01,
+        drop_holes=False,
+        use_padding=True,
+        backend="asap",
+    ),
+    segmentation=SegmentationConfig(
+        downsample=64,
+        sthresh=8,
+        sthresh_up=255,
+        mthresh=7,
+        close=4,
+        use_otsu=False,
+        use_hsv=True,
+    ),
+    filtering=FilterConfig(
+        ref_tile_size=16,
+        a_t=4,
+        a_h=2,
+        max_n_holes=8,
+        filter_white=False,
+        filter_black=False,
+        white_threshold=220,
+        black_threshold=25,
+        fraction_threshold=0.9,
+    ),
+    qc=QCConfig(save_mask_preview=False, save_tiling_preview=False),
+)
+```
+
+## CLI
+
+### Input CSV schema
+
+Both CLI entrypoints expect the same CSV schema:
+
+```csv
+sample_id,image_path,mask_path
+slide-1,/path/to/slide1.tif,/path/to/mask1.tif
+slide-2,/path/to/slide2.tif,
+```
+
+- `sample_id`: stable identifier used to name output artifacts
+- `image_path`: path to the whole-slide image to process
+- `mask_path`: optional path to a tissue or annotation mask aligned to the same sample
+
+### Tiling CLI
 
 <img src="illustrations/extraction_illu.png" width="1000px" align="center" />
 
-1. Create a `.csv` file containing paths to the desired slides. Optionally, you can provide paths to pre-computed tissue masks under the 'mask_path' column
+Run slide tiling with:
 
-    ```csv
-    wsi_path,mask_path
-    /path/to/slide1.tif,/path/to/mask1.tif
-    /path/to/slide2.tif,/path/to/mask2.tif
-    ...
-    ```
+```shell
+python3 -m hs2p.tiling --config-file </path/to/config.yaml>
+```
 
-2. Create a configuration file
+Important config entries in `hs2p/configs/default.yaml`:
 
-    A good starting point is to look at the default configuration file under `hs2p/configs/default.yaml` where parameters are documented.
+- `csv`: path to the input CSV described above
+- `output_dir`: directory where artifacts, visualizations, and `process_list.csv` are written
+- `resume`: whether to trust the current-schema `process_list.csv` in `output_dir`
+- `visualize`: whether to write mask and tiling preview images
+- `tiling.read_tiles_from`: optional directory containing precomputed `{sample_id}.tiles.npz` and `{sample_id}.tiles.meta.json` files to reuse instead of recomputing
+- `tiling.backend`: slide-reading backend, for example `asap`
+- `tiling.params.target_spacing_um`: target tile resolution in microns per pixel
+- `tiling.params.target_tile_size_px`: requested tile width and height in pixels at the target spacing
+- `tiling.params.tolerance`: allowed relative spacing mismatch when selecting the best pyramid level
+- `tiling.params.overlap`: fractional overlap between neighboring tiles
+- `tiling.params.tissue_threshold`: minimum tissue fraction required to keep a tile during tiling
+- `tiling.params.drop_holes`: whether tiles centered inside detected tissue holes should be discarded
+- `tiling.params.use_padding`: whether border tiles may extend beyond the native slide bounds and be padded
+- `tiling.seg_params.*`: tissue segmentation parameters used before coordinate extraction
+- `tiling.filter_params.*`: contour and white/black filtering parameters applied after segmentation
+- `tiling.visu_params.downsample`: downsample factor for preview rendering
+- `speed.num_workers`: worker count used for slide processing
 
-3. Kick off slide tiling
-
-    ```shell
-    python3 -m hs2p.tiling --config-file </path/to/config.yaml>
-    ```
-
-## Tile sampling
+### Sampling CLI
 
 <img src="illustrations/sampling_illu.png" width="1000px" align="center" />
 
-1. Create a `.csv` file containing paths to the desired slides & associated annotation masks:
+Run tile sampling with:
 
-    ```csv
-    wsi_path,mask_path
-    /path/to/slide1.tif,/path/to/mask1.tif
-    /path/to/slide2.tif,/path/to/mask2.tif
-    ...
-    ```
+```shell
+python3 -m hs2p.sampling --config-file </path/to/config.yaml>
+```
 
-2. Create a configuration file
+Sampling uses the same base tiling/segmentation/filtering settings as `hs2p.tiling`, plus:
 
-    A good starting point is to look at the default configuration file under `hs2p/configs/default.yaml` where parameters are documented.
+- `tiling.sampling_params.independant_sampling`: whether each annotation is sampled independently or sampled jointly with cross-category exclusion
+- `tiling.sampling_params.pixel_mapping`: mapping from annotation name to the pixel value used in the mask
+- `tiling.sampling_params.color_mapping`: optional overlay color for each annotation in previews
+- `tiling.sampling_params.tissue_percentage`: minimum coverage required for each annotation to keep or sample a tile
 
-3. Kick off tile sampling
+## Artifacts and Outputs
 
-    ```shell
-    python3 -m hs2p.sampling --config-file </path/to/config.yaml>
-    ```
+Both the CLI and the Python API write named artifacts under the configured output directory.
 
-## Output structure
+### Coordinate artifacts
 
-Both `tiling.py` and `sampling.py` produce a similar output structure in the specified output directory.
+- `hs2p.tiling` writes one artifact pair per slide under `coordinates/`
+- `hs2p.sampling` writes one artifact pair per annotation under `coordinates/<annotation>/`
 
-### Coordinates
+For each successful output, HS2P writes:
 
-The `coordinates/` folder contains a `.npy` file for each successfully processed slide.  
-This file stores a numpy array of shape `(num_tiles, 8)` containing the following information for each tile:
+- `{sample_id}.tiles.npz`: the coordinate arrays themselves
+- `{sample_id}.tiles.meta.json`: metadata describing what those coordinates represent
 
-1. **`x`**: x-coordinate of the tile at level 0
-2. **`y`**: y-coordinate of the tile at level 0
-3. **`contour_index`**: index of the contour containing the tile (useful for masking non-tissue content)
-4. **`target_tile_size`**: requested tile size (in pixels)
-5. **`target_spacing`**: spacing at which the user requested the tile (in microns per pixel)
-6. **`tile_level`**: pyramid level at which the tile was extracted
-7. **`resize_factor`**: ratio between `tile_size_resized` and the requested tile size (`target_tile_size`), useful for resizing when loading the tile
-8. **`tile_size_resized`**: size of the tile at the extraction level (`tile_level`), which may differ from the requested tile size (`target_tile_size`) if the target spacing was not available
-9. **`tile_size_lv0`**: tile size scaled to the slide's level 0
+### `.tiles.npz` arrays
 
-### Visualization (optional)
+- `tile_index`: contiguous tile ids from `0` to `num_tiles - 1`; this is the stable per-artifact row order
+- `x_lv0`: x-coordinate of the tile origin in level-0 slide pixels
+- `y_lv0`: y-coordinate of the tile origin in level-0 slide pixels
+- `tissue_fraction`: optional per-tile tissue fraction measured during extraction; present only when HS2P has that information available
 
-If `visualize` is set to `true`, a `visualization/` folder is created containing low-resolution images to verify the results:
+### `.tiles.meta.json` fields
 
-- **`mask/`**: visualizations of the provided tissue (or annotation) mask
-- **`tiling/`** (for `tiling.py`) or **`sampling/`** (for `sampling.py`): visualizations of the extracted or sampled tiles overlaid on the slide. For `sampling.py`, this includes subfolders for each category defined in the sampling parameters (e.g., tumor, stroma, etc.)
+- `sample_id`: sample identifier that produced the artifact and also names the output files
+- `image_path`: slide path used to generate or validate the coordinates
+- `mask_path`: mask path used during generation, or `null` when no mask was provided
+- `backend`: slide-reading backend used during extraction, for example `asap`
+- `target_spacing_um`: requested tile resolution in microns per pixel
+- `target_tile_size_px`: requested tile width and height in pixels at `target_spacing_um`
+- `read_level`: pyramid level actually read from the WSI during extraction
+- `read_spacing_um`: physical spacing of `read_level`; this is the native resolution that was actually read before any resizing
+- `read_tile_size_px`: tile width and height at `read_level`; this is the read-time pixel size before mapping back to level 0
+- `tile_size_lv0`: tile width and height expressed in level-0 slide pixels
+- `overlap`: fractional overlap that was requested between adjacent tiles
+- `tissue_threshold`: minimum tissue fraction required to keep a tile in tiling mode
+- `num_tiles`: number of tiles stored in the artifact
+- `config_hash`: hash of the effective tiling, segmentation, and filtering configuration used to validate artifact reuse
 
-Mask contour line thickness is automatically inferred from the whole-slide dimensions and the visualization level, so contour readability stays consistent across tiny biopsies and large resections.
+### Visualizations
 
-For sampling visualizations, overlays are drawn only for annotations that have a non-null color in `sampling_params.color_mapping`. Annotations with null color are left untouched (raw slide pixels, no darkening overlay).
+If `visualize: true`, HS2P writes preview images under `visualization/`:
 
-These visualizations are useful for double-checking that the tiling or sampling process ran as expected.
+- `visualization/mask/`: low-resolution renderings of the tissue or annotation mask
+- `visualization/tiling/`: low-resolution renderings of extracted tiling coordinates
+- `visualization/sampling/`: low-resolution renderings of sampled coordinates, with per-annotation subdirectories when applicable
 
-### Process summary
+Mask contour line thickness is automatically inferred from the whole-slide dimensions and the visualization level so previews remain readable across small biopsies and large resections.
 
-- **`process_list.csv`**: a summary file listing each processed slide, indicating whether processing was successful or failed. If a failure occurred, the traceback is provided to help diagnose the issue.
+For sampling visualizations, overlays are drawn only for annotations whose `color_mapping` is not `null`.
+
+### `process_list.csv`
+
+`process_list.csv` summarizes the batch run in the current schema only.
+
+Tiling columns:
+
+- `sample_id`: sample identifier from the input CSV
+- `image_path`: slide path associated with that sample
+- `mask_path`: mask path associated with that sample, or empty when absent
+- `tiling_status`: `success` or `failed`
+- `num_tiles`: number of tiles written for that sample
+- `tiles_npz_path`: path to the saved `.tiles.npz` file
+- `tiles_meta_path`: path to the saved `.tiles.meta.json` file
+- `error`: error message when tiling failed
+- `traceback`: Python traceback when tiling failed
+
+Sampling columns:
+
+- `sample_id`: sample identifier from the input CSV
+- `image_path`: slide path associated with that sample
+- `mask_path`: annotation mask path associated with that sample
+- `sampling_status`: `success`, `failed`, or pending state before processing
+- `error`: error message when sampling failed
+- `traceback`: Python traceback when sampling failed
+
+When `resume: true`, HS2P expects both `process_list.csv` and any referenced artifacts to use this current schema. Reused tiling artifacts are validated against `sample_id`, `config_hash`, `image_path`, and `mask_path`.
 
 ## Standalone tissue segmentator
 

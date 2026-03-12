@@ -1,0 +1,6 @@
+- [x] Add a shared private helper for CLI config translation and use it from tiling/sampling entrypoints
+- [x] Tighten tiling artifact validation to require matching sample, config, image path, and mask path
+- [x] Validate resumed tiling process-list columns and keep invalid reused artifacts as per-slide failures
+- [x] Add regression tests for sampling main, artifact identity mismatches, and resume failure behavior
+- [x] Refresh README to document the current CSV schema, artifact outputs, and resume expectations
+- [x] Run targeted tests for tiling/sampling refactor paths

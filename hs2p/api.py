@@ -220,6 +220,38 @@ def compute_config_hash(
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _build_cli_configs(cfg: Any) -> tuple[TilingConfig, SegmentationConfig, FilterConfig]:
+    return (
+        TilingConfig(
+            target_spacing_um=cfg.tiling.params.target_spacing_um,
+            target_tile_size_px=cfg.tiling.params.target_tile_size_px,
+            tolerance=cfg.tiling.params.tolerance,
+            overlap=cfg.tiling.params.overlap,
+            tissue_threshold=cfg.tiling.params.tissue_threshold,
+            drop_holes=cfg.tiling.params.drop_holes,
+            use_padding=cfg.tiling.params.use_padding,
+            backend=cfg.tiling.backend,
+        ),
+        SegmentationConfig(**dict(cfg.tiling.seg_params)),
+        FilterConfig(**dict(cfg.tiling.filter_params)),
+    )
+
+
+def _validate_required_columns(
+    df: pd.DataFrame,
+    *,
+    required_columns: set[str],
+    file_path: Path,
+    file_label: str,
+) -> None:
+    missing = sorted(required_columns - set(df.columns))
+    if missing:
+        raise ValueError(
+            f"Unsupported {file_label} schema in {file_path}; missing required columns: "
+            + ", ".join(missing)
+        )
+
+
 def tile_slide(
     whole_slide: WholeSlide,
     *,
@@ -339,6 +371,16 @@ def validate_tiling_artifacts(
         raise ValueError(
             f"Precomputed tiles config_hash mismatch for {whole_slide.sample_id}"
         )
+    if result.image_path != whole_slide.image_path:
+        raise ValueError(
+            f"Precomputed tiles image_path mismatch for {whole_slide.sample_id}: "
+            f"expected {whole_slide.image_path}, found {result.image_path}"
+        )
+    if result.mask_path != whole_slide.mask_path:
+        raise ValueError(
+            f"Precomputed tiles mask_path mismatch for {whole_slide.sample_id}: "
+            f"expected {whole_slide.mask_path}, found {result.mask_path}"
+        )
     return TilingArtifacts(
         sample_id=result.sample_id,
         tiles_npz_path=tiles_npz_path,
@@ -423,6 +465,22 @@ def tile_slides(
     existing_successes: dict[str, dict[str, Any]] = {}
     if resume and process_list_path.is_file():
         existing_df = pd.read_csv(process_list_path)
+        _validate_required_columns(
+            existing_df,
+            required_columns={
+                "sample_id",
+                "image_path",
+                "mask_path",
+                "tiling_status",
+                "num_tiles",
+                "tiles_npz_path",
+                "tiles_meta_path",
+                "error",
+                "traceback",
+            },
+            file_path=process_list_path,
+            file_label="tiling process_list.csv",
+        )
         for row in existing_df.to_dict(orient="records"):
             if row.get("tiling_status") == "success":
                 existing_successes[str(row["sample_id"])] = row
