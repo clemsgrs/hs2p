@@ -189,15 +189,6 @@ def _mask_level_downsamples(mask_obj) -> list[tuple[float, float]]:
         return [(float(d), float(d)) for d in mask_obj.downsamplings]
     raise AttributeError("Mask object must expose level_downsamples or downsamplings")
 
-
-def _mask_level_dimensions(mask_obj) -> list[tuple[int, int]]:
-    if hasattr(mask_obj, "level_dimensions"):
-        return list(mask_obj.level_dimensions)
-    if hasattr(mask_obj, "shapes"):
-        return list(mask_obj.shapes)
-    raise AttributeError("Mask object must expose level_dimensions or shapes")
-
-
 def _read_aligned_mask(
     *,
     mask_obj,

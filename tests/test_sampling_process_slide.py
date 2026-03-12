@@ -1,10 +1,25 @@
+import importlib
+import sys
+import types
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 
-sampling_mod = pytest.importorskip("hs2p.sampling")
+def _import_sampling_module():
+    try:
+        return importlib.import_module("hs2p.sampling")
+    except ModuleNotFoundError as exc:
+        if exc.name != "seaborn":
+            raise
+        sys.modules["seaborn"] = types.SimpleNamespace(
+            color_palette=lambda name: [(1.0, 0.0, 0.0)] * 20
+        )
+        return importlib.import_module("hs2p.sampling")
+
+
+sampling_mod = _import_sampling_module()
 
 
 def test_independent_sampling_no_visualization_does_not_crash(monkeypatch, tmp_path):
@@ -44,7 +59,6 @@ def test_independent_sampling_no_visualization_does_not_crash(monkeypatch, tmp_p
     monkeypatch.setattr(sampling_mod, "sample_coordinates", _fake_sample_coordinates)
     monkeypatch.setattr(sampling_mod, "_save_sampling_coordinates", lambda **kwargs: None)
     monkeypatch.setattr(sampling_mod, "visualize_coordinates", lambda **kwargs: None)
-    monkeypatch.setattr(sampling_mod, "overlay_mask_on_slide", lambda **kwargs: None)
 
     _, status_info = sampling_mod.process_slide(
         sample_id="sample-1",
@@ -220,11 +234,6 @@ def test_process_slide_uses_extraction_preview_instead_of_reopening_overlay(
     )
     monkeypatch.setattr(sampling_mod, "_save_sampling_coordinates", lambda **kwargs: None)
     monkeypatch.setattr(sampling_mod, "visualize_coordinates", lambda **kwargs: None)
-    monkeypatch.setattr(
-        sampling_mod,
-        "overlay_mask_on_slide",
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError("overlay_mask_on_slide should not run")),
-    )
 
     _, status_info = sampling_mod.process_slide(
         sample_id="sample-2",
@@ -442,3 +451,103 @@ def test_sampling_main_allows_explicit_inner_slide_workers(monkeypatch, tmp_path
 
     assert seen["pool_processes"] == 4
     assert [args["num_workers"] for args in seen["args_list"]] == [2]
+
+
+def test_save_sampling_coordinates_uses_annotation_threshold_and_sampling_mode_in_hash(
+    monkeypatch,
+    tmp_path,
+):
+    captured = {}
+    cfg = SimpleNamespace(
+        output_dir=str(tmp_path),
+        tiling=SimpleNamespace(
+            sampling_params=SimpleNamespace(independant_sampling=False),
+        ),
+    )
+
+    def _fake_save_tiling_result(result, output_dir, coordinates_dir=None):
+        captured["result"] = result
+        captured["output_dir"] = output_dir
+        captured["coordinates_dir"] = coordinates_dir
+        return SimpleNamespace(
+            sample_id=result.sample_id,
+            tiles_npz_path=Path(coordinates_dir) / f"{result.sample_id}.tiles.npz",
+            tiles_meta_path=Path(coordinates_dir) / f"{result.sample_id}.tiles.meta.json",
+            num_tiles=result.num_tiles,
+        )
+
+    monkeypatch.setattr(sampling_mod, "save_tiling_result", _fake_save_tiling_result)
+
+    tiling_config = sampling_mod.TilingConfig(
+        target_spacing_um=0.5,
+        target_tile_size_px=256,
+        tolerance=0.05,
+        overlap=0.0,
+        tissue_threshold=0.1,
+        drop_holes=False,
+        use_padding=True,
+        backend="asap",
+    )
+    segmentation_config = sampling_mod.SegmentationConfig(
+        downsample=64,
+        sthresh=8,
+        sthresh_up=255,
+        mthresh=7,
+        close=4,
+        use_otsu=False,
+        use_hsv=True,
+    )
+    filter_config = sampling_mod.FilterConfig(
+        ref_tile_size=16,
+        a_t=4,
+        a_h=2,
+        max_n_holes=8,
+        filter_white=False,
+        filter_black=False,
+        white_threshold=220,
+        black_threshold=25,
+        fraction_threshold=0.9,
+    )
+    sampling_params = sampling_mod.SamplingParameters(
+        pixel_mapping={"background": 0, "tumor": 1, "stroma": 2},
+        color_mapping={"background": None, "tumor": None, "stroma": None},
+        tissue_percentage={"background": None, "tumor": 0.7, "stroma": 0.2},
+    )
+    extraction = SimpleNamespace(
+        read_level=0,
+        read_spacing_um=0.5,
+        read_tile_size_px=256,
+        tile_size_lv0=256,
+    )
+
+    sampling_mod._save_sampling_coordinates(
+        sample_id="sample-1",
+        image_path=Path("slide.svs"),
+        mask_path=Path("mask.tif"),
+        backend="asap",
+        cfg=cfg,
+        tiling_config=tiling_config,
+        segmentation_config=segmentation_config,
+        filter_config=filter_config,
+        annotation="tumor",
+        coordinates=[(0, 0), (256, 0)],
+        extraction=extraction,
+        sampling_params=sampling_params,
+    )
+
+    result = captured["result"]
+    assert result.tissue_threshold == 0.7
+    assert result.config_hash == sampling_mod.compute_config_hash(
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        extra={
+            "annotation": "tumor",
+            "sampling": {
+                "pixel_mapping": sampling_params.pixel_mapping,
+                "tissue_percentage": sampling_params.tissue_percentage,
+                "independant_sampling": False,
+            },
+        },
+    )
+    assert captured["coordinates_dir"] == tmp_path / "coordinates" / "tumor"

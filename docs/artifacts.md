@@ -49,11 +49,13 @@ Each successful output produces:
 - `overlap`
   - Requested overlap fraction between neighboring tiles
 - `tissue_threshold`
-  - Minimum tissue fraction required to keep a tile in tiling mode
+  - Minimum tissue fraction used to keep tiles for this artifact
+  - For tiling artifacts, this is the global tiling threshold; for sampling artifacts, it is the active annotation threshold
 - `num_tiles`
   - Number of tiles stored in the artifact
 - `config_hash`
-  - Hash of the effective tiling, segmentation, and filtering config
+  - Hash of the effective coordinate-generation config
+  - Sampling artifacts include the active annotation plus sampling-mode details that affect which coordinates are written
 
 ## `process_list.csv`
 

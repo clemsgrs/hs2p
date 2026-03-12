@@ -112,6 +112,7 @@ def _save_sampling_coordinates(
     extraction,
     sampling_params: SamplingParameters,
 ):
+    annotation_threshold = sampling_params.tissue_percentage[annotation]
     x = np.array([x for x, _ in coordinates], dtype=np.int64)
     y = np.array([y for _, y in coordinates], dtype=np.int64)
     result = TilingResult(
@@ -130,7 +131,7 @@ def _save_sampling_coordinates(
         read_tile_size_px=extraction.read_tile_size_px,
         tile_size_lv0=extraction.tile_size_lv0,
         overlap=tiling_config.overlap,
-        tissue_threshold=tiling_config.tissue_threshold,
+        tissue_threshold=annotation_threshold,
         num_tiles=len(coordinates),
         config_hash=compute_config_hash(
             tiling=tiling_config,
@@ -141,6 +142,9 @@ def _save_sampling_coordinates(
                 "sampling": {
                     "pixel_mapping": sampling_params.pixel_mapping,
                     "tissue_percentage": sampling_params.tissue_percentage,
+                    "independant_sampling": bool(
+                        cfg.tiling.sampling_params.independant_sampling
+                    ),
                 },
             },
         ),
@@ -171,7 +175,9 @@ def process_slide(
     wsi_name = sample_id
     try:
 
-        if cfg.visualize and sampling_visualize_dir is not None:
+        if cfg.visualize and (
+            sampling_visualize_dir is not None or mask_visualize_dir is not None
+        ):
             preview_palette = np.zeros(shape=768, dtype=int)
             if sampling_params.color_mapping is None:
                 ncat = len(sampling_params.pixel_mapping)
