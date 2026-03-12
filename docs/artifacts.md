@@ -17,6 +17,7 @@ Each successful output produces:
 - `tile_index`
   - Contiguous tile ids from `0` to `num_tiles - 1`
   - Defines the row order for the other arrays in the artifact
+  - Row order is deterministic and column-major: numeric `x` first, then numeric `y` within each shared `x`
 - `x`
   - Tile origin x-coordinate in level-0 slide pixels
 - `y`

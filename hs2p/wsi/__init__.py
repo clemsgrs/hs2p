@@ -97,7 +97,12 @@ class CoordinateExtractionResult:
 
 def sort_coordinates_with_tissue(coordinates, tissue_percentages, contour_indices):
     """
-    Deduplicate coordinates, then sort deterministically by numeric coordinate order.
+    Deduplicate coordinates, then sort deterministically in column-major order.
+
+    The final order is numeric ``x`` first, then numeric ``y`` within each
+    shared ``x`` value. In other words, tiles are grouped by column before row.
+    This ordering defines the saved artifact row order for ``x``, ``y``, and
+    aligned arrays such as ``tile_index`` / ``tissue_fraction``.
     """
     seen = set()
     dedup_coordinates = []

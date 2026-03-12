@@ -142,6 +142,7 @@ More CLI details: [docs/cli.md](docs/cli.md)
 - Tiling writes `coordinates/{sample_id}.tiles.npz` and `coordinates/{sample_id}.tiles.meta.json`
 - Sampling writes the same pair under `coordinates/<annotation>/`
 - Batch runs also write `process_list.csv`
+- Saved coordinate arrays use a deterministic column-major order: numeric `x` first, then numeric `y` within each shared `x`
 
 Artifact field reference: [docs/artifacts.md](docs/artifacts.md)
 
