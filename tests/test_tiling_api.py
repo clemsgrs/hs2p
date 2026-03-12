@@ -17,6 +17,7 @@ from hs2p.api import (
     TilingResult,
     WholeSlide,
     compute_config_hash,
+    load_tiling_result,
     save_tiling_result,
     tile_slide,
     tile_slides,
@@ -156,7 +157,6 @@ def test_tile_slide_returns_named_arrays(monkeypatch, tiling_config, segmentatio
         tiling=tiling_config,
         segmentation=segmentation_config,
         filtering=filter_config,
-        qc=QCConfig(save_mask_preview=True),
         num_workers=2,
     )
 
@@ -185,6 +185,21 @@ def test_tile_slide_returns_named_arrays(monkeypatch, tiling_config, segmentatio
         segmentation=segmentation_config,
         filtering=filter_config,
     )
+
+
+def test_tile_slide_warns_when_preview_qc_is_requested(
+    monkeypatch, tiling_config, segmentation_config, filter_config
+):
+    monkeypatch.setattr("hs2p.api.extract_coordinates", lambda **_: _fake_extraction())
+
+    with pytest.warns(UserWarning, match="does not write preview artifacts"):
+        tile_slide(
+            WholeSlide(sample_id="slide-qc", image_path=Path("slide-qc.svs")),
+            tiling=tiling_config,
+            segmentation=segmentation_config,
+            filtering=filter_config,
+            qc=QCConfig(save_mask_preview=True, save_tiling_preview=True),
+        )
 
 
 def test_save_tiling_result_writes_expected_npz_and_json(tmp_path: Path):
@@ -289,6 +304,60 @@ def test_save_tiling_result_rejects_invalid_tile_index(tmp_path: Path):
 
     with pytest.raises(ValueError, match="tile_index"):
         save_tiling_result(invalid, output_dir=tmp_path)
+
+
+def test_save_tiling_result_rejects_non_vector_arrays(tmp_path: Path):
+    invalid = TilingResult(
+        sample_id="broken-shape",
+        image_path=Path("broken-shape.svs"),
+        mask_path=None,
+        backend="asap",
+        x_lv0=np.array([[10, 11]], dtype=np.int64),
+        y_lv0=np.array([20], dtype=np.int64),
+        tile_index=np.array([0], dtype=np.int32),
+        tissue_fraction=None,
+        target_spacing_um=0.5,
+        target_tile_size_px=224,
+        read_level=0,
+        read_spacing_um=0.5,
+        read_tile_size_px=224,
+        tile_size_lv0=224,
+        overlap=0.0,
+        tissue_threshold=0.1,
+        num_tiles=1,
+        config_hash="hash",
+    )
+
+    with pytest.raises(ValueError, match="x_lv0 must be a 1D array"):
+        save_tiling_result(invalid, output_dir=tmp_path)
+
+
+def test_tile_slide_rejects_tissue_fraction_shape_mismatch(
+    monkeypatch, tiling_config, segmentation_config, filter_config
+):
+    def _bad_extraction(**kwargs):
+        return CoordinateExtractionResult(
+            coordinates=[(100, 200), (300, 400)],
+            contour_indices=[0, 0],
+            tissue_percentages=[0.25],
+            x_lv0=np.array([100, 300], dtype=np.int64),
+            y_lv0=np.array([200, 400], dtype=np.int64),
+            read_level=1,
+            read_spacing_um=1.0,
+            read_tile_size_px=448,
+            resize_factor=2.0,
+            tile_size_lv0=448,
+        )
+
+    monkeypatch.setattr("hs2p.api.extract_coordinates", _bad_extraction)
+
+    with pytest.raises(ValueError, match="tissue_percentages length mismatch"):
+        tile_slide(
+            WholeSlide(sample_id="slide-bad-tissue", image_path=Path("slide.svs")),
+            tiling=tiling_config,
+            segmentation=segmentation_config,
+            filtering=filter_config,
+        )
 
 
 def test_validate_tiling_artifacts_rejects_mismatched_hash(tmp_path: Path):
@@ -402,6 +471,47 @@ def test_tile_slides_writes_process_list_and_can_reuse_precomputed_tiles(
     assert pd.isna(row["traceback"])
 
 
+def test_tile_slides_omits_tiling_preview_path_when_no_tiles(
+    monkeypatch,
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    monkeypatch.setattr(
+        "hs2p.api.extract_coordinates",
+        lambda **_: CoordinateExtractionResult(
+            coordinates=[],
+            contour_indices=[],
+            tissue_percentages=[],
+            x_lv0=np.array([], dtype=np.int64),
+            y_lv0=np.array([], dtype=np.int64),
+            read_level=0,
+            read_spacing_um=0.5,
+            read_tile_size_px=224,
+            resize_factor=1.0,
+            tile_size_lv0=224,
+        ),
+    )
+    monkeypatch.setattr(
+        "hs2p.api.visualize_coordinates",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("preview rendering should be skipped for zero tiles")),
+    )
+
+    artifacts = tile_slides(
+        [WholeSlide(sample_id="slide-0", image_path=Path("slide-0.svs"))],
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        qc=QCConfig(save_tiling_preview=True),
+        output_dir=tmp_path,
+    )
+
+    assert len(artifacts) == 1
+    assert artifacts[0].num_tiles == 0
+    assert artifacts[0].tiling_preview_path is None
+
+
 def test_tile_slides_resume_marks_stale_artifact_as_failed(
     monkeypatch,
     tmp_path: Path,
@@ -460,6 +570,32 @@ def test_tile_slides_resume_marks_stale_artifact_as_failed(
     assert "image_path mismatch" in row["error"]
 
 
+def test_tile_slides_logs_failures_in_real_time(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    def _raise_extract(**kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("hs2p.api.extract_coordinates", _raise_extract)
+
+    artifacts = tile_slides(
+        [WholeSlide(sample_id="slide-log", image_path=Path("slide-log.svs"))],
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        output_dir=tmp_path,
+    )
+
+    assert artifacts == []
+    captured = capsys.readouterr()
+    assert "[tile_slides] FAILED slide-log: boom" in captured.out
+
+
 def test_tile_slides_resume_rejects_unsupported_process_list_schema(
     tmp_path: Path,
     tiling_config: TilingConfig,
@@ -500,3 +636,65 @@ def test_load_csv_rejects_duplicate_sample_id(tmp_path: Path):
 
     with pytest.raises(ValueError, match="Duplicate sample_id"):
         load_csv(cfg)
+
+
+def test_load_tiling_result_rejects_missing_npz_keys(tmp_path: Path):
+    npz_path = tmp_path / "broken.tiles.npz"
+    meta_path = tmp_path / "broken.tiles.meta.json"
+    np.savez(npz_path, tile_index=np.array([0], dtype=np.int32), y_lv0=np.array([20], dtype=np.int64))
+    meta_path.write_text(
+        json.dumps(
+            {
+                "sample_id": "broken",
+                "image_path": "broken.svs",
+                "mask_path": None,
+                "backend": "asap",
+                "target_spacing_um": 0.5,
+                "target_tile_size_px": 224,
+                "read_level": 0,
+                "read_spacing_um": 0.5,
+                "read_tile_size_px": 224,
+                "tile_size_lv0": 224,
+                "overlap": 0.0,
+                "tissue_threshold": 0.1,
+                "num_tiles": 1,
+                "config_hash": "hash",
+            }
+        )
+    )
+
+    with pytest.raises(ValueError, match="missing keys: x_lv0"):
+        load_tiling_result(npz_path, meta_path)
+
+
+def test_load_tiling_result_rejects_missing_meta_keys(tmp_path: Path):
+    npz_path = tmp_path / "broken-meta.tiles.npz"
+    meta_path = tmp_path / "broken-meta.tiles.meta.json"
+    np.savez(
+        npz_path,
+        tile_index=np.array([0], dtype=np.int32),
+        x_lv0=np.array([10], dtype=np.int64),
+        y_lv0=np.array([20], dtype=np.int64),
+    )
+    meta_path.write_text(
+        json.dumps(
+            {
+                "sample_id": "broken",
+                "image_path": "broken.svs",
+                "mask_path": None,
+                "backend": "asap",
+                "target_spacing_um": 0.5,
+                "target_tile_size_px": 224,
+                "read_level": 0,
+                "read_spacing_um": 0.5,
+                "read_tile_size_px": 224,
+                "tile_size_lv0": 224,
+                "overlap": 0.0,
+                "tissue_threshold": 0.1,
+                "num_tiles": 1,
+            }
+        )
+    )
+
+    with pytest.raises(ValueError, match="missing keys: config_hash"):
+        load_tiling_result(npz_path, meta_path)

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import tempfile
 import traceback
+import warnings
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Sequence
@@ -108,14 +110,24 @@ class TilingArtifacts:
     tiling_preview_path: Path | None = None
 
 
+def _validate_vector(name: str, value: np.ndarray | None) -> int | None:
+    if value is None:
+        return None
+    if value.ndim != 1:
+        raise ValueError(f"{name} must be a 1D array, got shape {value.shape}")
+    return int(value.shape[0])
+
+
 def _validate_result_consistency(result: TilingResult) -> None:
     lengths = {
-        "x_lv0": int(result.x_lv0.shape[0]),
-        "y_lv0": int(result.y_lv0.shape[0]),
-        "tile_index": int(result.tile_index.shape[0]),
+        "x_lv0": _validate_vector("x_lv0", result.x_lv0),
+        "y_lv0": _validate_vector("y_lv0", result.y_lv0),
+        "tile_index": _validate_vector("tile_index", result.tile_index),
     }
     if result.tissue_fraction is not None:
-        lengths["tissue_fraction"] = int(result.tissue_fraction.shape[0])
+        lengths["tissue_fraction"] = _validate_vector(
+            "tissue_fraction", result.tissue_fraction
+        )
     expected = int(result.num_tiles)
     mismatched = [name for name, length in lengths.items() if length != expected]
     if mismatched:
@@ -163,9 +175,15 @@ def _compute_tiling_result(
     x_lv0 = extraction.x_lv0.astype(np.int64, copy=False)
     y_lv0 = extraction.y_lv0.astype(np.int64, copy=False)
     num_tiles = int(x_lv0.shape[0])
-    tissue_fraction = np.asarray(extraction.tissue_percentages, dtype=np.float32)
-    if tissue_fraction.shape[0] != num_tiles:
-        tissue_fraction = None
+    tissue_fraction = None
+    if extraction.tissue_percentages is not None:
+        tissue_fraction = np.asarray(extraction.tissue_percentages, dtype=np.float32)
+        if tissue_fraction.ndim != 1 or tissue_fraction.shape[0] != num_tiles:
+            raise ValueError(
+                "tissue_percentages length mismatch for "
+                f"{whole_slide.sample_id}: expected {num_tiles}, "
+                f"got shape {tissue_fraction.shape}"
+            )
     return TilingResult(
         sample_id=whole_slide.sample_id,
         image_path=whole_slide.image_path,
@@ -261,7 +279,11 @@ def tile_slide(
     qc: QCConfig | None = None,
     num_workers: int = 1,
 ) -> TilingResult:
-    del qc
+    if qc is not None and (qc.save_mask_preview or qc.save_tiling_preview):
+        warnings.warn(
+            "tile_slide() does not write preview artifacts; use tile_slides() to save previews.",
+            stacklevel=2,
+        )
     return _compute_tiling_result(
         whole_slide,
         tiling=tiling,
@@ -324,6 +346,35 @@ def load_tiling_result(
 ) -> TilingResult:
     tiles = np.load(tiles_npz_path, allow_pickle=False)
     meta = json.loads(Path(tiles_meta_path).read_text())
+    required_npz_keys = {"tile_index", "x_lv0", "y_lv0"}
+    missing_npz_keys = sorted(required_npz_keys - set(tiles.files))
+    if missing_npz_keys:
+        raise ValueError(
+            f"Invalid tiling npz artifact {tiles_npz_path}; missing keys: "
+            + ", ".join(missing_npz_keys)
+        )
+    required_meta_keys = {
+        "sample_id",
+        "image_path",
+        "mask_path",
+        "backend",
+        "target_spacing_um",
+        "target_tile_size_px",
+        "read_level",
+        "read_spacing_um",
+        "read_tile_size_px",
+        "tile_size_lv0",
+        "overlap",
+        "tissue_threshold",
+        "num_tiles",
+        "config_hash",
+    }
+    missing_meta_keys = sorted(required_meta_keys - set(meta))
+    if missing_meta_keys:
+        raise ValueError(
+            f"Invalid tiling metadata artifact {tiles_meta_path}; missing keys: "
+            + ", ".join(missing_meta_keys)
+        )
     x_lv0 = tiles["x_lv0"].astype(np.int64, copy=False)
     y_lv0 = tiles["y_lv0"].astype(np.int64, copy=False)
     tile_index = tiles["tile_index"].astype(np.int32, copy=False)
@@ -369,7 +420,8 @@ def validate_tiling_artifacts(
         )
     if result.config_hash != expected_config_hash:
         raise ValueError(
-            f"Precomputed tiles config_hash mismatch for {whole_slide.sample_id}"
+            f"Precomputed tiles config_hash mismatch for {whole_slide.sample_id}: "
+            f"stored={result.config_hash!r}, expected={expected_config_hash!r}"
         )
     if result.image_path != whole_slide.image_path:
         raise ValueError(
@@ -428,7 +480,9 @@ def _write_tiling_preview(
     result: TilingResult,
     output_dir: Path,
     downsample: int,
-) -> Path:
+) -> Path | None:
+    if result.num_tiles == 0:
+        return None
     save_dir = output_dir / "visualization" / "tiling"
     save_dir.mkdir(parents=True, exist_ok=True)
     coordinates = list(zip(result.x_lv0.tolist(), result.y_lv0.tolist()))
@@ -442,6 +496,19 @@ def _write_tiling_preview(
         sample_id=result.sample_id,
     )
     return save_dir / f"{result.sample_id}.jpg"
+
+
+def _write_process_list(process_rows: list[dict[str, Any]], process_list_path: Path) -> None:
+    process_list_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        suffix=".csv",
+        dir=process_list_path.parent,
+        delete=False,
+    ) as handle:
+        temp_path = Path(handle.name)
+        pd.DataFrame(process_rows).to_csv(handle, index=False)
+    temp_path.replace(process_list_path)
 
 
 def tile_slides(
@@ -532,6 +599,11 @@ def tile_slides(
                         output_dir=output_dir,
                         downsample=qc.downsample,
                     )
+                    tiling_preview_path = (
+                        tiling_preview_path
+                        if tiling_preview_path is not None and tiling_preview_path.is_file()
+                        else None
+                    )
                 artifact = TilingArtifacts(
                     sample_id=artifact.sample_id,
                     tiles_npz_path=artifact.tiles_npz_path,
@@ -555,6 +627,7 @@ def tile_slides(
                 }
             )
         except Exception as exc:
+            print(f"[tile_slides] FAILED {whole_slide.sample_id}: {exc}", flush=True)
             process_rows.append(
                 {
                     "sample_id": whole_slide.sample_id,
@@ -568,7 +641,7 @@ def tile_slides(
                     "traceback": traceback.format_exc(),
                 }
             )
-    pd.DataFrame(process_rows).to_csv(process_list_path, index=False)
+    _write_process_list(process_rows, process_list_path)
     return artifacts
 
 

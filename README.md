@@ -69,8 +69,8 @@ from hs2p import (
 
 ### Core functions
 
-- `tile_slide(...)`: compute a `TilingResult` for one `WholeSlide`
-- `tile_slides(...)`: batch process multiple slides, write artifacts, and return `TilingArtifacts`
+- `tile_slide(...)`: compute a `TilingResult` for one `WholeSlide`; this is the compute-only path and does not write preview images
+- `tile_slides(...)`: batch process multiple slides, write artifacts, optionally write previews, and return `TilingArtifacts`
 - `save_tiling_result(...)`: persist a `TilingResult` to `.tiles.npz` and `.tiles.meta.json`
 - `load_tiling_result(...)`: reconstruct a `TilingResult` from named artifacts on disk
 
