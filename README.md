@@ -80,7 +80,7 @@ print(artifacts.tiles_npz_path)
 print(artifacts.tiles_meta_path)
 ```
 
-`result` is a [`TilingResult`](hs2p/api.py) for one slide. It gives downstream pipelines the tile coordinates plus the metadata needed to relate those coordinates back to the slide pyramid and persist them as reusable named artifacts.
+`result` is a [`TilingResult`](hs2p/api.py#L144) for one slide. It gives downstream pipelines the tile coordinates plus the metadata needed to relate those coordinates back to the slide pyramid and persist them as reusable named artifacts.
 
 More API details: [docs/api.md](docs/api.md)
 
@@ -146,4 +146,3 @@ docker run --rm -it -v /path/to/your/data:/data waticlems/hs2p:latest
 - [CLI guide](docs/cli.md)
 - [Artifact format reference](docs/artifacts.md)
 - [Tissue mask generation script](docs/tissue-mask-generation.md)
-- [Testing and fixture notes](docs/documentation.md)

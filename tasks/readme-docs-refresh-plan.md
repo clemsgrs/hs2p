@@ -1,7 +1,0 @@
-- [x] Reframe the README as a concise package-first landing page with Python install/use first and Docker last
-- [x] Shorten the getting-started path to one minimal Python example and one minimal CLI example
-- [x] Move detailed configuration and artifact field reference material out of the README into dedicated docs pages
-- [x] Move standalone tissue mask generation documentation out of the README into a dedicated doc and link to it from the README
-- [x] Reposition the tiling and sampling figures earlier in the README near the quick-start workflows
-- [x] Add a small docs index so the README can link to deeper guides without becoming a full reference manual
-- [x] Verify the rewritten README still covers installation, supported interfaces, outputs, and where to find advanced documentation

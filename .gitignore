@@ -163,3 +163,5 @@ cython_debug/
 
 # custom
 output/
+tasks/
+docs/documentation.md

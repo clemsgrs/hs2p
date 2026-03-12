@@ -8,5 +8,3 @@
   - `.tiles.npz`, `.tiles.meta.json`, and `process_list.csv`
 - [Tissue mask generation](tissue-mask-generation.md)
   - Standalone script for producing pyramidal tissue masks
-- [Testing and fixtures](documentation.md)
-  - Test-suite structure, integration fixtures, and fixture refresh tooling
