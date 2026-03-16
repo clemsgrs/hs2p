@@ -2,15 +2,15 @@
 """
 Benchmark hs2p tiling throughput (tiles/s) as a function of num_workers.
 
-Reads slides from a CSV file (sample_id, image_path, optional mask_path),
-optionally subsamples --n-slides slides stratified by file size, runs
-tile_slides() for each worker count, then saves a CSV of raw results and
+Reads slides from a CSV file (sample_id, image_path, optional mask_path,
+optional spacing_at_level_0), optionally subsamples --n-slides slides
+stratified by file size, then runs the hs2p CLI for each worker count and
 produces a publication-quality chart.
 
 Usage
 -----
     python scripts/benchmark_throughput.py \
-        --csv /data/pathology/projects/clement/notebooks/hs2p/histai_mixed.csv \
+        --csv /data/pathology/.../histai_mixed.csv \
         --n-slides 100 \
         --workers 4 8 16 32 \
         --output-dir /tmp/hs2p-benchmark \
@@ -24,6 +24,7 @@ Regenerate chart only (skip benchmarking):
 import argparse
 import csv
 import random
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -35,17 +36,9 @@ import numpy as np
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import matplotlib.ticker as ticker  # noqa: E402
+from omegaconf import OmegaConf  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_REPO_ROOT))
-
-from hs2p import (  # noqa: E402
-    FilterConfig,
-    SegmentationConfig,
-    SlideSpec,
-    TilingConfig,
-    tile_slides,
-)
 
 
 # ---------------------------------------------------------------------------
@@ -62,7 +55,8 @@ def parse_args() -> argparse.Namespace:
         "--csv",
         type=Path,
         required=False,
-        help="CSV with columns: sample_id, image_path, (optional) mask_path.",
+        help="CSV with columns: sample_id, image_path, (optional) mask_path, "
+        "(optional) spacing_at_level_0.",
     )
     parser.add_argument(
         "--n-slides",
@@ -93,7 +87,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--backend",
         default="openslide",
-        help="WSI reading backend passed to TilingConfig.",
+        help="WSI reading backend passed to the tiling config.",
     )
     parser.add_argument(
         "--target-spacing",
@@ -117,6 +111,11 @@ def parse_args() -> argparse.Namespace:
         "--dataset-label",
         default="HistAI mixed",
         help="Dataset name shown in the chart subtitle and legend.",
+    )
+    parser.add_argument(
+        "--python",
+        default=sys.executable,
+        help="Python interpreter used to invoke the hs2p CLI.",
     )
     parser.add_argument(
         "--seed",
@@ -206,61 +205,175 @@ def stratified_sample(
 
 
 # ---------------------------------------------------------------------------
+# CLI helpers
+# ---------------------------------------------------------------------------
+
+
+def write_slides_csv(slides: list[dict[str, Any]], path: Path) -> None:
+    """Write a slides CSV compatible with the hs2p CLI."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    has_spacing = any(s.get("spacing_at_level_0") is not None for s in slides)
+    fieldnames = ["sample_id", "image_path", "mask_path"]
+    if has_spacing:
+        fieldnames.append("spacing_at_level_0")
+    with path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for s in slides:
+            row: dict[str, Any] = {
+                "sample_id": s["sample_id"],
+                "image_path": str(s["image_path"]),
+                "mask_path": str(s["mask_path"]) if s["mask_path"] else "",
+            }
+            if has_spacing:
+                row["spacing_at_level_0"] = s["spacing_at_level_0"] or ""
+            writer.writerow(row)
+
+
+def write_config(
+    *,
+    csv_path: Path,
+    output_dir: Path,
+    num_workers: int,
+    backend: str,
+    target_spacing: float,
+    tile_size: int,
+    config_path: Path,
+) -> None:
+    """Write a minimal hs2p tiling config YAML for one benchmark run."""
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg = {
+        "csv": str(csv_path),
+        "output_dir": str(output_dir),
+        "resume": False,
+        "visualize": False,
+        "seed": 0,
+        "tiling": {
+            "read_tiles_from": None,
+            "backend": backend,
+            "params": {
+                "target_spacing_um": target_spacing,
+                "target_tile_size_px": tile_size,
+                "tolerance": 0.05,
+                "overlap": 0.0,
+                "tissue_threshold": 0.01,
+                "drop_holes": False,
+                "use_padding": True,
+            },
+            "seg_params": {
+                "downsample": 64,
+                "sthresh": 8,
+                "sthresh_up": 255,
+                "mthresh": 7,
+                "close": 4,
+                "use_otsu": False,
+                "use_hsv": True,
+            },
+            "filter_params": {
+                "ref_tile_size": 16,
+                "a_t": 4,
+                "a_h": 2,
+                "max_n_holes": 8,
+                "filter_white": False,
+                "filter_black": False,
+                "white_threshold": 220,
+                "black_threshold": 25,
+                "fraction_threshold": 0.9,
+            },
+            "visu_params": {"downsample": 32},
+            "sampling_params": {
+                "independant_sampling": False,
+                "pixel_mapping": [{"background": 0}, {"tissue": 1}],
+                "color_mapping": [{"background": None}, {"tissue": [157, 219, 129]}],
+                "tissue_percentage": [
+                    {"background": None},
+                    {"tissue": 0.01},
+                ],
+            },
+        },
+        "speed": {"num_workers": num_workers},
+        "wandb": {"enable": False},
+    }
+    OmegaConf.save(config=OmegaConf.create(cfg), f=config_path)
+
+
+def parse_process_list(path: Path) -> dict[str, Any]:
+    """Read process_list.csv and return aggregate metrics."""
+    if not path.is_file():
+        return {"num_slides": 0, "total_tiles": 0, "slides_with_tiles": 0, "failed": 0}
+    with path.open(newline="") as f:
+        rows = list(csv.DictReader(f))
+    total_tiles = sum(int(float(r.get("num_tiles") or 0)) for r in rows)
+    slides_with_tiles = sum(int(float(r.get("num_tiles") or 0)) > 0 for r in rows)
+    failed = sum(r.get("tiling_status") == "failed" for r in rows)
+    return {
+        "num_slides": len(rows),
+        "total_tiles": total_tiles,
+        "slides_with_tiles": slides_with_tiles,
+        "failed": failed,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Benchmark
 # ---------------------------------------------------------------------------
 
 
-def build_configs(
+def run_one(
     *,
+    slides: list[dict[str, Any]],
+    num_workers: int,
+    run_dir: Path,
+    python_executable: str,
     backend: str,
     target_spacing: float,
     tile_size: int,
-) -> tuple[TilingConfig, SegmentationConfig, FilterConfig]:
-    tiling = TilingConfig(
-        backend=backend,
-        target_spacing_um=target_spacing,
-        target_tile_size_px=tile_size,
-        tolerance=0.05,
-        overlap=0.0,
-        tissue_threshold=0.01,
-        drop_holes=False,
-        use_padding=True,
-    )
-    return tiling, SegmentationConfig(), FilterConfig()
-
-
-def run_one(
-    *,
-    whole_slides: list[SlideSpec],
-    tiling: TilingConfig,
-    segmentation: SegmentationConfig,
-    filtering: FilterConfig,
-    num_workers: int,
-    output_dir: Path,
 ) -> dict[str, Any]:
-    """Run tile_slides once and return timing + tile count metrics."""
-    output_dir.mkdir(parents=True, exist_ok=True)
-    t0 = time.perf_counter()
-    artifacts = tile_slides(
-        whole_slides,
-        tiling=tiling,
-        segmentation=segmentation,
-        filtering=filtering,
-        output_dir=output_dir,
+    """Run the hs2p CLI once and return timing + tile count metrics."""
+    run_dir.mkdir(parents=True, exist_ok=True)
+    slides_csv = run_dir / "slides.csv"
+    config_path = run_dir / "config.yaml"
+    tiling_output = run_dir / "tiling"
+    log_path = run_dir / "tiling.log"
+
+    write_slides_csv(slides, slides_csv)
+    write_config(
+        csv_path=slides_csv,
+        output_dir=tiling_output,
         num_workers=num_workers,
-        resume=False,
+        backend=backend,
+        target_spacing=target_spacing,
+        tile_size=tile_size,
+        config_path=config_path,
     )
+
+    cmd = [
+        python_executable,
+        "-m",
+        "hs2p.tiling",
+        "--config-file",
+        str(config_path),
+        "--skip-datetime",
+        "--skip-logging",
+    ]
+    t0 = time.perf_counter()
+    with log_path.open("w") as log_fh:
+        result = subprocess.run(
+            cmd,
+            cwd=_REPO_ROOT,
+            stdout=log_fh,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
     elapsed = time.perf_counter() - t0
 
-    total_tiles = sum(a.num_tiles for a in artifacts)
-    successful = sum(1 for a in artifacts if a.num_tiles > 0)
+    stats = parse_process_list(tiling_output / "process_list.csv")
     return {
         "num_workers": num_workers,
         "elapsed_seconds": elapsed,
-        "total_tiles": total_tiles,
-        "tiles_per_second": total_tiles / elapsed if elapsed > 0 else 0.0,
-        "slides_processed": len(artifacts),
-        "slides_with_tiles": successful,
+        "exit_code": result.returncode,
+        **stats,
+        "tiles_per_second": stats["total_tiles"] / elapsed if elapsed > 0 else 0.0,
     }
 
 
@@ -269,26 +382,12 @@ def benchmark(
     slides: list[dict[str, Any]],
     workers: list[int],
     repeat: int,
+    python_executable: str,
     backend: str,
     target_spacing: float,
     tile_size: int,
     output_root: Path,
 ) -> list[dict[str, Any]]:
-    tiling, segmentation, filtering = build_configs(
-        backend=backend,
-        target_spacing=target_spacing,
-        tile_size=tile_size,
-    )
-    whole_slides = [
-        SlideSpec(
-            sample_id=s["sample_id"],
-            image_path=s["image_path"],
-            mask_path=s["mask_path"],
-            spacing_at_level_0=s.get("spacing_at_level_0"),
-        )
-        for s in slides
-    ]
-
     records: list[dict[str, Any]] = []
     total_runs = len(workers) * repeat
     run_idx = 0
@@ -301,27 +400,32 @@ def benchmark(
                 f"  [{run_idx}/{total_runs}] workers={nw}, repeat={rep}/{repeat} ...",
                 flush=True,
             )
-            run_dir = output_root / "tiling" / f"workers-{nw:02d}" / f"rep-{rep:02d}"
+            run_dir = output_root / "runs" / f"workers-{nw:02d}" / f"rep-{rep:02d}"
             result = run_one(
-                whole_slides=whole_slides,
-                tiling=tiling,
-                segmentation=segmentation,
-                filtering=filtering,
+                slides=slides,
                 num_workers=nw,
-                output_dir=run_dir,
+                run_dir=run_dir,
+                python_executable=python_executable,
+                backend=backend,
+                target_spacing=target_spacing,
+                tile_size=tile_size,
             )
             rep_results.append(result)
+            status = "OK" if result["exit_code"] == 0 else f"exit={result['exit_code']}"
             print(
                 f"    → {result['total_tiles']:,} tiles in "
                 f"{result['elapsed_seconds']:.1f}s "
-                f"({result['tiles_per_second']:,.0f} tiles/s)",
+                f"({result['tiles_per_second']:,.0f} tiles/s)  [{status}]",
                 flush=True,
             )
 
         mean_tps = float(np.mean([r["tiles_per_second"] for r in rep_results]))
         mean_elapsed = float(np.mean([r["elapsed_seconds"] for r in rep_results]))
-        std_tps = float(np.std([r["tiles_per_second"] for r in rep_results])) if repeat > 1 else 0.0
-
+        std_tps = (
+            float(np.std([r["tiles_per_second"] for r in rep_results]))
+            if repeat > 1
+            else 0.0
+        )
         records.append(
             {
                 "num_workers": nw,
@@ -330,8 +434,9 @@ def benchmark(
                 "std_tiles_per_second": round(std_tps, 2),
                 "mean_elapsed_seconds": round(mean_elapsed, 3),
                 "total_tiles": rep_results[0]["total_tiles"],
-                "slides_processed": rep_results[0]["slides_processed"],
+                "slides_processed": rep_results[0]["num_slides"],
                 "slides_with_tiles": rep_results[0]["slides_with_tiles"],
+                "failed_slides": rep_results[0]["failed"],
             }
         )
 
@@ -339,7 +444,7 @@ def benchmark(
 
 
 # ---------------------------------------------------------------------------
-# CSV I/O
+# Results CSV I/O
 # ---------------------------------------------------------------------------
 
 
@@ -410,12 +515,11 @@ def plot_results(
     baseline_workers = workers[0]
     ideal = [baseline * w / baseline_workers for w in workers]
 
-    # projection from observed avg tiles/slide extrapolated to full dataset
+    # projection: observed avg tiles/slide extrapolated to full dataset
     avg_tiles_per_slide = records[0]["total_tiles"] / max(records[0]["slides_processed"], 1)
     max_tps = max(tps)
     max_workers = workers[tps.index(max_tps)]
-    projected_total_tiles = avg_tiles_per_slide * total_slides
-    projected_hours = projected_total_tiles / max_tps / 3600
+    projected_hours = avg_tiles_per_slide * total_slides / max_tps / 3600
 
     # ------------------------------------------------------------------ figure
     fig, ax = plt.subplots(figsize=(13, 7.5))
@@ -424,12 +528,10 @@ def plot_results(
 
     for spine in ax.spines.values():
         spine.set_edgecolor(_GRID)
-
     ax.tick_params(colors=_TEXT, which="both")
     ax.xaxis.label.set_color(_TEXT)
     ax.yaxis.label.set_color(_TEXT)
 
-    # grid
     ax.grid(True, color=_GRID, linewidth=0.8, linestyle="--", alpha=0.7, zorder=0)
     ax.set_axisbelow(True)
 
@@ -499,14 +601,11 @@ def plot_results(
         )
 
     # projection annotation box
-    proj_text = (
-        f"Projected · {dataset_label} (~{total_slides:,} slides)\n"
-        f"At {max_workers} workers:  {projected_hours:.1f} hours"
-    )
     ax.text(
         0.985,
         0.05,
-        proj_text,
+        f"Projected · {dataset_label} (~{total_slides:,} slides)\n"
+        f"At {max_workers} workers:  {projected_hours:.1f} hours",
         transform=ax.transAxes,
         ha="right",
         va="bottom",
@@ -624,10 +723,12 @@ def main() -> int:
 
     # ── benchmark ────────────────────────────────────────────────────────
     print(f"\nRunning benchmark: workers={sorted(args.workers)}, repeat={args.repeat}")
+    print(f"Python: {args.python}")
     records = benchmark(
         slides=sampled,
         workers=sorted(args.workers),
         repeat=args.repeat,
+        python_executable=args.python,
         backend=args.backend,
         target_spacing=args.target_spacing,
         tile_size=args.tile_size,
@@ -646,6 +747,7 @@ def main() -> int:
             f"  workers={r['num_workers']:>2}  "
             f"{r['mean_tiles_per_second']:>10,.0f} tiles/s"
             f"  (elapsed {r['mean_elapsed_seconds']:.1f}s)"
+            + (f"  ⚠ {r['failed_slides']} failed" if r["failed_slides"] else "")
         )
 
     # ── chart ─────────────────────────────────────────────────────────────
