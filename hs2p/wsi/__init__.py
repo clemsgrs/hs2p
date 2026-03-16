@@ -316,6 +316,7 @@ def extract_coordinates(
     preview_palette: np.ndarray | None = None,
     preview_pixel_mapping: dict[str, int] | None = None,
     preview_color_mapping: dict[str, list[int] | None] | None = None,
+    spacing_at_level_0: float | None = None,
     disable_tqdm: bool = False,
     num_workers: int = 1,
 ):
@@ -328,6 +329,7 @@ def extract_coordinates(
         segment=True,
         segment_params=segment_params,
         sampling_params=sampling_params,
+        spacing_at_level_0=spacing_at_level_0,
     )
     tolerance = tiling_params.tolerance
     starting_spacing = wsi.spacings[0]

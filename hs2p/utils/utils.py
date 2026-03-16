@@ -94,11 +94,17 @@ def load_csv(cfg):
     mask_series = (
         df["mask_path"] if "mask_path" in df.columns else pd.Series([None] * len(df))
     )
+    spacing_series = (
+        df["spacing_at_level_0"]
+        if "spacing_at_level_0" in df.columns
+        else pd.Series([None] * len(df))
+    )
     whole_slides = []
-    for sample_id, image_path, mask_path in zip(
+    for sample_id, image_path, mask_path, spacing in zip(
         df["sample_id"].astype(str).tolist(),
         df["image_path"].tolist(),
         mask_series.tolist(),
+        spacing_series.tolist(),
     ):
         whole_slides.append(
             SlideSpec(
@@ -107,6 +113,11 @@ def load_csv(cfg):
                 mask_path=(
                     Path(mask_path)
                     if mask_path is not None and not pd.isna(mask_path)
+                    else None
+                ),
+                spacing_at_level_0=(
+                    float(spacing)
+                    if spacing is not None and not pd.isna(spacing)
                     else None
                 ),
             )

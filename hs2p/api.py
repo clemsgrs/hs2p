@@ -35,11 +35,16 @@ class SlideSpec:
         sample_id: Stable sample identifier used to name outputs.
         image_path: Path to the whole-slide image.
         mask_path: Optional path to a tissue or annotation mask.
+        spacing_at_level_0: Optional override for the slide's native spacing at
+            pyramid level 0 (µm/px).  Use this when the embedded metadata is
+            missing or incorrect.  All other pyramid-level spacings are rescaled
+            proportionally from this value.
     """
 
     sample_id: str
     image_path: Path
     mask_path: Path | None = None
+    spacing_at_level_0: float | None = None
 
 
 @dataclass(frozen=True)
@@ -279,6 +284,7 @@ def _compute_tiling_result(
         filter_params=filtering,
         sampling_params=sampling_params,
         mask_visu_path=mask_visu_path,
+        spacing_at_level_0=whole_slide.spacing_at_level_0,
         disable_tqdm=True,
         num_workers=num_workers,
     )
