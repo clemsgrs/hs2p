@@ -263,6 +263,44 @@ def copy_slides_locally(
 
 
 # ---------------------------------------------------------------------------
+# Slide metadata
+# ---------------------------------------------------------------------------
+
+
+def collect_slide_stats(
+    slides: list[dict[str, Any]],
+    target_spacing: float,
+) -> dict[str, Any]:
+    """Read basic slide metadata via openslide and return summary statistics.
+
+    Computes the slide area in megapixels at the target spacing, which gives
+    viewers a concrete sense of the data scale.  Returns an empty dict if
+    openslide is not available or no spacing metadata can be read.
+    """
+    try:
+        import openslide
+    except ImportError:
+        return {}
+
+    mpx_at_target: list[float] = []
+    for slide in slides:
+        try:
+            wsi = openslide.OpenSlide(str(slide["image_path"]))
+            w, h = wsi.dimensions
+            mpp_x = float(wsi.properties.get(openslide.PROPERTY_NAME_MPP_X) or 0)
+            wsi.close()
+            if mpp_x > 0 and target_spacing > 0:
+                scale = mpp_x / target_spacing
+                mpx_at_target.append(w * scale * h * scale / 1e6)
+        except Exception:
+            continue
+
+    if not mpx_at_target:
+        return {}
+    return {"median_mpx_at_target": float(np.median(mpx_at_target))}
+
+
+# ---------------------------------------------------------------------------
 # CLI helpers
 # ---------------------------------------------------------------------------
 
@@ -562,6 +600,7 @@ def plot_results(
     backend: str,
     total_slides: int,
     dataset_label: str,
+    slide_stats: dict[str, Any] | None = None,
 ) -> None:
     workers = [r["num_workers"] for r in records]
     tps = [r["mean_tiles_per_second"] for r in records]
@@ -704,6 +743,25 @@ def plot_results(
         fontsize=11, color=_TEXT_MUTED,
     )
 
+    # slide stats line (shown only when metadata is available)
+    if slide_stats:
+        stats_parts: list[str] = []
+        if "median_mpx_at_target" in slide_stats:
+            mpx = slide_stats["median_mpx_at_target"]
+            stats_parts.append(f"median {mpx:,.0f} Mpx at {target_spacing}µm/px")
+        if "avg_tiles_per_slide" in slide_stats:
+            stats_parts.append(f"avg {slide_stats['avg_tiles_per_slide']:,.0f} tiles/slide")
+        if "median_file_size_mb" in slide_stats:
+            stats_parts.append(f"median {slide_stats['median_file_size_mb']:.0f} MB/slide")
+        if stats_parts:
+            fig.text(
+                0.08, 0.875,
+                "  ·  ".join(stats_parts),
+                ha="left", va="top",
+                fontsize=10, color=_TEXT_MUTED,
+                alpha=0.8,
+            )
+
     # ------------------------------------------------------------------ legend
     legend = ax.legend(
         fontsize=11,
@@ -801,6 +859,17 @@ def main() -> int:
         sampled = copy_slides_locally(sampled, args.local_dir)
         print("Copy complete.", flush=True)
 
+    # ── collect slide metadata ────────────────────────────────────────────
+    print("\nCollecting slide metadata ...", flush=True)
+    slide_stats: dict[str, Any] = collect_slide_stats(sampled, args.target_spacing)
+    sizes_mb_local = [s["size_bytes"] / 1e6 for s in sampled if s["size_bytes"] > 0]
+    if sizes_mb_local:
+        slide_stats["median_file_size_mb"] = float(np.median(sizes_mb_local))
+    if "median_mpx_at_target" in slide_stats:
+        print(f"  median slide area at {args.target_spacing}µm/px: {slide_stats['median_mpx_at_target']:,.0f} Mpx")
+    else:
+        print("  (slide spacing metadata unavailable, skipping Mpx stat)")
+
     # ── benchmark ────────────────────────────────────────────────────────
     print(f"\nRunning benchmark: workers={sorted(args.workers)}, repeat={args.repeat}")
     print(f"Python: {args.python}")
@@ -831,6 +900,8 @@ def main() -> int:
         )
 
     # ── chart ─────────────────────────────────────────────────────────────
+    avg_tiles = records[0]["total_tiles"] / max(records[0]["slides_processed"], 1)
+    slide_stats["avg_tiles_per_slide"] = avg_tiles
     plot_results(
         records,
         output_path=args.output_dir / "throughput.png",
@@ -840,6 +911,7 @@ def main() -> int:
         backend=args.backend,
         total_slides=args.total_slides,
         dataset_label=args.dataset_label,
+        slide_stats=slide_stats,
     )
 
     return 0
