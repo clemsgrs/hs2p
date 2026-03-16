@@ -370,7 +370,7 @@ def write_config(
                 "use_hsv": True,
             },
             "filter_params": {
-                "ref_tile_size": 16,
+                "ref_tile_size": tile_size,
                 "a_t": 4,
                 "a_h": 2,
                 "max_n_holes": 8,
