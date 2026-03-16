@@ -367,9 +367,12 @@ class WholeSlideImage(object):
         """
 
         seg_level = self.get_best_level_for_downsample_custom(segment_params.downsample)
-        seg_spacing = self.get_level_spacing(seg_level)
 
-        img = np.asarray(self.wsi.get_slide(spacing=seg_spacing))
+        # Use the backend's native spacing for this level so that get_slide resolves
+        # to the correct pyramid level even when spacing_at_level_0 was overridden
+        # (the backend's internal level lookup uses raw file metadata, not the override).
+        native_seg_spacing = self.wsi.spacings[seg_level]
+        img = np.asarray(self.wsi.get_slide(spacing=native_seg_spacing))
         if img.ndim == 3 and img.shape[2] == 4:
             img = img[:, :, :3]
         img_hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)  # convert to HSV space
