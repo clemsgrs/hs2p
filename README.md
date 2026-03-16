@@ -4,6 +4,7 @@
     <a href="https://pypi.org/project/hs2p"><img src="https://img.shields.io/pypi/v/hs2p.svg" alt="PyPI version"></a>
     <a href="https://github.com/psf/black"><img alt="empty" src=https://img.shields.io/badge/code%20style-black-000000.svg></a>
     <a href="https://github.com/PyCQA/pylint"><img alt="empty" src=https://img.shields.io/github/stars/clemsgrs/hs2p?style=social></a>
+    <a href="https://huggingface.co/spaces/waticlems/hs2p-demo"><img alt="HuggingFace Space" src="https://img.shields.io/badge/🤗%20demo-hs2p-blue"></a>
 </p>
 
 `hs2p` is a Python package for efficient slide tiling and tile sampling at any requested spacing, whether or not that spacing is natively present in the whole-slide image. It is designed for computational pathology workflows that need reproducible coordinates.
@@ -13,19 +14,24 @@ We support two main workflows:
 - a Python API for library-style integration
 - a CLI for batch preprocessing from a CSV and YAML config
 
+## Demo
+
+Try hs2p interactively: **[hs2p-demo on HuggingFace Spaces](https://huggingface.co/spaces/waticlems/hs2p-demo)**  
+You can adjust tiling parameters (spacing, tile size, tissue threshold, overlap) and instantly see a tiling preview and tissue mask overlay.  
+You can also upload your own pyramidal WSI (up to 1 GB).
+
 ## Installation
 
 ```bash
 pip install hs2p
 ```
 
- If a mask is not provided, `hs2p` can segment tissue directly from the slide; if you want to precompute tissue masks, a standalone script is available.
-
 ## Workflows
 
 ### Tiling
 
-Tiling computes a reproducible grid of tile coordinates for each slide and saves them as named artifacts with extraction metadata, ready for downstream use.
+Tiling computes a reproducible grid of tile coordinates for each slide and saves them as named artifacts with extraction metadata, ready for downstream use.  
+When a precomputed tissue mask is not provided, `hs2p` segments tissue on-the-fly. If you want to precompute tissue masks, a [standalone script](docs/tissue-mask-generation.md) is available.
 
 <img src="illustrations/extraction_illu.png" alt="HS2P tiling workflow" width="1000" />
 
