@@ -1,4 +1,3 @@
-
 from pathlib import Path
 
 import numpy as np
@@ -63,7 +62,9 @@ def _sampling_parameters(*, tissue_threshold: float) -> SamplingParameters:
     )
 
 
-def test_extract_coordinates_returns_exact_coordinates_for_rectangular_tissue(fake_backend):
+def test_extract_coordinates_returns_exact_coordinates_for_rectangular_tissue(
+    fake_backend,
+):
     mask_l0 = np.zeros((16, 16, 1), dtype=np.uint8)
     mask_l0[4:12, 4:12, 0] = 1
     fake_backend(mask_l0)
@@ -89,7 +90,9 @@ def test_extract_coordinates_returns_exact_coordinates_for_rectangular_tissue(fa
 
 def test_extract_coordinates_respects_50_vs_51_percent_tissue_threshold(fake_backend):
     mask_l0 = np.zeros((16, 16, 1), dtype=np.uint8)
-    mask_l0[4:12, 4:10, 0] = 1  # produces two 100%-tissue tiles and two 50%-tissue tiles
+    mask_l0[4:12, 4:10, 0] = (
+        1  # produces two 100%-tissue tiles and two 50%-tissue tiles
+    )
     fake_backend(mask_l0)
 
     sampling_at_50 = _sampling_parameters(tissue_threshold=0.50)
@@ -174,7 +177,9 @@ def test_extract_coordinates_match_expected_coordinates_across_spacings(fake_bac
         assert result.tile_size_lv0 == exp["tile_size_lv0"]
 
 
-def test_extract_coordinates_segments_maskless_slides_without_annotation_pct_crash(monkeypatch):
+def test_extract_coordinates_segments_maskless_slides_without_annotation_pct_crash(
+    monkeypatch,
+):
     slide_l0 = np.full((32, 32, 3), 255, dtype=np.uint8)
     slide_l1 = slide_l0[::2, ::2, :]
     tissue_mask = np.zeros((32, 32), dtype=np.uint8)
@@ -182,7 +187,9 @@ def test_extract_coordinates_segments_maskless_slides_without_annotation_pct_cra
 
     def _fake_wholeslide(path: Path, backend: str = "asap"):
         del path, backend
-        return FakePyramidWSI(PyramidSpec(spacings=[1.0, 2.0], levels=[slide_l0, slide_l1]))
+        return FakePyramidWSI(
+            PyramidSpec(spacings=[1.0, 2.0], levels=[slide_l0, slide_l1])
+        )
 
     def _fake_segment_tissue(self, segment_params):
         del segment_params
@@ -215,13 +222,17 @@ def test_extract_coordinates_segments_maskless_slides_without_annotation_pct_cra
     assert len(result.coordinates) == len(result.tissue_percentages)
 
 
-def test_extract_coordinates_returns_zero_tile_result_for_tissue_free_maskless_slide(monkeypatch):
+def test_extract_coordinates_returns_zero_tile_result_for_tissue_free_maskless_slide(
+    monkeypatch,
+):
     slide_l0 = np.full((32, 32, 3), 255, dtype=np.uint8)
     slide_l1 = slide_l0[::2, ::2, :]
 
     def _fake_wholeslide(path: Path, backend: str = "asap"):
         del path, backend
-        return FakePyramidWSI(PyramidSpec(spacings=[1.0, 2.0], levels=[slide_l0, slide_l1]))
+        return FakePyramidWSI(
+            PyramidSpec(spacings=[1.0, 2.0], levels=[slide_l0, slide_l1])
+        )
 
     monkeypatch.setattr(wsimod.wsd, "WholeSlideImage", _fake_wholeslide)
 
@@ -246,7 +257,9 @@ def test_extract_coordinates_returns_zero_tile_result_for_tissue_free_maskless_s
     assert result.tile_size_lv0 == 8
 
 
-def test_sample_coordinates_returns_zero_tile_result_for_tissue_free_annotation(fake_backend):
+def test_sample_coordinates_returns_zero_tile_result_for_tissue_free_annotation(
+    fake_backend,
+):
     mask_l0 = np.zeros((16, 16, 1), dtype=np.uint8)
     fake_backend(mask_l0)
 

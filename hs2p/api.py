@@ -21,7 +21,6 @@ from hs2p.wsi import (
     visualize_coordinates,
 )
 
-
 _DEFAULT_TILING = default_config.tiling
 _DEFAULT_TILING_PARAMS = _DEFAULT_TILING.params
 _DEFAULT_SEGMENTATION = _DEFAULT_TILING.seg_params
@@ -234,11 +233,14 @@ def _validate_result_consistency(result: TilingResult) -> None:
     mismatched = [name for name, length in lengths.items() if length != expected]
     if mismatched:
         raise ValueError(
-            "TilingResult arrays do not match num_tiles for fields: " + ", ".join(mismatched)
+            "TilingResult arrays do not match num_tiles for fields: "
+            + ", ".join(mismatched)
         )
     expected_index = np.arange(expected, dtype=np.int32)
     actual_index = result.tile_index.astype(np.int32, copy=False)
-    if actual_index.shape != expected_index.shape or not np.array_equal(actual_index, expected_index):
+    if actual_index.shape != expected_index.shape or not np.array_equal(
+        actual_index, expected_index
+    ):
         raise ValueError("tile_index must be a contiguous range from 0 to num_tiles-1")
 
 
@@ -350,7 +352,9 @@ def compute_config_hash(
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _build_cli_configs(cfg: Any) -> tuple[TilingConfig, SegmentationConfig, FilterConfig]:
+def _build_cli_configs(
+    cfg: Any,
+) -> tuple[TilingConfig, SegmentationConfig, FilterConfig]:
     return (
         TilingConfig(
             target_spacing_um=cfg.tiling.params.target_spacing_um,
@@ -420,7 +424,11 @@ def save_tiling_result(
     coordinates_dir: Path | None = None,
 ) -> TilingArtifacts:
     _validate_result_consistency(result)
-    coordinates_dir = Path(coordinates_dir) if coordinates_dir is not None else Path(output_dir) / "coordinates"
+    coordinates_dir = (
+        Path(coordinates_dir)
+        if coordinates_dir is not None
+        else Path(output_dir) / "coordinates"
+    )
     coordinates_dir.mkdir(parents=True, exist_ok=True)
     npz_path = coordinates_dir / f"{result.sample_id}.tiles.npz"
     meta_path = coordinates_dir / f"{result.sample_id}.tiles.meta.json"
@@ -431,7 +439,9 @@ def save_tiling_result(
         "y": result.y.astype(np.int64, copy=False),
     }
     if result.tissue_fraction is not None:
-        payload["tissue_fraction"] = result.tissue_fraction.astype(np.float32, copy=False)
+        payload["tissue_fraction"] = result.tissue_fraction.astype(
+            np.float32, copy=False
+        )
     np.savez(npz_path, **payload)
 
     meta = {
@@ -541,7 +551,9 @@ def validate_tiling_artifacts(
     tiles_meta_path: Path,
     expected_config_hash: str,
 ) -> TilingArtifacts:
-    result = load_tiling_result(tiles_npz_path=tiles_npz_path, tiles_meta_path=tiles_meta_path)
+    result = load_tiling_result(
+        tiles_npz_path=tiles_npz_path, tiles_meta_path=tiles_meta_path
+    )
     if result.sample_id != whole_slide.sample_id:
         raise ValueError(
             f"Precomputed tiles sample_id mismatch for {whole_slide.sample_id}: "
@@ -579,7 +591,9 @@ def _validate_whole_slides(whole_slides: Sequence[SlideSpec]) -> None:
         seen.add(whole_slide.sample_id)
     if duplicates:
         duplicate_text = ", ".join(sorted(set(duplicates)))
-        raise ValueError(f"Duplicate sample_id values are not allowed: {duplicate_text}")
+        raise ValueError(
+            f"Duplicate sample_id values are not allowed: {duplicate_text}"
+        )
 
 
 def _maybe_load_existing_artifacts(
@@ -668,7 +682,9 @@ def overlay_mask_on_slide(
     )
 
 
-def _write_process_list(process_rows: list[dict[str, Any]], process_list_path: Path) -> None:
+def _write_process_list(
+    process_rows: list[dict[str, Any]], process_list_path: Path
+) -> None:
     process_list_path.parent.mkdir(parents=True, exist_ok=True)
     temp_path: Path | None = None
     try:
@@ -749,7 +765,9 @@ def _build_success_process_row(
     return {
         "sample_id": whole_slide.sample_id,
         "image_path": str(whole_slide.image_path),
-        "mask_path": str(whole_slide.mask_path) if whole_slide.mask_path is not None else None,
+        "mask_path": (
+            str(whole_slide.mask_path) if whole_slide.mask_path is not None else None
+        ),
         "tiling_status": "success",
         "num_tiles": artifact.num_tiles,
         "tiles_npz_path": str(artifact.tiles_npz_path),
@@ -768,7 +786,9 @@ def _build_failure_process_row(
     return {
         "sample_id": whole_slide.sample_id,
         "image_path": str(whole_slide.image_path),
-        "mask_path": str(whole_slide.mask_path) if whole_slide.mask_path is not None else None,
+        "mask_path": (
+            str(whole_slide.mask_path) if whole_slide.mask_path is not None else None
+        ),
         "tiling_status": "failed",
         "num_tiles": 0,
         "tiles_npz_path": np.nan,
@@ -1093,7 +1113,9 @@ def tile_slides(
                 for request in compute_requests
             ]
             with mp.Pool(processes=pool_processes) as pool:
-                _drain_planned_work(iter(pool.imap(_compute_tiling_result_from_request, pool_requests)))
+                _drain_planned_work(
+                    iter(pool.imap(_compute_tiling_result_from_request, pool_requests))
+                )
         else:
             serial_requests = [
                 _SlideComputeRequest(
@@ -1108,7 +1130,10 @@ def tile_slides(
                 for request in compute_requests
             ]
             _drain_planned_work(
-                iter(_compute_tiling_result_from_request(request) for request in serial_requests)
+                iter(
+                    _compute_tiling_result_from_request(request)
+                    for request in serial_requests
+                )
             )
         _finalize_pending_preview_if_any()
     finally:

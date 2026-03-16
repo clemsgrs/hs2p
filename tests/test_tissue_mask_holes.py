@@ -1,7 +1,6 @@
 import numpy as np
 import pytest
 
-
 utils_mod = pytest.importorskip("hs2p.wsi.utils")
 
 
@@ -69,4 +68,6 @@ def test_check_coordinates_returns_vectorized_outputs_with_expected_coverages():
     assert isinstance(keep_flags, np.ndarray)
     assert isinstance(tissue_pcts, np.ndarray)
     np.testing.assert_array_equal(keep_flags, np.array([1, 0, 1, 0], dtype=np.uint8))
-    np.testing.assert_allclose(tissue_pcts, np.array([1.0, 0.0, 1.0, 0.0], dtype=np.float32))
+    np.testing.assert_allclose(
+        tissue_pcts, np.array([1.0, 0.0, 1.0, 0.0], dtype=np.float32)
+    )

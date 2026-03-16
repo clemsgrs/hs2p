@@ -1,4 +1,3 @@
-
 from types import SimpleNamespace
 
 import numpy as np
@@ -21,11 +20,18 @@ def test_segment_tissue_strips_alpha_channel_before_hsv_conversion(monkeypatch):
         return np.zeros((2, 2, 3), dtype=np.uint8)
 
     monkeypatch.setattr(wsimod.cv2, "cvtColor", _fake_cvt_color)
-    monkeypatch.setattr(wsimod.cv2, "medianBlur", lambda channel, ksize: np.zeros((2, 2), dtype=np.uint8))
+    monkeypatch.setattr(
+        wsimod.cv2,
+        "medianBlur",
+        lambda channel, ksize: np.zeros((2, 2), dtype=np.uint8),
+    )
     monkeypatch.setattr(
         wsimod.cv2,
         "threshold",
-        lambda src, thresh, maxval, threshold_type: (0, np.ones((2, 2), dtype=np.uint8)),
+        lambda src, thresh, maxval, threshold_type: (
+            0,
+            np.ones((2, 2), dtype=np.uint8),
+        ),
     )
 
     seg_level = wsimod.WholeSlideImage.segment_tissue(
@@ -43,4 +49,6 @@ def test_segment_tissue_strips_alpha_channel_before_hsv_conversion(monkeypatch):
 
     assert seg_level == 0
     assert captured["shape"] == (2, 2, 3)
-    np.testing.assert_array_equal(dummy.annotation_mask["tissue"], np.ones((2, 2), dtype=np.uint8))
+    np.testing.assert_array_equal(
+        dummy.annotation_mask["tissue"], np.ones((2, 2), dtype=np.uint8)
+    )

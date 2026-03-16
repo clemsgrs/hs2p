@@ -1,4 +1,3 @@
-
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,7 +15,9 @@ class FakePyramidWSI:
         self.spacings = spec.spacings
         self._levels = spec.levels
         self.shapes = tuple((arr.shape[1], arr.shape[0]) for arr in self._levels)
-        self.downsamplings = tuple(self.shapes[0][0] / shape[0] for shape in self.shapes)
+        self.downsamplings = tuple(
+            self.shapes[0][0] / shape[0] for shape in self.shapes
+        )
 
     def _best_level(self, spacing: float) -> int:
         return int(np.argmin([abs(s - spacing) for s in self.spacings]))

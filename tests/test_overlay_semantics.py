@@ -5,7 +5,6 @@ import numpy as np
 import pytest
 from PIL import Image
 
-
 cv2 = pytest.importorskip("cv2")
 wsi_mod = pytest.importorskip("hs2p.wsi")
 
@@ -42,8 +41,12 @@ def test_overlay_mask_on_tile_only_colored_labels_are_blended():
     overlay_arr = np.array(overlay)
 
     assert np.array_equal(overlay_arr[0, 0], tile_arr[0, 0])  # background untouched
-    assert np.array_equal(overlay_arr[1, 0], tile_arr[1, 0])  # uncolored label untouched
-    assert not np.array_equal(overlay_arr[0, 1], tile_arr[0, 1])  # colored label blended
+    assert np.array_equal(
+        overlay_arr[1, 0], tile_arr[1, 0]
+    )  # uncolored label untouched
+    assert not np.array_equal(
+        overlay_arr[0, 1], tile_arr[0, 1]
+    )  # colored label blended
 
 
 def test_overlay_mask_on_slide_matches_tile_semantics(monkeypatch):
@@ -89,8 +92,12 @@ def test_overlay_mask_on_slide_matches_tile_semantics(monkeypatch):
     overlay_arr = np.array(overlay.convert("RGB"))
 
     assert np.array_equal(overlay_arr[0, 0], slide_arr[0, 0])  # background untouched
-    assert np.array_equal(overlay_arr[1, 0], slide_arr[1, 0])  # uncolored label untouched
-    assert not np.array_equal(overlay_arr[0, 1], slide_arr[0, 1])  # colored label blended
+    assert np.array_equal(
+        overlay_arr[1, 0], slide_arr[1, 0]
+    )  # uncolored label untouched
+    assert not np.array_equal(
+        overlay_arr[0, 1], slide_arr[0, 1]
+    )  # colored label blended
 
 
 def test_overlay_mask_on_slide_accepts_in_memory_mask_array(monkeypatch):
@@ -186,7 +193,9 @@ def test_extract_coordinates_uses_overlay_mask_preview_instead_of_line_rendering
             self.spacings = [0.5]
             self.level_dimensions = [(2, 2)]
             self.level_downsamples = [(1.0, 1.0)]
-            self.annotation_mask = {"tissue": np.array([[0, 255], [255, 0]], dtype=np.uint8)}
+            self.annotation_mask = {
+                "tissue": np.array([[0, 255], [255, 0]], dtype=np.uint8)
+            }
 
         def get_tile_coordinates(
             self,
@@ -261,7 +270,9 @@ def test_extract_coordinates_uses_overlay_mask_preview_instead_of_line_rendering
     assert result.coordinates == [(0, 0)]
     assert preview_path.is_file()
     assert len(preview_calls) == 1
-    np.testing.assert_array_equal(preview_calls[0]["mask_arr"], np.array([[0, 1], [1, 0]], dtype=np.uint8))
+    np.testing.assert_array_equal(
+        preview_calls[0]["mask_arr"], np.array([[0, 1], [1, 0]], dtype=np.uint8)
+    )
     assert preview_calls[0]["annotation_mask_path"] is None
 
 
@@ -370,7 +381,9 @@ def test_extract_coordinates_preview_uses_in_memory_annotation_labels_when_style
     assert result.coordinates == [(0, 0)]
     assert preview_path.is_file()
     assert len(preview_calls) == 1
-    np.testing.assert_array_equal(preview_calls[0]["mask_arr"], np.array([[0, 1], [1, 0]], dtype=np.uint8))
+    np.testing.assert_array_equal(
+        preview_calls[0]["mask_arr"], np.array([[0, 1], [1, 0]], dtype=np.uint8)
+    )
     assert preview_calls[0]["annotation_mask_path"] is None
     assert preview_calls[0]["downsample"] == 8
 
@@ -386,7 +399,9 @@ def test_draw_grid_from_coordinates_crops_loaded_canvas_instead_of_fetching_tile
             return 1.0
 
         def get_tile(self, *args, **kwargs):
-            raise AssertionError("draw_grid_from_coordinates should crop from the loaded canvas")
+            raise AssertionError(
+                "draw_grid_from_coordinates should crop from the loaded canvas"
+            )
 
     canvas = np.array(
         [

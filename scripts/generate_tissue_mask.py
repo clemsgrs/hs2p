@@ -1,4 +1,3 @@
-
 import argparse
 import csv
 import glob
@@ -17,7 +16,6 @@ from PIL import Image
 from tqdm import tqdm
 
 import wholeslidedata as wsd
-
 
 HSV_LOWER = np.array([90, 8, 103], dtype=np.uint8)
 HSV_UPPER = np.array([180, 255, 255], dtype=np.uint8)
@@ -206,7 +204,9 @@ def get_downsamples(wsi: wsd.WholeSlideImage) -> list[tuple[float, float]]:
     return level_downsamples
 
 
-def get_best_level_for_downsample_custom(downsamples: list[tuple[int, int]], target_downsample: int):
+def get_best_level_for_downsample_custom(
+    downsamples: list[tuple[int, int]], target_downsample: int
+):
     """
     Determines the best level for a given downsample factor based on the available
     level downsample values.
@@ -283,7 +283,9 @@ def load_wsi_at_spacing(
     else:
         spacings = [spacing_at_level_0 * sp / base_spacings[0] for sp in base_spacings]
 
-    level, is_within_tolerance = get_best_level_for_spacing(wsi, target_spacing, tolerance)
+    level, is_within_tolerance = get_best_level_for_spacing(
+        wsi, target_spacing, tolerance
+    )
     wsi_arr = wsi.get_slide(spacing=spacings[level])
 
     if not is_within_tolerance:
@@ -360,7 +362,9 @@ def segment_tissue_hsv(
     gaussian_sigma_px: float = 0.0,
 ) -> np.ndarray:
     if gaussian_sigma_px > 0:
-        wsi_arr = cv2.GaussianBlur(wsi_arr, (0, 0), sigmaX=gaussian_sigma_px, sigmaY=gaussian_sigma_px)
+        wsi_arr = cv2.GaussianBlur(
+            wsi_arr, (0, 0), sigmaX=gaussian_sigma_px, sigmaY=gaussian_sigma_px
+        )
 
     img_hsv = cv2.cvtColor(wsi_arr, cv2.COLOR_RGB2HSV)
     mask = (cv2.inRange(img_hsv, lower, upper) > 0).astype(np.uint8)
@@ -391,7 +395,9 @@ def _sigma_um_to_px(sigma_um: float, spacing_um_per_px: float) -> float:
 def _remove_small_tissue_components(mask: np.ndarray, min_area_px: int) -> np.ndarray:
     if min_area_px <= 0:
         return mask
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+        mask.astype(np.uint8), connectivity=8
+    )
     if num_labels <= 1:
         return mask
     keep = np.zeros_like(mask, dtype=np.uint8)
@@ -512,7 +518,9 @@ def _compute_level0_mask_with_coarse_roi_shortcut(
         spacing_at_level_0=spacing_at_level_0,
     )
     coarse_sigma_px = _sigma_um_to_px(gaussian_sigma_um, coarse_effective_spacing)
-    coarse_mask = segment_tissue_hsv(wsi_arr=coarse_arr, gaussian_sigma_px=coarse_sigma_px)
+    coarse_mask = segment_tissue_hsv(
+        wsi_arr=coarse_arr, gaussian_sigma_px=coarse_sigma_px
+    )
     coarse_mask = postprocess_mask(
         mask=coarse_mask,
         spacing_um_per_px=coarse_effective_spacing,
@@ -535,7 +543,9 @@ def _compute_level0_mask_with_coarse_roi_shortcut(
         margin_px=margin_px,
     )
 
-    tmp_file = tempfile.NamedTemporaryFile(prefix="hs2p-mask-", suffix=".mmap", delete=False)
+    tmp_file = tempfile.NamedTemporaryFile(
+        prefix="hs2p-mask-", suffix=".mmap", delete=False
+    )
     tmp_path = Path(tmp_file.name)
     tmp_file.close()
     try:
@@ -648,7 +658,9 @@ def build_mask_pyramid(
         next_h = max(1, int(round(prev_h / downsample_per_level)))
         if min(next_h, next_w) < min_size:
             break
-        next_level = cv2.resize(previous, (next_w, next_h), interpolation=cv2.INTER_NEAREST)
+        next_level = cv2.resize(
+            previous, (next_w, next_h), interpolation=cv2.INTER_NEAREST
+        )
         levels.append(next_level)
 
     return levels
@@ -690,11 +702,17 @@ def build_output_mapping(
 ) -> list[tuple[Path, Path]]:
     if len(input_wsi_paths) == 1:
         if output_path is not None and output_dir is not None:
-            raise ValueError("For single-slide mode, provide only one of --output or --output-dir")
+            raise ValueError(
+                "For single-slide mode, provide only one of --output or --output-dir"
+            )
         if output_path is None and output_dir is None:
             raise ValueError("For single-slide mode, provide --output or --output-dir")
         slide_path = input_wsi_paths[0]
-        final_output = output_path if output_path is not None else output_dir / f"{slide_path.stem}.tif"
+        final_output = (
+            output_path
+            if output_path is not None
+            else output_dir / f"{slide_path.stem}.tif"
+        )
         return [(slide_path, final_output)]
 
     if output_path is not None:
@@ -740,7 +758,10 @@ def write_pyramidal_mask_tiff(
             "data": level_arr,
             "photometric": "minisblack",
             "compression": compression,
-            "resolution": (_spacing_to_pixels_per_cm(spacing), _spacing_to_pixels_per_cm(spacing)),
+            "resolution": (
+                _spacing_to_pixels_per_cm(spacing),
+                _spacing_to_pixels_per_cm(spacing),
+            ),
             "resolutionunit": "CENTIMETER",
             "metadata": None,
         }
@@ -756,7 +777,7 @@ def write_pyramidal_mask_tiff(
         _write_level(tif, levels[0], level0_spacing)
 
         for idx, level in enumerate(levels[1:], start=1):
-            spacing = level0_spacing * (downsample_per_level ** idx)
+            spacing = level0_spacing * (downsample_per_level**idx)
             _write_level(
                 tif,
                 level,
@@ -881,7 +902,9 @@ def can_skip_slide(
 
     expected_input_fingerprint = cached_entry.get("input_fingerprint")
     expected_output_fingerprint = cached_entry.get("output_fingerprint")
-    if not isinstance(expected_input_fingerprint, dict) or not isinstance(expected_output_fingerprint, dict):
+    if not isinstance(expected_input_fingerprint, dict) or not isinstance(
+        expected_output_fingerprint, dict
+    ):
         return False
 
     current_input_fingerprint = get_file_fingerprint(input_wsi)
@@ -906,8 +929,12 @@ def _process_slide_job(job: dict[str, object]) -> dict[str, object]:
                 backend=str(job["backend"]),
                 spacing_at_level_0=job["spacing_at_level_0"],
             )
-            gaussian_sigma_px = _sigma_um_to_px(float(job["gaussian_sigma_um"]), effective_spacing)
-            mask_l0 = segment_tissue_hsv(wsi_arr=wsi_arr, gaussian_sigma_px=gaussian_sigma_px)
+            gaussian_sigma_px = _sigma_um_to_px(
+                float(job["gaussian_sigma_um"]), effective_spacing
+            )
+            mask_l0 = segment_tissue_hsv(
+                wsi_arr=wsi_arr, gaussian_sigma_px=gaussian_sigma_px
+            )
             mask_l0 = postprocess_mask(
                 mask=mask_l0,
                 spacing_um_per_px=effective_spacing,
@@ -918,23 +945,27 @@ def _process_slide_job(job: dict[str, object]) -> dict[str, object]:
             )
             processing_mode = "full"
         else:
-            mask_l0, effective_spacing, processing_mode = _compute_level0_mask_with_coarse_roi_shortcut(
-                wsi_path=input_wsi,
-                target_spacing=float(job["spacing"]),
-                tolerance=float(job["tolerance"]),
-                backend=str(job["backend"]),
-                spacing_at_level_0=job["spacing_at_level_0"],
-                coarse_spacing=float(job["coarse_spacing"]),
-                coarse_roi_margin_um=float(job["coarse_roi_margin_um"]),
-                processing_tile_size=int(job["processing_tile_size"]),
-                min_component_area_um2=float(job["min_component_area_um2"]),
-                min_hole_area_um2=float(job["min_hole_area_um2"]),
-                gaussian_sigma_um=float(job["gaussian_sigma_um"]),
-                open_radius_um=float(job["open_radius_um"]),
-                close_radius_um=float(job["close_radius_um"]),
+            mask_l0, effective_spacing, processing_mode = (
+                _compute_level0_mask_with_coarse_roi_shortcut(
+                    wsi_path=input_wsi,
+                    target_spacing=float(job["spacing"]),
+                    tolerance=float(job["tolerance"]),
+                    backend=str(job["backend"]),
+                    spacing_at_level_0=job["spacing_at_level_0"],
+                    coarse_spacing=float(job["coarse_spacing"]),
+                    coarse_roi_margin_um=float(job["coarse_roi_margin_um"]),
+                    processing_tile_size=int(job["processing_tile_size"]),
+                    min_component_area_um2=float(job["min_component_area_um2"]),
+                    min_hole_area_um2=float(job["min_hole_area_um2"]),
+                    gaussian_sigma_um=float(job["gaussian_sigma_um"]),
+                    open_radius_um=float(job["open_radius_um"]),
+                    close_radius_um=float(job["close_radius_um"]),
+                )
             )
 
-        resolved_min_size = job["min_size"] if job["min_size"] is not None else int(job["tile_size"])
+        resolved_min_size = (
+            job["min_size"] if job["min_size"] is not None else int(job["tile_size"])
+        )
         levels = build_mask_pyramid(
             level0_mask=mask_l0,
             downsample_per_level=downsample_per_level,
@@ -952,7 +983,7 @@ def _process_slide_job(job: dict[str, object]) -> dict[str, object]:
 
         level_info = []
         for idx, level in enumerate(levels):
-            level_spacing = effective_spacing * (downsample_per_level ** idx)
+            level_spacing = effective_spacing * (downsample_per_level**idx)
             height, width = level.shape[:2]
             level_info.append(
                 {
@@ -1020,10 +1051,14 @@ def process_slides(
     processing_tile_size: int = 2048,
 ) -> list[dict[str, str]]:
     results: list[dict[str, str]] = []
-    cache_manifest = load_cache_manifest(cache_manifest_path) if not no_cache else {
-        "command_signature": None,
-        "entries": {},
-    }
+    cache_manifest = (
+        load_cache_manifest(cache_manifest_path)
+        if not no_cache
+        else {
+            "command_signature": None,
+            "entries": {},
+        }
+    )
     cached_command_signature = cache_manifest.get("command_signature")
     cached_entries_raw = cache_manifest.get("entries", {})
     cached_entries = cached_entries_raw if isinstance(cached_entries_raw, dict) else {}
@@ -1036,21 +1071,29 @@ def process_slides(
         updated_entries = {}
 
     jobs: list[dict[str, object]] = []
-    progress_bar = tqdm(total=len(output_mapping), desc="Generating tissue masks", unit="slide")
+    progress_bar = tqdm(
+        total=len(output_mapping), desc="Generating tissue masks", unit="slide"
+    )
 
     for index, (input_wsi, output_path) in enumerate(output_mapping, start=1):
         traceback_text = ""
         status = "success"
         cache_key = str(input_wsi.resolve())
 
-        if (not no_cache) and cached_command_signature == command_signature and can_skip_slide(
-            input_wsi=input_wsi,
-            output_path=output_path,
-            cached_entry=updated_entries.get(cache_key),
+        if (
+            (not no_cache)
+            and cached_command_signature == command_signature
+            and can_skip_slide(
+                input_wsi=input_wsi,
+                output_path=output_path,
+                cached_entry=updated_entries.get(cache_key),
+            )
         ):
             status = "skipped"
             if verbose:
-                print(f"[{index}/{len(output_mapping)}] Skipped (cache hit): {input_wsi}")
+                print(
+                    f"[{index}/{len(output_mapping)}] Skipped (cache hit): {input_wsi}"
+                )
             results.append(
                 {
                     "slide_path": str(input_wsi),
@@ -1166,7 +1209,9 @@ def get_summary_csv_path(*, output_path: Path | None, output_dir: Path | None) -
     return output_path.parent / "summary.csv"
 
 
-def get_cache_manifest_path(*, output_path: Path | None, output_dir: Path | None) -> Path:
+def get_cache_manifest_path(
+    *, output_path: Path | None, output_dir: Path | None
+) -> Path:
     if output_dir is not None:
         return output_dir / "cache_manifest.json"
     assert output_path is not None
@@ -1224,7 +1269,9 @@ def main() -> None:
         tile_size=args.tile_size,
         min_size=args.min_size,
     )
-    cache_manifest_path = get_cache_manifest_path(output_path=args.output, output_dir=args.output_dir)
+    cache_manifest_path = get_cache_manifest_path(
+        output_path=args.output, output_dir=args.output_dir
+    )
 
     results = process_slides(
         output_mapping=output_mapping,
@@ -1252,7 +1299,9 @@ def main() -> None:
         processing_tile_size=args.processing_tile_size,
     )
 
-    summary_csv_path = get_summary_csv_path(output_path=args.output, output_dir=args.output_dir)
+    summary_csv_path = get_summary_csv_path(
+        output_path=args.output, output_dir=args.output_dir
+    )
     write_summary_csv(summary_csv_path, results)
 
     success_count = sum(row["status"] == "success" for row in results)

@@ -1,4 +1,3 @@
-
 from pathlib import Path
 
 import numpy as np
@@ -7,7 +6,6 @@ import pytest
 from hs2p.api import FilterConfig, SegmentationConfig, TilingConfig
 import hs2p.wsi as wsi_api
 from hs2p.wsi import SamplingParameters
-
 
 pytestmark = pytest.mark.integration
 
