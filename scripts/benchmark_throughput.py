@@ -282,22 +282,27 @@ def collect_slide_stats(
     except ImportError:
         return {}
 
-    mpx_at_target: list[float] = []
+    widths_at_target: list[float] = []
+    heights_at_target: list[float] = []
     for slide in slides:
         try:
             wsi = openslide.OpenSlide(str(slide["image_path"]))
             w, h = wsi.dimensions
             mpp_x = float(wsi.properties.get(openslide.PROPERTY_NAME_MPP_X) or 0)
+            mpp_y = float(wsi.properties.get(openslide.PROPERTY_NAME_MPP_Y) or mpp_x)
             wsi.close()
-            if mpp_x > 0 and target_spacing > 0:
-                scale = mpp_x / target_spacing
-                mpx_at_target.append(w * scale * h * scale / 1e6)
+            if mpp_x > 0 and mpp_y > 0 and target_spacing > 0:
+                widths_at_target.append(w * mpp_x / target_spacing)
+                heights_at_target.append(h * mpp_y / target_spacing)
         except Exception:
             continue
 
-    if not mpx_at_target:
+    if not widths_at_target:
         return {}
-    return {"median_mpx_at_target": float(np.median(mpx_at_target))}
+    return {
+        "median_width_px": float(np.median(widths_at_target)),
+        "median_height_px": float(np.median(heights_at_target)),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -746,9 +751,10 @@ def plot_results(
     # slide stats line (shown only when metadata is available)
     if slide_stats:
         stats_parts: list[str] = []
-        if "median_mpx_at_target" in slide_stats:
-            mpx = slide_stats["median_mpx_at_target"]
-            stats_parts.append(f"median {mpx:,.0f} Mpx at {target_spacing}µm/px")
+        if "median_width_px" in slide_stats and "median_height_px" in slide_stats:
+            w = int(slide_stats["median_width_px"])
+            h = int(slide_stats["median_height_px"])
+            stats_parts.append(f"median {w:,} × {h:,} px at {target_spacing}µm/px")
         if "avg_tiles_per_slide" in slide_stats:
             stats_parts.append(f"avg {slide_stats['avg_tiles_per_slide']:,.0f} tiles/slide")
         if "median_file_size_mb" in slide_stats:
@@ -865,10 +871,13 @@ def main() -> int:
     sizes_mb_local = [s["size_bytes"] / 1e6 for s in sampled if s["size_bytes"] > 0]
     if sizes_mb_local:
         slide_stats["median_file_size_mb"] = float(np.median(sizes_mb_local))
-    if "median_mpx_at_target" in slide_stats:
-        print(f"  median slide area at {args.target_spacing}µm/px: {slide_stats['median_mpx_at_target']:,.0f} Mpx")
+    if "median_width_px" in slide_stats:
+        print(
+            f"  median slide size at {args.target_spacing}µm/px: "
+            f"{int(slide_stats['median_width_px']):,} × {int(slide_stats['median_height_px']):,} px"
+        )
     else:
-        print("  (slide spacing metadata unavailable, skipping Mpx stat)")
+        print("  (slide spacing metadata unavailable, skipping size stat)")
 
     # ── benchmark ────────────────────────────────────────────────────────
     print(f"\nRunning benchmark: workers={sorted(args.workers)}, repeat={args.repeat}")
