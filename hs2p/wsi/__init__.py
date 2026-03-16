@@ -271,6 +271,7 @@ def _save_overlay_preview(
     palette: np.ndarray | None = None,
     pixel_mapping: dict[str, int] | None = None,
     color_mapping: dict[str, list[int] | None] | None = None,
+    tile_size_lv0: int | None = None,
 ) -> None:
     mask_visu_path.parent.mkdir(parents=True, exist_ok=True)
     overlay = overlay_mask_on_slide(
@@ -282,6 +283,7 @@ def _save_overlay_preview(
         palette=palette,
         pixel_mapping=pixel_mapping,
         color_mapping=color_mapping,
+        tile_size_lv0=tile_size_lv0,
     )
     overlay.save(mask_visu_path)
 
@@ -367,6 +369,7 @@ def extract_coordinates(
             palette=preview_palette,
             pixel_mapping=preview_pixel_mapping,
             color_mapping=preview_color_mapping,
+            tile_size_lv0=tile_size_lv0,
         )
     tile_spacing = wsi.get_level_spacing(tile_level)
     read_tile_size_px = int(round(tiling_params.tile_size * resize_factor, 0))
@@ -441,6 +444,7 @@ def sample_coordinates(
             mask_arr=_normalize_tissue_mask(wsi.annotation_mask["tissue"]),
             mask_visu_path=mask_visu_path,
             downsample=preview_downsample,
+            tile_size_lv0=tile_size_lv0,
         )
     tile_spacing = wsi.get_level_spacing(tile_level)
     read_tile_size_px = int(round(tiling_params.tile_size * resize_factor, 0))
@@ -585,6 +589,7 @@ def overlay_mask_on_slide(
     color_mapping: dict[str, list[int] | None] | None = None,
     alpha: float = 0.5,
     mask_arr: np.ndarray | None = None,
+    tile_size_lv0: int | None = None,
 ):
     """
     Show a mask overlayed on a slide
@@ -604,6 +609,12 @@ def overlay_mask_on_slide(
     height, width, _ = wsi_arr.shape
 
     wsi = Image.fromarray(wsi_arr).convert("RGBA")
+    if tile_size_lv0 is not None:
+        tile_size_at_vis_level = tuple(
+            (np.array((tile_size_lv0, tile_size_lv0)) / np.array(wsi_object.level_downsamples[vis_level])).astype(np.int32)
+        )
+        wsi = pad_to_patch_size(wsi.convert("RGB"), tile_size_at_vis_level).convert("RGBA")
+        width, height = wsi.size
     if annotation_mask_path is not None:
         mask_object = WholeSlideImage(path=annotation_mask_path, backend=backend)
         mask_width_at_level_0, _ = mask_object.level_dimensions[0]
