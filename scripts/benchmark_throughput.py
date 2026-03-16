@@ -459,14 +459,19 @@ def run_one(
     ]
     t0 = time.perf_counter()
     with log_path.open("w") as log_fh:
-        result = subprocess.run(
+        process = subprocess.Popen(
             cmd,
             cwd=_REPO_ROOT,
-            stdout=log_fh,
+            stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            check=False,
+            text=True,
         )
+        for line in process.stdout:  # type: ignore[union-attr]
+            print(line, end="", flush=True)
+            log_fh.write(line)
+        process.wait()
     elapsed = time.perf_counter() - t0
+    result = process
 
     stats = parse_process_list(tiling_output / "process_list.csv")
     return {
