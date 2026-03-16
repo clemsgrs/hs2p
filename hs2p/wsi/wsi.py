@@ -129,7 +129,8 @@ class WholeSlideImage(object):
         self._level_spacing_cache = {}  # add a cache for level spacings
 
         self.spacing_at_level_0 = spacing_at_level_0  # manually set spacing at level 0
-        self.spacings = self.get_spacings()
+        self.raw_spacings = list(self.wsi.spacings)  # native spacings from file metadata, never overridden
+        self.spacings = self.get_spacings()  # physical spacings, possibly overridden via spacing_at_level_0
         self.level_dimensions = self.wsi.shapes
         self.level_downsamples = self.get_downsamples()
         self.backend = backend
@@ -147,32 +148,36 @@ class WholeSlideImage(object):
         if sampling_params is not None:
             self.annotation_pct = sampling_params.tissue_percentage
 
-    def get_slide(self, spacing: float):
-        return self.wsi.get_slide(spacing=spacing)
+    def get_slide(self, level: int) -> np.ndarray:
+        """Return the full slide image at the given pyramid level.
 
-    def get_tile(self, x: int, y: int, width: int, height: int, spacing: float):
+        Uses raw_spacings so the backend resolves to the correct level regardless
+        of any spacing_at_level_0 override.
         """
-        Extracts a tile from a whole slide image at the specified coordinates, size, and spacing.
+        return self.wsi.get_slide(spacing=self.raw_spacings[level])
+
+    def get_tile(self, x: int, y: int, width: int, height: int, level: int) -> np.ndarray:
+        """
+        Extracts a tile from a whole slide image at the specified coordinates and pyramid level.
 
         Args:
-            x (int): The x-coordinate of the top-left corner of the tile.
-            y (int): The y-coordinate of the top-left corner of the tile.
-            width (int): Tile width.
-            height (int): Tile height.
-            spacing (float): The spacing (resolution) at which the tile should be extracted.
+            x (int): The x-coordinate of the top-left corner of the tile (level-0 pixel space).
+            y (int): The y-coordinate of the top-left corner of the tile (level-0 pixel space).
+            width (int): Tile width in pixels at the target level.
+            height (int): Tile height in pixels at the target level.
+            level (int): Pyramid level to read from.
 
         Returns:
             numpy.ndarray: The extracted tile as a numpy array.
         """
-        tile = self.wsi.get_patch(
+        return self.wsi.get_patch(
             x,
             y,
             width,
             height,
-            spacing=spacing,
+            spacing=self.raw_spacings[level],
             center=False,
         )
-        return tile
 
     def get_downsamples(self):
         """
@@ -208,13 +213,11 @@ class WholeSlideImage(object):
             `spacing` attribute.
         """
         if self.spacing_at_level_0 is None:
-            spacings = self.wsi.spacings
-        else:
-            spacings = [
-                self.spacing_at_level_0 * s / self.wsi.spacings[0]
-                for s in self.wsi.spacings
-            ]
-        return spacings
+            return self.raw_spacings
+        return [
+            self.spacing_at_level_0 * s / self.raw_spacings[0]
+            for s in self.raw_spacings
+        ]
 
     def get_level_spacing(self, level: int):
         """
@@ -368,11 +371,7 @@ class WholeSlideImage(object):
 
         seg_level = self.get_best_level_for_downsample_custom(segment_params.downsample)
 
-        # Use the backend's native spacing for this level so that get_slide resolves
-        # to the correct pyramid level even when spacing_at_level_0 was overridden
-        # (the backend's internal level lookup uses raw file metadata, not the override).
-        native_seg_spacing = self.wsi.spacings[seg_level]
-        img = np.asarray(self.wsi.get_slide(spacing=native_seg_spacing))
+        img = np.asarray(self.get_slide(seg_level))
         if img.ndim == 3 and img.shape[2] == 4:
             img = img[:, :, :3]
         img_hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)  # convert to HSV space
@@ -496,8 +495,7 @@ class WholeSlideImage(object):
         filter_params,
     ):
         if filter_params.filter_white or filter_params.filter_black:
-            tile_spacing = self.get_level_spacing(tile_level)
-            downsample = tile_spacing / self.get_level_spacing(0)
+            downsample = self.get_level_spacing(tile_level) / self.get_level_spacing(0)
             img_w, img_h = self.level_dimensions[tile_level]
             filtered_keep_flags = []
             error_count = 0
@@ -506,13 +504,7 @@ class WholeSlideImage(object):
                 if keep:
                     try:
                         x, y = int(coord[0]), int(coord[1])
-                        tile = self.get_tile(
-                            x,
-                            y,
-                            tile_size,
-                            tile_size,
-                            spacing=tile_spacing,
-                        )
+                        tile = self.get_tile(x, y, tile_size, tile_size, tile_level)
                         # restrict coverage to valid portion of the slide
                         x_downsample, y_downsample = int(x / downsample), int(
                             y / downsample

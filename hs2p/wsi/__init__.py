@@ -607,8 +607,7 @@ def overlay_mask_on_slide(
     wsi_object = WholeSlideImage(path=wsi_path, backend=backend)
 
     vis_level = wsi_object.get_best_level_for_downsample_custom(downsample)
-    vis_spacing = wsi_object.spacings[vis_level]
-    wsi_arr = wsi_object.get_slide(spacing=vis_spacing)
+    wsi_arr = wsi_object.get_slide(vis_level)
     height, width, _ = wsi_arr.shape
 
     wsi = Image.fromarray(wsi_arr).convert("RGBA")
@@ -854,14 +853,12 @@ def visualize_coordinates(
 ):
     wsi = WholeSlideImage(wsi_path, backend=backend)
     vis_level = wsi.get_best_level_for_downsample_custom(downsample)
-    vis_spacing = wsi.spacings[vis_level]
-
     if mask_path is not None:
         mask = WholeSlideImage(mask_path, backend=backend)
     else:
         mask = None
 
-    canvas = wsi.get_slide(spacing=vis_spacing)
+    canvas = wsi.get_slide(vis_level)
     canvas = Image.fromarray(canvas).convert("RGB")
     if len(coordinates) == 0:
         return canvas
