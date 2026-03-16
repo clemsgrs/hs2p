@@ -90,12 +90,11 @@ class HasEnoughTissue(object):
         x2 = np.clip(x1 + self.downsampled_tile_size, 0, width)
         y2 = np.clip(y1 + self.downsampled_tile_size, 0, height)
 
-        integral = cv2.integral(self.precomputed_mask.astype(np.uint8), sdepth=cv2.CV_32S)
+        integral = cv2.integral(
+            self.precomputed_mask.astype(np.uint8), sdepth=cv2.CV_32S
+        )
         tissue_area = (
-            integral[y2, x2]
-            - integral[y1, x2]
-            - integral[y2, x1]
-            + integral[y1, x1]
+            integral[y2, x2] - integral[y1, x2] - integral[y2, x1] + integral[y1, x1]
         ).astype(np.float32)
         tissue_pcts = np.round(tissue_area / tile_area, 3).astype(np.float32)
         keep_flags = (tissue_pcts >= self.pct).astype(np.uint8)

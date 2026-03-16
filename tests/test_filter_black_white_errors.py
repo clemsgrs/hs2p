@@ -1,7 +1,6 @@
 import numpy as np
 import pytest
 
-
 wsi_mod = pytest.importorskip("hs2p.wsi.wsi")
 
 

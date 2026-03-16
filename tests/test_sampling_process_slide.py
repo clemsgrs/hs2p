@@ -57,7 +57,9 @@ def test_independent_sampling_no_visualization_does_not_crash(monkeypatch, tmp_p
         )
 
     monkeypatch.setattr(sampling_mod, "sample_coordinates", _fake_sample_coordinates)
-    monkeypatch.setattr(sampling_mod, "_save_sampling_coordinates", lambda **kwargs: None)
+    monkeypatch.setattr(
+        sampling_mod, "_save_sampling_coordinates", lambda **kwargs: None
+    )
     monkeypatch.setattr(sampling_mod, "visualize_coordinates", lambda **kwargs: None)
 
     _, status_info = sampling_mod.process_slide(
@@ -232,7 +234,9 @@ def test_process_slide_uses_extraction_preview_instead_of_reopening_overlay(
         "filter_coordinates",
         lambda **kwargs: ({"tissue": [(0, 0)]}, {"tissue": [0]}),
     )
-    monkeypatch.setattr(sampling_mod, "_save_sampling_coordinates", lambda **kwargs: None)
+    monkeypatch.setattr(
+        sampling_mod, "_save_sampling_coordinates", lambda **kwargs: None
+    )
     monkeypatch.setattr(sampling_mod, "visualize_coordinates", lambda **kwargs: None)
 
     _, status_info = sampling_mod.process_slide(
@@ -278,8 +282,14 @@ def test_process_slide_uses_extraction_preview_instead_of_reopening_overlay(
     assert status_info["status"] == "success"
     assert (mask_visualize_dir / "sample-2.png").is_file()
     assert captured["extract_kwargs"]["preview_downsample"] == 32
-    assert captured["extract_kwargs"]["preview_pixel_mapping"] == sampling_params.pixel_mapping
-    assert captured["extract_kwargs"]["preview_color_mapping"] == sampling_params.color_mapping
+    assert (
+        captured["extract_kwargs"]["preview_pixel_mapping"]
+        == sampling_params.pixel_mapping
+    )
+    assert (
+        captured["extract_kwargs"]["preview_color_mapping"]
+        == sampling_params.color_mapping
+    )
     assert captured["extract_kwargs"]["preview_palette"] is not None
 
 
@@ -320,7 +330,9 @@ def test_sampling_main_defaults_inner_slide_workers_to_one(monkeypatch, tmp_path
         sampling_mod,
         "load_csv",
         lambda cfg: [
-            SimpleNamespace(sample_id="slide-1", image_path=Path("slide-1.svs"), mask_path=None),
+            SimpleNamespace(
+                sample_id="slide-1", image_path=Path("slide-1.svs"), mask_path=None
+            ),
         ],
     )
     monkeypatch.setattr(
@@ -360,7 +372,11 @@ def test_sampling_main_defaults_inner_slide_workers_to_one(monkeypatch, tmp_path
                 yield fn(args)
 
     monkeypatch.setattr(sampling_mod.mp, "Pool", _FakePool)
-    monkeypatch.setattr(sampling_mod, "process_slide_wrapper", lambda kwargs: (kwargs["sample_id"], {"status": "success"}))
+    monkeypatch.setattr(
+        sampling_mod,
+        "process_slide_wrapper",
+        lambda kwargs: (kwargs["sample_id"], {"status": "success"}),
+    )
 
     sampling_mod.main(SimpleNamespace())
 
@@ -405,7 +421,9 @@ def test_sampling_main_allows_explicit_inner_slide_workers(monkeypatch, tmp_path
         sampling_mod,
         "load_csv",
         lambda cfg: [
-            SimpleNamespace(sample_id="slide-1", image_path=Path("slide-1.svs"), mask_path=None),
+            SimpleNamespace(
+                sample_id="slide-1", image_path=Path("slide-1.svs"), mask_path=None
+            ),
         ],
     )
     monkeypatch.setattr(
@@ -445,7 +463,11 @@ def test_sampling_main_allows_explicit_inner_slide_workers(monkeypatch, tmp_path
                 yield fn(args)
 
     monkeypatch.setattr(sampling_mod.mp, "Pool", _FakePool)
-    monkeypatch.setattr(sampling_mod, "process_slide_wrapper", lambda kwargs: (kwargs["sample_id"], {"status": "success"}))
+    monkeypatch.setattr(
+        sampling_mod,
+        "process_slide_wrapper",
+        lambda kwargs: (kwargs["sample_id"], {"status": "success"}),
+    )
 
     sampling_mod.main(SimpleNamespace())
 
@@ -472,7 +494,8 @@ def test_save_sampling_coordinates_uses_annotation_threshold_and_sampling_mode_i
         return SimpleNamespace(
             sample_id=result.sample_id,
             tiles_npz_path=Path(coordinates_dir) / f"{result.sample_id}.tiles.npz",
-            tiles_meta_path=Path(coordinates_dir) / f"{result.sample_id}.tiles.meta.json",
+            tiles_meta_path=Path(coordinates_dir)
+            / f"{result.sample_id}.tiles.meta.json",
             num_tiles=result.num_tiles,
         )
 

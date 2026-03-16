@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 import tempfile
 from pathlib import Path
@@ -149,7 +147,9 @@ def test_tile_slide_builds_default_sampling_params_for_masked_slides(
     }
 
 
-def test_tile_slide_returns_named_arrays(monkeypatch, tiling_config, segmentation_config, filter_config):
+def test_tile_slide_returns_named_arrays(
+    monkeypatch, tiling_config, segmentation_config, filter_config
+):
     monkeypatch.setattr("hs2p.api.extract_coordinates", lambda **_: _fake_extraction())
 
     result = tile_slide(
@@ -365,9 +365,7 @@ def test_write_tiling_preview_writes_expected_preview(monkeypatch, tmp_path: Pat
         downsample=16,
     )
 
-    assert preview_path == (
-        tmp_path / "visualization" / "tiling" / "slide-preview.jpg"
-    )
+    assert preview_path == (tmp_path / "visualization" / "tiling" / "slide-preview.jpg")
     assert preview_path.is_file()
 
 
@@ -541,7 +539,11 @@ def test_tile_slides_uses_slide_level_pool_and_preserves_input_order(
 
     assert seen["pool_processes"] == 2
     assert seen["inner_workers"] == [1, 1, 1]
-    assert [artifact.sample_id for artifact in artifacts] == ["slide-1", "slide-2", "slide-3"]
+    assert [artifact.sample_id for artifact in artifacts] == [
+        "slide-1",
+        "slide-2",
+        "slide-3",
+    ]
     process_df = pd.read_csv(tmp_path / "process_list.csv")
     assert process_df["sample_id"].tolist() == ["slide-1", "slide-2", "slide-3"]
 
@@ -645,7 +647,9 @@ def test_validate_tiling_artifacts_rejects_mismatched_image_path(tmp_path: Path)
 
     with pytest.raises(ValueError, match="image_path mismatch"):
         validate_tiling_artifacts(
-            whole_slide=SlideSpec(sample_id="slide-4", image_path=Path("requested-slide.svs")),
+            whole_slide=SlideSpec(
+                sample_id="slide-4", image_path=Path("requested-slide.svs")
+            ),
             tiles_npz_path=artifacts.tiles_npz_path,
             tiles_meta_path=artifacts.tiles_meta_path,
             expected_config_hash="actual-hash",
@@ -689,10 +693,14 @@ def test_tile_slides_writes_process_list_and_can_reuse_precomputed_tiles(
         segmentation=segmentation_config,
         filtering=filter_config,
     )
-    precomputed_artifacts = save_tiling_result(source_result, output_dir=precomputed_root)
+    precomputed_artifacts = save_tiling_result(
+        source_result, output_dir=precomputed_root
+    )
 
     def _unexpected_extract(**kwargs):
-        raise AssertionError("tile extraction should not run when precomputed tiles are reused")
+        raise AssertionError(
+            "tile extraction should not run when precomputed tiles are reused"
+        )
 
     monkeypatch.setattr("hs2p.api.extract_coordinates", _unexpected_extract)
 
@@ -761,7 +769,9 @@ def test_tile_slides_omits_tiling_preview_path_when_no_tiles(
     )
     monkeypatch.setattr(
         "hs2p.api.visualize_coordinates",
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError("preview rendering should be skipped for zero tiles")),
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("preview rendering should be skipped for zero tiles")
+        ),
     )
 
     artifacts = tile_slides(
@@ -818,7 +828,10 @@ def test_tile_slides_writes_preview_paths_when_visualizations_are_saved(
     assert len(artifacts) == 1
     assert artifacts[0].mask_preview_path == expected_mask_path
     assert artifacts[0].mask_preview_path.is_file()
-    assert artifacts[0].tiling_preview_path == tmp_path / "visualization" / "tiling" / "slide-preview.jpg"
+    assert (
+        artifacts[0].tiling_preview_path
+        == tmp_path / "visualization" / "tiling" / "slide-preview.jpg"
+    )
     assert artifacts[0].tiling_preview_path.is_file()
 
 
@@ -857,7 +870,9 @@ def test_tile_slides_resume_marks_stale_artifact_as_failed(
 
     monkeypatch.setattr(
         "hs2p.api.extract_coordinates",
-        lambda **_: (_ for _ in ()).throw(AssertionError("should not recompute stale resumed tiles")),
+        lambda **_: (_ for _ in ()).throw(
+            AssertionError("should not recompute stale resumed tiles")
+        ),
     )
 
     reused = tile_slides(
@@ -958,10 +973,14 @@ def test_tile_slides_computes_resume_hash_once_per_batch(
         )
 
     monkeypatch.setattr("hs2p.api.compute_config_hash", _fake_compute_config_hash)
-    monkeypatch.setattr("hs2p.api.validate_tiling_artifacts", _fake_validate_tiling_artifacts)
+    monkeypatch.setattr(
+        "hs2p.api.validate_tiling_artifacts", _fake_validate_tiling_artifacts
+    )
     monkeypatch.setattr(
         "hs2p.api.extract_coordinates",
-        lambda **_: (_ for _ in ()).throw(AssertionError("resume path should not recompute tiles")),
+        lambda **_: (_ for _ in ()).throw(
+            AssertionError("resume path should not recompute tiles")
+        ),
     )
 
     artifacts = tile_slides(
@@ -1057,7 +1076,11 @@ def test_load_csv_rejects_duplicate_sample_id(tmp_path: Path):
 def test_load_tiling_result_rejects_missing_npz_keys(tmp_path: Path):
     npz_path = tmp_path / "broken.tiles.npz"
     meta_path = tmp_path / "broken.tiles.meta.json"
-    np.savez(npz_path, tile_index=np.array([0], dtype=np.int32), y=np.array([20], dtype=np.int64))
+    np.savez(
+        npz_path,
+        tile_index=np.array([0], dtype=np.int32),
+        y=np.array([20], dtype=np.int64),
+    )
     meta_path.write_text(
         json.dumps(
             {
@@ -1108,7 +1131,9 @@ def test_load_tiling_result_wraps_corrupt_npz_errors_with_path(tmp_path: Path):
         )
     )
 
-    with pytest.raises(ValueError, match=r"Unable to load tiling npz artifact .*corrupt\.tiles\.npz"):
+    with pytest.raises(
+        ValueError, match=r"Unable to load tiling npz artifact .*corrupt\.tiles\.npz"
+    ):
         load_tiling_result(npz_path, meta_path)
 
 
@@ -1261,7 +1286,9 @@ def test_write_process_list_removes_temp_file_on_failure(monkeypatch, tmp_path: 
     def _raise_to_csv(self, *args, **kwargs):
         raise OSError("disk full")
 
-    monkeypatch.setattr("hs2p.api.tempfile.NamedTemporaryFile", _tracking_named_temporary_file)
+    monkeypatch.setattr(
+        "hs2p.api.tempfile.NamedTemporaryFile", _tracking_named_temporary_file
+    )
     monkeypatch.setattr("hs2p.api.pd.DataFrame.to_csv", _raise_to_csv)
 
     with pytest.raises(OSError, match="disk full"):
@@ -1310,8 +1337,12 @@ def test_config_dataclasses_apply_package_defaults_for_secondary_parameters():
     assert filtering.max_n_holes == default_config.tiling.filter_params.max_n_holes
     assert filtering.filter_white == default_config.tiling.filter_params.filter_white
     assert filtering.filter_black == default_config.tiling.filter_params.filter_black
-    assert filtering.white_threshold == default_config.tiling.filter_params.white_threshold
-    assert filtering.black_threshold == default_config.tiling.filter_params.black_threshold
+    assert (
+        filtering.white_threshold == default_config.tiling.filter_params.white_threshold
+    )
+    assert (
+        filtering.black_threshold == default_config.tiling.filter_params.black_threshold
+    )
     assert filtering.fraction_threshold == pytest.approx(
         default_config.tiling.filter_params.fraction_threshold
     )

@@ -6,7 +6,6 @@ from hs2p.api import (
     TilingArtifacts,
     TilingConfig,
     TilingResult,
-    WholeSlide,
     load_tiling_result,
     overlay_mask_on_slide,
     save_tiling_result,

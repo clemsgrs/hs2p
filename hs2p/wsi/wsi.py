@@ -847,9 +847,7 @@ class WholeSlideImage(object):
             if x_coords.shape[0] > 0:
                 x_coord_chunks.append(x_coords.astype(np.int64, copy=False))
                 y_coord_chunks.append(y_coords.astype(np.int64, copy=False))
-                tissue_pct_chunks.append(
-                    np.asarray(tissue_pct, dtype=np.float32)
-                )
+                tissue_pct_chunks.append(np.asarray(tissue_pct, dtype=np.float32))
                 contour_index_chunks.append(
                     np.full(x_coords.shape[0], i, dtype=np.int32)
                 )

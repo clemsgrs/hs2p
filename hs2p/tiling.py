@@ -56,11 +56,15 @@ def main(args):
         output_dir=output_dir,
         num_workers=cfg.speed.num_workers,
         resume=cfg.resume,
-        read_tiles_from=Path(cfg.tiling.read_tiles_from) if cfg.tiling.read_tiles_from else None,
+        read_tiles_from=(
+            Path(cfg.tiling.read_tiles_from) if cfg.tiling.read_tiles_from else None
+        ),
     )
     process_df = pd.read_csv(output_dir / "process_list.csv")
     failed_tiling = process_df[process_df["tiling_status"] == "failed"]
-    no_tiles = process_df[(process_df["tiling_status"] == "success") & (process_df["num_tiles"] == 0)]
+    no_tiles = process_df[
+        (process_df["tiling_status"] == "success") & (process_df["num_tiles"] == 0)
+    ]
     print("=+=" * 10)
     print(f"Total number of slides: {len(process_df)}")
     print(f"Failed tiling: {len(failed_tiling)}")

@@ -15,7 +15,6 @@ from .wsi import (
     WholeSlideImage,
 )
 
-
 DEFAULT_TISSUE_PIXEL_MAPPING = {"background": 0, "tissue": 1}
 DEFAULT_TISSUE_COLOR_MAPPING = {
     "background": None,
@@ -94,6 +93,7 @@ class CoordinateExtractionResult:
     @property
     def coordinates(self) -> list[tuple[int, int]]:
         return list(zip(self.x.tolist(), self.y.tolist()))
+
 
 def sort_coordinates_with_tissue(coordinates, tissue_percentages, contour_indices):
     """
@@ -193,6 +193,7 @@ def _mask_level_downsamples(mask_obj) -> list[tuple[float, float]]:
     if hasattr(mask_obj, "downsamplings"):
         return [(float(d), float(d)) for d in mask_obj.downsamplings]
     raise AttributeError("Mask object must expose level_downsamples or downsamplings")
+
 
 def _read_aligned_mask(
     *,
@@ -350,8 +351,8 @@ def extract_coordinates(
         disable_tqdm=disable_tqdm,
         num_workers=num_workers,
     )
-    sorted_coordinates, sorted_tissue_percentages, sorted_contour_indices = sort_coordinates_with_tissue(
-        coordinates, tissue_percentages, contour_indices
+    sorted_coordinates, sorted_tissue_percentages, sorted_contour_indices = (
+        sort_coordinates_with_tissue(coordinates, tissue_percentages, contour_indices)
     )
     if mask_visu_path is not None:
         preview_mask_arr = _normalize_tissue_mask(wsi.annotation_mask["tissue"])
@@ -434,8 +435,8 @@ def sample_coordinates(
         disable_tqdm=disable_tqdm,
         num_workers=num_workers,
     )
-    sorted_coordinates, sorted_tissue_percentages, sorted_contour_indices = sort_coordinates_with_tissue(
-        coordinates, tissue_percentages, contour_indices
+    sorted_coordinates, sorted_tissue_percentages, sorted_contour_indices = (
+        sort_coordinates_with_tissue(coordinates, tissue_percentages, contour_indices)
     )
     if mask_visu_path is not None:
         _save_overlay_preview(
@@ -611,16 +612,23 @@ def overlay_mask_on_slide(
     wsi = Image.fromarray(wsi_arr).convert("RGBA")
     if tile_size_lv0 is not None:
         tile_size_at_vis_level = tuple(
-            (np.array((tile_size_lv0, tile_size_lv0)) / np.array(wsi_object.level_downsamples[vis_level])).astype(np.int32)
+            (
+                np.array((tile_size_lv0, tile_size_lv0))
+                / np.array(wsi_object.level_downsamples[vis_level])
+            ).astype(np.int32)
         )
-        wsi = pad_to_patch_size(wsi.convert("RGB"), tile_size_at_vis_level).convert("RGBA")
+        wsi = pad_to_patch_size(wsi.convert("RGB"), tile_size_at_vis_level).convert(
+            "RGBA"
+        )
         width, height = wsi.size
     if annotation_mask_path is not None:
         mask_object = WholeSlideImage(path=annotation_mask_path, backend=backend)
         mask_width_at_level_0, _ = mask_object.level_dimensions[0]
         mask_downsample = mask_width_at_level_0 / width
         mask_level = int(
-            np.argmin([abs(x - mask_downsample) for x, _ in mask_object.level_downsamples])
+            np.argmin(
+                [abs(x - mask_downsample) for x, _ in mask_object.level_downsamples]
+            )
         )
         mask_spacing = mask_object.spacings[mask_level]
         mask_width, _ = mask_object.level_dimensions[mask_level]
@@ -649,7 +657,9 @@ def overlay_mask_on_slide(
             interpolation=cv2.INTER_NEAREST,
         )
     else:
-        raise ValueError("Provide annotation_mask_path or mask_arr to overlay_mask_on_slide()")
+        raise ValueError(
+            "Provide annotation_mask_path or mask_arr to overlay_mask_on_slide()"
+        )
 
     mask = Image.fromarray(mask_arr)
 

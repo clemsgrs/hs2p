@@ -151,7 +151,9 @@ def _save_sampling_coordinates(
     )
     annotation_dir = Path(cfg.output_dir, "coordinates", annotation)
     annotation_dir.mkdir(parents=True, exist_ok=True)
-    return save_tiling_result(result, output_dir=cfg.output_dir, coordinates_dir=annotation_dir)
+    return save_tiling_result(
+        result, output_dir=cfg.output_dir, coordinates_dir=annotation_dir
+    )
 
 
 def process_slide(
@@ -279,7 +281,9 @@ def process_slide(
                     continue
                 tissue_mask_visu_path = None
                 if cfg.visualize and mask_visualize_dir is not None:
-                    tissue_mask_visu_path = mask_visualize_dir / annotation / f"{wsi_name}.jpg"
+                    tissue_mask_visu_path = (
+                        mask_visualize_dir / annotation / f"{wsi_name}.jpg"
+                    )
                 extraction = sample_coordinates(
                     wsi_path=wsi_path,
                     mask_path=mask_path,
@@ -375,14 +379,24 @@ def main(args):
         data = {
             "sample_id": [slide.sample_id for slide in whole_slides],
             "image_path": [str(slide.image_path) for slide in whole_slides],
-            "mask_path": [str(slide.mask_path) if slide.mask_path is not None else slide.mask_path for slide in whole_slides],
+            "mask_path": [
+                str(slide.mask_path) if slide.mask_path is not None else slide.mask_path
+                for slide in whole_slides
+            ],
             "sampling_status": ["tbp"] * len(whole_slides),
             "error": [str(np.nan)] * len(whole_slides),
             "traceback": [str(np.nan)] * len(whole_slides),
         }
         process_df = pd.DataFrame(data)
 
-    skip_sampling = process_df.empty or process_df["sampling_status"].fillna("").astype(str).str.contains("success").all()
+    skip_sampling = (
+        process_df.empty
+        or process_df["sampling_status"]
+        .fillna("")
+        .astype(str)
+        .str.contains("success")
+        .all()
+    )
 
     pixel_mapping = {
         k: v for e in cfg.tiling.sampling_params.pixel_mapping for k, v in e.items()
@@ -414,7 +428,9 @@ def main(args):
         process_stack = process_df[mask]
         total = len(process_stack)
 
-        wsi_paths_to_process = [Path(x) for x in process_stack.image_path.values.tolist()]
+        wsi_paths_to_process = [
+            Path(x) for x in process_stack.image_path.values.tolist()
+        ]
         mask_paths_to_process = [
             Path(x) if x is not None and not pd.isna(x) else x
             for x in process_stack.mask_path.values.tolist()
@@ -450,7 +466,9 @@ def main(args):
                     "disable_tqdm": True,
                     "num_workers": inner_workers,
                 }
-                for wsi_fp, mask_fp, sample_id in zip(wsi_paths_to_process, mask_paths_to_process, sample_ids_to_process)
+                for wsi_fp, mask_fp, sample_id in zip(
+                    wsi_paths_to_process, mask_paths_to_process, sample_ids_to_process
+                )
             ]
             results = list(
                 tqdm.tqdm(
@@ -465,16 +483,16 @@ def main(args):
             sampling_updates[result_sample_id] = status_info
 
         for result_sample_id, status_info in sampling_updates.items():
-            process_df.loc[process_df["sample_id"] == result_sample_id, "sampling_status"] = (
-                status_info["status"]
-            )
+            process_df.loc[
+                process_df["sample_id"] == result_sample_id, "sampling_status"
+            ] = status_info["status"]
             if "error" in status_info:
                 process_df.loc[process_df["sample_id"] == result_sample_id, "error"] = (
                     status_info["error"]
                 )
-                process_df.loc[process_df["sample_id"] == result_sample_id, "traceback"] = (
-                    status_info["traceback"]
-                )
+                process_df.loc[
+                    process_df["sample_id"] == result_sample_id, "traceback"
+                ] = status_info["traceback"]
         process_df.to_csv(process_list, index=False)
 
         # summary logging
@@ -491,7 +509,9 @@ def main(args):
             slides_with_tiles = [
                 slide.sample_id
                 for slide in whole_slides
-                if Path(coordinates_dir, annotation, f"{slide.sample_id}.tiles.npz").is_file()
+                if Path(
+                    coordinates_dir, annotation, f"{slide.sample_id}.tiles.npz"
+                ).is_file()
             ]
             no_tiles = process_df[~process_df["sample_id"].isin(slides_with_tiles)]
             print(f"No {annotation} tiles after sampling step: {len(no_tiles)}")

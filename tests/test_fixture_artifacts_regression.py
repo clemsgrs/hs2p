@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 from pathlib import Path
 
@@ -15,7 +13,6 @@ from hs2p.api import (
     tile_slide,
 )
 
-
 pytestmark = pytest.mark.integration
 
 
@@ -25,10 +22,14 @@ def _require_asap_backend(wsi_path: Path) -> str:
         wsd.WholeSlideImage(wsi_path, backend="asap")
         return "asap"
     except Exception:
-        pytest.skip("ASAP backend is unavailable; golden coordinate regression requires ASAP")
+        pytest.skip(
+            "ASAP backend is unavailable; golden coordinate regression requires ASAP"
+        )
 
 
-def _build_tiling_configs(*, backend: str, tissue_pct: float) -> tuple[TilingConfig, SegmentationConfig, FilterConfig]:
+def _build_tiling_configs(
+    *, backend: str, tissue_pct: float
+) -> tuple[TilingConfig, SegmentationConfig, FilterConfig]:
     tiling = TilingConfig(
         target_spacing_um=0.5,
         target_tile_size_px=224,
@@ -62,7 +63,14 @@ def _build_tiling_configs(*, backend: str, tissue_pct: float) -> tuple[TilingCon
     return tiling, segmentation, filtering
 
 
-def _run_and_save_tiles(*, wsi_path: Path, mask_path: Path, backend: str, tissue_pct: float, output_dir: Path):
+def _run_and_save_tiles(
+    *,
+    wsi_path: Path,
+    mask_path: Path,
+    backend: str,
+    tissue_pct: float,
+    output_dir: Path,
+):
     tiling, segmentation, filtering = _build_tiling_configs(
         backend=backend,
         tissue_pct=tissue_pct,
@@ -107,8 +115,16 @@ def test_generated_tiles_match_checked_in_artifacts(real_fixture_paths, tmp_path
 
     assert set(meta) == set(golden_meta)
     assert meta["sample_id"] == golden_meta["sample_id"] == "test-wsi"
-    assert Path(meta["image_path"]).name == Path(golden_meta["image_path"]).name == wsi_path.name
-    assert Path(meta["mask_path"]).name == Path(golden_meta["mask_path"]).name == mask_path.name
+    assert (
+        Path(meta["image_path"]).name
+        == Path(golden_meta["image_path"]).name
+        == wsi_path.name
+    )
+    assert (
+        Path(meta["mask_path"]).name
+        == Path(golden_meta["mask_path"]).name
+        == mask_path.name
+    )
     assert meta["backend"] == golden_meta["backend"] == backend
     assert meta["target_spacing_um"] == pytest.approx(golden_meta["target_spacing_um"])
     assert meta["target_tile_size_px"] == golden_meta["target_tile_size_px"]
@@ -124,7 +140,9 @@ def test_generated_tiles_match_checked_in_artifacts(real_fixture_paths, tmp_path
     assert artifacts.num_tiles == golden_meta["num_tiles"]
 
 
-def test_repeated_tiling_run_writes_identical_artifacts(real_fixture_paths, tmp_path: Path):
+def test_repeated_tiling_run_writes_identical_artifacts(
+    real_fixture_paths, tmp_path: Path
+):
     wsi_path, mask_path = real_fixture_paths
     backend = _require_asap_backend(wsi_path)
     tissue_pct = 0.1

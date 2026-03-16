@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from pathlib import Path
 
 import numpy as np
@@ -73,7 +71,9 @@ def test_filter_coordinates_returns_expected_per_class_subsets(fake_backend):
     assert filtered_indices["stroma"] == [0, 0]
 
 
-def test_filter_coordinates_reuses_loaded_mask_and_avoids_per_tile_mask_reads(monkeypatch):
+def test_filter_coordinates_reuses_loaded_mask_and_avoids_per_tile_mask_reads(
+    monkeypatch,
+):
     constructor_calls = []
 
     class FakeMaskBackend:
@@ -95,7 +95,9 @@ def test_filter_coordinates_reuses_loaded_mask_and_avoids_per_tile_mask_reads(mo
             )
 
         def get_patch(self, *args, **kwargs):
-            raise AssertionError("filter_coordinates should not read one mask patch per tile")
+            raise AssertionError(
+                "filter_coordinates should not read one mask patch per tile"
+            )
 
     class FakeWholeSlideImage:
         def __init__(
@@ -109,8 +111,17 @@ def test_filter_coordinates_reuses_loaded_mask_and_avoids_per_tile_mask_reads(mo
             sampling_params=None,
             pixel_mapping=None,
         ):
-            del backend, spacing_at_level_0, segment, segment_params, sampling_params, pixel_mapping
-            constructor_calls.append((Path(path), None if mask_path is None else Path(mask_path)))
+            del (
+                backend,
+                spacing_at_level_0,
+                segment,
+                segment_params,
+                sampling_params,
+                pixel_mapping,
+            )
+            constructor_calls.append(
+                (Path(path), None if mask_path is None else Path(mask_path))
+            )
             self.path = Path(path)
             self.spacings = [1.0]
             self.level_dimensions = [(4, 4)]
@@ -154,7 +165,9 @@ def test_filter_coordinates_reuses_loaded_mask_and_avoids_per_tile_mask_reads(mo
     assert filtered_indices["stroma"] == [1]
 
 
-def test_load_segmentation_preserves_discrete_labels_with_nearest_neighbor(fake_backend):
+def test_load_segmentation_preserves_discrete_labels_with_nearest_neighbor(
+    fake_backend,
+):
     mask_l0 = np.zeros((16, 16, 1), dtype=np.uint8)
     mask_l0[4:12, 4:8, 0] = 1
     mask_l0[4:12, 8:12, 0] = 2

@@ -2,6 +2,7 @@
 
 <p>
     <a href="https://pypi.org/project/hs2p"><img src="https://img.shields.io/pypi/v/hs2p.svg" alt="PyPI version"></a>
+    <a href="https://pypi.org/project/hs2p"><img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+"></a>
     <a href="https://github.com/psf/black"><img alt="empty" src=https://img.shields.io/badge/code%20style-black-000000.svg></a>
     <a href="https://github.com/PyCQA/pylint"><img alt="empty" src=https://img.shields.io/github/stars/clemsgrs/hs2p?style=social></a>
     <a href="https://huggingface.co/spaces/waticlems/hs2p-demo"><img alt="HuggingFace Space" src="https://img.shields.io/badge/🤗%20demo-hs2p-blue"></a>
@@ -12,7 +13,7 @@
 We support two main workflows:
 
 - a Python API for library-style integration
-- a CLI for batch preprocessing from a CSV and YAML config
+- a CLI for batch preprocessing
 
 ## Demo
 
@@ -54,10 +55,8 @@ Minimal tiling example:
 from pathlib import Path
 
 from hs2p import (
-    FilterConfig,
-    SegmentationConfig,
+    SlideSpec,
     TilingConfig,
-    WholeSlide,
     overlay_mask_on_slide,
     save_tiling_result,
     tile_slide,
@@ -65,7 +64,7 @@ from hs2p import (
 )
 
 result = tile_slide(
-    WholeSlide(
+    SlideSpec(
         sample_id="slide-1",
         image_path=Path("/data/wsi/slide-1.tif"),
         mask_path=Path("/data/mask/slide-1.tif"),
@@ -78,17 +77,19 @@ result = tile_slide(
         overlap=0.0,
         tissue_threshold=0.1,
     ),
-    segmentation=SegmentationConfig(downsample=64),
-    filtering=FilterConfig(ref_tile_size=224, a_t=4, a_h=2),
-    num_workers=1,
 )
 
 artifacts = save_tiling_result(result, output_dir=Path("output"))
+
+print(artifacts.tiles_npz_path)   # output/coordinates/slide-1.tiles.npz ; more info in docs/artifacts.md
+print(artifacts.tiles_meta_path)  # output/coordinates/slide-1.tiles.meta.json ; more info in docs/artifacts.md
+
 tiling_preview_path = write_tiling_preview(
     result=result,
     output_dir=Path("output"),
     downsample=32,
 )
+print(tiling_preview_path)  # output/visualization/tiling/slide-1.jpg ; low resolution preview of tiling result, good for QC
 
 mask_overlay = overlay_mask_on_slide(
     wsi_path=result.image_path,
@@ -97,10 +98,6 @@ mask_overlay = overlay_mask_on_slide(
     backend=result.backend,
 )
 mask_overlay.save("output/visualization/mask/slide-1.jpg")
-
-print(artifacts.tiles_npz_path)
-print(artifacts.tiles_meta_path)
-print(tiling_preview_path)
 ```
 
 `result` is a [`TilingResult`](hs2p/api.py#L144) for one slide. It gives downstream pipelines the tile coordinates plus the metadata needed to relate those coordinates back to the slide pyramid and persist them as reusable named artifacts.
@@ -109,7 +106,7 @@ More API details: [docs/api.md](docs/api.md)
 
 ## CLI
 
-Both CLI entrypoints use the same input CSV schema:
+The CLI is intended for fast batch processing of multiple slides with the same config. Both CLI entrypoints expect the same input `csv` schema:
 
 ```csv
 sample_id,image_path,mask_path

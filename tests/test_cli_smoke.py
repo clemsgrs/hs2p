@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import importlib
 import sys
 import types
@@ -28,8 +26,7 @@ def _import_sampling_module():
 def _write_csv(tmp_path: Path) -> Path:
     csv_path = tmp_path / "slides.csv"
     csv_path.write_text(
-        "sample_id,image_path,mask_path\n"
-        "slide-1,slide-1.svs,slide-1-mask.png\n"
+        "sample_id,image_path,mask_path\n" "slide-1,slide-1.svs,slide-1-mask.png\n"
     )
     return csv_path
 
@@ -85,7 +82,9 @@ def _base_cfg(tmp_path: Path, csv_path: Path) -> SimpleNamespace:
     )
 
 
-def test_tiling_main_smoke_uses_current_schema_and_manifest(monkeypatch, tmp_path: Path):
+def test_tiling_main_smoke_uses_current_schema_and_manifest(
+    monkeypatch, tmp_path: Path
+):
     csv_path = _write_csv(tmp_path)
     cfg = _base_cfg(tmp_path, csv_path)
     captured = {}
@@ -116,7 +115,9 @@ def test_tiling_main_smoke_uses_current_schema_and_manifest(monkeypatch, tmp_pat
                     "mask_path": "slide-1-mask.png",
                     "tiling_status": "success",
                     "num_tiles": 2,
-                    "tiles_npz_path": str(output_dir / "coordinates" / "slide-1.tiles.npz"),
+                    "tiles_npz_path": str(
+                        output_dir / "coordinates" / "slide-1.tiles.npz"
+                    ),
                     "tiles_meta_path": str(
                         output_dir / "coordinates" / "slide-1.tiles.meta.json"
                     ),
@@ -166,7 +167,9 @@ def test_tiling_main_smoke_uses_current_schema_and_manifest(monkeypatch, tmp_pat
     assert row["num_tiles"] == 2
 
 
-def test_sampling_main_smoke_uses_current_schema_and_manifest(monkeypatch, tmp_path: Path):
+def test_sampling_main_smoke_uses_current_schema_and_manifest(
+    monkeypatch, tmp_path: Path
+):
     sampling_mod = _import_sampling_module()
     csv_path = _write_csv(tmp_path)
     cfg = _base_cfg(tmp_path, csv_path)
@@ -203,7 +206,9 @@ def test_sampling_main_smoke_uses_current_schema_and_manifest(monkeypatch, tmp_p
         )
         return kwargs["sample_id"], {"status": "success"}
 
-    monkeypatch.setattr(sampling_mod, "process_slide_wrapper", _fake_process_slide_wrapper)
+    monkeypatch.setattr(
+        sampling_mod, "process_slide_wrapper", _fake_process_slide_wrapper
+    )
 
     sampling_mod.main(SimpleNamespace())
 

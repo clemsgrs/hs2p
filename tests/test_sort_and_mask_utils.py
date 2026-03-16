@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import numpy as np
 
 from hs2p.wsi import get_mask_coverage, sort_coordinates_with_tissue
