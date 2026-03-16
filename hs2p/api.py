@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import hashlib
 import json
 import multiprocessing as mp
@@ -97,7 +95,7 @@ class SegmentationConfig:
         use_hsv: Whether to segment in HSV space instead of grayscale.
     """
 
-    downsample: int
+    downsample: int = int(_DEFAULT_SEGMENTATION.downsample)
     sthresh: int = int(_DEFAULT_SEGMENTATION.sthresh)
     sthresh_up: int = int(_DEFAULT_SEGMENTATION.sthresh_up)
     mthresh: int = int(_DEFAULT_SEGMENTATION.mthresh)
@@ -122,9 +120,9 @@ class FilterConfig:
         fraction_threshold: Fraction of white or black pixels required to reject a tile.
     """
 
-    ref_tile_size: int
-    a_t: int
-    a_h: int
+    ref_tile_size: int = int(_DEFAULT_FILTERING.ref_tile_size)
+    a_t: int = int(_DEFAULT_FILTERING.a_t)
+    a_h: int = int(_DEFAULT_FILTERING.a_h)
     max_n_holes: int = int(_DEFAULT_FILTERING.max_n_holes)
     filter_white: bool = bool(_DEFAULT_FILTERING.filter_white)
     filter_black: bool = bool(_DEFAULT_FILTERING.filter_black)
