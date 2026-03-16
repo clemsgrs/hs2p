@@ -24,6 +24,7 @@ Regenerate chart only (skip benchmarking):
 import argparse
 import csv
 import random
+import shutil
 import subprocess
 import sys
 import time
@@ -111,6 +112,18 @@ def parse_args() -> argparse.Namespace:
         "--dataset-label",
         default="HistAI mixed",
         help="Dataset name shown in the chart subtitle and legend.",
+    )
+    parser.add_argument(
+        "--local-dir",
+        type=Path,
+        default=Path("/tmp/benchmark-slides"),
+        help="Local directory to copy slides into before benchmarking, "
+        "eliminating network I/O from timing measurements.",
+    )
+    parser.add_argument(
+        "--skip-copy",
+        action="store_true",
+        help="Skip copying slides to --local-dir (use if already copied).",
     )
     parser.add_argument(
         "--python",
@@ -202,6 +215,51 @@ def stratified_sample(
 
     rng.shuffle(sampled)
     return sampled[:n]
+
+
+# ---------------------------------------------------------------------------
+# Local copy
+# ---------------------------------------------------------------------------
+
+
+def copy_slides_locally(
+    slides: list[dict[str, Any]],
+    local_dir: Path,
+) -> list[dict[str, Any]]:
+    """Copy slide (and mask) files to local_dir, return updated slide list.
+
+    Files are named ``{sample_id}{original_suffix}`` to avoid collisions
+    when slides from different directories share the same filename.
+    Already-present files are skipped.
+    """
+    local_dir.mkdir(parents=True, exist_ok=True)
+    updated: list[dict[str, Any]] = []
+    n = len(slides)
+    for i, slide in enumerate(slides, start=1):
+        src_image = slide["image_path"]
+        dst_image = local_dir / f"{slide['sample_id']}{src_image.suffix}"
+        if not dst_image.exists():
+            print(f"  [{i}/{n}] copying {src_image.name} ...", flush=True)
+            shutil.copy2(src_image, dst_image)
+        else:
+            print(f"  [{i}/{n}] {dst_image.name} already present, skipping.", flush=True)
+
+        dst_mask: Path | None = None
+        if slide["mask_path"] is not None:
+            src_mask = slide["mask_path"]
+            dst_mask = local_dir / f"{slide['sample_id']}.mask{src_mask.suffix}"
+            if not dst_mask.exists():
+                shutil.copy2(src_mask, dst_mask)
+
+        updated.append(
+            {
+                **slide,
+                "image_path": dst_image,
+                "mask_path": dst_mask,
+                # size_bytes stays as-is (reflects original file)
+            }
+        )
+    return updated
 
 
 # ---------------------------------------------------------------------------
@@ -720,6 +778,28 @@ def main() -> int:
         )
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
+
+    # ── copy slides locally ───────────────────────────────────────────────
+    if args.skip_copy:
+        print(f"\nSkipping copy (--skip-copy). Expecting slides in {args.local_dir}.")
+        # Remap paths to local_dir using the same naming convention.
+        remapped = []
+        for s in sampled:
+            dst_image = args.local_dir / f"{s['sample_id']}{s['image_path'].suffix}"
+            dst_mask: Path | None = None
+            if s["mask_path"] is not None:
+                dst_mask = args.local_dir / f"{s['sample_id']}.mask{s['mask_path'].suffix}"
+            remapped.append({**s, "image_path": dst_image, "mask_path": dst_mask})
+        sampled = remapped
+    else:
+        total_mb = sum(s["size_bytes"] for s in sampled) / 1e6
+        print(
+            f"\nCopying {len(sampled)} slides to {args.local_dir}"
+            f" (~{total_mb:.0f} MB) ...",
+            flush=True,
+        )
+        sampled = copy_slides_locally(sampled, args.local_dir)
+        print("Copy complete.", flush=True)
 
     # ── benchmark ────────────────────────────────────────────────────────
     print(f"\nRunning benchmark: workers={sorted(args.workers)}, repeat={args.repeat}")
