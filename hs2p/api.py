@@ -45,10 +45,6 @@ class SlideSpec:
     mask_path: Path | None = None
 
 
-# Backward-compatible alias for older callers that still import WholeSlide.
-WholeSlide = SlideSpec
-
-
 @dataclass(frozen=True)
 class TilingConfig:
     """Control tile extraction at a target physical resolution.
