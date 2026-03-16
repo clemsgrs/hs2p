@@ -117,13 +117,12 @@ def parse_args() -> argparse.Namespace:
         "--local-dir",
         type=Path,
         default=Path("/tmp/benchmark-slides"),
-        help="Local directory to copy slides into before benchmarking, "
-        "eliminating network I/O from timing measurements.",
+        help="Destination directory when --copy-locally is set.",
     )
     parser.add_argument(
-        "--skip-copy",
+        "--copy-locally",
         action="store_true",
-        help="Skip copying slides to --local-dir (use if already copied).",
+        help="Copy slides to --local-dir before benchmarking to eliminate network I/O.",
     )
     parser.add_argument(
         "--python",
@@ -581,22 +580,19 @@ def load_results_csv(path: Path) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 # GitHub-dark-inspired palette
-_BG = "#0d1117"
-_AXES_BG = "#161b22"
-_GRID = "#21262d"
-_TEXT = "#e6edf3"
-_TEXT_MUTED = "#8b949e"
-_LINE = "#58a6ff"
-_IDEAL = "#3fb950"
-_ANNOT_BG = "#21262d"
-_ANNOT_BORDER = "#30363d"
-_ACCENT = "#f78166"
+# Publication-ready color palette (light background, restrained)
+_C_LINE   = "#1a6faf"   # main throughput line  – steel blue
+_C_IDEAL  = "#adb5bd"   # ideal scaling          – muted gray
+_C_BAND   = "#a8c8e8"   # error band fill        – desaturated blue
+_C_ACCENT = "#c0392b"   # speedup callout        – muted red
+_C_TEXT   = "#222222"   # primary text
+_C_MUTED  = "#666666"   # secondary text / axis labels
+_C_GRID   = "#e8e8e8"   # horizontal gridlines
 
 
-def _format_kilo(x: float, _pos: Any) -> str:
-    if x >= 1_000:
-        return f"{x/1_000:.0f}k"
-    return f"{x:.0f}"
+def _fmt_k(x: float, _pos: Any) -> str:
+    """Format y-axis ticks as e.g. '24k'."""
+    return f"{x / 1_000:.0f}k" if x >= 1_000 else f"{x:.0f}"
 
 
 def plot_results(
@@ -612,189 +608,157 @@ def plot_results(
     slide_stats: dict[str, Any] | None = None,
 ) -> None:
     workers = [r["num_workers"] for r in records]
-    tps = [r["mean_tiles_per_second"] for r in records]
-    err = [r["std_tiles_per_second"] for r in records]
-    has_error = any(e > 0 for e in err)
+    tps     = [r["mean_tiles_per_second"] for r in records]
+    err     = [r["std_tiles_per_second"]  for r in records]
+    has_err = any(e > 0 for e in err)
 
-    # ideal linear scaling anchored at the lowest worker count
-    baseline = tps[0]
-    baseline_workers = workers[0]
-    ideal = [baseline * w / baseline_workers for w in workers]
+    baseline     = tps[0]
+    max_tps      = max(tps)
+    max_workers  = workers[tps.index(max_tps)]
+    avg_tiles    = records[0]["total_tiles"] / max(records[0]["slides_processed"], 1)
+    proj_hours   = avg_tiles * total_slides / max_tps / 3600
 
-    # projection: observed avg tiles/slide extrapolated to full dataset
-    avg_tiles_per_slide = records[0]["total_tiles"] / max(records[0]["slides_processed"], 1)
-    max_tps = max(tps)
-    max_workers = workers[tps.index(max_tps)]
-    projected_hours = avg_tiles_per_slide * total_slides / max_tps / 3600
+    # ------------------------------------------------------------------ style
+    plt.rcParams.update({
+        "font.family":       "sans-serif",
+        "font.size":         11,
+        "axes.spines.top":   False,
+        "axes.spines.right": False,
+        "axes.linewidth":    0.8,
+        "xtick.direction":   "out",
+        "ytick.direction":   "out",
+        "xtick.major.size":  4,
+        "ytick.major.size":  4,
+        "xtick.major.width": 0.8,
+        "ytick.major.width": 0.8,
+    })
 
-    # ------------------------------------------------------------------ figure
-    fig, ax = plt.subplots(figsize=(13, 7.5))
-    fig.patch.set_facecolor(_BG)
-    ax.set_facecolor(_AXES_BG)
+    fig, ax = plt.subplots(figsize=(8, 5))
+    fig.patch.set_facecolor("white")
+    ax.set_facecolor("white")
 
-    for spine in ax.spines.values():
-        spine.set_edgecolor(_GRID)
-    ax.tick_params(colors=_TEXT, which="both")
-    ax.xaxis.label.set_color(_TEXT)
-    ax.yaxis.label.set_color(_TEXT)
-
-    ax.grid(True, color=_GRID, linewidth=0.8, linestyle="--", alpha=0.7, zorder=0)
+    # subtle horizontal-only grid
+    ax.yaxis.grid(True, color=_C_GRID, linewidth=0.6, linestyle="-", zorder=0)
     ax.set_axisbelow(True)
+    ax.xaxis.grid(False)
 
-    # ideal linear scaling reference
+    # log₂ x-axis: worker counts are powers of 2 → evenly spaced
+    ax.set_xscale("log", base=2)
+
+    # y-axis focused on the actual data; ideal line will be clipped at top
+    y_min = min(tps) * 0.72   # floor slightly below lowest data point
+    y_max = max_tps * 1.48
+
+    # ------------------------------------------------------------------ Amdahl reference
+    # Fit Amdahl's law  S(n) = 1 / (f + (1-f)/n)  to all measured speedups via OLS.
+    # Linearise: 1/S(n) = f·(1 - 1/n) + 1/n  →  y = f·x  (regression through origin)
+    # where x_i = 1 - 1/n_i,  y_i = 1/S(n_i) - 1/n_i
+    # Closed-form OLS: f = Σ(x_i · y_i) / Σ(x_i²)
+    xs = [1.0 - 1.0 / w for w in workers]
+    ys = [baseline / t - 1.0 / w for w, t in zip(workers, tps)]
+    serial_fraction = max(0.0, min(1.0, sum(x * y for x, y in zip(xs, ys)) / sum(x * x for x in xs)))
+    amdahl_tps = [baseline / (serial_fraction + (1 - serial_fraction) / w) for w in workers]
+
     ax.plot(
-        workers,
-        ideal,
-        color=_IDEAL,
-        linewidth=1.5,
-        linestyle="--",
-        alpha=0.55,
-        label="Ideal linear scaling",
-        zorder=2,
+        workers, amdahl_tps,
+        color=_C_IDEAL, linewidth=1.1, linestyle="--",
+        label=f"Amdahl's law  (f = {serial_fraction:.0%} serial)",
+        zorder=2, clip_on=True,
     )
 
-    # main throughput line
-    ax.plot(
-        workers,
-        tps,
-        color=_LINE,
-        linewidth=3,
-        solid_capstyle="round",
-        solid_joinstyle="round",
-        zorder=4,
-        label=f"hs2p  ({n_slides} {dataset_label} slides)",
-    )
-    if has_error:
+    # ------------------------------------------------------------------ error band
+    if has_err:
         lower = [max(0.0, t - e) for t, e in zip(tps, err)]
         upper = [t + e for t, e in zip(tps, err)]
-        ax.fill_between(workers, lower, upper, color=_LINE, alpha=0.18, zorder=3)
+        ax.fill_between(workers, lower, upper, color=_C_BAND, alpha=0.35, zorder=3)
 
-    # markers + value labels
+    # ------------------------------------------------------------------ main line
+    ax.plot(
+        workers, tps,
+        color=_C_LINE, linewidth=2.4,
+        solid_capstyle="round", solid_joinstyle="round",
+        label=f"hs2p  ({n_slides} {dataset_label} slides)",
+        zorder=4,
+    )
+
+    # markers – filled dots with white centre ring
     for w, t in zip(workers, tps):
-        ax.scatter(w, t, color=_LINE, s=90, zorder=5, edgecolors=_BG, linewidths=1.5)
-        ax.annotate(
-            f"{t:,.0f}",
-            xy=(w, t),
-            xytext=(0, 14),
-            textcoords="offset points",
-            ha="center",
-            va="bottom",
-            fontsize=11,
-            fontweight="bold",
-            color=_TEXT,
+        ax.scatter(w, t, s=65, color=_C_LINE, zorder=6)
+        ax.scatter(w, t, s=20, color="white",  zorder=7)
+
+    # ------------------------------------------------------------------ value labels
+    # on log₂ x, worker ticks are evenly spaced → simple offset above each point
+    v_offset = y_max * 0.04
+    for w, t in zip(workers, tps):
+        ax.text(
+            w, t + v_offset, f"{t / 1_000:.1f}k",
+            ha="center", va="bottom",
+            fontsize=8.5, color=_C_TEXT, fontweight="semibold",
         )
 
-    # speedup annotation (min → max workers)
-    if len(workers) > 1:
-        speedup = max_tps / baseline
-        mid_x = (workers[0] + max_workers) / 2
-        mid_y = (baseline + max_tps) / 2
-        ax.annotate(
-            f"{speedup:.1f}×",
-            xy=(max_workers, max_tps),
-            xytext=(mid_x, mid_y * 0.82),
-            textcoords="data",
-            ha="center",
-            fontsize=12,
-            fontweight="bold",
-            color=_ACCENT,
-            arrowprops=dict(
-                arrowstyle="-",
-                color=_ACCENT,
-                lw=1.2,
-                linestyle="dotted",
-            ),
-        )
-
-    # projection annotation box
+    # ------------------------------------------------------------------ projection note + speedup
+    speedup = max_tps / baseline if len(workers) > 1 else 1.0
     ax.text(
-        0.985,
-        0.05,
-        f"Projected · {dataset_label} (~{total_slides:,} slides)\n"
-        f"At {max_workers} workers:  {projected_hours:.1f} hours",
+        0.97, 0.96,
+        f"~{total_slides:,} {dataset_label} slides\n"
+        f"→ {proj_hours:.1f} h  at {max_workers} workers\n"
+        f"{speedup:.1f}× speedup  ({workers[0]}→{max_workers} workers)",
         transform=ax.transAxes,
-        ha="right",
-        va="bottom",
-        fontsize=10.5,
-        color=_TEXT,
-        linespacing=1.7,
-        bbox=dict(
-            boxstyle="round,pad=0.55",
-            facecolor=_ANNOT_BG,
-            edgecolor=_ANNOT_BORDER,
-            linewidth=1.2,
-        ),
+        ha="right", va="top",
+        fontsize=8, color=_C_MUTED, linespacing=1.7,
     )
 
     # ------------------------------------------------------------------ axes
-    ax.set_xlabel("Number of workers", fontsize=14, labelpad=10)
-    ax.set_ylabel("Throughput  (tiles / second)", fontsize=14, labelpad=10)
+    ax.set_xlabel("Number of workers", fontsize=11, labelpad=6, color=_C_TEXT)
+    ax.set_ylabel("Throughput  (tiles / s)", fontsize=11, labelpad=6, color=_C_TEXT)
     ax.set_xticks(workers)
-    ax.set_xticklabels([str(w) for w in workers], fontsize=12)
-    ax.yaxis.set_major_formatter(ticker.FuncFormatter(_format_kilo))
-    ax.tick_params(axis="y", labelsize=12)
-    x_pad = (workers[-1] - workers[0]) * 0.06
-    ax.set_xlim(workers[0] - x_pad, workers[-1] + x_pad)
-    ax.set_ylim(0, max(max(ideal), max(tps)) * 1.22)
+    ax.set_xticklabels([str(w) for w in workers], fontsize=10, color=_C_TEXT)
+    ax.yaxis.set_major_formatter(ticker.FuncFormatter(_fmt_k))
+    ax.tick_params(axis="y", labelsize=10, colors=_C_TEXT)
+    ax.tick_params(axis="x", colors=_C_TEXT)
+    # small padding on log x-axis
+    log_pad = 0.12
+    ax.set_xlim(workers[0] * 2 ** (-log_pad), workers[-1] * 2 ** log_pad)
+    ax.set_ylim(y_min, y_max)
 
-    # ------------------------------------------------------------------ title
-    fig.text(
-        0.08, 0.96,
-        "hs2p · Tiling Throughput",
-        ha="left", va="top",
-        fontsize=18, fontweight="bold", color=_TEXT,
+    # ------------------------------------------------------------------ title block
+    config_line = (
+        f"{tile_size} px tiles · {target_spacing} µm/px · {backend} backend"
+        f"  ·  {n_slides} {dataset_label} slides"
     )
-    fig.text(
-        0.08, 0.91,
-        f"{tile_size}px tiles · {target_spacing}µm/px · {backend} backend"
-        f"  ·  {n_slides} {dataset_label} slides",
-        ha="left", va="top",
-        fontsize=11, color=_TEXT_MUTED,
-    )
-
-    # slide stats line (shown only when metadata is available)
+    stats_parts: list[str] = []
     if slide_stats:
-        stats_parts: list[str] = []
         if "median_width_px" in slide_stats and "median_height_px" in slide_stats:
-            w = int(slide_stats["median_width_px"])
-            h = int(slide_stats["median_height_px"])
-            stats_parts.append(f"median {w:,} × {h:,} px at {target_spacing}µm/px")
+            sw = int(slide_stats["median_width_px"])
+            sh = int(slide_stats["median_height_px"])
+            stats_parts.append(f"median {sw:,} × {sh:,} px at {target_spacing} µm/px")
         if "avg_tiles_per_slide" in slide_stats:
             stats_parts.append(f"avg {slide_stats['avg_tiles_per_slide']:,.0f} tiles/slide")
         if "median_file_size_mb" in slide_stats:
             stats_parts.append(f"median {slide_stats['median_file_size_mb']:.0f} MB/slide")
-        if stats_parts:
-            fig.text(
-                0.08, 0.875,
-                "  ·  ".join(stats_parts),
-                ha="left", va="top",
-                fontsize=10, color=_TEXT_MUTED,
-                alpha=0.8,
-            )
+
+    fig.text(0.13, 0.97, "hs2p · Tiling Throughput",
+             ha="left", va="top", fontsize=14, fontweight="bold", color=_C_TEXT)
+    fig.text(0.13, 0.925, config_line,
+             ha="left", va="top", fontsize=8.5, color=_C_MUTED)
+    if stats_parts:
+        fig.text(0.13, 0.895, "  ·  ".join(stats_parts),
+                 ha="left", va="top", fontsize=8, color=_C_MUTED, alpha=0.85)
 
     # ------------------------------------------------------------------ legend
-    legend = ax.legend(
-        fontsize=11,
-        loc="upper left",
-        framealpha=0.0,
-        labelcolor=_TEXT,
-        handlelength=2.2,
+    leg = ax.legend(
+        fontsize=9, loc="upper left",
+        frameon=False, labelcolor=_C_TEXT, handlelength=2,
     )
-    for line in legend.get_lines():
-        line.set_linewidth(2.5)
-
-    # ------------------------------------------------------------------ footer
-    fig.text(
-        0.08, 0.025,
-        "github.com/clemsgrs/hs2p",
-        ha="left", va="bottom",
-        fontsize=9.5, color=_TEXT_MUTED, style="italic",
-    )
+    for line in leg.get_lines():
+        line.set_linewidth(1.8)
 
     # ------------------------------------------------------------------ save
+    fig.subplots_adjust(top=0.84, bottom=0.13, left=0.13, right=0.97)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path, dpi=150, bbox_inches="tight", facecolor=_BG)
+    fig.savefig(output_path, dpi=200, bbox_inches="tight", facecolor="white")
     plt.close(fig)
+    plt.rcdefaults()
     print(f"\nChart saved → {output_path}")
 
 
@@ -848,18 +812,7 @@ def main() -> int:
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     # ── copy slides locally ───────────────────────────────────────────────
-    if args.skip_copy:
-        print(f"\nSkipping copy (--skip-copy). Expecting slides in {args.local_dir}.")
-        # Remap paths to local_dir using the same naming convention.
-        remapped = []
-        for s in sampled:
-            dst_image = args.local_dir / f"{s['sample_id']}{s['image_path'].suffix}"
-            dst_mask: Path | None = None
-            if s["mask_path"] is not None:
-                dst_mask = args.local_dir / f"{s['sample_id']}.mask{s['mask_path'].suffix}"
-            remapped.append({**s, "image_path": dst_image, "mask_path": dst_mask})
-        sampled = remapped
-    else:
+    if args.copy_locally:
         total_mb = sum(s["size_bytes"] for s in sampled) / 1e6
         print(
             f"\nCopying {len(sampled)} slides to {args.local_dir}"
