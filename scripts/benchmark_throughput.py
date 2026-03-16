@@ -270,38 +270,37 @@ def copy_slides_locally(
 def collect_slide_stats(
     slides: list[dict[str, Any]],
     target_spacing: float,
+    backend: str = "openslide",
+    tolerance: float = 0.05,
 ) -> dict[str, Any]:
-    """Read basic slide metadata via openslide and return summary statistics.
+    """Read basic slide metadata via WholeSlideImage and return summary statistics.
 
-    Computes the slide area in megapixels at the target spacing, which gives
-    viewers a concrete sense of the data scale.  Returns an empty dict if
-    openslide is not available or no spacing metadata can be read.
+    Uses level_dimensions at the best level for target_spacing, which gives
+    viewers a concrete sense of the data scale.  Returns an empty dict on failure.
     """
-    try:
-        import openslide
-    except ImportError:
-        return {}
+    from hs2p.wsi.wsi import WholeSlideImage
 
-    widths_at_target: list[float] = []
-    heights_at_target: list[float] = []
+    widths: list[int] = []
+    heights: list[int] = []
     for slide in slides:
         try:
-            wsi = openslide.OpenSlide(str(slide["image_path"]))
-            w, h = wsi.dimensions
-            mpp_x = float(wsi.properties.get(openslide.PROPERTY_NAME_MPP_X) or 0)
-            mpp_y = float(wsi.properties.get(openslide.PROPERTY_NAME_MPP_Y) or mpp_x)
-            wsi.close()
-            if mpp_x > 0 and mpp_y > 0 and target_spacing > 0:
-                widths_at_target.append(w * mpp_x / target_spacing)
-                heights_at_target.append(h * mpp_y / target_spacing)
+            wsi = WholeSlideImage(
+                path=slide["image_path"],
+                backend=backend,
+                spacing_at_level_0=slide.get("spacing_at_level_0"),
+            )
+            level, _ = wsi.get_best_level_for_spacing(target_spacing, tolerance)
+            w, h = wsi.level_dimensions[level]
+            widths.append(w)
+            heights.append(h)
         except Exception:
             continue
 
-    if not widths_at_target:
+    if not widths:
         return {}
     return {
-        "median_width_px": float(np.median(widths_at_target)),
-        "median_height_px": float(np.median(heights_at_target)),
+        "median_width_px": float(np.median(widths)),
+        "median_height_px": float(np.median(heights)),
     }
 
 
@@ -872,7 +871,7 @@ def main() -> int:
 
     # ── collect slide metadata ────────────────────────────────────────────
     print("\nCollecting slide metadata ...", flush=True)
-    slide_stats: dict[str, Any] = collect_slide_stats(sampled, args.target_spacing)
+    slide_stats: dict[str, Any] = collect_slide_stats(sampled, args.target_spacing, backend=args.backend)
     sizes_mb_local = [s["size_bytes"] / 1e6 for s in sampled if s["size_bytes"] > 0]
     if sizes_mb_local:
         slide_stats["median_file_size_mb"] = float(np.median(sizes_mb_local))
