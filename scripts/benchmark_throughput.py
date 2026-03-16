@@ -87,7 +87,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--backend",
-        default="openslide",
+        default="asap",
         help="WSI reading backend passed to the tiling config.",
     )
     parser.add_argument(
@@ -270,7 +270,7 @@ def copy_slides_locally(
 def collect_slide_stats(
     slides: list[dict[str, Any]],
     target_spacing: float,
-    backend: str = "openslide",
+    backend: str = "asap",
     tolerance: float = 0.05,
 ) -> dict[str, Any]:
     """Read basic slide metadata via WholeSlideImage and return summary statistics.
@@ -356,7 +356,7 @@ def write_config(
                 "target_tile_size_px": tile_size,
                 "tolerance": 0.05,
                 "overlap": 0.0,
-                "tissue_threshold": 0.01,
+                "tissue_threshold": 0.25,
                 "drop_holes": False,
                 "use_padding": True,
             },
