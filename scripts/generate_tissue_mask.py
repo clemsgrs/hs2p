@@ -286,7 +286,7 @@ def load_wsi_at_spacing(
     level, is_within_tolerance = get_best_level_for_spacing(
         wsi, target_spacing, tolerance
     )
-    wsi_arr = wsi.get_slide(spacing=spacings[level])
+    wsi_arr = wsi.get_slide(spacing=base_spacings[level])
 
     if not is_within_tolerance:
         # means the selected level's spacing is smaller than the target_spacing

@@ -129,7 +129,8 @@ class WholeSlideImage(object):
         self._level_spacing_cache = {}  # add a cache for level spacings
 
         self.spacing_at_level_0 = spacing_at_level_0  # manually set spacing at level 0
-        self.spacings = self.get_spacings()
+        self.raw_spacings = list(self.wsi.spacings)  # native spacings from file metadata, never overridden
+        self.spacings = self.get_spacings()  # physical spacings, possibly overridden via spacing_at_level_0
         self.level_dimensions = self.wsi.shapes
         self.level_downsamples = self.get_downsamples()
         self.backend = backend
@@ -147,32 +148,36 @@ class WholeSlideImage(object):
         if sampling_params is not None:
             self.annotation_pct = sampling_params.tissue_percentage
 
-    def get_slide(self, spacing: float):
-        return self.wsi.get_slide(spacing=spacing)
+    def get_slide(self, level: int) -> np.ndarray:
+        """Return the full slide image at the given pyramid level.
 
-    def get_tile(self, x: int, y: int, width: int, height: int, spacing: float):
+        Uses raw_spacings so the backend resolves to the correct level regardless
+        of any spacing_at_level_0 override.
         """
-        Extracts a tile from a whole slide image at the specified coordinates, size, and spacing.
+        return self.wsi.get_slide(spacing=self.raw_spacings[level])
+
+    def get_tile(self, x: int, y: int, width: int, height: int, level: int) -> np.ndarray:
+        """
+        Extracts a tile from a whole slide image at the specified coordinates and pyramid level.
 
         Args:
-            x (int): The x-coordinate of the top-left corner of the tile.
-            y (int): The y-coordinate of the top-left corner of the tile.
-            width (int): Tile width.
-            height (int): Tile height.
-            spacing (float): The spacing (resolution) at which the tile should be extracted.
+            x (int): The x-coordinate of the top-left corner of the tile (level-0 pixel space).
+            y (int): The y-coordinate of the top-left corner of the tile (level-0 pixel space).
+            width (int): Tile width in pixels at the target level.
+            height (int): Tile height in pixels at the target level.
+            level (int): Pyramid level to read from.
 
         Returns:
             numpy.ndarray: The extracted tile as a numpy array.
         """
-        tile = self.wsi.get_patch(
+        return self.wsi.get_patch(
             x,
             y,
             width,
             height,
-            spacing=spacing,
+            spacing=self.raw_spacings[level],
             center=False,
         )
-        return tile
 
     def get_downsamples(self):
         """
@@ -208,13 +213,11 @@ class WholeSlideImage(object):
             `spacing` attribute.
         """
         if self.spacing_at_level_0 is None:
-            spacings = self.wsi.spacings
-        else:
-            spacings = [
-                self.spacing_at_level_0 * s / self.wsi.spacings[0]
-                for s in self.wsi.spacings
-            ]
-        return spacings
+            return self.raw_spacings
+        return [
+            self.spacing_at_level_0 * s / self.raw_spacings[0]
+            for s in self.raw_spacings
+        ]
 
     def get_level_spacing(self, level: int):
         """
@@ -367,9 +370,8 @@ class WholeSlideImage(object):
         """
 
         seg_level = self.get_best_level_for_downsample_custom(segment_params.downsample)
-        seg_spacing = self.get_level_spacing(seg_level)
 
-        img = np.asarray(self.wsi.get_slide(spacing=seg_spacing))
+        img = np.asarray(self.get_slide(seg_level))
         if img.ndim == 3 and img.shape[2] == 4:
             img = img[:, :, :3]
         img_hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)  # convert to HSV space
@@ -493,49 +495,104 @@ class WholeSlideImage(object):
         filter_params,
     ):
         if filter_params.filter_white or filter_params.filter_black:
-            tile_spacing = self.get_level_spacing(tile_level)
-            downsample = tile_spacing / self.get_level_spacing(0)
             img_w, img_h = self.level_dimensions[tile_level]
-            filtered_keep_flags = []
+            downsample_x, downsample_y = self.level_downsamples[tile_level]
+            keep_array = np.asarray(keep_flags, dtype=np.uint8).copy()
+            active_indices = np.flatnonzero(keep_array)
+            if active_indices.size == 0:
+                return keep_array.tolist()
+
+            level_coords = np.empty((coord_candidates.shape[0], 2), dtype=np.int64)
+            level_coords[:, 0] = np.floor(coord_candidates[:, 0] / downsample_x).astype(
+                np.int64
+            )
+            level_coords[:, 1] = np.floor(coord_candidates[:, 1] / downsample_y).astype(
+                np.int64
+            )
+
+            supertile_span = max(int(tile_size) * 8, int(tile_size))
+            batched_indices: dict[tuple[int, int], list[int]] = {}
+            for idx in active_indices.tolist():
+                x_level, y_level = level_coords[idx]
+                batch_key = (
+                    int(x_level // supertile_span),
+                    int(y_level // supertile_span),
+                )
+                batched_indices.setdefault(batch_key, []).append(idx)
+
             error_count = 0
             error_samples = []
-            for keep, coord in zip(keep_flags, coord_candidates):
-                if keep:
-                    try:
-                        x, y = int(coord[0]), int(coord[1])
-                        tile = self.get_tile(
-                            x,
-                            y,
-                            tile_size,
-                            tile_size,
-                            spacing=tile_spacing,
-                        )
-                        # restrict coverage to valid portion of the slide
-                        x_downsample, y_downsample = int(x / downsample), int(
-                            y / downsample
-                        )
-                        valid_w = int(min(tile_size, img_w - x_downsample))
-                        valid_h = int(min(tile_size, img_h - y_downsample))
-                        valid_tile = tile[:valid_h, :valid_w, :]
-                        if filter_params.filter_white:
-                            white_pixels = np.all(
-                                valid_tile[:, :, :3] > filter_params.white_threshold,
-                                axis=-1,
-                            )
-                            if np.mean(white_pixels) > filter_params.fraction_threshold:
-                                keep = 0
-                        if keep and filter_params.filter_black:
-                            black_pixels = np.all(
-                                valid_tile[:, :, :3] < filter_params.black_threshold,
-                                axis=-1,
-                            )
-                            if np.mean(black_pixels) > filter_params.fraction_threshold:
-                                keep = 0
-                    except Exception as e:
-                        error_count += 1
-                        if len(error_samples) < 3:
-                            error_samples.append(str(e))
-                filtered_keep_flags.append(keep)
+            for (batch_x, batch_y), batch_member_indices in batched_indices.items():
+                x0_level = batch_x * supertile_span
+                y0_level = batch_y * supertile_span
+                read_width = int(min(supertile_span + tile_size, max(0, img_w - x0_level)))
+                read_height = int(
+                    min(supertile_span + tile_size, max(0, img_h - y0_level))
+                )
+                x0 = int(round(x0_level * downsample_x))
+                y0 = int(round(y0_level * downsample_y))
+                try:
+                    window = self.get_tile(
+                        x0,
+                        y0,
+                        read_width,
+                        read_height,
+                        tile_level,
+                    )
+                except Exception as e:
+                    error_count += len(batch_member_indices)
+                    if len(error_samples) < 3:
+                        error_samples.append(str(e))
+                    continue
+
+                tiles = np.zeros(
+                    (len(batch_member_indices), tile_size, tile_size, 3),
+                    dtype=window.dtype,
+                )
+                valid_mask = np.zeros(
+                    (len(batch_member_indices), tile_size, tile_size),
+                    dtype=bool,
+                )
+                for local_idx, coord_idx in enumerate(batch_member_indices):
+                    x_level, y_level = level_coords[coord_idx]
+                    offset_x = int(x_level - x0_level)
+                    offset_y = int(y_level - y0_level)
+                    tile_view = window[
+                        offset_y : offset_y + tile_size,
+                        offset_x : offset_x + tile_size,
+                        :3,
+                    ]
+                    height = min(tile_size, tile_view.shape[0])
+                    width = min(tile_size, tile_view.shape[1])
+                    if height > 0 and width > 0:
+                        tiles[local_idx, :height, :width, :] = tile_view[:height, :width]
+
+                    valid_w = int(min(tile_size, max(0, img_w - x_level)))
+                    valid_h = int(min(tile_size, max(0, img_h - y_level)))
+                    if valid_h > 0 and valid_w > 0:
+                        valid_mask[local_idx, :valid_h, :valid_w] = True
+
+                valid_area = np.maximum(valid_mask.sum(axis=(1, 2)), 1)
+                keep_batch = np.ones(len(batch_member_indices), dtype=np.uint8)
+                if filter_params.filter_white:
+                    white_pixels = np.all(
+                        tiles > filter_params.white_threshold, axis=-1
+                    ) & valid_mask
+                    white_fraction = white_pixels.sum(axis=(1, 2)) / valid_area
+                    keep_batch = (
+                        white_fraction <= filter_params.fraction_threshold
+                    ).astype(np.uint8)
+                if filter_params.filter_black:
+                    black_pixels = np.all(
+                        tiles < filter_params.black_threshold, axis=-1
+                    ) & valid_mask
+                    black_fraction = black_pixels.sum(axis=(1, 2)) / valid_area
+                    keep_batch = keep_batch & (
+                        black_fraction <= filter_params.fraction_threshold
+                    ).astype(np.uint8)
+
+                for coord_idx, keep in zip(batch_member_indices, keep_batch.tolist()):
+                    keep_array[coord_idx] = keep
             if error_count > 0:
                 slide_id = getattr(self, "path", "<unknown-slide>")
                 sample_msg = "; ".join(error_samples)
@@ -544,7 +601,7 @@ class WholeSlideImage(object):
                     f"Keeping affected tile(s). Sample error(s): {sample_msg}",
                     UserWarning,
                 )
-            return filtered_keep_flags
+            return keep_array.tolist()
         return keep_flags
 
     @staticmethod
