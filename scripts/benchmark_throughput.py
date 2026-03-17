@@ -108,6 +108,12 @@ def parse_args() -> argparse.Namespace:
         help="Dataset name shown in the chart subtitle and legend.",
     )
     parser.add_argument(
+        "--collect-slide-metadata",
+        action="store_true",
+        default=False,
+        help="Open each slide to collect median width/height stats for the chart subtitle (slow for large datasets).",
+    )
+    parser.add_argument(
         "--local-dir",
         type=Path,
         default=Path("/tmp/benchmark-slides"),
@@ -711,8 +717,8 @@ def plot_results(
         )
 
     # ------------------------------------------------------------------ axes
-    ax.set_xlabel("Number of workers", fontsize=11, labelpad=6, color=_C_TEXT)
-    ax.set_ylabel("Throughput  (tiles / s)", fontsize=11, labelpad=6, color=_C_TEXT)
+    ax.set_xlabel("Number of workers", fontsize=11, labelpad=10, color=_C_TEXT)
+    ax.set_ylabel("Throughput  (tiles / s)", fontsize=11, labelpad=10, color=_C_TEXT)
     ax.set_xticks(workers)
     ax.set_xticklabels([str(w) for w in workers], fontsize=10, color=_C_TEXT)
     ax.yaxis.set_major_formatter(ticker.FuncFormatter(_fmt_k))
@@ -750,7 +756,7 @@ def plot_results(
     # ------------------------------------------------------------------ save
     fig.subplots_adjust(top=0.84, bottom=0.13, left=0.13, right=0.97)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path, dpi=200, bbox_inches="tight", facecolor="white")
+    fig.savefig(output_path, dpi=300, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     plt.rcdefaults()
     print(f"\nChart saved → {output_path}")
@@ -828,20 +834,22 @@ def main() -> int:
         print("Copy complete.", flush=True)
 
     # ── collect slide metadata ────────────────────────────────────────────
-    print("\nCollecting slide metadata ...", flush=True)
-    slide_stats: dict[str, Any] = collect_slide_stats(
-        balanced, args.target_spacing, backend=args.backend
-    )
+    slide_stats: dict[str, Any] = {}
+    if args.collect_slide_metadata:
+        print("\nCollecting slide metadata ...", flush=True)
+        slide_stats = collect_slide_stats(
+            balanced, args.target_spacing, backend=args.backend
+        )
+        if "median_width_px" in slide_stats:
+            print(
+                f"  median slide size at {args.target_spacing}µm/px: "
+                f"{int(slide_stats['median_width_px']):,} × {int(slide_stats['median_height_px']):,} px"
+            )
+        else:
+            print("  (slide spacing metadata unavailable, skipping size stat)")
     sizes_mb_local = [s["size_bytes"] / 1e6 for s in balanced if s["size_bytes"] > 0]
     if sizes_mb_local:
         slide_stats["median_file_size_mb"] = float(np.median(sizes_mb_local))
-    if "median_width_px" in slide_stats:
-        print(
-            f"  median slide size at {args.target_spacing}µm/px: "
-            f"{int(slide_stats['median_width_px']):,} × {int(slide_stats['median_height_px']):,} px"
-        )
-    else:
-        print("  (slide spacing metadata unavailable, skipping size stat)")
 
     # ── benchmark ────────────────────────────────────────────────────────
     print(f"\nRunning benchmark: workers={sorted(args.workers)}, repeat={args.repeat}")
