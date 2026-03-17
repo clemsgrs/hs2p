@@ -103,12 +103,6 @@ def parse_args() -> argparse.Namespace:
         help="Tile size in pixels at target spacing.",
     )
     parser.add_argument(
-        "--total-slides",
-        type=int,
-        default=52691,
-        help="Total slide count for the projection annotation on the chart.",
-    )
-    parser.add_argument(
         "--dataset-label",
         default="HistAI mixed",
         help="Dataset name shown in the chart subtitle and legend.",
@@ -645,7 +639,6 @@ def plot_results(
     target_spacing: float,
     tile_size: int,
     backend: str,
-    total_slides: int,
     dataset_label: str,
     slide_stats: dict[str, Any] | None = None,
 ) -> None:
@@ -657,9 +650,6 @@ def plot_results(
     baseline     = tps[0]
     max_tps      = max(tps)
     max_workers  = workers[tps.index(max_tps)]
-    avg_tiles    = records[0]["total_tiles"] / max(records[0]["slides_processed"], 1)
-    proj_hours   = avg_tiles * total_slides / max_tps / 3600
-
     # ------------------------------------------------------------------ style
     plt.rcParams.update({
         "font.family":       "sans-serif",
@@ -702,7 +692,6 @@ def plot_results(
         workers, tps,
         color=_C_LINE, linewidth=2.4,
         solid_capstyle="round", solid_joinstyle="round",
-        label=f"hs2p  ({n_slides} {dataset_label} slides)",
         zorder=4,
     )
 
@@ -720,18 +709,6 @@ def plot_results(
             ha="center", va="bottom",
             fontsize=8.5, color=_C_TEXT, fontweight="semibold",
         )
-
-    # ------------------------------------------------------------------ projection note + speedup
-    speedup = max_tps / baseline if len(workers) > 1 else 1.0
-    ax.text(
-        0.97, 0.96,
-        f"~{total_slides:,} {dataset_label} slides\n"
-        f"→ {proj_hours:.1f} h  at {max_workers} workers\n"
-        f"{speedup:.1f}× speedup  ({workers[0]}→{max_workers} workers)",
-        transform=ax.transAxes,
-        ha="right", va="top",
-        fontsize=8, color=_C_MUTED, linespacing=1.7,
-    )
 
     # ------------------------------------------------------------------ axes
     ax.set_xlabel("Number of workers", fontsize=11, labelpad=6, color=_C_TEXT)
@@ -770,14 +747,6 @@ def plot_results(
         fig.text(0.13, 0.895, "  ·  ".join(stats_parts),
                  ha="left", va="top", fontsize=8, color=_C_MUTED, alpha=0.85)
 
-    # ------------------------------------------------------------------ legend
-    leg = ax.legend(
-        fontsize=9, loc="upper left",
-        frameon=False, labelcolor=_C_TEXT, handlelength=2,
-    )
-    for line in leg.get_lines():
-        line.set_linewidth(1.8)
-
     # ------------------------------------------------------------------ save
     fig.subplots_adjust(top=0.84, bottom=0.13, left=0.13, right=0.97)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -808,7 +777,6 @@ def main() -> int:
                 target_spacing=args.target_spacing,
                 tile_size=args.tile_size,
                 backend=args.backend,
-                total_slides=args.total_slides,
                 dataset_label=f"{args.dataset_label} ({workload})",
             )
         return 0
@@ -919,7 +887,6 @@ def main() -> int:
             target_spacing=args.target_spacing,
             tile_size=args.tile_size,
             backend=args.backend,
-            total_slides=args.total_slides,
             dataset_label=f"{args.dataset_label} ({workload})",
             slide_stats=workload_slide_stats,
         )
