@@ -498,6 +498,7 @@ def _compute_level0_mask_with_coarse_roi_shortcut(
         tolerance=tolerance,
         spacing_at_level_0=spacing_at_level_0,
     )
+    native_level_spacing = list(wsi.spacings)[level]
 
     coarse_arr, coarse_effective_spacing = load_wsi_at_spacing(
         wsi_path=wsi_path,
@@ -566,7 +567,7 @@ def _compute_level0_mask_with_coarse_roi_shortcut(
                     ry0_l0,
                     rx1 - rx0,
                     ry1 - ry0,
-                    spacing=effective_spacing,
+                    spacing=native_level_spacing,
                     center=False,
                 )
                 tile_mask = segment_tissue_hsv(wsi_arr=tile, gaussian_sigma_px=sigma_px)
