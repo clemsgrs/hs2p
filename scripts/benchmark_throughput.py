@@ -625,7 +625,6 @@ def load_results_csv(path: Path) -> list[dict[str, Any]]:
 # GitHub-dark-inspired palette
 # Publication-ready color palette (light background, restrained)
 _C_LINE   = "#1a6faf"   # main throughput line  – steel blue
-_C_IDEAL  = "#adb5bd"   # ideal scaling          – muted gray
 _C_BAND   = "#a8c8e8"   # error band fill        – desaturated blue
 _C_ACCENT = "#c0392b"   # speedup callout        – muted red
 _C_TEXT   = "#222222"   # primary text
@@ -688,26 +687,9 @@ def plot_results(
     # log₂ x-axis: worker counts are powers of 2 → evenly spaced
     ax.set_xscale("log", base=2)
 
-    # y-axis focused on the actual data; ideal line will be clipped at top
+    # y-axis focused on the actual data range
     y_min = min(tps) * 0.72   # floor slightly below lowest data point
     y_max = max_tps * 1.48
-
-    # ------------------------------------------------------------------ Amdahl reference
-    # Fit Amdahl's law  S(n) = 1 / (f + (1-f)/n)  to all measured speedups via OLS.
-    # Linearise: 1/S(n) = f·(1 - 1/n) + 1/n  →  y = f·x  (regression through origin)
-    # where x_i = 1 - 1/n_i,  y_i = 1/S(n_i) - 1/n_i
-    # Closed-form OLS: f = Σ(x_i · y_i) / Σ(x_i²)
-    xs = [1.0 - 1.0 / w for w in workers]
-    ys = [baseline / t - 1.0 / w for w, t in zip(workers, tps)]
-    serial_fraction = max(0.0, min(1.0, sum(x * y for x, y in zip(xs, ys)) / sum(x * x for x in xs)))
-    amdahl_tps = [baseline / (serial_fraction + (1 - serial_fraction) / w) for w in workers]
-
-    ax.plot(
-        workers, amdahl_tps,
-        color=_C_IDEAL, linewidth=1.1, linestyle="--",
-        label=f"Amdahl's law  (f = {serial_fraction:.0%} serial)",
-        zorder=2, clip_on=True,
-    )
 
     # ------------------------------------------------------------------ error band
     if has_err:
