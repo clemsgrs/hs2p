@@ -62,7 +62,6 @@ def test_filter_coordinates_returns_expected_per_class_subsets(fake_backend):
         segment_params=_segmentation_config(),
         tiling_params=_tiling_config(),
         sampling_params=_sampling_parameters(),
-        disable_tqdm=True,
     )
 
     assert filtered["tumor"] == [(8, 8), (16, 16)]
@@ -153,7 +152,6 @@ def test_filter_coordinates_reuses_loaded_mask_and_avoids_per_tile_mask_reads(
             backend="asap",
         ),
         sampling_params=_sampling_parameters(),
-        disable_tqdm=True,
     )
 
     assert constructor_calls == [
@@ -163,6 +161,94 @@ def test_filter_coordinates_reuses_loaded_mask_and_avoids_per_tile_mask_reads(
     assert filtered["stroma"] == [(2, 0)]
     assert filtered_indices["tumor"] == [0]
     assert filtered_indices["stroma"] == [1]
+
+
+def test_filter_coordinates_vectorized_path_avoids_per_tile_crops_and_handles_borders(
+    monkeypatch,
+):
+    class FakeMaskBackend:
+        def __init__(self):
+            self.spacings = [1.0]
+            self.downsamplings = [1.0]
+            self.shapes = [(3, 3)]
+
+        def get_slide(self, spacing):
+            assert spacing == 1.0
+            return np.array(
+                [
+                    [[1], [1], [0]],
+                    [[1], [1], [0]],
+                    [[0], [0], [0]],
+                ],
+                dtype=np.uint8,
+            )
+
+    class FakeWholeSlideImage:
+        def __init__(
+            self,
+            path,
+            mask_path=None,
+            backend="asap",
+            spacing_at_level_0=None,
+            segment=False,
+            segment_params=None,
+            sampling_params=None,
+            pixel_mapping=None,
+        ):
+            del (
+                path,
+                backend,
+                spacing_at_level_0,
+                segment,
+                segment_params,
+                sampling_params,
+                pixel_mapping,
+            )
+            self.spacings = [1.0]
+            self.level_dimensions = [(3, 3)]
+            self.level_downsamples = [(1.0, 1.0)]
+            self.mask = FakeMaskBackend() if mask_path is not None else None
+
+        def get_level_spacing(self, level):
+            assert level == 0
+            return 1.0
+
+    monkeypatch.setattr(wsi_api, "WholeSlideImage", FakeWholeSlideImage)
+    monkeypatch.setattr(
+        wsi_api,
+        "_extract_padded_crop",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("vectorized mask scoring should not crop one tile at a time")
+        ),
+    )
+
+    filtered, filtered_indices = wsi_api.filter_coordinates(
+        wsi_path=Path("synthetic-slide.tif"),
+        mask_path=Path("synthetic-mask.tif"),
+        backend="asap",
+        coordinates=[(0, 0), (1, 0), (2, 2)],
+        contour_indices=[0, 1, 2],
+        tile_level=0,
+        segment_params=_segmentation_config(),
+        tiling_params=TilingConfig(
+            target_spacing_um=1.0,
+            target_tile_size_px=2,
+            tolerance=0.01,
+            overlap=0.0,
+            tissue_threshold=0.0,
+            drop_holes=False,
+            use_padding=False,
+            backend="asap",
+        ),
+        sampling_params=SamplingParameters(
+            pixel_mapping={"background": 0, "tumor": 1},
+            color_mapping={"background": None, "tumor": None},
+            tissue_percentage={"background": None, "tumor": 0.5},
+        ),
+    )
+
+    assert filtered["tumor"] == [(0, 0), (1, 0)]
+    assert filtered_indices["tumor"] == [0, 1]
 
 
 def test_load_segmentation_preserves_discrete_labels_with_nearest_neighbor(

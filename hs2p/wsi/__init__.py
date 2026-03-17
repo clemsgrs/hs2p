@@ -477,7 +477,6 @@ def filter_coordinates(
     segment_params: SegmentationParameters,
     tiling_params: _SupportsTilingParams,
     sampling_params: SamplingParameters,
-    disable_tqdm: bool = False,
 ):
     if mask_path is None:
         raise ValueError("mask_path is required for filter_coordinates()")
@@ -492,7 +491,6 @@ def filter_coordinates(
     tile_spacing = wsi.get_level_spacing(tile_level)
     resize_factor = tiling_params.spacing / tile_spacing
     tile_size_resized = int(round(tiling_params.tile_size * resize_factor, 0))
-    combined = list(zip(coordinates, contour_indices))
     slide_downsample_x, slide_downsample_y = wsi.level_downsamples[tile_level]
     mask = _read_aligned_mask(
         mask_obj=wsi.mask,
@@ -502,6 +500,20 @@ def filter_coordinates(
     if mask.ndim == 3 and mask.shape[2] == 1:
         mask = np.squeeze(mask, axis=-1)
 
+    coord_array = np.asarray(coordinates, dtype=np.int64)
+    contour_index_array = np.asarray(contour_indices)
+    if coord_array.size == 0:
+        return defaultdict(list), defaultdict(list)
+
+    tile_area = float(tile_size_resized * tile_size_resized)
+    x_level = np.rint(coord_array[:, 0] / slide_downsample_x).astype(np.int64)
+    y_level = np.rint(coord_array[:, 1] / slide_downsample_y).astype(np.int64)
+    mask_height, mask_width = mask.shape[:2]
+    x1 = np.clip(x_level, 0, mask_width)
+    y1 = np.clip(y_level, 0, mask_height)
+    x2 = np.clip(x1 + tile_size_resized, 0, mask_width)
+    y2 = np.clip(y1 + tile_size_resized, 0, mask_height)
+
     filtered_coordinates = defaultdict(list)
     filtered_contour_indices = defaultdict(list)
     for annotation, pct in sampling_params.tissue_percentage.items():
@@ -509,32 +521,19 @@ def filter_coordinates(
             continue
         if annotation not in sampling_params.pixel_mapping:
             continue
-        with tqdm.tqdm(
-            combined,
-            desc=f"Filtering coordinates for annotation '{annotation}' (min coverage {pct}%) on slide {wsi_path.stem}",
-            unit=" tile",
-            total=len(coordinates),
-            disable=disable_tqdm,
-        ) as t:
-            for coord, contour_idx in t:
-                x, y = coord
-                x_level = int(round(x / slide_downsample_x, 0))
-                y_level = int(round(y / slide_downsample_y, 0))
-                masked_tile = _extract_padded_crop(
-                    mask,
-                    x=x_level,
-                    y=y_level,
-                    width=tile_size_resized,
-                    height=tile_size_resized,
-                )
-                if masked_tile.ndim == 3 and masked_tile.shape[-1] == 1:
-                    masked_tile = np.squeeze(masked_tile, axis=-1)
-                mask_pct = get_mask_coverage(
-                    masked_tile, sampling_params.pixel_mapping[annotation]
-                )
-                if mask_pct >= pct:
-                    filtered_coordinates[annotation].append(coord)
-                    filtered_contour_indices[annotation].append(contour_idx)
+        label_value = sampling_params.pixel_mapping[annotation]
+        integral = cv2.integral((mask == label_value).astype(np.uint8), sdepth=cv2.CV_32S)
+        label_area = (
+            integral[y2, x2] - integral[y1, x2] - integral[y2, x1] + integral[y1, x1]
+        ).astype(np.float32)
+        keep = (label_area / tile_area) >= float(pct)
+        kept_indices = np.flatnonzero(keep)
+        filtered_coordinates[annotation].extend(
+            tuple(int(v) for v in coord_array[idx]) for idx in kept_indices
+        )
+        filtered_contour_indices[annotation].extend(
+            contour_index_array[kept_indices].tolist()
+        )
     return filtered_coordinates, filtered_contour_indices
 
 

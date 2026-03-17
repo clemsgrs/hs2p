@@ -473,37 +473,27 @@ def test_tile_slides_uses_slide_level_pool_and_preserves_input_order(
 ):
     seen = {"pool_processes": None, "inner_workers": []}
 
-    def _fake_compute_tiling_result(
-        whole_slide,
-        *,
-        tiling,
-        segmentation,
-        filtering,
-        mask_visu_path,
-        num_workers,
-        config_hash=None,
-    ):
-        del tiling, segmentation, filtering, mask_visu_path, config_hash
-        seen["inner_workers"].append(num_workers)
-        return _build_result(
-            sample_id=whole_slide.sample_id,
-            image_path=str(whole_slide.image_path),
-            config_hash="hash",
-        )
-
-    def _fake_save_tiling_result(result, output_dir, coordinates_dir=None):
-        del coordinates_dir
-        coordinates_dir = Path(output_dir) / "coordinates"
+    def _fake_compute_and_save(request):
+        seen["inner_workers"].append(request.num_workers)
+        coordinates_dir = Path(request.output_dir) / "coordinates"
         coordinates_dir.mkdir(parents=True, exist_ok=True)
-        npz_path = coordinates_dir / f"{result.sample_id}.tiles.npz"
-        meta_path = coordinates_dir / f"{result.sample_id}.tiles.meta.json"
+        npz_path = coordinates_dir / f"{request.whole_slide.sample_id}.tiles.npz"
+        meta_path = coordinates_dir / f"{request.whole_slide.sample_id}.tiles.meta.json"
         npz_path.write_bytes(b"npz")
         meta_path.write_text("{}")
-        return TilingArtifacts(
-            sample_id=result.sample_id,
-            tiles_npz_path=npz_path,
-            tiles_meta_path=meta_path,
-            num_tiles=result.num_tiles,
+        return SimpleNamespace(
+            input_index=request.input_index,
+            whole_slide=request.whole_slide,
+            ok=True,
+            artifact=TilingArtifacts(
+                sample_id=request.whole_slide.sample_id,
+                tiles_npz_path=npz_path,
+                tiles_meta_path=meta_path,
+                num_tiles=1,
+            ),
+            mask_preview_path=None,
+            error=None,
+            traceback_text=None,
         )
 
     class _FakePool:
@@ -516,12 +506,22 @@ def test_tile_slides_uses_slide_level_pool_and_preserves_input_order(
         def __exit__(self, exc_type, exc, tb):
             return False
 
-        def imap(self, fn, args_list):
-            for args in args_list:
+        def imap_unordered(self, fn, args_list):
+            requests = list(args_list)
+            for args in reversed(requests):
                 yield fn(args)
 
-    monkeypatch.setattr("hs2p.api._compute_tiling_result", _fake_compute_tiling_result)
-    monkeypatch.setattr("hs2p.api.save_tiling_result", _fake_save_tiling_result)
+    monkeypatch.setattr(
+        "hs2p.api._compute_and_save_tiling_artifacts_from_request",
+        _fake_compute_and_save,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "hs2p.api.save_tiling_result",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("parent should not write tiling artifacts in pooled mode")
+        ),
+    )
     monkeypatch.setattr("hs2p.api.mp.Pool", _FakePool)
 
     artifacts = tile_slides(
@@ -546,6 +546,75 @@ def test_tile_slides_uses_slide_level_pool_and_preserves_input_order(
     ]
     process_df = pd.read_csv(tmp_path / "process_list.csv")
     assert process_df["sample_id"].tolist() == ["slide-1", "slide-2", "slide-3"]
+
+
+def test_tile_slides_assigns_inner_workers_when_batch_is_small(
+    monkeypatch,
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    seen = {"pool_processes": None, "inner_workers": []}
+
+    def _fake_compute_and_save(request):
+        seen["inner_workers"].append(request.num_workers)
+        coordinates_dir = Path(request.output_dir) / "coordinates"
+        coordinates_dir.mkdir(parents=True, exist_ok=True)
+        npz_path = coordinates_dir / f"{request.whole_slide.sample_id}.tiles.npz"
+        meta_path = coordinates_dir / f"{request.whole_slide.sample_id}.tiles.meta.json"
+        npz_path.write_bytes(b"npz")
+        meta_path.write_text("{}")
+        return SimpleNamespace(
+            input_index=request.input_index,
+            whole_slide=request.whole_slide,
+            ok=True,
+            artifact=TilingArtifacts(
+                sample_id=request.whole_slide.sample_id,
+                tiles_npz_path=npz_path,
+                tiles_meta_path=meta_path,
+                num_tiles=1,
+            ),
+            mask_preview_path=None,
+            error=None,
+            traceback_text=None,
+        )
+
+    class _FakePool:
+        def __init__(self, processes):
+            seen["pool_processes"] = processes
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def imap_unordered(self, fn, args_list):
+            for args in args_list:
+                yield fn(args)
+
+    monkeypatch.setattr(
+        "hs2p.api._compute_and_save_tiling_artifacts_from_request",
+        _fake_compute_and_save,
+        raising=False,
+    )
+    monkeypatch.setattr("hs2p.api.mp.Pool", _FakePool)
+
+    tile_slides(
+        [
+            SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs")),
+            SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
+        ],
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        output_dir=tmp_path,
+        num_workers=8,
+    )
+
+    assert seen["pool_processes"] == 2
+    assert seen["inner_workers"] == [4, 4]
 
 
 def test_save_tiling_result_rejects_invalid_tile_index(tmp_path: Path):
@@ -598,6 +667,25 @@ def test_save_tiling_result_rejects_non_vector_arrays(tmp_path: Path):
 
     with pytest.raises(ValueError, match="x must be a 1D array"):
         save_tiling_result(invalid, output_dir=tmp_path)
+
+
+def test_save_tiling_result_cleans_up_partial_outputs_when_metadata_write_fails(
+    monkeypatch, tmp_path: Path
+):
+    result = _build_result(sample_id="slide-clean", image_path="slide-clean.svs")
+    coordinates_dir = tmp_path / "coordinates"
+
+    def _raise_json(*args, **kwargs):
+        raise RuntimeError("json failure")
+
+    monkeypatch.setattr("hs2p.api.json.dumps", _raise_json)
+
+    with pytest.raises(RuntimeError, match="json failure"):
+        save_tiling_result(result, output_dir=tmp_path)
+
+    assert not (coordinates_dir / "slide-clean.tiles.npz").exists()
+    assert not (coordinates_dir / "slide-clean.tiles.meta.json").exists()
+    assert list(coordinates_dir.glob("*")) == []
 
 
 def test_tile_slide_rejects_tissue_fraction_shape_mismatch(

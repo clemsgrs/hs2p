@@ -466,7 +466,43 @@ def save_tiling_result(
         "num_tiles": result.num_tiles,
         "config_hash": result.config_hash,
     }
-    meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n")
+    temp_npz_path: Path | None = None
+    temp_meta_path: Path | None = None
+    write_complete = False
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            suffix=".npz",
+            dir=coordinates_dir,
+            delete=False,
+        ) as handle:
+            temp_npz_path = Path(handle.name)
+            np.savez(handle, **payload)
+            handle.flush()
+
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".json",
+            dir=coordinates_dir,
+            delete=False,
+        ) as handle:
+            temp_meta_path = Path(handle.name)
+            handle.write(json.dumps(meta, indent=2, sort_keys=True) + "\n")
+            handle.flush()
+
+        temp_npz_path.replace(npz_path)
+        temp_npz_path = None
+        temp_meta_path.replace(meta_path)
+        temp_meta_path = None
+        write_complete = True
+    finally:
+        if not write_complete:
+            npz_path.unlink(missing_ok=True)
+            meta_path.unlink(missing_ok=True)
+        if temp_npz_path is not None:
+            temp_npz_path.unlink(missing_ok=True)
+        if temp_meta_path is not None:
+            temp_meta_path.unlink(missing_ok=True)
     return TilingArtifacts(
         sample_id=result.sample_id,
         tiles_npz_path=npz_path,
@@ -728,19 +764,24 @@ class _PlannedSlideWork:
 
 @dataclass(frozen=True)
 class _SlideComputeRequest:
+    input_index: int
     whole_slide: SlideSpec
     tiling: TilingConfig
     segmentation: SegmentationConfig
     filtering: FilterConfig
     config_hash: str
     mask_visu_path: Path | None
+    output_dir: Path
     num_workers: int
+    include_result: bool = False
 
 
 @dataclass(frozen=True)
 class _SlideComputeResponse:
+    input_index: int
     whole_slide: SlideSpec
     ok: bool
+    artifact: TilingArtifacts | None = None
     result: TilingResult | None = None
     mask_preview_path: Path | None = None
     error: str | None = None
@@ -825,19 +866,6 @@ def _finalize_pending_tiling_preview(
     )
     return artifact, row
 
-
-def _build_failure_process_row_from_exception(
-    *,
-    whole_slide: SlideSpec,
-    exc: Exception,
-) -> dict[str, Any]:
-    return _build_failure_process_row(
-        whole_slide=whole_slide,
-        error=str(exc),
-        traceback_text=traceback.format_exc(),
-    )
-
-
 def _compute_tiling_result_from_request(
     request: _SlideComputeRequest,
 ) -> _SlideComputeResponse:
@@ -851,19 +879,23 @@ def _compute_tiling_result_from_request(
             num_workers=request.num_workers,
             config_hash=request.config_hash,
         )
+        artifact = save_tiling_result(result, output_dir=request.output_dir)
         mask_preview_path = (
             request.mask_visu_path
             if request.mask_visu_path is not None and request.mask_visu_path.is_file()
             else None
         )
         return _SlideComputeResponse(
+            input_index=request.input_index,
             whole_slide=request.whole_slide,
             ok=True,
-            result=result,
+            artifact=artifact,
+            result=result if request.include_result else None,
             mask_preview_path=mask_preview_path,
         )
     except Exception as exc:
         return _SlideComputeResponse(
+            input_index=request.input_index,
             whole_slide=request.whole_slide,
             ok=False,
             error=str(exc),
@@ -871,12 +903,34 @@ def _compute_tiling_result_from_request(
         )
 
 
-def _should_use_slide_pool(*, num_workers: int, compute_count: int) -> bool:
-    return int(num_workers) > 1 and compute_count > 1
+_compute_and_save_tiling_artifacts_from_request = _compute_tiling_result_from_request
 
 
-def _pool_process_count(*, num_workers: int, compute_count: int) -> int:
-    return max(1, min(int(num_workers), int(compute_count)))
+def _resolve_tiling_worker_allocation(
+    *, num_workers: int, compute_count: int
+) -> tuple[bool, int, int]:
+    total_workers = max(1, int(num_workers))
+    pending_compute = max(0, int(compute_count))
+    use_slide_pool = total_workers > 1 and pending_compute > 1
+    if not use_slide_pool:
+        return False, 1, total_workers
+    outer_workers = min(total_workers, pending_compute)
+    inner_workers = max(1, total_workers // outer_workers)
+    return True, outer_workers, inner_workers
+
+
+def _write_tiling_preview_from_artifacts(
+    *,
+    artifact: TilingArtifacts,
+    output_dir: Path,
+    downsample: int,
+) -> Path | None:
+    result = load_tiling_result(artifact.tiles_npz_path, artifact.tiles_meta_path)
+    return write_tiling_preview(
+        result=result,
+        output_dir=output_dir,
+        downsample=downsample,
+    )
 
 
 def tile_slides(
@@ -958,12 +1012,14 @@ def tile_slides(
                 mask_dir = output_dir / "visualization" / "mask"
                 mask_visu_path = mask_dir / f"{whole_slide.sample_id}.jpg"
             compute_request = _SlideComputeRequest(
+                input_index=len(planned_work),
                 whole_slide=whole_slide,
                 tiling=tiling,
                 segmentation=segmentation,
                 filtering=filtering,
                 config_hash=expected_hash,
                 mask_visu_path=mask_visu_path,
+                output_dir=output_dir,
                 num_workers=1,
             )
             planned_work.append(
@@ -981,7 +1037,7 @@ def tile_slides(
                     traceback_text=traceback.format_exc(),
                 )
             )
-    use_slide_pool = _should_use_slide_pool(
+    use_slide_pool, pool_processes, worker_inner_workers = _resolve_tiling_worker_allocation(
         num_workers=num_workers,
         compute_count=len(compute_requests),
     )
@@ -991,10 +1047,6 @@ def tile_slides(
         else None
     )
     pending_preview: _PendingTilingPreview | None = None
-    pool_processes = _pool_process_count(
-        num_workers=num_workers,
-        compute_count=len(compute_requests),
-    )
 
     def _finalize_pending_preview_if_any() -> None:
         nonlocal pending_preview
@@ -1039,25 +1091,35 @@ def tile_slides(
             )
             return
 
-        assert response.result is not None
-        base_artifact = save_tiling_result(response.result, output_dir=output_dir)
+        assert response.artifact is not None
+        base_artifact = response.artifact
         _finalize_pending_preview_if_any()
         if (
             preview_executor is not None
             and qc is not None
             and qc.save_tiling_preview
-            and response.result.num_tiles > 0
+            and base_artifact.num_tiles > 0
         ):
+            preview_result = getattr(response, "result", None)
+            if preview_result is not None:
+                future = preview_executor.submit(
+                    write_tiling_preview,
+                    result=preview_result,
+                    output_dir=output_dir,
+                    downsample=qc.downsample,
+                )
+            else:
+                future = preview_executor.submit(
+                    _write_tiling_preview_from_artifacts,
+                    artifact=base_artifact,
+                    output_dir=output_dir,
+                    downsample=qc.downsample,
+                )
             pending_preview = _PendingTilingPreview(
                 whole_slide=response.whole_slide,
                 base_artifact=base_artifact,
                 mask_preview_path=response.mask_preview_path,
-                future=preview_executor.submit(
-                    write_tiling_preview,
-                    result=response.result,
-                    output_dir=output_dir,
-                    downsample=qc.downsample,
-                ),
+                future=future,
             )
             return
 
@@ -1075,6 +1137,14 @@ def tile_slides(
         )
 
     def _drain_planned_work(compute_response_iter) -> None:
+        buffered_responses: dict[int, _SlideComputeResponse] = {}
+
+        def _await_response(input_index: int) -> _SlideComputeResponse:
+            while input_index not in buffered_responses:
+                response = next(compute_response_iter)
+                buffered_responses[response.input_index] = response
+            return buffered_responses.pop(input_index)
+
         for planned in planned_work:
             if planned.artifact is not None:
                 _finalize_pending_preview_if_any()
@@ -1101,43 +1171,54 @@ def tile_slides(
                 )
                 continue
             assert planned.compute_request is not None
-            response = next(compute_response_iter)
+            response = _await_response(planned.compute_request.input_index)
             _process_compute_response(response)
 
     try:
         if use_slide_pool:
             pool_requests = [
                 _SlideComputeRequest(
+                    input_index=request.input_index,
                     whole_slide=request.whole_slide,
                     tiling=request.tiling,
                     segmentation=request.segmentation,
                     filtering=request.filtering,
                     config_hash=request.config_hash,
                     mask_visu_path=request.mask_visu_path,
-                    num_workers=1,
+                    output_dir=request.output_dir,
+                    num_workers=worker_inner_workers,
+                    include_result=False,
                 )
                 for request in compute_requests
             ]
             with mp.Pool(processes=pool_processes) as pool:
                 _drain_planned_work(
-                    iter(pool.imap(_compute_tiling_result_from_request, pool_requests))
+                    iter(
+                        pool.imap_unordered(
+                            _compute_and_save_tiling_artifacts_from_request,
+                            pool_requests,
+                        )
+                    )
                 )
         else:
             serial_requests = [
                 _SlideComputeRequest(
+                    input_index=request.input_index,
                     whole_slide=request.whole_slide,
                     tiling=request.tiling,
                     segmentation=request.segmentation,
                     filtering=request.filtering,
                     config_hash=request.config_hash,
                     mask_visu_path=request.mask_visu_path,
-                    num_workers=max(1, int(num_workers)),
+                    output_dir=request.output_dir,
+                    num_workers=worker_inner_workers,
+                    include_result=True,
                 )
                 for request in compute_requests
             ]
             _drain_planned_work(
                 iter(
-                    _compute_tiling_result_from_request(request)
+                    _compute_and_save_tiling_artifacts_from_request(request)
                     for request in serial_requests
                 )
             )

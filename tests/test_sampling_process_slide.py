@@ -380,11 +380,13 @@ def test_sampling_main_defaults_inner_slide_workers_to_one(monkeypatch, tmp_path
 
     sampling_mod.main(SimpleNamespace())
 
-    assert seen["pool_processes"] == 4
+    assert seen["pool_processes"] == 1
     assert [args["num_workers"] for args in seen["args_list"]] == [1]
 
 
-def test_sampling_main_allows_explicit_inner_slide_workers(monkeypatch, tmp_path):
+def test_sampling_main_rejects_explicit_inner_slide_workers_override(
+    monkeypatch, tmp_path
+):
     cfg = SimpleNamespace(
         seed=0,
         output_dir=str(tmp_path),
@@ -469,10 +471,8 @@ def test_sampling_main_allows_explicit_inner_slide_workers(monkeypatch, tmp_path
         lambda kwargs: (kwargs["sample_id"], {"status": "success"}),
     )
 
-    sampling_mod.main(SimpleNamespace())
-
-    assert seen["pool_processes"] == 4
-    assert [args["num_workers"] for args in seen["args_list"]] == [2]
+    with pytest.raises(ValueError, match="cfg.speed.inner_workers is no longer supported"):
+        sampling_mod.main(SimpleNamespace())
 
 
 def test_save_sampling_coordinates_uses_annotation_threshold_and_sampling_mode_in_hash(

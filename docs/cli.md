@@ -73,6 +73,8 @@ python -m hs2p.sampling --config-file /path/to/config.yaml
   - Optional overlay colors used in previews
 - `tiling.sampling_params.tissue_percentage`
   - Minimum annotation coverage required to keep a tile
+- `speed.num_workers`
+  - Controls how many slides `hs2p.sampling` processes in parallel. Each worker always uses one extraction thread, and the old `cfg.speed.inner_workers` override is no longer supported.
 
 ## Performance notes
 

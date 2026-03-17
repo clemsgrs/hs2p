@@ -89,12 +89,20 @@ def process_slide_wrapper(kwargs):
     return process_slide(**kwargs)
 
 
-def _resolve_inner_workers(cfg, parallel_workers: int) -> int:
-    inner_workers = getattr(cfg.speed, "inner_workers", 1)
-    inner_workers = int(inner_workers)
-    if inner_workers < 1:
-        raise ValueError("cfg.speed.inner_workers must be >= 1")
-    return min(inner_workers, parallel_workers)
+def _resolve_sampling_workers(cfg, *, slide_count: int) -> tuple[int, int]:
+    if hasattr(cfg.speed, "inner_workers"):
+        raise ValueError(
+            "cfg.speed.inner_workers is no longer supported; sampling always uses 1 inner worker per slide"
+        )
+
+    parallel_workers = min(mp.cpu_count(), int(cfg.speed.num_workers))
+    if "SLURM_JOB_CPUS_PER_NODE" in os.environ:
+        parallel_workers = min(
+            parallel_workers, int(os.environ["SLURM_JOB_CPUS_PER_NODE"])
+        )
+    parallel_workers = max(1, parallel_workers)
+    outer_workers = max(1, min(parallel_workers, int(slide_count)))
+    return outer_workers, 1
 
 
 def _save_sampling_coordinates(
@@ -241,7 +249,6 @@ def process_slide(
                 segment_params=segmentation_config,
                 tiling_params=tiling_config,
                 sampling_params=sampling_params,
-                disable_tqdm=disable_tqdm,
             )  # a dict mapping annotation -> coordinates
             for annotation, coordinates in filtered_coordinates.items():
                 if len(coordinates) == 0:
@@ -349,13 +356,6 @@ def main(args):
 
     whole_slides = load_csv(cfg)
 
-    parallel_workers = min(mp.cpu_count(), cfg.speed.num_workers)
-    if "SLURM_JOB_CPUS_PER_NODE" in os.environ:
-        parallel_workers = min(
-            parallel_workers, int(os.environ["SLURM_JOB_CPUS_PER_NODE"])
-        )
-    inner_workers = _resolve_inner_workers(cfg, parallel_workers)
-
     process_list = output_dir / "process_list.csv"
     if process_list.is_file() and cfg.resume:
         process_df = pd.read_csv(process_list)
@@ -436,6 +436,9 @@ def main(args):
             for x in process_stack.mask_path.values.tolist()
         ]
         sample_ids_to_process = process_stack.sample_id.astype(str).tolist()
+        parallel_workers, inner_workers = _resolve_sampling_workers(
+            cfg, slide_count=total
+        )
 
         # setup directories for coordinates and visualization
         coordinates_dir = output_dir / "coordinates"
