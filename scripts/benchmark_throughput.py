@@ -117,7 +117,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--local-dir",
         type=Path,
-        default=Path("/tmp/benchmark-slides"),
+        default=Path("/tmp-data/benchmark-slides"),
         help="Destination directory when --copy-locally is set.",
     )
     parser.add_argument(
