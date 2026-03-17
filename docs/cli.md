@@ -21,6 +21,14 @@ slide-2,/data/slide-2.tif,
   - Path to the whole-slide image
 - `mask_path`
   - Optional tissue or annotation mask path
+- `spacing_at_level_0` *(optional)*
+  - Override for the slide's native spacing at pyramid level 0 (µm/px). Use this when the embedded metadata is missing or incorrect. All other pyramid-level spacings are rescaled proportionally from this value. Leave the column empty or omit it entirely to use the spacing reported by the file.
+
+```csv
+sample_id,image_path,mask_path,spacing_at_level_0
+slide-1,/data/slide-1.tif,,0.25
+slide-2,/data/slide-2.tif,/data/slide-2-mask.tif,
+```
 
 ## Quick start
 
