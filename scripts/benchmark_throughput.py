@@ -136,14 +136,7 @@ def parse_args() -> argparse.Namespace:
         default=42,
         help="Random seed for slide sampling.",
     )
-    parser.add_argument(
-        "--dataset-size",
-        type=int,
-        default=0,
-        help="Total number of slides in the full dataset. When set, a projection.txt "
-        "file is written with estimated wall-clock times for each worker count. "
-        "Set to 0 to skip.",
-    )
+
     parser.add_argument(
         "--chart-only",
         type=Path,
@@ -889,14 +882,13 @@ def main() -> int:
 
     # ── projection ────────────────────────────────────────────────────────
     avg_tps = records[0]["total_tiles"] / max(records[0]["slides_processed"], 1)
-    if args.dataset_size > 0:
-        write_projection(
-            records,
-            dataset_size=args.dataset_size,
-            avg_tiles_per_slide=avg_tps,
-            output_path=args.output_dir / "projection.txt",
-            dataset_label=args.dataset_label,
-        )
+    write_projection(
+        records,
+        dataset_size=len(all_slides),
+        avg_tiles_per_slide=avg_tps,
+        output_path=args.output_dir / "projection.txt",
+        dataset_label=args.dataset_label,
+    )
 
     # ── chart ─────────────────────────────────────────────────────────────
     chart_slide_stats = dict(slide_stats)
