@@ -8,7 +8,7 @@
     <a href="https://huggingface.co/spaces/waticlems/hs2p-demo"><img alt="HuggingFace Space" src="https://img.shields.io/badge/🤗%20demo-hs2p-blue"></a>
 </p>
 
-`hs2p` is a Python package for efficient slide tiling and tile sampling at any requested spacing, whether or not that spacing is natively present in the whole-slide image. It is designed for computational pathology workflows that need reproducible coordinates.
+`hs2p` is a Python package for fast, scalable whole-slide tiling. You can request tiles at any spacing, whether or not that spacing is natively present in the image pyramid. It is designed for computational pathology workflows that need reproducible coordinates.
 
 We support two main workflows:
 
