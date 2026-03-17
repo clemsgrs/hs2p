@@ -223,24 +223,7 @@ def build_workloads(
     seed: int,
 ) -> list[dict[str, Any]]:
     balanced = stratified_sample(slides, n_slides, seed=seed)
-    sorted_slides = sorted(slides, key=lambda slide: slide["size_bytes"])
-    largest_count = min(2, len(sorted_slides), max(1, n_slides // 2))
-    largest = list(reversed(sorted_slides[-largest_count:]))
-    smallest_pool = [slide for slide in sorted_slides if slide not in largest]
-    skewed = largest + smallest_pool[: max(0, n_slides - len(largest))]
-    if len(skewed) < n_slides:
-        seen = {slide["sample_id"] for slide in skewed}
-        for slide in balanced:
-            if slide["sample_id"] in seen:
-                continue
-            skewed.append(slide)
-            seen.add(slide["sample_id"])
-            if len(skewed) == n_slides:
-                break
-    return [
-        {"name": "balanced", "slides": balanced[:n_slides]},
-        {"name": "skewed", "slides": skewed[:n_slides]},
-    ]
+    return [{"name": "balanced", "slides": balanced[:n_slides]}]
 
 
 # ---------------------------------------------------------------------------
@@ -774,17 +757,15 @@ def main() -> int:
     if args.chart_only is not None:
         print(f"Regenerating chart from {args.chart_only} ...")
         records = load_results_csv(args.chart_only)
-        for workload in sorted({record["workload"] for record in records}):
-            workload_records = [record for record in records if record["workload"] == workload]
-            plot_results(
-                workload_records,
-                output_path=args.chart_only.parent / f"throughput-{workload}.png",
-                n_slides=workload_records[0]["slides_processed"],
-                target_spacing=args.target_spacing,
-                tile_size=args.tile_size,
-                backend=args.backend,
-                dataset_label=f"{args.dataset_label} ({workload})",
-            )
+        plot_results(
+            records,
+            output_path=args.chart_only.parent / "throughput.png",
+            n_slides=records[0]["slides_processed"],
+            target_spacing=args.target_spacing,
+            tile_size=args.tile_size,
+            backend=args.backend,
+            dataset_label=args.dataset_label,
+        )
         return 0
 
     # ── load slides ───────────────────────────────────────────────────────
@@ -803,9 +784,7 @@ def main() -> int:
     n_target = args.n_slides if args.n_slides > 0 else len(all_slides)
     workloads = build_workloads(all_slides, n_slides=n_target, seed=args.seed)
     balanced = workloads[0]["slides"]
-    print(
-        f"Sampled {len(balanced)} slides for balanced/skewed workloads (seed={args.seed})."
-    )
+    print(f"Sampled {len(balanced)} slides (seed={args.seed}).")
     sizes_mb = [s["size_bytes"] / 1e6 for s in balanced if s["size_bytes"] > 0]
     if sizes_mb:
         print(
@@ -874,30 +853,27 @@ def main() -> int:
     print("-------")
     for r in records:
         print(
-            f"  workload={r['workload']:<8} workers={r['num_workers']:>2}  "
+            f"  workers={r['num_workers']:>2}  "
             f"{r['mean_tiles_per_second']:>10,.0f} tiles/s"
             f"  (elapsed {r['mean_elapsed_seconds']:.1f}s)"
             + (f"  ⚠ {r['failed_slides']} failed" if r["failed_slides"] else "")
         )
 
     # ── chart ─────────────────────────────────────────────────────────────
-    for workload in sorted({record["workload"] for record in records}):
-        workload_records = [record for record in records if record["workload"] == workload]
-        workload_slide_stats = dict(slide_stats)
-        avg_tiles = workload_records[0]["total_tiles"] / max(
-            workload_records[0]["slides_processed"], 1
-        )
-        workload_slide_stats["avg_tiles_per_slide"] = avg_tiles
-        plot_results(
-            workload_records,
-            output_path=args.output_dir / f"throughput-{workload}.png",
-            n_slides=len(next(w["slides"] for w in workloads if w["name"] == workload)),
-            target_spacing=args.target_spacing,
-            tile_size=args.tile_size,
-            backend=args.backend,
-            dataset_label=f"{args.dataset_label} ({workload})",
-            slide_stats=workload_slide_stats,
-        )
+    chart_slide_stats = dict(slide_stats)
+    chart_slide_stats["avg_tiles_per_slide"] = records[0]["total_tiles"] / max(
+        records[0]["slides_processed"], 1
+    )
+    plot_results(
+        records,
+        output_path=args.output_dir / "throughput.png",
+        n_slides=len(balanced),
+        target_spacing=args.target_spacing,
+        tile_size=args.tile_size,
+        backend=args.backend,
+        dataset_label=args.dataset_label,
+        slide_stats=chart_slide_stats,
+    )
 
     return 0
 
