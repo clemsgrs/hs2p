@@ -137,6 +137,14 @@ def parse_args() -> argparse.Namespace:
         help="Random seed for slide sampling.",
     )
     parser.add_argument(
+        "--dataset-size",
+        type=int,
+        default=0,
+        help="Total number of slides in the full dataset. When set, a projection.txt "
+        "file is written with estimated wall-clock times for each worker count. "
+        "Set to 0 to skip.",
+    )
+    parser.add_argument(
         "--chart-only",
         type=Path,
         default=None,
@@ -730,6 +738,46 @@ def plot_results(
 
 
 # ---------------------------------------------------------------------------
+# Projection
+# ---------------------------------------------------------------------------
+
+
+def write_projection(
+    records: list[dict[str, Any]],
+    *,
+    dataset_size: int,
+    avg_tiles_per_slide: float,
+    output_path: Path,
+    dataset_label: str,
+) -> None:
+    """Write estimated full-dataset tiling times for each worker count."""
+    total_tiles = dataset_size * avg_tiles_per_slide
+    lines: list[str] = [
+        f"Full-dataset projection  —  {dataset_label}",
+        f"  Dataset size          : {dataset_size:,} slides",
+        f"  Avg tiles / slide     : {avg_tiles_per_slide:,.0f}",
+        f"  Estimated total tiles : {total_tiles:,.0f}",
+        "",
+        f"{'Workers':>10}  {'Throughput':>16}  {'Estimated time':>16}",
+        "-" * 48,
+    ]
+    for r in records:
+        tps = r["mean_tiles_per_second"]
+        if tps <= 0:
+            continue
+        seconds = total_tiles / tps
+        hours, rem = divmod(seconds, 3600)
+        minutes = rem / 60
+        lines.append(
+            f"{r['num_workers']:>10}  {tps:>12,.0f} t/s  "
+            f"{int(hours):>4}h {minutes:04.1f}m"
+        )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n".join(lines) + "\n")
+    print(f"Projection saved → {output_path}")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -837,6 +885,17 @@ def main() -> int:
             f"{r['mean_tiles_per_second']:>10,.0f} tiles/s"
             f"  (elapsed {r['mean_elapsed_seconds']:.1f}s)"
             + (f"  ⚠ {r['failed_slides']} failed" if r["failed_slides"] else "")
+        )
+
+    # ── projection ────────────────────────────────────────────────────────
+    avg_tps = records[0]["total_tiles"] / max(records[0]["slides_processed"], 1)
+    if args.dataset_size > 0:
+        write_projection(
+            records,
+            dataset_size=args.dataset_size,
+            avg_tiles_per_slide=avg_tps,
+            output_path=args.output_dir / "projection.txt",
+            dataset_label=args.dataset_label,
         )
 
     # ── chart ─────────────────────────────────────────────────────────────
