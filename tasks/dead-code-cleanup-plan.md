@@ -1,4 +1,0 @@
-- [x] Review `hs2p/api.py` and `hs2p/sampling.py` for dead branches and unused helpers. Removed the orphaned `_build_failure_process_row_from_exception()` helper and kept `process_slide()` behavior unchanged.
-- [x] Review `hs2p/wsi/__init__.py` and `hs2p/wsi/wsi.py` for unused parameters and stale compatibility shims. Removed the unused `disable_tqdm` argument from `filter_coordinates()` and kept the existing `WholeSlideImage` invariants intact.
-- [x] Review supporting docs/tests touched by the cleanup and update them to match the live behavior, including the sampling worker note in `docs/cli.md`.
-- [x] Run focused pytest targets for each touched area, then rerun the default fast suite if the cleanup spans multiple core modules.

@@ -1,6 +1,0 @@
-- [x] Add regression tests for worker-owned unordered tiling dispatch, adaptive tiling worker allocation, fixed sampling inner workers, vectorized sampling mask scoring, and batched black/white filtering.
-- [x] Refactor batch tiling to use worker-owned artifact writes with `imap_unordered`, buffered input-order draining, and crash-safe artifact persistence.
-- [x] Implement adaptive tiling worker allocation while keeping sampling fixed at `inner_workers=1` and rejecting the undocumented sampling override.
-- [x] Vectorize `filter_coordinates()` with per-label integral images and rework `filter_black_and_white_tiles()` to batch exact read-level fetches.
-- [x] Extend the throughput benchmark with balanced/skewed workload labels and update `docs/documentation.md` plus `tasks/lessons.md`.
-- [x] Run focused pytest coverage and record outcomes; full dataset-backed throughput acceptance remains pending until a real benchmark manifest is available.
