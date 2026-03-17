@@ -13,7 +13,7 @@ def _load_benchmark_module():
     return module
 
 
-def test_build_workloads_returns_balanced_and_skewed_sets():
+def test_build_balanced_sample_returns_requested_slide_count():
     benchmark_mod = _load_benchmark_module()
     slides = [
         {
@@ -26,22 +26,22 @@ def test_build_workloads_returns_balanced_and_skewed_sets():
         for idx, size in enumerate([10, 20, 30, 40, 500, 600], start=1)
     ]
 
-    workloads = benchmark_mod.build_workloads(slides, n_slides=4, seed=7)
+    sampled = benchmark_mod.build_balanced_sample(slides, n_slides=4, seed=7)
 
-    assert [workload["name"] for workload in workloads] == ["balanced", "skewed"]
-    assert len(workloads[0]["slides"]) == 4
-    assert len(workloads[1]["slides"]) == 4
-    skewed_ids = [slide["sample_id"] for slide in workloads[1]["slides"]]
-    assert "slide-5" in skewed_ids
-    assert "slide-6" in skewed_ids
+    assert len(sampled) == 4
+    assert {slide["sample_id"] for slide in sampled}.issubset(
+        {f"slide-{idx}" for idx in range(1, 7)}
+    )
 
 
-def test_benchmark_records_workload_label(monkeypatch, tmp_path: Path):
+def test_benchmark_records_worker_sweep_without_workload_label(
+    monkeypatch, tmp_path: Path
+):
     benchmark_mod = _load_benchmark_module()
-    calls = []
+    seen_workers = []
 
     def _fake_run_one(**kwargs):
-        calls.append(kwargs["workload"])
+        seen_workers.append(kwargs["num_workers"])
         return {
             "num_workers": kwargs["num_workers"],
             "elapsed_seconds": 2.0,
@@ -56,11 +56,8 @@ def test_benchmark_records_workload_label(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(benchmark_mod, "run_one", _fake_run_one)
 
     records = benchmark_mod.benchmark(
-        workloads=[
-            {"name": "balanced", "slides": [{"sample_id": "a"}]},
-            {"name": "skewed", "slides": [{"sample_id": "b"}]},
-        ],
-        workers=[2],
+        slides=[{"sample_id": "a"}],
+        workers=[2, 4],
         repeat=1,
         python_executable="python",
         backend="asap",
@@ -69,5 +66,5 @@ def test_benchmark_records_workload_label(monkeypatch, tmp_path: Path):
         output_root=tmp_path,
     )
 
-    assert calls == ["balanced", "skewed"]
-    assert [record["workload"] for record in records] == ["balanced", "skewed"]
+    assert seen_workers == [2, 4]
+    assert [record["num_workers"] for record in records] == [2, 4]

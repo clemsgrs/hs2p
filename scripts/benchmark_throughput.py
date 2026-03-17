@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Benchmark hs2p tiling throughput (tiles/s) as a function of num_workers.
+Benchmark hs2p tiling throughput (tiles/s) on a balanced slide sample as a
+function of num_workers.
 
 Reads slides from a CSV file (sample_id, image_path, optional mask_path,
-optional spacing_at_level_0), optionally subsamples --n-slides slides
+optional spacing_at_level_0), optionally subsamples a balanced --n-slides set
 stratified by file size, then runs the hs2p CLI for each worker count and
 produces a publication-quality chart.
 
@@ -11,8 +12,8 @@ Usage
 -----
     python scripts/benchmark_throughput.py \
         --csv /data/pathology/.../histai_mixed.csv \
-        --n-slides 100 \
-        --workers 4 8 16 32 \
+        --n-slides 1000 \
+        --workers 8 16 32 64 128 \
         --output-dir /tmp/hs2p-benchmark \
         --backend openslide
 
@@ -62,8 +63,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--n-slides",
         type=int,
-        default=100,
-        help="Number of slides to sample from the CSV (stratified by file size). "
+        default=1000,
+        help="Number of balanced slides to sample from the CSV (stratified by file size). "
         "Set to 0 to use all slides.",
     )
     parser.add_argument(
@@ -216,14 +217,13 @@ def stratified_sample(
     return sampled[:n]
 
 
-def build_workloads(
+def build_balanced_sample(
     slides: list[dict[str, Any]],
     *,
     n_slides: int,
     seed: int,
 ) -> list[dict[str, Any]]:
-    balanced = stratified_sample(slides, n_slides, seed=seed)
-    return [{"name": "balanced", "slides": balanced[:n_slides]}]
+    return stratified_sample(slides, n_slides, seed=seed)[:n_slides]
 
 
 # ---------------------------------------------------------------------------
@@ -430,7 +430,6 @@ def parse_process_list(path: Path) -> dict[str, Any]:
 
 def run_one(
     *,
-    workload: str,
     slides: list[dict[str, Any]],
     num_workers: int,
     run_dir: Path,
@@ -484,7 +483,6 @@ def run_one(
 
     stats = parse_process_list(tiling_output / "process_list.csv")
     return {
-        "workload": workload,
         "num_workers": num_workers,
         "elapsed_seconds": elapsed,
         "exit_code": result.returncode,
@@ -495,7 +493,7 @@ def run_one(
 
 def benchmark(
     *,
-    workloads: list[dict[str, Any]],
+    slides: list[dict[str, Any]],
     workers: list[int],
     repeat: int,
     python_executable: str,
@@ -505,69 +503,56 @@ def benchmark(
     output_root: Path,
 ) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
-    total_runs = len(workloads) * len(workers) * repeat
+    total_runs = len(workers) * repeat
     run_idx = 0
 
-    for workload in workloads:
-        workload_name = workload["name"]
-        workload_slides = workload["slides"]
-        for nw in workers:
-            rep_results: list[dict[str, Any]] = []
-            for rep in range(1, repeat + 1):
-                run_idx += 1
-                print(
-                    f"  [{run_idx}/{total_runs}] workload={workload_name}, workers={nw}, repeat={rep}/{repeat} ...",
-                    flush=True,
-                )
-                run_dir = (
-                    output_root
-                    / "runs"
-                    / workload_name
-                    / f"workers-{nw:02d}"
-                    / f"rep-{rep:02d}"
-                )
-                result = run_one(
-                    workload=workload_name,
-                    slides=workload_slides,
-                    num_workers=nw,
-                    run_dir=run_dir,
-                    python_executable=python_executable,
-                    backend=backend,
-                    target_spacing=target_spacing,
-                    tile_size=tile_size,
-                )
-                rep_results.append(result)
-                status = (
-                    "OK" if result["exit_code"] == 0 else f"exit={result['exit_code']}"
-                )
-                print(
-                    f"    → {result['total_tiles']:,} tiles in "
-                    f"{result['elapsed_seconds']:.1f}s "
-                    f"({result['tiles_per_second']:,.0f} tiles/s)  [{status}]",
-                    flush=True,
-                )
+    for nw in workers:
+        rep_results: list[dict[str, Any]] = []
+        for rep in range(1, repeat + 1):
+            run_idx += 1
+            print(
+                f"  [{run_idx}/{total_runs}] workers={nw}, repeat={rep}/{repeat} ...",
+                flush=True,
+            )
+            run_dir = output_root / "runs" / f"workers-{nw:02d}" / f"rep-{rep:02d}"
+            result = run_one(
+                slides=slides,
+                num_workers=nw,
+                run_dir=run_dir,
+                python_executable=python_executable,
+                backend=backend,
+                target_spacing=target_spacing,
+                tile_size=tile_size,
+            )
+            rep_results.append(result)
+            status = "OK" if result["exit_code"] == 0 else f"exit={result['exit_code']}"
+            print(
+                f"    → {result['total_tiles']:,} tiles in "
+                f"{result['elapsed_seconds']:.1f}s "
+                f"({result['tiles_per_second']:,.0f} tiles/s)  [{status}]",
+                flush=True,
+            )
 
-            mean_tps = float(np.mean([r["tiles_per_second"] for r in rep_results]))
-            mean_elapsed = float(np.mean([r["elapsed_seconds"] for r in rep_results]))
-            std_tps = (
-                float(np.std([r["tiles_per_second"] for r in rep_results]))
-                if repeat > 1
-                else 0.0
-            )
-            records.append(
-                {
-                    "workload": workload_name,
-                    "num_workers": nw,
-                    "repeat": repeat,
-                    "mean_tiles_per_second": round(mean_tps, 2),
-                    "std_tiles_per_second": round(std_tps, 2),
-                    "mean_elapsed_seconds": round(mean_elapsed, 3),
-                    "total_tiles": rep_results[0]["total_tiles"],
-                    "slides_processed": rep_results[0]["num_slides"],
-                    "slides_with_tiles": rep_results[0]["slides_with_tiles"],
-                    "failed_slides": rep_results[0]["failed"],
-                }
-            )
+        mean_tps = float(np.mean([r["tiles_per_second"] for r in rep_results]))
+        mean_elapsed = float(np.mean([r["elapsed_seconds"] for r in rep_results]))
+        std_tps = (
+            float(np.std([r["tiles_per_second"] for r in rep_results]))
+            if repeat > 1
+            else 0.0
+        )
+        records.append(
+            {
+                "num_workers": nw,
+                "repeat": repeat,
+                "mean_tiles_per_second": round(mean_tps, 2),
+                "std_tiles_per_second": round(std_tps, 2),
+                "mean_elapsed_seconds": round(mean_elapsed, 3),
+                "total_tiles": rep_results[0]["total_tiles"],
+                "slides_processed": rep_results[0]["num_slides"],
+                "slides_with_tiles": rep_results[0]["slides_with_tiles"],
+                "failed_slides": rep_results[0]["failed"],
+            }
+        )
 
     return records
 
@@ -590,7 +575,6 @@ def load_results_csv(path: Path) -> list[dict[str, Any]]:
         reader = csv.DictReader(f)
         return [
             {
-                "workload": row.get("workload", "balanced"),
                 "num_workers": int(row["num_workers"]),
                 "mean_tiles_per_second": float(row["mean_tiles_per_second"]),
                 "std_tiles_per_second": float(row["std_tiles_per_second"]),
@@ -782,9 +766,8 @@ def main() -> int:
         return 1
 
     n_target = args.n_slides if args.n_slides > 0 else len(all_slides)
-    workloads = build_workloads(all_slides, n_slides=n_target, seed=args.seed)
-    balanced = workloads[0]["slides"]
-    print(f"Sampled {len(balanced)} slides (seed={args.seed}).")
+    balanced = build_balanced_sample(all_slides, n_slides=n_target, seed=args.seed)
+    print(f"Sampled {len(balanced)} balanced slides (seed={args.seed}).")
     sizes_mb = [s["size_bytes"] / 1e6 for s in balanced if s["size_bytes"] > 0]
     if sizes_mb:
         print(
@@ -806,10 +789,7 @@ def main() -> int:
             slide["sample_id"]: slide
             for slide in copy_slides_locally(balanced, args.local_dir)
         }
-        for workload in workloads:
-            workload["slides"] = [
-                local_lookup.get(slide["sample_id"], slide) for slide in workload["slides"]
-            ]
+        balanced = [local_lookup.get(slide["sample_id"], slide) for slide in balanced]
         print("Copy complete.", flush=True)
 
     # ── collect slide metadata ────────────────────────────────────────────
@@ -834,7 +814,7 @@ def main() -> int:
     print(f"\nRunning benchmark: workers={sorted(args.workers)}, repeat={args.repeat}")
     print(f"Python: {args.python}")
     records = benchmark(
-        workloads=workloads,
+        slides=balanced,
         workers=sorted(args.workers),
         repeat=args.repeat,
         python_executable=args.python,
@@ -853,7 +833,7 @@ def main() -> int:
     print("-------")
     for r in records:
         print(
-            f"  workers={r['num_workers']:>2}  "
+            f"  workers={r['num_workers']:>3}  "
             f"{r['mean_tiles_per_second']:>10,.0f} tiles/s"
             f"  (elapsed {r['mean_elapsed_seconds']:.1f}s)"
             + (f"  ⚠ {r['failed_slides']} failed" if r["failed_slides"] else "")
