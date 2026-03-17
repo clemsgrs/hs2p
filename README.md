@@ -34,13 +34,13 @@ pip install hs2p
 Tiling computes a reproducible grid of tile coordinates for each slide and saves them as named artifacts with extraction metadata, ready for downstream use.  
 When a precomputed tissue mask is not provided, `hs2p` segments tissue on-the-fly. If you want to precompute tissue masks, a [standalone script](docs/tissue-mask-generation.md) is available.
 
-<img src="illustrations/extraction_illu.png" alt="HS2P tiling workflow" width="1000" />
+<img src="assets/tiling.png" alt="hs2p tiling workflow" width="1000" />
 
 ### Sampling
 
 Sampling filters or partitions tile coordinates by annotation coverage so you can keep only tiles relevant to a tissue class or label.
 
-<img src="illustrations/sampling_illu.png" alt="HS2P sampling workflow" width="1000" />
+<img src="illustrations/sampling_illu.png" alt="hs2p sampling workflow" width="1000" />
 
 ## Python API
 
