@@ -16,6 +16,7 @@ The config dataclasses keep the main knobs explicit and fill secondary options f
 - `SlideSpec`
   - Identifies one sample through `sample_id`, `image_path`, and optional `mask_path`
   - If `mask_path` is omitted, HS2P can segment tissue directly from the slide
+  - `spacing_at_level_0` overrides the spacing embedded in the file metadata (µm/px at pyramid level 0); all other pyramid-level spacings are rescaled proportionally. Use this when the file reports a wrong or missing spacing.
 - `TilingConfig`
   - Defines the requested backend, spacing, tile size, overlap, and tissue threshold
 - `SegmentationConfig`
@@ -53,6 +54,7 @@ result = tile_slide(
         sample_id="slide-1",
         image_path=Path("/data/slide-1.tif"),
         mask_path=Path("/data/slide-1-mask.tif"),
+        spacing_at_level_0=0.25,  # omit to use the spacing embedded in the file
     ),
     tiling=TilingConfig(
         backend="openslide",
