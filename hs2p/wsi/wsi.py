@@ -510,7 +510,7 @@ class WholeSlideImage(object):
                 np.int64
             )
 
-            supertile_span = max(int(tile_size) * 8, int(tile_size))
+            supertile_span = int(tile_size) * 8
             batched_indices: dict[tuple[int, int], list[int]] = {}
             for idx in active_indices.tolist():
                 x_level, y_level = level_coords[idx]
