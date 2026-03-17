@@ -74,6 +74,23 @@ python -m hs2p.sampling --config-file /path/to/config.yaml
 - `tiling.sampling_params.tissue_percentage`
   - Minimum annotation coverage required to keep a tile
 
+## Performance notes
+
+### Segmentation downsample (`tiling.seg_params.downsample`)
+
+Tissue segmentation runs once per slide on a downsampled thumbnail. The `downsample` value controls which pyramid level is used:
+
+- **Larger value** (e.g. `64`, the default) → smaller thumbnail → faster read and less memory per worker. At 64× downsample a 256 px tile maps to a 4×4 patch in the mask, which is coarse but sufficient for interior tiles.
+- **Smaller value** (e.g. `16` or `4`) → higher-resolution thumbnail → more precise tissue boundaries at tile edges, but the thumbnail read is proportionally larger and the in-memory mask grows as `1/downsample²`. Below `16`, segmentation quality rarely improves meaningfully while speed degrades noticeably.
+
+The tissue percentage check itself (`check_coordinates`) is entirely in-memory — it does not read any pixel data from the slide; it operates on the mask computed during segmentation.
+
+### Black/white tile filtering (`tiling.filter_params.filter_white` / `filter_black`)
+
+These filters are **disabled by default** and should stay off unless your dataset contains a meaningful fraction of pen marks, blank regions, or background tiles that tissue segmentation does not catch.
+
+When enabled, every candidate tile that passes the tissue mask check is read from the slide at full resolution and its pixel values inspected. This is the **only step in the tiling pipeline that reads actual tile pixel data**. For slides with large internal JPEG tiles (common in some scanner formats), each read triggers a full JPEG decode of the underlying tile block — which can be an order of magnitude slower than the rest of the pipeline per slide.
+
 ## Resume and precomputed artifacts
 
 - `resume: true` expects the current `process_list.csv` schema and current-format artifacts
