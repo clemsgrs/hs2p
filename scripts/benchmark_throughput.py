@@ -308,7 +308,7 @@ def collect_slide_stats(
 
     widths: list[int] = []
     heights: list[int] = []
-    for slide in slides:
+    for slide in slides[:1000]:
         try:
             wsi = WholeSlideImage(
                 path=slide["image_path"],
