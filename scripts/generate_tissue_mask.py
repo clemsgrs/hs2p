@@ -334,14 +334,19 @@ def _resolve_spacing_plan(
         if abs(level_spacing - target_spacing) / target_spacing <= tolerance:
             return level, level_spacing, level_spacing, False
 
-    power = int(np.ceil(np.log2(target_spacing / level_spacing)))
-    effective_spacing = level_spacing * (2**power)
-    if abs(effective_spacing - target_spacing) / target_spacing > tolerance:
+    if level_spacing > target_spacing:
+        available_spacings = ", ".join(f"{spacing:.4g}" for spacing in spacings)
         raise ValueError(
-            f"Unable to achieve target spacing within tolerance after downsampling. Closest achievable spacing is {effective_spacing:.2f} mpp, which is {abs(effective_spacing - target_spacing) / target_spacing:.2%} away from the target spacing. Consider increasing the tolerance or adjusting the target spacing."
+            "Unable to resolve a read spacing for the requested tissue-mask target "
+            f"spacing ({target_spacing:.4g} um/px). Available spacings: "
+            f"[{available_spacings}] um/px. The finest available spacing "
+            f"({spacings[0]:.4g} um/px) is still coarser than the target and not "
+            f"within the current tolerance ({tolerance:.0%}). Consider increasing "
+            "the tolerance if that finest level is acceptable, or request a "
+            "coarser target spacing."
         )
 
-    return level, level_spacing, effective_spacing, True
+    return level, level_spacing, target_spacing, True
 
 
 def segment_tissue_hsv(
