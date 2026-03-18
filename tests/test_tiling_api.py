@@ -9,8 +9,11 @@ import pytest
 
 from hs2p.api import (
     FilterConfig,
-    QCConfig,
+    PreviewConfig,
+    CoordinateOutputMode,
+    CoordinateSelectionStrategy,
     SegmentationConfig,
+    ResolvedSamplingSpec,
     SlideSpec,
     TilingArtifacts,
     TilingConfig,
@@ -24,9 +27,16 @@ from hs2p.api import (
     validate_tiling_artifacts,
     write_tiling_preview,
 )
-from hs2p.configs import default_config
+from hs2p.configs import (
+    FilterConfig as ConfigsFilterConfig,
+    PreviewConfig as ConfigsPreviewConfig,
+    SegmentationConfig as ConfigsSegmentationConfig,
+    TilingConfig as ConfigsTilingConfig,
+    default_config,
+)
 from hs2p.utils import load_csv
 from hs2p.wsi import CoordinateExtractionResult
+import hs2p.wsi.wsi as wsi_mod
 
 
 @pytest.fixture
@@ -115,13 +125,13 @@ def _build_result(
     )
 
 
-def test_tile_slide_builds_default_sampling_params_for_masked_slides(
+def test_tile_slide_builds_default_sampling_spec_for_masked_slides(
     monkeypatch, tiling_config, segmentation_config, filter_config
 ):
     captured = {}
 
     def _fake_extract_coordinates(**kwargs):
-        captured["sampling_params"] = kwargs["sampling_params"]
+        captured["sampling_spec"] = kwargs["sampling_spec"]
         return _fake_extraction()
 
     monkeypatch.setattr("hs2p.api.extract_coordinates", _fake_extract_coordinates)
@@ -137,14 +147,16 @@ def test_tile_slide_builds_default_sampling_params_for_masked_slides(
         filtering=filter_config,
     )
 
-    sampling_params = captured["sampling_params"]
-    assert sampling_params is not None
-    assert sampling_params.pixel_mapping == {"background": 0, "tissue": 1}
-    assert sampling_params.color_mapping == {"background": None, "tissue": None}
-    assert sampling_params.tissue_percentage == {
+    sampling_spec = captured["sampling_spec"]
+    assert sampling_spec is not None
+    assert isinstance(sampling_spec, ResolvedSamplingSpec)
+    assert sampling_spec.pixel_mapping == {"background": 0, "tissue": 1}
+    assert sampling_spec.color_mapping == {"background": None, "tissue": None}
+    assert sampling_spec.tissue_percentage == {
         "background": None,
         "tissue": tiling_config.tissue_threshold,
     }
+    assert sampling_spec.active_annotations == ("tissue",)
 
 
 def test_tile_slide_returns_named_arrays(
@@ -188,7 +200,89 @@ def test_tile_slide_returns_named_arrays(
         tiling=tiling_config,
         segmentation=segmentation_config,
         filtering=filter_config,
+        extra={
+            "sampling": {
+                "output_mode": CoordinateOutputMode.SINGLE_OUTPUT,
+                "selection_strategy": CoordinateSelectionStrategy.MERGED_DEFAULT_TILING,
+                "resolved_sampling_spec": {
+                    "pixel_mapping": {"background": 0, "tissue": 1},
+                    "tissue_percentage": {
+                        "background": None,
+                        "tissue": tiling_config.tissue_threshold,
+                    },
+                    "color_mapping": {"background": None, "tissue": None},
+                    "active_annotations": ["tissue"],
+                },
+            }
+        },
     )
+
+
+def test_tile_slide_unmasked_hash_stays_legacy(
+    monkeypatch, tiling_config, segmentation_config, filter_config
+):
+    monkeypatch.setattr("hs2p.api.extract_coordinates", lambda **_: _fake_extraction())
+
+    result = tile_slide(
+        SlideSpec(
+            sample_id="slide-1",
+            image_path=Path("slide-1.svs"),
+            mask_path=None,
+        ),
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+    )
+
+    assert result.config_hash == compute_config_hash(
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+    )
+
+
+def test_masked_default_tiling_hash_changes_when_sampling_semantics_change(
+    tiling_config, segmentation_config, filter_config
+):
+    default_spec = ResolvedSamplingSpec(
+        pixel_mapping={"background": 0, "tissue": 1},
+        color_mapping={"background": None, "tissue": None},
+        tissue_percentage={"background": None, "tissue": tiling_config.tissue_threshold},
+        active_annotations=("tissue",),
+    )
+    changed_spec = ResolvedSamplingSpec(
+        pixel_mapping={"background": 0, "tumor": 2},
+        color_mapping={"background": None, "tumor": None},
+        tissue_percentage={"background": None, "tumor": 0.3},
+        active_annotations=("tumor",),
+    )
+
+    default_hash = compute_config_hash(
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        extra={
+            "sampling": {
+                "output_mode": CoordinateOutputMode.SINGLE_OUTPUT,
+                "selection_strategy": CoordinateSelectionStrategy.MERGED_DEFAULT_TILING,
+                "resolved_sampling_spec": default_spec,
+            }
+        },
+    )
+    changed_hash = compute_config_hash(
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        extra={
+            "sampling": {
+                "output_mode": CoordinateOutputMode.SINGLE_OUTPUT,
+                "selection_strategy": CoordinateSelectionStrategy.MERGED_DEFAULT_TILING,
+                "resolved_sampling_spec": changed_spec,
+            }
+        },
+    )
+
+    assert default_hash != changed_hash
 
 
 def test_tile_slide_warns_when_preview_qc_is_requested(
@@ -205,7 +299,7 @@ def test_tile_slide_warns_when_preview_qc_is_requested(
             tiling=tiling_config,
             segmentation=segmentation_config,
             filtering=filter_config,
-            qc=QCConfig(save_mask_preview=True, save_tiling_preview=True),
+            preview=PreviewConfig(save_mask_preview=True, save_tiling_preview=True),
         )
 
 
@@ -352,12 +446,12 @@ def test_write_tiling_preview_writes_expected_preview(monkeypatch, tmp_path: Pat
         config_hash="preview-hash",
     )
 
-    def _fake_visualize_coordinates(**kwargs):
+    def _fake_write_coordinate_preview(**kwargs):
         save_dir = Path(kwargs["save_dir"])
         save_dir.mkdir(parents=True, exist_ok=True)
         (save_dir / f"{kwargs['sample_id']}.jpg").write_bytes(b"preview")
 
-    monkeypatch.setattr("hs2p.api.visualize_coordinates", _fake_visualize_coordinates)
+    monkeypatch.setattr("hs2p.api.write_coordinate_preview", _fake_write_coordinate_preview)
 
     preview_path = write_tiling_preview(
         result=result,
@@ -365,7 +459,7 @@ def test_write_tiling_preview_writes_expected_preview(monkeypatch, tmp_path: Pat
         downsample=16,
     )
 
-    assert preview_path == (tmp_path / "visualization" / "tiling" / "slide-preview.jpg")
+    assert preview_path == (tmp_path / "preview" / "tiling" / "slide-preview.jpg")
     assert preview_path.is_file()
 
 
@@ -384,11 +478,11 @@ def test_tile_slides_defers_preview_writes_until_after_next_slide_compute(
         tiling,
         segmentation,
         filtering,
-        mask_visu_path,
+        mask_preview_path,
         num_workers,
         config_hash=None,
     ):
-        del tiling, segmentation, filtering, mask_visu_path, num_workers, config_hash
+        del tiling, segmentation, filtering, mask_preview_path, num_workers, config_hash
         events.append(f"compute:{whole_slide.sample_id}")
         return _build_result(
             sample_id=whole_slide.sample_id,
@@ -414,7 +508,7 @@ def test_tile_slides_defers_preview_writes_until_after_next_slide_compute(
     def _fake_write_tiling_preview(*, result, output_dir, downsample):
         del downsample
         events.append(f"preview:{result.sample_id}")
-        save_dir = Path(output_dir) / "visualization" / "tiling"
+        save_dir = Path(output_dir) / "preview" / "tiling"
         save_dir.mkdir(parents=True, exist_ok=True)
         path = save_dir / f"{result.sample_id}.jpg"
         path.write_bytes(b"preview")
@@ -451,7 +545,7 @@ def test_tile_slides_defers_preview_writes_until_after_next_slide_compute(
         tiling=tiling_config,
         segmentation=segmentation_config,
         filtering=filter_config,
-        qc=QCConfig(save_tiling_preview=True),
+        preview=PreviewConfig(save_tiling_preview=True),
         output_dir=tmp_path,
     )
 
@@ -856,7 +950,7 @@ def test_tile_slides_omits_tiling_preview_path_when_no_tiles(
         ),
     )
     monkeypatch.setattr(
-        "hs2p.api.visualize_coordinates",
+        "hs2p.api.write_coordinate_preview",
         lambda **kwargs: (_ for _ in ()).throw(
             AssertionError("preview rendering should be skipped for zero tiles")
         ),
@@ -867,7 +961,7 @@ def test_tile_slides_omits_tiling_preview_path_when_no_tiles(
         tiling=tiling_config,
         segmentation=segmentation_config,
         filtering=filter_config,
-        qc=QCConfig(save_tiling_preview=True),
+        preview=PreviewConfig(save_tiling_preview=True),
         output_dir=tmp_path,
     )
 
@@ -876,7 +970,7 @@ def test_tile_slides_omits_tiling_preview_path_when_no_tiles(
     assert artifacts[0].tiling_preview_path is None
 
 
-def test_tile_slides_writes_preview_paths_when_visualizations_are_saved(
+def test_tile_slides_writes_preview_paths_when_previews_are_saved(
     monkeypatch,
     tmp_path: Path,
     tiling_config: TilingConfig,
@@ -885,21 +979,21 @@ def test_tile_slides_writes_preview_paths_when_visualizations_are_saved(
 ):
     monkeypatch.setattr("hs2p.api.extract_coordinates", lambda **_: _fake_extraction())
 
-    def _fake_visualize_coordinates(**kwargs):
+    def _fake_write_coordinate_preview(**kwargs):
         save_dir = Path(kwargs["save_dir"])
         save_dir.mkdir(parents=True, exist_ok=True)
         sample_id = kwargs.get("sample_id", "preview")
         (save_dir / f"{sample_id}.jpg").write_bytes(b"preview")
 
-    monkeypatch.setattr("hs2p.api.visualize_coordinates", _fake_visualize_coordinates)
+    monkeypatch.setattr("hs2p.api.write_coordinate_preview", _fake_write_coordinate_preview)
 
-    expected_mask_path = tmp_path / "visualization" / "mask" / "slide-preview.jpg"
+    expected_mask_path = tmp_path / "preview" / "mask" / "slide-preview.jpg"
 
     def _fake_extract_with_mask_preview(**kwargs):
-        mask_visu_path = kwargs["mask_visu_path"]
-        if mask_visu_path is not None:
-            mask_visu_path.parent.mkdir(parents=True, exist_ok=True)
-            mask_visu_path.write_bytes(b"mask-preview")
+        mask_preview_path = kwargs["mask_preview_path"]
+        if mask_preview_path is not None:
+            mask_preview_path.parent.mkdir(parents=True, exist_ok=True)
+            mask_preview_path.write_bytes(b"mask-preview")
         return _fake_extraction()
 
     monkeypatch.setattr("hs2p.api.extract_coordinates", _fake_extract_with_mask_preview)
@@ -909,7 +1003,7 @@ def test_tile_slides_writes_preview_paths_when_visualizations_are_saved(
         tiling=tiling_config,
         segmentation=segmentation_config,
         filtering=filter_config,
-        qc=QCConfig(save_mask_preview=True, save_tiling_preview=True),
+        preview=PreviewConfig(save_mask_preview=True, save_tiling_preview=True),
         output_dir=tmp_path,
     )
 
@@ -918,7 +1012,7 @@ def test_tile_slides_writes_preview_paths_when_visualizations_are_saved(
     assert artifacts[0].mask_preview_path.is_file()
     assert (
         artifacts[0].tiling_preview_path
-        == tmp_path / "visualization" / "tiling" / "slide-preview.jpg"
+        == tmp_path / "preview" / "tiling" / "slide-preview.jpg"
     )
     assert artifacts[0].tiling_preview_path.is_file()
 
@@ -1434,3 +1528,10 @@ def test_config_dataclasses_apply_package_defaults_for_secondary_parameters():
     assert filtering.fraction_threshold == pytest.approx(
         default_config.tiling.filter_params.fraction_threshold
     )
+
+
+def test_hs2p_configs_reexports_runtime_config_models():
+    assert ConfigsTilingConfig is TilingConfig
+    assert ConfigsSegmentationConfig is SegmentationConfig
+    assert ConfigsFilterConfig is FilterConfig
+    assert ConfigsPreviewConfig is PreviewConfig

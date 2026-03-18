@@ -1,8 +1,8 @@
 import sys
 import warnings
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import NamedTuple, Protocol
 
 import cv2
 import numpy as np
@@ -10,7 +10,8 @@ import tqdm
 import wholeslidedata as wsd
 from PIL import Image
 
-from hs2p.wsi.utils import HasEnoughTissue
+from hs2p.configs import FilterConfig, SegmentationConfig, TilingConfig
+from hs2p.wsi.utils import HasEnoughTissue, ResolvedTileGeometry
 
 # ignore all warnings from wholeslidedata
 warnings.filterwarnings("ignore", module="wholeslidedata")
@@ -18,62 +19,12 @@ warnings.filterwarnings("ignore", module="wholeslidedata")
 Image.MAX_IMAGE_PIXELS = 933120000
 
 
-class SegmentationParameters(NamedTuple):
-    """
-    Parameters for filtering contours.
-    """
-
-    downsample: int  # dowsample factor for loading segmentation mask
-    sthresh: int  # segmentation threshold (positive integer, using a higher threshold leads to less foreground and more background detection) (not used when use_otsu=True)
-    sthresh_up: int  # upper threshold value for scaling the binary mask
-    mthresh: int  # median filter size (positive, odd integer)
-    close: int  # additional morphological closing to apply following initial thresholding (positive integer)
-    use_otsu: bool  # whether to use Otsu's method for thresholding
-    use_hsv: bool  # whether to use HSV thresholding
-
-
-class FilterParameters(NamedTuple):
-    """
-    Parameters for filtering contours.
-    """
-
-    ref_tile_size: int  # reference tile size for filtering
-    a_t: int  # contour area threshold for filtering
-    a_h: int  # hole area threshold for filtering
-    max_n_holes: int  # maximum number of holes allowed
-    filter_white: bool  # whether to filter out mostly white tiles
-    filter_black: bool  # whether to filter out mostly black tiles
-    white_threshold: int  # threshold for white pixels (0-255)
-    black_threshold: int  # threshold for black pixels (0-255)
-    fraction_threshold: (
-        float  # fraction of pixels that must be white/black to filter out the tile
-    )
-
-
-class _SupportsTilingParams(Protocol):
-    spacing: float
-    tile_size: int
-    tolerance: float
-    overlap: float
-    min_tissue_percentage: float
-    drop_holes: bool
-    use_padding: bool
-
-
-class SamplingParameters(NamedTuple):
-    """
-    Parameters for sampling.
-    """
-
-    pixel_mapping: dict[
-        str, int
-    ]  # mapping from annotation names to pixel values in the annotation mask
-    color_mapping: dict[
-        str, list[int] | None
-    ]  # mapping from annotation names to RGB color codes for overlaying
-    tissue_percentage: dict[
-        str, float | None
-    ]  # minimum percentage of tile coverage for each category required to sample tiles
+@dataclass(frozen=True)
+class ResolvedSamplingSpec:
+    pixel_mapping: dict[str, int]
+    color_mapping: dict[str, list[int] | None] | None
+    tissue_percentage: dict[str, float | None]
+    active_annotations: tuple[str, ...]
 
 
 class WholeSlideImage(object):
@@ -102,8 +53,8 @@ class WholeSlideImage(object):
         mask_path: Path | None = None,
         spacing_at_level_0: float | None = None,
         segment: bool = False,
-        segment_params: SegmentationParameters | None = None,
-        sampling_params: SamplingParameters | None = None,
+        segment_params: SegmentationConfig | None = None,
+        sampling_spec: ResolvedSamplingSpec | None = None,
         pixel_mapping: dict | None = None,
     ):
         """
@@ -115,8 +66,9 @@ class WholeSlideImage(object):
             spacing_at_level_0 (float, optional): Manually set spacing at level 0, if speficied. Defaults to None.
             backend (str): Backend to use for opening the wsi.
             segment (bool): Whether to segment the slide if tissue mask is not provided. Defaults to False.
-            segment_params (NamedTuple, optional): Segmentation parameters. Used for either loading an existing tissue mask or segmenting the slide.
-            sampling_params (NamedTuple, optional): Sampling parameters. Used for either loading an existing annotation mask.
+            segment_params (SegmentationConfig, optional): Segmentation parameters used for either loading an existing tissue mask or segmenting the slide.
+            sampling_spec (ResolvedSamplingSpec, optional): Normalized sampling specification
+                used when loading an existing annotation mask.
         """
 
         self.path = path
@@ -138,15 +90,20 @@ class WholeSlideImage(object):
 
         self.mask_path = mask_path
         if mask_path is not None:
+            if sampling_spec is None:
+                raise ValueError(
+                    "sampling_spec is required when loading a mask-backed slide"
+                )
             self.mask = wsd.WholeSlideImage(mask_path, backend=backend)
             self.seg_level = self.load_segmentation(
-                segment_params, sampling_params=sampling_params
+                segment_params,
+                sampling_spec=sampling_spec,
             )
         elif segment:
             self.seg_level = self.segment_tissue(segment_params)
 
-        if sampling_params is not None:
-            self.annotation_pct = sampling_params.tissue_percentage
+        if sampling_spec is not None:
+            self.annotation_pct = sampling_spec.tissue_percentage
 
     def get_slide(self, level: int) -> np.ndarray:
         """Return the full slide image at the given pyramid level.
@@ -291,8 +248,8 @@ class WholeSlideImage(object):
 
     def load_segmentation(
         self,
-        segment_params: SegmentationParameters,
-        sampling_params: SamplingParameters,
+        segment_params: SegmentationConfig,
+        sampling_spec: ResolvedSamplingSpec,
     ):
         """
         Load and process a segmentation mask for a whole slide image.
@@ -332,8 +289,8 @@ class WholeSlideImage(object):
         # WSD/OpenSlide may return non-integer values when reading pyramid levels
         # (bilinear resampling from level 0 instead of reading stored pages).
         # Fall back to a direct PIL read of the correct pyramid page to recover
-        # the exact label values defined in sampling_params.pixel_mapping.
-        known_values = set(sampling_params.pixel_mapping.values())
+        # the exact label values defined in sampling_spec.pixel_mapping.
+        known_values = set(sampling_spec.pixel_mapping.values())
         if not set(np.unique(mask).tolist()).issubset(known_values):
             with Image.open(self.mask_path) as mask_img:
                 mask_img.seek(mask_level)
@@ -349,10 +306,10 @@ class WholeSlideImage(object):
             interpolation=cv2.INTER_NEAREST,
         )
 
-        background = sampling_params.pixel_mapping["background"]
+        background = sampling_spec.pixel_mapping["background"]
         m = (mask != background).astype("uint8") * segment_params.sthresh_up
         self.annotation_mask = {"tissue": m}
-        for annotation, val in sampling_params.pixel_mapping.items():
+        for annotation, val in sampling_spec.pixel_mapping.items():
             if annotation != "background":
                 self.annotation_mask[annotation] = (mask == val).astype(
                     "uint8"
@@ -362,7 +319,7 @@ class WholeSlideImage(object):
 
     def segment_tissue(
         self,
-        segment_params: SegmentationParameters,
+        segment_params: SegmentationConfig,
     ):
         """
         Segment the tissue via HSV -> Median thresholding -> Binary thresholding -> Morphological closing.
@@ -426,8 +383,8 @@ class WholeSlideImage(object):
 
     def get_tile_coordinates(
         self,
-        tiling_params: _SupportsTilingParams,
-        filter_params: FilterParameters,
+        tiling_params: TilingConfig,
+        filter_params: FilterConfig,
         annotation: str | None = None,
         disable_tqdm: bool = False,
         num_workers: int = 1,
@@ -464,11 +421,11 @@ class WholeSlideImage(object):
                 - resize_factor (float): The factor by which the tile size was resized.
                 - tile_size_lv0 (int): The tile size at level 0 of the wsi pyramid.
         """
-        scale = tiling_params.spacing / self.get_level_spacing(0)
-        tile_size_lv0 = int(round(tiling_params.tile_size * scale, 0))
+        scale = tiling_params.target_spacing_um / self.get_level_spacing(0)
+        tile_size_lv0 = int(round(tiling_params.target_tile_size_px * scale, 0))
 
         contours, holes = self.detect_contours(
-            target_spacing=tiling_params.spacing,
+            target_spacing=tiling_params.target_spacing_um,
             tolerance=tiling_params.tolerance,
             filter_params=filter_params,
             annotation=annotation,
@@ -618,9 +575,9 @@ class WholeSlideImage(object):
         return keep_flags
 
     @staticmethod
-    def filter_contours(contours, hierarchy, filter_params: FilterParameters):
+    def filter_contours(contours, hierarchy, filter_params: FilterConfig):
         """
-        Filter contours by area using FilterParameters.
+        Filter contours by area using FilterConfig.
         """
         filtered = []
 
@@ -673,7 +630,7 @@ class WholeSlideImage(object):
         self,
         target_spacing: float,
         tolerance: float,
-        filter_params: FilterParameters,
+        filter_params: FilterConfig,
         annotation: str | None = None,
     ):
         """
@@ -686,7 +643,7 @@ class WholeSlideImage(object):
             target_spacing (float): Desired spacing at which tiles should be extracted.
             tolerance (float): Tolerance for matching the target_spacing, deciding how much
                 target_spacing can deviate from those specified in the slide metadata.
-            filter_params (NamedTuple): A NamedTuple containing filtering parameters:
+            filter_params (FilterConfig): Filtering parameters containing:
                 - "a_t" (int): Minimum area threshold for foreground contours.
                 - "a_h" (int): Minimum area threshold for holes within contours.
                 - "max_n_holes" (int): Maximum number of holes to retain per contour.
@@ -711,16 +668,10 @@ class WholeSlideImage(object):
             ref_tile_size_at_target_scale[0] * ref_tile_size_at_target_scale[1]
         )
 
-        adjusted_filter_params = FilterParameters(
-            ref_tile_size=filter_params.ref_tile_size,
+        adjusted_filter_params = replace(
+            filter_params,
             a_t=filter_params.a_t * scaled_ref_tile_area,
             a_h=filter_params.a_h * scaled_ref_tile_area,
-            max_n_holes=filter_params.max_n_holes,
-            filter_white=filter_params.filter_white,
-            filter_black=filter_params.filter_black,
-            white_threshold=filter_params.white_threshold,
-            black_threshold=filter_params.black_threshold,
-            fraction_threshold=filter_params.fraction_threshold,
         )
 
         # find and filter contours
@@ -846,8 +797,8 @@ class WholeSlideImage(object):
         self,
         contours,
         holes,
-        tiling_params: _SupportsTilingParams,
-        filter_params: FilterParameters,
+        tiling_params: TilingConfig,
+        filter_params: FilterConfig,
         annotation: str | None = None,
         disable_tqdm: bool = False,
         num_workers: int = 1,
@@ -860,7 +811,7 @@ class WholeSlideImage(object):
             contours (list): List of contours representing tissue blobs in the wsi.
             holes (list): List of tissue holes in each contour.
             tiling_params: Tiling configuration for contour processing.
-            filter_params (FilterParameters): Parameters for filtering.
+            filter_params (FilterConfig): Parameters for filtering.
             annotation (str, optional): annotation type to use for tile extraction.
             num_workers (int, optional): Number of workers to use for parallel processing. Defaults to 1.
 
@@ -942,8 +893,8 @@ class WholeSlideImage(object):
             resize_factor,
         )
 
-    def _resolve_tile_read_metadata(self, tiling_params: _SupportsTilingParams):
-        target_spacing = tiling_params.spacing
+    def _resolve_tile_read_metadata(self, tiling_params: TilingConfig):
+        target_spacing = tiling_params.target_spacing_um
         tolerance = tiling_params.tolerance
         tile_level, is_within_tolerance = self.get_best_level_for_spacing(
             target_spacing, tolerance
@@ -962,8 +913,8 @@ class WholeSlideImage(object):
         self,
         contour,
         contour_holes,
-        tiling_params: _SupportsTilingParams,
-        filter_params: FilterParameters,
+        tiling_params: TilingConfig,
+        filter_params: FilterConfig,
         annotation: str | None = None,
     ):
         """
@@ -973,7 +924,7 @@ class WholeSlideImage(object):
             contour (numpy.ndarray): Contour to process, defined as a set of points.
             contour_holes (list): List of holes within the contour.
             tiling_params: Tiling configuration for contour processing.
-            filter_params (FilterParameters): Parameters for filtering.
+            filter_params (FilterConfig): Parameters for filtering.
             annotation (str, optional): Annotation type to use for tile extraction.
 
         Returns:
@@ -984,7 +935,7 @@ class WholeSlideImage(object):
                 - tile_level (int): Level of the image used for tile extraction.
                 - resize_factor (float): The factor by which the tile size was resized.
         """
-        target_tile_size = tiling_params.tile_size
+        target_tile_size = tiling_params.target_tile_size_px
         overlap = tiling_params.overlap
         drop_holes = tiling_params.drop_holes
         use_padding = tiling_params.use_padding
@@ -1030,21 +981,25 @@ class WholeSlideImage(object):
             if annotation is None
             else self.annotation_mask[annotation]
         )
-        pct = (
-            self.annotation_pct["tissue"]
-            if annotation is None
-            else self.annotation_pct[annotation]
-        )
-        seg_spacing = self.get_level_spacing(self.seg_level)
+        if annotation is None and not hasattr(self, "annotation_pct"):
+            pct = tiling_params.tissue_threshold
+        else:
+            pct = (
+                self.annotation_pct["tissue"]
+                if annotation is None
+                else self.annotation_pct[annotation]
+            )
         tissue_checker = HasEnoughTissue(
             contour=cont,
             contour_holes=contour_holes,
             tissue_mask=mask,
-            target_tile_size=target_tile_size,
-            tile_spacing=tile_spacing,
-            resize_factor=resize_factor,
-            seg_spacing=seg_spacing,
-            spacing_at_level_0=self.get_level_spacing(0),
+            geometry=ResolvedTileGeometry(
+                target_tile_size_px=target_tile_size,
+                read_spacing_um=tile_spacing,
+                resize_factor=resize_factor,
+                seg_spacing_um=self.get_level_spacing(self.seg_level),
+                level0_spacing_um=self.get_level_spacing(0),
+            ),
             pct=pct,
         )
 

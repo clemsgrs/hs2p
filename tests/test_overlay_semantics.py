@@ -186,9 +186,18 @@ def test_extract_coordinates_uses_overlay_mask_preview_instead_of_line_rendering
             spacing_at_level_0=None,
             segment=False,
             segment_params=None,
-            sampling_params=None,
+            sampling_spec=None,
             pixel_mapping=None,
         ):
+            del (
+                backend,
+                mask_path,
+                spacing_at_level_0,
+                segment,
+                segment_params,
+                sampling_spec,
+                pixel_mapping,
+            )
             self.path = Path(path)
             self.spacings = [0.5]
             self.level_dimensions = [(2, 2)]
@@ -242,11 +251,11 @@ def test_extract_coordinates_uses_overlay_mask_preview_instead_of_line_rendering
             use_hsv=True,
         ),
         tiling_params=SimpleNamespace(
-            spacing=0.5,
+            target_spacing_um=0.5,
             tolerance=0.05,
-            tile_size=224,
+            target_tile_size_px=224,
             overlap=0.0,
-            min_tissue_percentage=0.1,
+            tissue_threshold=0.1,
             drop_holes=False,
             use_padding=True,
         ),
@@ -261,8 +270,7 @@ def test_extract_coordinates_uses_overlay_mask_preview_instead_of_line_rendering
             black_threshold=25,
             fraction_threshold=0.9,
         ),
-        sampling_params=None,
-        mask_visu_path=preview_path,
+        mask_preview_path=preview_path,
         disable_tqdm=True,
         num_workers=1,
     )
@@ -290,9 +298,18 @@ def test_extract_coordinates_preview_uses_in_memory_annotation_labels_when_style
             spacing_at_level_0=None,
             segment=False,
             segment_params=None,
-            sampling_params=None,
+            sampling_spec=None,
             pixel_mapping=None,
         ):
+            del (
+                backend,
+                mask_path,
+                spacing_at_level_0,
+                segment,
+                segment_params,
+                sampling_spec,
+                pixel_mapping,
+            )
             self.path = Path(path)
             self.spacings = [0.5]
             self.level_dimensions = [(2, 2)]
@@ -345,11 +362,11 @@ def test_extract_coordinates_preview_uses_in_memory_annotation_labels_when_style
             use_hsv=True,
         ),
         tiling_params=SimpleNamespace(
-            spacing=0.5,
+            target_spacing_um=0.5,
             tolerance=0.05,
-            tile_size=224,
+            target_tile_size_px=224,
             overlap=0.0,
-            min_tissue_percentage=0.1,
+            tissue_threshold=0.1,
             drop_holes=False,
             use_padding=True,
         ),
@@ -364,12 +381,13 @@ def test_extract_coordinates_preview_uses_in_memory_annotation_labels_when_style
             black_threshold=25,
             fraction_threshold=0.9,
         ),
-        sampling_params=SimpleNamespace(
+        sampling_spec=SimpleNamespace(
             pixel_mapping={"background": 0, "tumor": 1},
             color_mapping={"background": None, "tumor": [255, 0, 0]},
             tissue_percentage={"background": None, "tumor": 0.1},
+            active_annotations=("tumor",),
         ),
-        mask_visu_path=preview_path,
+        mask_preview_path=preview_path,
         preview_downsample=8,
         preview_palette=palette,
         preview_pixel_mapping={"background": 0, "tumor": 1},

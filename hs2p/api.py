@@ -5,26 +5,28 @@ import tempfile
 import traceback
 import warnings
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
 import numpy as np
 import pandas as pd
 
-from hs2p.configs import default_config
+from hs2p.configs import (
+    FilterConfig,
+    PreviewConfig,
+    SegmentationConfig,
+    TilingConfig,
+)
+from hs2p.configs.resolvers import build_default_sampling_spec
 from hs2p.wsi import (
-    _build_default_tissue_sampling_params,
-    SamplingParameters,
+    CoordinateOutputMode,
+    CoordinateSelectionStrategy,
+    ResolvedSamplingSpec,
     extract_coordinates,
     overlay_mask_on_slide as _overlay_mask_on_slide,
-    visualize_coordinates,
+    write_coordinate_preview,
 )
-
-_DEFAULT_TILING = default_config.tiling
-_DEFAULT_TILING_PARAMS = _DEFAULT_TILING.params
-_DEFAULT_SEGMENTATION = _DEFAULT_TILING.seg_params
-_DEFAULT_FILTERING = _DEFAULT_TILING.filter_params
 
 
 @dataclass(frozen=True)
@@ -45,109 +47,6 @@ class SlideSpec:
     image_path: Path
     mask_path: Path | None = None
     spacing_at_level_0: float | None = None
-
-
-@dataclass(frozen=True)
-class TilingConfig:
-    """Control tile extraction at a target physical resolution.
-
-    Attributes:
-        backend: Slide-reading backend, for example ``openslide`` or ``asap``.
-        target_spacing_um: Requested spacing in microns per pixel.
-        target_tile_size_px: Requested tile width and height at the target spacing.
-        tolerance: Allowed relative spacing mismatch when choosing a pyramid level.
-        overlap: Fractional overlap between neighboring tiles.
-        tissue_threshold: Minimum tissue fraction required to keep a tile.
-        drop_holes: Whether tiles centered in detected tissue holes are discarded.
-        use_padding: Whether border tiles may extend beyond slide bounds and be padded.
-    """
-
-    backend: str
-    target_spacing_um: float
-    target_tile_size_px: int
-    tolerance: float
-    overlap: float
-    tissue_threshold: float
-    drop_holes: bool = bool(_DEFAULT_TILING_PARAMS.drop_holes)
-    use_padding: bool = bool(_DEFAULT_TILING_PARAMS.use_padding)
-
-    # Legacy compatibility for wrapped core logic.
-    @property
-    def spacing(self) -> float:
-        return self.target_spacing_um
-
-    @property
-    def tile_size(self) -> int:
-        return self.target_tile_size_px
-
-    @property
-    def min_tissue_percentage(self) -> float:
-        return self.tissue_threshold
-
-
-@dataclass(frozen=True)
-class SegmentationConfig:
-    """Control tissue segmentation before coordinate extraction.
-
-    Attributes:
-        downsample: Downsample factor used to choose the segmentation level.
-        sthresh: Foreground threshold used when Otsu thresholding is disabled.
-        sthresh_up: Upper threshold value used when scaling the binary mask.
-        mthresh: Median-filter kernel size applied before thresholding.
-        close: Morphological closing kernel size applied after thresholding.
-        use_otsu: Whether to use Otsu thresholding instead of a fixed threshold.
-        use_hsv: Whether to segment in HSV space instead of grayscale.
-    """
-
-    downsample: int = int(_DEFAULT_SEGMENTATION.downsample)
-    sthresh: int = int(_DEFAULT_SEGMENTATION.sthresh)
-    sthresh_up: int = int(_DEFAULT_SEGMENTATION.sthresh_up)
-    mthresh: int = int(_DEFAULT_SEGMENTATION.mthresh)
-    close: int = int(_DEFAULT_SEGMENTATION.close)
-    use_otsu: bool = bool(_DEFAULT_SEGMENTATION.use_otsu)
-    use_hsv: bool = bool(_DEFAULT_SEGMENTATION.use_hsv)
-
-
-@dataclass(frozen=True)
-class FilterConfig:
-    """Control contour and tile-level filtering after segmentation.
-
-    Attributes:
-        ref_tile_size: Reference tile size used to scale contour-area thresholds.
-        a_t: Minimum contour area threshold, relative to the reference tile size.
-        a_h: Minimum hole area threshold, relative to the reference tile size.
-        max_n_holes: Maximum number of holes retained per contour.
-        filter_white: Whether mostly white tiles are removed.
-        filter_black: Whether mostly black tiles are removed.
-        white_threshold: Pixel threshold used for white-tile rejection.
-        black_threshold: Pixel threshold used for black-tile rejection.
-        fraction_threshold: Fraction of white or black pixels required to reject a tile.
-    """
-
-    ref_tile_size: int = int(_DEFAULT_FILTERING.ref_tile_size)
-    a_t: int = int(_DEFAULT_FILTERING.a_t)
-    a_h: int = int(_DEFAULT_FILTERING.a_h)
-    max_n_holes: int = int(_DEFAULT_FILTERING.max_n_holes)
-    filter_white: bool = bool(_DEFAULT_FILTERING.filter_white)
-    filter_black: bool = bool(_DEFAULT_FILTERING.filter_black)
-    white_threshold: int = int(_DEFAULT_FILTERING.white_threshold)
-    black_threshold: int = int(_DEFAULT_FILTERING.black_threshold)
-    fraction_threshold: float = float(_DEFAULT_FILTERING.fraction_threshold)
-
-
-@dataclass(frozen=True)
-class QCConfig:
-    """Control preview generation in batch tiling.
-
-    Attributes:
-        save_mask_preview: Whether a mask preview image is written.
-        save_tiling_preview: Whether a tiling preview image is written.
-        downsample: Downsample factor used for preview rendering.
-    """
-
-    save_mask_preview: bool = False
-    save_tiling_preview: bool = False
-    downsample: int = 32
 
 
 @dataclass
@@ -173,6 +72,9 @@ class TilingResult:
         num_tiles: Number of retained tiles.
         config_hash: Hash of the effective tiling, segmentation, and filtering config.
         tissue_fraction: Optional per-tile tissue coverage values.
+        annotation: Optional annotation label for per-annotation sampling artifacts.
+        selection_strategy: Optional internal coordinate-selection strategy marker.
+        output_mode: Optional internal output-mode marker.
     """
 
     sample_id: str
@@ -193,6 +95,9 @@ class TilingResult:
     num_tiles: int
     config_hash: str
     tissue_fraction: np.ndarray | None = None
+    annotation: str | None = None
+    selection_strategy: str | None = None
+    output_mode: str | None = None
 
 
 @dataclass(frozen=True)
@@ -249,8 +154,41 @@ def _validate_result_consistency(result: TilingResult) -> None:
         raise ValueError("tile_index must be a contiguous range from 0 to num_tiles-1")
 
 
-def _build_default_sampling_params(tiling: TilingConfig) -> SamplingParameters:
-    return _build_default_tissue_sampling_params(tiling)
+def compute_effective_config_hash(
+    *,
+    tiling: TilingConfig,
+    segmentation: SegmentationConfig,
+    filtering: FilterConfig,
+    sampling_spec: ResolvedSamplingSpec | None = None,
+    selection_strategy: str | None = None,
+    output_mode: str | None = None,
+    annotation: str | None = None,
+) -> str:
+    if (
+        sampling_spec is None
+        or selection_strategy is None
+        or output_mode is None
+    ):
+        return compute_config_hash(
+            tiling=tiling,
+            segmentation=segmentation,
+            filtering=filtering,
+        )
+    payload: dict[str, Any] = {
+        "sampling": {
+            "selection_strategy": selection_strategy,
+            "output_mode": output_mode,
+            "resolved_sampling_spec": sampling_spec,
+        }
+    }
+    if annotation is not None:
+        payload["sampling"]["annotation"] = annotation
+    return compute_config_hash(
+        tiling=tiling,
+        segmentation=segmentation,
+        filtering=filtering,
+        extra=payload,
+    )
 
 
 def _optional_path(value: Any) -> Path | None:
@@ -268,13 +206,13 @@ def _compute_tiling_result(
     tiling: TilingConfig,
     segmentation: SegmentationConfig,
     filtering: FilterConfig,
-    mask_visu_path: Path | None,
+    mask_preview_path: Path | None,
     num_workers: int,
     config_hash: str | None = None,
 ) -> TilingResult:
-    sampling_params = None
+    sampling_spec = None
     if whole_slide.mask_path is not None:
-        sampling_params = _build_default_sampling_params(tiling)
+        sampling_spec = build_default_sampling_spec(tiling)
     extraction = extract_coordinates(
         wsi_path=whole_slide.image_path,
         mask_path=whole_slide.mask_path,
@@ -282,8 +220,8 @@ def _compute_tiling_result(
         segment_params=segmentation,
         tiling_params=tiling,
         filter_params=filtering,
-        sampling_params=sampling_params,
-        mask_visu_path=mask_visu_path,
+        sampling_spec=sampling_spec,
+        mask_preview_path=mask_preview_path,
         spacing_at_level_0=whole_slide.spacing_at_level_0,
         disable_tqdm=True,
         num_workers=num_workers,
@@ -321,11 +259,30 @@ def _compute_tiling_result(
         config_hash=(
             config_hash
             if config_hash is not None
-            else compute_config_hash(
+            else compute_effective_config_hash(
                 tiling=tiling,
                 segmentation=segmentation,
                 filtering=filtering,
+                sampling_spec=sampling_spec,
+                selection_strategy=(
+                    CoordinateSelectionStrategy.MERGED_DEFAULT_TILING
+                    if sampling_spec is not None
+                    else None
+                ),
+                output_mode=(
+                    CoordinateOutputMode.SINGLE_OUTPUT
+                    if sampling_spec is not None
+                    else None
+                ),
             )
+        ),
+        selection_strategy=(
+            CoordinateSelectionStrategy.MERGED_DEFAULT_TILING
+            if sampling_spec is not None
+            else None
+        ),
+        output_mode=(
+            CoordinateOutputMode.SINGLE_OUTPUT if sampling_spec is not None else None
         ),
     )
 
@@ -333,6 +290,11 @@ def _compute_tiling_result(
 def _normalize_for_hash(value: Any) -> Any:
     if isinstance(value, Path):
         return str(value)
+    if is_dataclass(value) and not isinstance(value, type):
+        return {
+            key: _normalize_for_hash(val)
+            for key, val in sorted(asdict(value).items())
+        }
     if isinstance(value, dict):
         return {k: _normalize_for_hash(v) for k, v in sorted(value.items())}
     if isinstance(value, (list, tuple)):
@@ -358,25 +320,6 @@ def compute_config_hash(
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _build_cli_configs(
-    cfg: Any,
-) -> tuple[TilingConfig, SegmentationConfig, FilterConfig]:
-    return (
-        TilingConfig(
-            target_spacing_um=cfg.tiling.params.target_spacing_um,
-            target_tile_size_px=cfg.tiling.params.target_tile_size_px,
-            tolerance=cfg.tiling.params.tolerance,
-            overlap=cfg.tiling.params.overlap,
-            tissue_threshold=cfg.tiling.params.tissue_threshold,
-            drop_holes=cfg.tiling.params.drop_holes,
-            use_padding=cfg.tiling.params.use_padding,
-            backend=cfg.tiling.backend,
-        ),
-        SegmentationConfig(**dict(cfg.tiling.seg_params)),
-        FilterConfig(**dict(cfg.tiling.filter_params)),
-    )
-
-
 def _validate_required_columns(
     df: pd.DataFrame,
     *,
@@ -398,27 +341,43 @@ def tile_slide(
     tiling: TilingConfig,
     segmentation: SegmentationConfig,
     filtering: FilterConfig,
-    qc: QCConfig | None = None,
+    preview: PreviewConfig | None = None,
     num_workers: int = 1,
 ) -> TilingResult:
-    if qc is not None and (qc.save_mask_preview or qc.save_tiling_preview):
+    if preview is not None and (
+        preview.save_mask_preview or preview.save_tiling_preview
+    ):
         warnings.warn(
             "tile_slide() is compute-only and does not write preview artifacts; "
             "use write_tiling_preview() for tiling overlays and "
             "overlay_mask_on_slide() for mask overlays.",
             stacklevel=2,
         )
+    sampling_spec = (
+        build_default_sampling_spec(tiling)
+        if whole_slide.mask_path is not None
+        else None
+    )
     return _compute_tiling_result(
         whole_slide,
         tiling=tiling,
         segmentation=segmentation,
         filtering=filtering,
-        mask_visu_path=None,
+        mask_preview_path=None,
         num_workers=num_workers,
-        config_hash=compute_config_hash(
+        config_hash=compute_effective_config_hash(
             tiling=tiling,
             segmentation=segmentation,
             filtering=filtering,
+            sampling_spec=sampling_spec,
+            selection_strategy=(
+                CoordinateSelectionStrategy.MERGED_DEFAULT_TILING
+                if sampling_spec is not None
+                else None
+            ),
+            output_mode=(
+                CoordinateOutputMode.SINGLE_OUTPUT if sampling_spec is not None else None
+            ),
         ),
     )
 
@@ -466,6 +425,12 @@ def save_tiling_result(
         "num_tiles": result.num_tiles,
         "config_hash": result.config_hash,
     }
+    if result.annotation is not None:
+        meta["annotation"] = result.annotation
+    if result.selection_strategy is not None:
+        meta["selection_strategy"] = result.selection_strategy
+    if result.output_mode is not None:
+        meta["output_mode"] = result.output_mode
     temp_npz_path: Path | None = None
     temp_meta_path: Path | None = None
     write_complete = False
@@ -581,6 +546,17 @@ def load_tiling_result(
         tissue_threshold=float(meta["tissue_threshold"]),
         num_tiles=int(meta["num_tiles"]),
         config_hash=str(meta["config_hash"]),
+        annotation=(
+            str(meta["annotation"]) if meta.get("annotation") is not None else None
+        ),
+        selection_strategy=(
+            str(meta["selection_strategy"])
+            if meta.get("selection_strategy") is not None
+            else None
+        ),
+        output_mode=(
+            str(meta["output_mode"]) if meta.get("output_mode") is not None else None
+        ),
     )
     _validate_result_consistency(result)
     return result
@@ -670,18 +646,18 @@ def write_tiling_preview(
 
     Args:
         result: Tiling coordinates and read metadata for one slide.
-        output_dir: Root output directory where ``visualization/tiling`` is created.
-        downsample: Visualization downsample passed to ``visualize_coordinates``.
+        output_dir: Root output directory where ``preview/tiling`` is created.
+        downsample: Preview downsample passed to ``write_coordinate_preview``.
 
     Returns:
         Path to the rendered preview image, or ``None`` when there are no tiles.
     """
     if result.num_tiles == 0:
         return None
-    save_dir = output_dir / "visualization" / "tiling"
+    save_dir = output_dir / "preview" / "tiling"
     save_dir.mkdir(parents=True, exist_ok=True)
     coordinates = list(zip(result.x.tolist(), result.y.tolist()))
-    visualize_coordinates(
+    write_coordinate_preview(
         wsi_path=result.image_path,
         coordinates=coordinates,
         tile_size_lv0=result.tile_size_lv0,
@@ -707,7 +683,7 @@ def overlay_mask_on_slide(
     """Render a mask overlay preview for a slide.
 
     This is the public API counterpart to the batch QC preview written by
-    ``tile_slides(..., qc=QCConfig(save_mask_preview=True, ...))``. It can
+    ``tile_slides(..., preview=PreviewConfig(save_mask_preview=True, ...))``. It can
     overlay either a mask file from disk or an in-memory mask array.
     """
 
@@ -770,7 +746,7 @@ class _SlideComputeRequest:
     segmentation: SegmentationConfig
     filtering: FilterConfig
     config_hash: str
-    mask_visu_path: Path | None
+    mask_preview_path: Path | None
     output_dir: Path
     num_workers: int
     include_result: bool = False
@@ -875,14 +851,15 @@ def _compute_tiling_result_from_request(
             tiling=request.tiling,
             segmentation=request.segmentation,
             filtering=request.filtering,
-            mask_visu_path=request.mask_visu_path,
+            mask_preview_path=request.mask_preview_path,
             num_workers=request.num_workers,
             config_hash=request.config_hash,
         )
         artifact = save_tiling_result(result, output_dir=request.output_dir)
         mask_preview_path = (
-            request.mask_visu_path
-            if request.mask_visu_path is not None and request.mask_visu_path.is_file()
+            request.mask_preview_path
+            if request.mask_preview_path is not None
+            and request.mask_preview_path.is_file()
             else None
         )
         return _SlideComputeResponse(
@@ -939,7 +916,7 @@ def tile_slides(
     tiling: TilingConfig,
     segmentation: SegmentationConfig,
     filtering: FilterConfig,
-    qc: QCConfig | None = None,
+    preview: PreviewConfig | None = None,
     output_dir: Path,
     num_workers: int = 1,
     resume: bool = False,
@@ -973,15 +950,35 @@ def tile_slides(
         for row in existing_df.to_dict(orient="records"):
             if row.get("tiling_status") == "success":
                 existing_successes[str(row["sample_id"])] = row
-    expected_hash = compute_config_hash(
-        tiling=tiling,
-        segmentation=segmentation,
-        filtering=filtering,
-    )
+    expected_hashes: dict[bool, str] = {}
+
+    def _expected_hash_for_slide(whole_slide: SlideSpec) -> str:
+        key = whole_slide.mask_path is not None
+        if key not in expected_hashes:
+            sampling_spec = build_default_sampling_spec(tiling) if key else None
+            expected_hashes[key] = compute_effective_config_hash(
+                tiling=tiling,
+                segmentation=segmentation,
+                filtering=filtering,
+                sampling_spec=sampling_spec,
+                selection_strategy=(
+                    CoordinateSelectionStrategy.MERGED_DEFAULT_TILING
+                    if sampling_spec is not None
+                    else None
+                ),
+                output_mode=(
+                    CoordinateOutputMode.SINGLE_OUTPUT
+                    if sampling_spec is not None
+                    else None
+                ),
+            )
+        return expected_hashes[key]
+
     planned_work: list[_PlannedSlideWork] = []
     compute_requests: list[_SlideComputeRequest] = []
     for whole_slide in whole_slides:
         try:
+            expected_hash = _expected_hash_for_slide(whole_slide)
             artifact: TilingArtifacts | None = None
             if whole_slide.sample_id in existing_successes:
                 row = existing_successes[whole_slide.sample_id]
@@ -1007,10 +1004,10 @@ def tile_slides(
                     )
                 )
                 continue
-            mask_visu_path = None
-            if qc is not None and qc.save_mask_preview:
-                mask_dir = output_dir / "visualization" / "mask"
-                mask_visu_path = mask_dir / f"{whole_slide.sample_id}.jpg"
+            mask_preview_path = None
+            if preview is not None and preview.save_mask_preview:
+                mask_dir = output_dir / "preview" / "mask"
+                mask_preview_path = mask_dir / f"{whole_slide.sample_id}.jpg"
             compute_request = _SlideComputeRequest(
                 input_index=len(planned_work),
                 whole_slide=whole_slide,
@@ -1018,7 +1015,7 @@ def tile_slides(
                 segmentation=segmentation,
                 filtering=filtering,
                 config_hash=expected_hash,
-                mask_visu_path=mask_visu_path,
+                mask_preview_path=mask_preview_path,
                 output_dir=output_dir,
                 num_workers=1,
             )
@@ -1043,7 +1040,7 @@ def tile_slides(
     )
     preview_executor = (
         ThreadPoolExecutor(max_workers=1)
-        if qc is not None and qc.save_tiling_preview
+        if preview is not None and preview.save_tiling_preview
         else None
     )
     pending_preview: _PendingTilingPreview | None = None
@@ -1096,8 +1093,8 @@ def tile_slides(
         _finalize_pending_preview_if_any()
         if (
             preview_executor is not None
-            and qc is not None
-            and qc.save_tiling_preview
+            and preview is not None
+            and preview.save_tiling_preview
             and base_artifact.num_tiles > 0
         ):
             preview_result = getattr(response, "result", None)
@@ -1106,14 +1103,14 @@ def tile_slides(
                     write_tiling_preview,
                     result=preview_result,
                     output_dir=output_dir,
-                    downsample=qc.downsample,
+                    downsample=preview.downsample,
                 )
             else:
                 future = preview_executor.submit(
                     _write_tiling_preview_from_artifacts,
                     artifact=base_artifact,
                     output_dir=output_dir,
-                    downsample=qc.downsample,
+                    downsample=preview.downsample,
                 )
             pending_preview = _PendingTilingPreview(
                 whole_slide=response.whole_slide,
@@ -1184,7 +1181,7 @@ def tile_slides(
                     segmentation=request.segmentation,
                     filtering=request.filtering,
                     config_hash=request.config_hash,
-                    mask_visu_path=request.mask_visu_path,
+                    mask_preview_path=request.mask_preview_path,
                     output_dir=request.output_dir,
                     num_workers=worker_inner_workers,
                     include_result=False,
@@ -1209,7 +1206,7 @@ def tile_slides(
                     segmentation=request.segmentation,
                     filtering=request.filtering,
                     config_hash=request.config_hash,
-                    mask_visu_path=request.mask_visu_path,
+                    mask_preview_path=request.mask_preview_path,
                     output_dir=request.output_dir,
                     num_workers=worker_inner_workers,
                     include_result=True,

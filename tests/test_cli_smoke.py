@@ -37,7 +37,7 @@ def _base_cfg(tmp_path: Path, csv_path: Path) -> SimpleNamespace:
         seed=0,
         output_dir=str(tmp_path / "output"),
         resume=False,
-        visualize=False,
+        save_previews=False,
         speed=SimpleNamespace(num_workers=1),
         tiling=SimpleNamespace(
             read_tiles_from=None,
@@ -71,11 +71,11 @@ def _base_cfg(tmp_path: Path, csv_path: Path) -> SimpleNamespace:
                 "black_threshold": 25,
                 "fraction_threshold": 0.9,
             },
-            visu_params=SimpleNamespace(downsample=32),
+            preview=SimpleNamespace(downsample=32),
             sampling_params=SimpleNamespace(
-                independant_sampling=True,
-                pixel_mapping=[{"tumor": 1}],
-                tissue_percentage=[{"tumor": 0.1}],
+                independent_sampling=True,
+                pixel_mapping=[{"background": 0}, {"tumor": 1}],
+                tissue_percentage=[{"background": None}, {"tumor": 0.1}],
                 color_mapping=None,
             ),
         ),
@@ -90,7 +90,6 @@ def test_tiling_main_smoke_uses_current_schema_and_manifest(
     captured = {}
 
     monkeypatch.setattr(tiling_mod, "setup", lambda args: cfg)
-    monkeypatch.setattr(tiling_mod, "fix_random_seeds", lambda seed: None)
 
     def _fake_tile_slides(
         whole_slides,
@@ -98,12 +97,13 @@ def test_tiling_main_smoke_uses_current_schema_and_manifest(
         tiling,
         segmentation,
         filtering,
-        qc,
+        preview,
         output_dir,
         num_workers,
         resume,
         read_tiles_from,
     ):
+        del tiling, segmentation, filtering, preview, num_workers, resume, read_tiles_from
         captured["whole_slides"] = whole_slides
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -175,7 +175,6 @@ def test_sampling_main_smoke_uses_current_schema_and_manifest(
     cfg = _base_cfg(tmp_path, csv_path)
 
     monkeypatch.setattr(sampling_mod, "setup", lambda args: cfg)
-    monkeypatch.setattr(sampling_mod, "fix_random_seeds", lambda seed: None)
     monkeypatch.setattr(sampling_mod.mp, "cpu_count", lambda: 1)
     monkeypatch.setattr(sampling_mod.tqdm, "tqdm", lambda iterable, **kwargs: iterable)
 
@@ -204,7 +203,28 @@ def test_sampling_main_smoke_uses_current_schema_and_manifest(
             x=np.array([10], dtype=np.int64),
             y=np.array([20], dtype=np.int64),
         )
-        return kwargs["sample_id"], {"status": "success"}
+        meta_path = annotation_dir / f"{kwargs['sample_id']}.tiles.meta.json"
+        meta_path.write_text(
+            '{"sample_id":"slide-1","image_path":"slide-1.svs","mask_path":"slide-1-mask.png","backend":"asap","target_spacing_um":0.5,"target_tile_size_px":256,"read_level":0,"read_spacing_um":0.5,"read_tile_size_px":256,"tile_size_lv0":256,"overlap":0.0,"tissue_threshold":0.1,"num_tiles":1,"config_hash":"hash","annotation":"tumor","selection_strategy":"independent_sampling","output_mode":"per_annotation"}\n'
+        )
+        return kwargs["sample_id"], {
+            "status": "success",
+            "rows": [
+                {
+                    "sample_id": kwargs["sample_id"],
+                    "annotation": "tumor",
+                    "image_path": "slide-1.svs",
+                    "mask_path": "slide-1-mask.png",
+                    "sampling_status": "success",
+                    "num_tiles": 1,
+                    "tiles_npz_path": str(annotation_dir / f"{kwargs['sample_id']}.tiles.npz"),
+                    "tiles_meta_path": str(meta_path),
+                    "config_hash": "hash",
+                    "error": np.nan,
+                    "traceback": np.nan,
+                }
+            ],
+        }
 
     monkeypatch.setattr(
         sampling_mod, "process_slide_wrapper", _fake_process_slide_wrapper
@@ -215,17 +235,27 @@ def test_sampling_main_smoke_uses_current_schema_and_manifest(
     process_df = pd.read_csv(Path(cfg.output_dir) / "process_list.csv")
     assert list(process_df.columns) == [
         "sample_id",
+        "annotation",
         "image_path",
         "mask_path",
         "sampling_status",
+        "num_tiles",
+        "tiles_npz_path",
+        "tiles_meta_path",
+        "config_hash",
         "error",
         "traceback",
     ]
     row = process_df.to_dict(orient="records")[0]
     assert row["sample_id"] == "slide-1"
+    assert row["annotation"] == "tumor"
     assert row["image_path"] == "slide-1.svs"
     assert row["mask_path"] == "slide-1-mask.png"
     assert row["sampling_status"] == "success"
+    assert row["num_tiles"] == 1
+    assert row["tiles_npz_path"].endswith("coordinates/tumor/slide-1.tiles.npz")
+    assert row["tiles_meta_path"].endswith("coordinates/tumor/slide-1.tiles.meta.json")
+    assert row["config_hash"] == "hash"
     assert pd.isna(row["error"])
     assert pd.isna(row["traceback"])
     assert (

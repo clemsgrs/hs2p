@@ -4,7 +4,7 @@ import pytest
 
 from hs2p.api import FilterConfig, SegmentationConfig, TilingConfig
 import hs2p.wsi as wsi_api
-from hs2p.wsi import SamplingParameters
+from hs2p.wsi import ResolvedSamplingSpec
 from hs2p.wsi.wsi import WholeSlideImage
 
 
@@ -47,11 +47,12 @@ def _tiling_config(*, spacing: float = 1.0, tolerance: float = 0.01) -> TilingCo
     )
 
 
-def _sampling_parameters() -> SamplingParameters:
-    return SamplingParameters(
+def _sampling_spec() -> ResolvedSamplingSpec:
+    return ResolvedSamplingSpec(
         pixel_mapping={"background": 0, "tissue": 1},
         color_mapping={"background": None, "tissue": None},
         tissue_percentage={"background": None, "tissue": 0.0},
+        active_annotations=("tissue",),
     )
 
 
@@ -101,7 +102,7 @@ def test_extract_coordinates_raises_when_target_spacing_is_below_level0_beyond_t
             segment_params=_segmentation_config(),
             tiling_params=_tiling_config(spacing=0.5, tolerance=0.05),
             filter_params=_filter_config(),
-            sampling_params=_sampling_parameters(),
+            sampling_spec=_sampling_spec(),
             disable_tqdm=True,
             num_workers=1,
         )

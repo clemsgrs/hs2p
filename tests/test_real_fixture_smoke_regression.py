@@ -5,7 +5,7 @@ import pytest
 
 from hs2p.api import FilterConfig, SegmentationConfig, TilingConfig
 import hs2p.wsi as wsi_api
-from hs2p.wsi import SamplingParameters
+from hs2p.wsi import ResolvedSamplingSpec
 
 pytestmark = pytest.mark.integration
 
@@ -56,10 +56,11 @@ def _run_extract(wsi_path: Path, mask_path: Path, backend: str, tissue_pct: floa
             black_threshold=25,
             fraction_threshold=0.9,
         ),
-        sampling_params=SamplingParameters(
+        sampling_spec=ResolvedSamplingSpec(
             pixel_mapping={"background": 0, "tissue": 1},
             color_mapping={"background": None, "tissue": None},
             tissue_percentage={"background": None, "tissue": tissue_pct},
+            active_annotations=("tissue",),
         ),
         disable_tqdm=True,
         num_workers=1,

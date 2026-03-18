@@ -16,7 +16,7 @@ def test_validation_accepts_omegaconf_listconfig_rgb_values():
     pixel_mapping = {"background": 0, "gleason-3": 3}
     color_mapping = {"background": None, "gleason-3": list_config}
 
-    sampling_mod._validate_visualization_color_mapping(
+    sampling_mod.validate_color_mapping(
         pixel_mapping=pixel_mapping,
         color_mapping=color_mapping,
     )

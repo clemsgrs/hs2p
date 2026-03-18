@@ -62,10 +62,12 @@ python -m hs2p.sampling --config-file /path/to/config.yaml
   - Tissue segmentation settings
 - `tiling.filter_params`
   - Contour and white/black filtering settings
-- `tiling.visu_params`
+- `tiling.preview`
   - Preview-rendering settings
 - `tiling.sampling_params`
   - Annotation-specific sampling rules for `hs2p.sampling`
+- `save_previews`
+  - Global switch for writing mask and tiling previews to disk
 - `speed.num_workers`
   - Parallelism for slide processing
 
@@ -73,7 +75,7 @@ python -m hs2p.sampling --config-file /path/to/config.yaml
 
 `hs2p.sampling` uses the same base tiling setup as `hs2p.tiling`, plus:
 
-- `tiling.sampling_params.independant_sampling`
+- `tiling.sampling_params.independent_sampling`
   - Whether annotations are sampled independently or jointly
 - `tiling.sampling_params.pixel_mapping`
   - Mapping from annotation names to mask pixel values

@@ -4,7 +4,7 @@ output_dir: "output" # output directory
 resume: false # resume from a previous run
 resume_dirname: # directory name to resume from
 
-visualize: true # save a visualization of slide tiling in a .jpg
+save_previews: true # save preview images of slide tiling and mask overlays
 
 seed: 0 # seed for reproducibility
 
@@ -33,8 +33,8 @@ tiling:
     use_otsu: false # use otsu's method instead of simple binary thresholding
     use_hsv: true # use HSV thresholding instead of simple binary thresholding
   filter_params:
-    ref_tile_size: 16 # reference tile size at spacing tiling.spacing
-    a_t: 4 # area filter threshold for tissue (positive integer, the minimum size of detected foreground contours to consider, relative to the reference tile size ref_tile_size, e.g. a value 10 means only detected foreground contours of size greater than 10 [ref_tile_size, ref_tile_size] tiles at spacing tiling.spacing will be kept)
+    ref_tile_size: 16 # reference tile size at the target spacing
+    a_t: 4 # area filter threshold for tissue (positive integer, the minimum size of detected foreground contours to consider, relative to the reference tile size ref_tile_size, e.g. a value 10 means only detected foreground contours of size greater than 10 [ref_tile_size, ref_tile_size] tiles at the target spacing will be kept)
     a_h: 2 # area filter threshold for holes (positive integer, the minimum size of detected holes/cavities in foreground contours to avoid, once again relative to the reference tile size ref_tile_size)
     max_n_holes: 8 # maximum of holes to consider per detected foreground contours (positive integer, higher values lead to more accurate patching but increase computational cost ; keeps the biggest holes)
     # filter_white / filter_black: when enabled, each candidate tile is read from the slide at full
@@ -47,10 +47,10 @@ tiling:
     white_threshold: 220 # threshold for white pixels (0-255)
     black_threshold: 25 # threshold for black pixels (0-255)
     fraction_threshold: 0.9 # fraction of pixels that must be white/black to filter out the tile
-  visu_params:
-    downsample: 32 # downsample to use for tiling visualization
+  preview:
+    downsample: 32 # downsample to use for preview rendering
   sampling_params:
-    independant_sampling: false # whether or not to sample tiles independently for each category (if false, tiles will be sampled jointly across all categories, ensuring no overlap between tiles of different categories)
+    independent_sampling: false # whether or not to sample tiles independently for each category (if false, tiles will be sampled jointly across all categories, ensuring no overlap between tiles of different categories)
     pixel_mapping: # map annotated categories to their corresponding pixel values
       - 'background': 0
       - 'tissue': 1

@@ -7,57 +7,35 @@ import pandas as pd
 import seaborn as sns
 import multiprocessing as mp
 from pathlib import Path
-from collections.abc import Sequence
 
 from hs2p.api import (
+    CoordinateOutputMode,
     FilterConfig,
+    ResolvedSamplingSpec,
     SegmentationConfig,
     TilingConfig,
     TilingResult,
-    _build_cli_configs,
+    _write_process_list,
     _validate_required_columns,
-    compute_config_hash,
+    compute_effective_config_hash,
+    load_tiling_result,
     save_tiling_result,
 )
-from hs2p.utils import setup, load_csv, fix_random_seeds
-from hs2p.wsi import (
-    extract_coordinates,
-    filter_coordinates,
-    sample_coordinates,
-    visualize_coordinates,
-    SamplingParameters,
+from hs2p.configs.resolvers import (
+    resolve_filter_config,
+    resolve_sampling_spec,
+    resolve_sampling_strategy,
+    resolve_segmentation_config,
+    resolve_tiling_config,
+    validate_color_mapping,
 )
-
-
-def _validate_visualization_color_mapping(
-    *,
-    pixel_mapping: dict[str, int],
-    color_mapping: dict[str, Sequence[int] | None],
-):
-    missing_annotations = sorted(set(pixel_mapping.keys()) - set(color_mapping.keys()))
-    if missing_annotations:
-        raise ValueError(
-            "color_mapping is missing annotation keys required by pixel_mapping: "
-            + ", ".join(missing_annotations)
-        )
-
-    for annotation, color in color_mapping.items():
-        if color is None:
-            continue
-        if isinstance(color, (str, bytes)):
-            raise ValueError(
-                f"color_mapping['{annotation}'] must be None or a length-3 RGB sequence"
-            )
-        if not isinstance(color, Sequence) or len(color) != 3:
-            raise ValueError(
-                f"color_mapping['{annotation}'] must be None or a length-3 RGB sequence"
-            )
-        if any(
-            (not isinstance(c, (int, np.integer)) or c < 0 or c > 255) for c in color
-        ):
-            raise ValueError(
-                f"color_mapping['{annotation}'] must contain integers in [0, 255]"
-            )
+from hs2p.utils import setup, load_csv
+from hs2p.wsi import (
+    CoordinateSelectionStrategy,
+    UnifiedCoordinateRequest,
+    execute_coordinate_request,
+    write_coordinate_preview,
+)
 
 
 def get_args_parser(add_help: bool = True):
@@ -105,6 +83,47 @@ def _resolve_sampling_workers(cfg, *, slide_count: int) -> tuple[int, int]:
     return outer_workers, 1
 
 
+def _selection_strategy_from_cfg(cfg) -> str:
+    return resolve_sampling_strategy(cfg)
+
+
+def _build_sampling_preview_assets(
+    resolved_sampling_spec: ResolvedSamplingSpec,
+    *,
+    save_previews: bool,
+):
+    if not save_previews:
+        return None, None
+
+    preview_palette = np.zeros(shape=768, dtype=int)
+    if resolved_sampling_spec.color_mapping is None:
+        ncat = len(resolved_sampling_spec.pixel_mapping)
+        if ncat <= 10:
+            color_palette = sns.color_palette("tab10")[:ncat]
+        elif ncat <= 20:
+            color_palette = sns.color_palette("tab20")[:ncat]
+        else:
+            raise ValueError(
+                f"Implementation supports up to 20 categories (provided pixel_mapping has {ncat})"
+            )
+        color_mapping = {
+            k: tuple(int(round(255 * x)) for x in color_palette[i])
+            for i, k in enumerate(resolved_sampling_spec.pixel_mapping.keys())
+        }
+    else:
+        color_mapping = resolved_sampling_spec.color_mapping
+    validate_color_mapping(
+        pixel_mapping=resolved_sampling_spec.pixel_mapping,
+        color_mapping=color_mapping,
+    )
+    p = [0] * 3 * len(color_mapping)
+    for k, v in resolved_sampling_spec.pixel_mapping.items():
+        if color_mapping[k] is not None:
+            p[v * 3 : v * 3 + 3] = color_mapping[k]
+    preview_palette[0 : len(p)] = np.array(p).astype(int)
+    return preview_palette, color_mapping
+
+
 def _save_sampling_coordinates(
     *,
     sample_id: str,
@@ -118,9 +137,13 @@ def _save_sampling_coordinates(
     annotation: str,
     coordinates: list[tuple[int, int]],
     extraction,
-    sampling_params: SamplingParameters,
+    resolved_sampling_spec: ResolvedSamplingSpec,
+    selection_strategy: str | None = None,
+    output_mode: str = CoordinateOutputMode.PER_ANNOTATION,
 ):
-    annotation_threshold = sampling_params.tissue_percentage[annotation]
+    if selection_strategy is None:
+        selection_strategy = _selection_strategy_from_cfg(cfg)
+    annotation_threshold = resolved_sampling_spec.tissue_percentage[annotation]
     x = np.array([x for x, _ in coordinates], dtype=np.int64)
     y = np.array([y for _, y in coordinates], dtype=np.int64)
     result = TilingResult(
@@ -141,21 +164,18 @@ def _save_sampling_coordinates(
         overlap=tiling_config.overlap,
         tissue_threshold=annotation_threshold,
         num_tiles=len(coordinates),
-        config_hash=compute_config_hash(
+        config_hash=compute_effective_config_hash(
             tiling=tiling_config,
             segmentation=segmentation_config,
             filtering=filter_config,
-            extra={
-                "annotation": annotation,
-                "sampling": {
-                    "pixel_mapping": sampling_params.pixel_mapping,
-                    "tissue_percentage": sampling_params.tissue_percentage,
-                    "independant_sampling": bool(
-                        cfg.tiling.sampling_params.independant_sampling
-                    ),
-                },
-            },
+            sampling_spec=resolved_sampling_spec,
+            selection_strategy=selection_strategy,
+            output_mode=output_mode,
+            annotation=annotation,
         ),
+        annotation=annotation,
+        selection_strategy=selection_strategy,
+        output_mode=output_mode,
     )
     annotation_dir = Path(cfg.output_dir, "coordinates", annotation)
     annotation_dir.mkdir(parents=True, exist_ok=True)
@@ -173,87 +193,69 @@ def process_slide(
     tiling_config: TilingConfig,
     segmentation_config: SegmentationConfig,
     filter_config: FilterConfig,
-    mask_visualize_dir,
-    sampling_visualize_dir,
-    sampling_params: SamplingParameters,
+    mask_preview_dir,
+    sampling_preview_dir,
+    resolved_sampling_spec: ResolvedSamplingSpec,
+    selection_strategy: str | None = None,
     disable_tqdm: bool = False,
     num_workers: int = 4,
 ):
     """
-    Process a single slide: sample tile coordinates and visualize if needed.
+    Process a single slide: sample tile coordinates and write previews if needed.
     """
     wsi_name = sample_id
+    if selection_strategy is None:
+        selection_strategy = _selection_strategy_from_cfg(cfg)
     try:
-
-        if cfg.visualize and (
-            sampling_visualize_dir is not None or mask_visualize_dir is not None
-        ):
-            preview_palette = np.zeros(shape=768, dtype=int)
-            if sampling_params.color_mapping is None:
-                ncat = len(sampling_params.pixel_mapping)
-                if ncat <= 10:
-                    color_palette = sns.color_palette("tab10")[:ncat]
-                elif ncat <= 20:
-                    color_palette = sns.color_palette("tab20")[:ncat]
-                else:
-                    raise ValueError(
-                        f"Implementation supports up to 20 categories (provided pixel_mapping has {ncat})"
-                    )
-                color_mapping = {
-                    k: tuple(255 * x for x in color_palette[i])
-                    for i, k in enumerate(sampling_params.pixel_mapping.keys())
+        preview_palette, color_mapping = _build_sampling_preview_assets(
+            resolved_sampling_spec,
+            save_previews=cfg.save_previews
+            and (sampling_preview_dir is not None or mask_preview_dir is not None),
+        )
+        mask_preview_path = None
+        mask_preview_paths_by_annotation = None
+        if cfg.save_previews and mask_preview_dir is not None:
+            if selection_strategy == CoordinateSelectionStrategy.INDEPENDENT_SAMPLING:
+                mask_preview_paths_by_annotation = {
+                    annotation: mask_preview_dir / annotation / f"{wsi_name}.jpg"
+                    for annotation in resolved_sampling_spec.active_annotations
                 }
             else:
-                color_mapping = sampling_params.color_mapping
-            _validate_visualization_color_mapping(
-                pixel_mapping=sampling_params.pixel_mapping,
-                color_mapping=color_mapping,
-            )
-            p = [0] * 3 * len(color_mapping)
-            for k, v in sampling_params.pixel_mapping.items():
-                if color_mapping[k] is not None:
-                    p[v * 3 : v * 3 + 3] = color_mapping[k]
-            n = len(p)
-            preview_palette[0:n] = np.array(p).astype(int)
-        else:
-            color_mapping = None
-            preview_palette = None
+                mask_preview_path = Path(mask_preview_dir, f"{wsi_name}.png")
 
-        if not cfg.tiling.sampling_params.independant_sampling:
-            tissue_mask_visu_path = None
-            if cfg.visualize and mask_visualize_dir is not None:
-                tissue_mask_visu_path = Path(mask_visualize_dir, f"{wsi_name}.png")
-            extraction = extract_coordinates(
+        response = execute_coordinate_request(
+            UnifiedCoordinateRequest(
                 wsi_path=wsi_path,
                 mask_path=mask_path,
                 backend=cfg.tiling.backend,
-                tiling_params=tiling_config,
                 segment_params=segmentation_config,
+                tiling_params=tiling_config,
                 filter_params=filter_config,
-                sampling_params=sampling_params,
-                mask_visu_path=tissue_mask_visu_path,
-                preview_downsample=cfg.tiling.visu_params.downsample,
+                sampling_spec=resolved_sampling_spec,
+                selection_strategy=selection_strategy,
+                output_mode=CoordinateOutputMode.PER_ANNOTATION,
+                mask_preview_path=mask_preview_path,
+                mask_preview_paths_by_annotation=mask_preview_paths_by_annotation,
+                preview_downsample=cfg.tiling.preview.downsample,
                 preview_palette=preview_palette,
-                preview_pixel_mapping=sampling_params.pixel_mapping,
+                preview_pixel_mapping=(
+                    resolved_sampling_spec.pixel_mapping
+                    if color_mapping is not None
+                    else None
+                ),
                 preview_color_mapping=color_mapping,
                 disable_tqdm=disable_tqdm,
                 num_workers=num_workers,
             )
-            filtered_coordinates, filtered_contour_indices = filter_coordinates(
-                wsi_path=wsi_path,
-                mask_path=mask_path,
-                backend=cfg.tiling.backend,
-                coordinates=extraction.coordinates,
-                contour_indices=extraction.contour_indices,
-                tile_level=extraction.read_level,
-                segment_params=segmentation_config,
-                tiling_params=tiling_config,
-                sampling_params=sampling_params,
-            )  # a dict mapping annotation -> coordinates
-            for annotation, coordinates in filtered_coordinates.items():
-                if len(coordinates) == 0:
-                    continue
-                _save_sampling_coordinates(
+        )
+        per_annotation_results = response.per_annotation_results or {}
+        rows: list[dict[str, object]] = []
+        for annotation in resolved_sampling_spec.active_annotations:
+            extraction = per_annotation_results.get(annotation)
+            coordinates = extraction.coordinates if extraction is not None else []
+            artifacts = None
+            if len(coordinates) > 0:
+                artifacts = _save_sampling_coordinates(
                     sample_id=sample_id,
                     image_path=wsi_path,
                     mask_path=mask_path,
@@ -265,86 +267,141 @@ def process_slide(
                     annotation=annotation,
                     coordinates=coordinates,
                     extraction=extraction,
-                    sampling_params=sampling_params,
+                    resolved_sampling_spec=resolved_sampling_spec,
+                    selection_strategy=selection_strategy,
                 )
-                if cfg.visualize and sampling_visualize_dir is not None:
-                    visualize_coordinates(
+                if cfg.save_previews and sampling_preview_dir is not None:
+                    write_coordinate_preview(
                         wsi_path=wsi_path,
                         coordinates=coordinates,
                         tile_size_lv0=extraction.tile_size_lv0,
-                        save_dir=sampling_visualize_dir,
+                        save_dir=sampling_preview_dir,
                         sample_id=sample_id,
-                        downsample=cfg.tiling.visu_params.downsample,
+                        downsample=cfg.tiling.preview.downsample,
                         backend=cfg.tiling.backend,
                         mask_path=mask_path,
                         annotation=annotation,
                         palette=preview_palette,
-                        pixel_mapping=sampling_params.pixel_mapping,
+                        pixel_mapping=resolved_sampling_spec.pixel_mapping,
                         color_mapping=color_mapping,
                     )
-        else:
-            for annotation in sampling_params.pixel_mapping.keys():
-                if sampling_params.tissue_percentage[annotation] is None:
-                    continue
-                tissue_mask_visu_path = None
-                if cfg.visualize and mask_visualize_dir is not None:
-                    tissue_mask_visu_path = (
-                        mask_visualize_dir / annotation / f"{wsi_name}.jpg"
-                    )
-                extraction = sample_coordinates(
-                    wsi_path=wsi_path,
-                    mask_path=mask_path,
-                    backend=cfg.tiling.backend,
-                    tiling_params=tiling_config,
-                    segment_params=segmentation_config,
-                    filter_params=filter_config,
-                    sampling_params=sampling_params,
-                    annotation=annotation,
-                    mask_visu_path=tissue_mask_visu_path,
-                    preview_downsample=cfg.tiling.visu_params.downsample,
-                    disable_tqdm=disable_tqdm,
-                    num_workers=num_workers,
-                )
-                coordinates = extraction.coordinates
-                if len(coordinates) == 0:
-                    continue
-                _save_sampling_coordinates(
-                    sample_id=sample_id,
-                    image_path=wsi_path,
-                    mask_path=mask_path,
-                    backend=cfg.tiling.backend,
-                    cfg=cfg,
-                    tiling_config=tiling_config,
-                    segmentation_config=segmentation_config,
-                    filter_config=filter_config,
-                    annotation=annotation,
-                    coordinates=coordinates,
-                    extraction=extraction,
-                    sampling_params=sampling_params,
-                )
-                if cfg.visualize and sampling_visualize_dir is not None:
-                    visualize_coordinates(
-                        wsi_path=wsi_path,
-                        coordinates=coordinates,
-                        tile_size_lv0=extraction.tile_size_lv0,
-                        save_dir=sampling_visualize_dir,
-                        sample_id=sample_id,
-                        downsample=cfg.tiling.visu_params.downsample,
-                        backend=cfg.tiling.backend,
-                        mask_path=mask_path,
-                        annotation=annotation,
-                        palette=preview_palette,
-                        pixel_mapping=sampling_params.pixel_mapping,
-                        color_mapping=color_mapping,
-                    )
-        return sample_id, {"status": "success"}
+            config_hash = compute_effective_config_hash(
+                tiling=tiling_config,
+                segmentation=segmentation_config,
+                filtering=filter_config,
+                sampling_spec=resolved_sampling_spec,
+                selection_strategy=selection_strategy,
+                output_mode=CoordinateOutputMode.PER_ANNOTATION,
+                annotation=annotation,
+            )
+            rows.append(
+                {
+                    "sample_id": sample_id,
+                    "annotation": annotation,
+                    "image_path": str(wsi_path),
+                    "mask_path": str(mask_path) if mask_path is not None else None,
+                    "sampling_status": "success",
+                    "num_tiles": len(coordinates),
+                    "tiles_npz_path": (
+                        str(artifacts.tiles_npz_path) if artifacts is not None else np.nan
+                    ),
+                    "tiles_meta_path": (
+                        str(artifacts.tiles_meta_path)
+                        if artifacts is not None
+                        else np.nan
+                    ),
+                    "config_hash": config_hash,
+                    "error": np.nan,
+                    "traceback": np.nan,
+                }
+            )
+        return sample_id, {"status": "success", "rows": rows}
 
     except Exception as e:
-        return sample_id, {
-            "status": "failed",
-            "error": str(e),
-            "traceback": str(traceback.format_exc()),
-        }
+        active_annotations = (
+            list(resolved_sampling_spec.active_annotations)
+            if resolved_sampling_spec is not None
+            else [np.nan]
+        )
+        rows = []
+        for annotation in active_annotations:
+            rows.append(
+                {
+                    "sample_id": sample_id,
+                    "annotation": annotation,
+                    "image_path": str(wsi_path),
+                    "mask_path": str(mask_path) if mask_path is not None else None,
+                    "sampling_status": "failed",
+                    "num_tiles": 0,
+                    "tiles_npz_path": np.nan,
+                    "tiles_meta_path": np.nan,
+                    "config_hash": np.nan,
+                    "error": str(e),
+                    "traceback": str(traceback.format_exc()),
+                }
+            )
+        return sample_id, {"status": "failed", "rows": rows}
+
+
+def _build_sampling_process_rows(
+    *,
+    whole_slides,
+    active_annotations: tuple[str, ...],
+):
+    rows = []
+    for slide in whole_slides:
+        for annotation in active_annotations:
+            rows.append(
+                {
+                    "sample_id": slide.sample_id,
+                    "annotation": annotation,
+                    "image_path": str(slide.image_path),
+                    "mask_path": (
+                        str(slide.mask_path) if slide.mask_path is not None else None
+                    ),
+                    "sampling_status": "tbp",
+                    "num_tiles": 0,
+                    "tiles_npz_path": np.nan,
+                    "tiles_meta_path": np.nan,
+                    "config_hash": np.nan,
+                    "error": np.nan,
+                    "traceback": np.nan,
+                }
+            )
+    return rows
+
+
+def _validate_sampling_artifact_row(
+    *,
+    row: dict[str, object],
+    whole_slide,
+    expected_hash: str,
+    selection_strategy: str,
+) -> None:
+    if row.get("sampling_status") != "success":
+        raise ValueError("sampling row is not successful")
+    if str(row.get("config_hash")) != expected_hash:
+        raise ValueError("sampling config_hash mismatch")
+    num_tiles = int(row.get("num_tiles", 0))
+    if num_tiles == 0:
+        return
+    npz_path = Path(str(row["tiles_npz_path"]))
+    meta_path = Path(str(row["tiles_meta_path"]))
+    result = load_tiling_result(npz_path, meta_path)
+    if result.sample_id != whole_slide.sample_id:
+        raise ValueError("sampling sample_id mismatch")
+    if result.image_path != whole_slide.image_path:
+        raise ValueError("sampling image_path mismatch")
+    if result.mask_path != whole_slide.mask_path:
+        raise ValueError("sampling mask_path mismatch")
+    if result.config_hash != expected_hash:
+        raise ValueError("sampling config_hash mismatch")
+    if result.annotation != row["annotation"]:
+        raise ValueError("sampling annotation mismatch")
+    if result.selection_strategy != selection_strategy:
+        raise ValueError("sampling selection_strategy mismatch")
+    if result.output_mode != CoordinateOutputMode.PER_ANNOTATION:
+        raise ValueError("sampling output_mode mismatch")
 
 
 def main(args):
@@ -352,9 +409,13 @@ def main(args):
     cfg = setup(args)
     output_dir = Path(cfg.output_dir)
 
-    fix_random_seeds(cfg.seed)
-
     whole_slides = load_csv(cfg)
+    tiling_config = resolve_tiling_config(cfg)
+    segmentation_config = resolve_segmentation_config(cfg)
+    filter_config = resolve_filter_config(cfg)
+    resolved_sampling_spec = resolve_sampling_spec(cfg, tiling=tiling_config)
+    selection_strategy = resolve_sampling_strategy(cfg)
+    active_annotations = resolved_sampling_spec.active_annotations
 
     process_list = output_dir / "process_list.csv"
     if process_list.is_file() and cfg.resume:
@@ -363,9 +424,14 @@ def main(args):
             process_df,
             required_columns={
                 "sample_id",
+                "annotation",
                 "image_path",
                 "mask_path",
                 "sampling_status",
+                "num_tiles",
+                "tiles_npz_path",
+                "tiles_meta_path",
+                "config_hash",
                 "error",
                 "traceback",
             },
@@ -376,102 +442,84 @@ def main(args):
             lambda x: str(x) if pd.notna(x) else None
         )
     else:
-        data = {
-            "sample_id": [slide.sample_id for slide in whole_slides],
-            "image_path": [str(slide.image_path) for slide in whole_slides],
-            "mask_path": [
-                str(slide.mask_path) if slide.mask_path is not None else slide.mask_path
-                for slide in whole_slides
-            ],
-            "sampling_status": ["tbp"] * len(whole_slides),
-            "error": [str(np.nan)] * len(whole_slides),
-            "traceback": [str(np.nan)] * len(whole_slides),
-        }
-        process_df = pd.DataFrame(data)
+        process_df = pd.DataFrame(
+            _build_sampling_process_rows(
+                whole_slides=whole_slides,
+                active_annotations=active_annotations,
+            )
+        )
 
-    skip_sampling = (
-        process_df.empty
-        or process_df["sampling_status"]
-        .fillna("")
-        .astype(str)
-        .str.contains("success")
-        .all()
-    )
-
-    pixel_mapping = {
-        k: v for e in cfg.tiling.sampling_params.pixel_mapping for k, v in e.items()
+    expected_hash_by_annotation = {
+        annotation: compute_effective_config_hash(
+            tiling=tiling_config,
+            segmentation=segmentation_config,
+            filtering=filter_config,
+            sampling_spec=resolved_sampling_spec,
+            selection_strategy=selection_strategy,
+            output_mode=CoordinateOutputMode.PER_ANNOTATION,
+            annotation=annotation,
+        )
+        for annotation in active_annotations
     }
-    tissue_percentage = {
-        k: v for e in cfg.tiling.sampling_params.tissue_percentage for k, v in e.items()
-    }
-    tissue_key_present = True
-    if "tissue" not in tissue_percentage:
-        tissue_key_present = False
-        tissue_percentage["tissue"] = cfg.tiling.params.tissue_threshold
-    if cfg.tiling.sampling_params.color_mapping is not None:
-        color_mapping = {
-            k: v for e in cfg.tiling.sampling_params.color_mapping for k, v in e.items()
-        }
-    else:
-        color_mapping = None
+    slides_to_process = []
+    for slide in whole_slides:
+        slide_rows = process_df[process_df["sample_id"] == slide.sample_id]
+        try:
+            if slide_rows.empty or set(slide_rows["annotation"].tolist()) != set(
+                active_annotations
+            ):
+                raise ValueError("sampling rows missing required annotations")
+            for annotation in active_annotations:
+                row = slide_rows[slide_rows["annotation"] == annotation]
+                if row.empty:
+                    raise ValueError("sampling row missing annotation")
+                _validate_sampling_artifact_row(
+                    row=row.iloc[0].to_dict(),
+                    whole_slide=slide,
+                    expected_hash=expected_hash_by_annotation[annotation],
+                    selection_strategy=selection_strategy,
+                )
+        except Exception:
+            slides_to_process.append(slide)
 
-    sampling_params = SamplingParameters(
-        pixel_mapping=pixel_mapping,
-        color_mapping=color_mapping,
-        tissue_percentage=tissue_percentage,
-    )
-    tiling_config, segmentation_config, filter_config = _build_cli_configs(cfg)
+    if slides_to_process:
 
-    if not skip_sampling:
-
-        mask = process_df["sampling_status"] != "success"
-        process_stack = process_df[mask]
-        total = len(process_stack)
-
-        wsi_paths_to_process = [
-            Path(x) for x in process_stack.image_path.values.tolist()
-        ]
-        mask_paths_to_process = [
-            Path(x) if x is not None and not pd.isna(x) else x
-            for x in process_stack.mask_path.values.tolist()
-        ]
-        sample_ids_to_process = process_stack.sample_id.astype(str).tolist()
+        total = len(slides_to_process)
         parallel_workers, inner_workers = _resolve_sampling_workers(
             cfg, slide_count=total
         )
 
-        # setup directories for coordinates and visualization
+        # setup directories for coordinates and previews
         coordinates_dir = output_dir / "coordinates"
         coordinates_dir.mkdir(exist_ok=True, parents=True)
-        mask_visualize_dir = None
-        sampling_visualize_dir = None
-        if cfg.visualize:
-            visualize_dir = output_dir / "visualization"
-            mask_visualize_dir = Path(visualize_dir, "mask")
-            sampling_visualize_dir = Path(visualize_dir, "sampling")
-            mask_visualize_dir.mkdir(exist_ok=True, parents=True)
-            sampling_visualize_dir.mkdir(exist_ok=True, parents=True)
+        mask_preview_dir = None
+        sampling_preview_dir = None
+        if cfg.save_previews:
+            preview_dir = output_dir / "preview"
+            mask_preview_dir = Path(preview_dir, "mask")
+            sampling_preview_dir = Path(preview_dir, "sampling")
+            mask_preview_dir.mkdir(exist_ok=True, parents=True)
+            sampling_preview_dir.mkdir(exist_ok=True, parents=True)
 
         sampling_updates: dict[str, dict[str, str]] = {}
         with mp.Pool(processes=parallel_workers) as pool:
             args_list = [
                 {
-                    "sample_id": sample_id,
-                    "wsi_path": wsi_fp,
-                    "mask_path": mask_fp,
+                    "sample_id": slide.sample_id,
+                    "wsi_path": slide.image_path,
+                    "mask_path": slide.mask_path,
                     "cfg": cfg,
                     "tiling_config": tiling_config,
                     "segmentation_config": segmentation_config,
                     "filter_config": filter_config,
-                    "mask_visualize_dir": mask_visualize_dir,
-                    "sampling_visualize_dir": sampling_visualize_dir,
-                    "sampling_params": sampling_params,
+                    "mask_preview_dir": mask_preview_dir,
+                    "sampling_preview_dir": sampling_preview_dir,
+                    "resolved_sampling_spec": resolved_sampling_spec,
+                    "selection_strategy": selection_strategy,
                     "disable_tqdm": True,
                     "num_workers": inner_workers,
                 }
-                for wsi_fp, mask_fp, sample_id in zip(
-                    wsi_paths_to_process, mask_paths_to_process, sample_ids_to_process
-                )
+                for slide in slides_to_process
             ]
             results = list(
                 tqdm.tqdm(
@@ -486,37 +534,30 @@ def main(args):
             sampling_updates[result_sample_id] = status_info
 
         for result_sample_id, status_info in sampling_updates.items():
-            process_df.loc[
-                process_df["sample_id"] == result_sample_id, "sampling_status"
-            ] = status_info["status"]
-            if "error" in status_info:
-                process_df.loc[process_df["sample_id"] == result_sample_id, "error"] = (
-                    status_info["error"]
-                )
-                process_df.loc[
-                    process_df["sample_id"] == result_sample_id, "traceback"
-                ] = status_info["traceback"]
-        process_df.to_csv(process_list, index=False)
+            process_df = process_df[process_df["sample_id"] != result_sample_id]
+            process_df = pd.concat(
+                [process_df, pd.DataFrame(status_info["rows"])],
+                ignore_index=True,
+            )
+        _write_process_list(
+            process_df.to_dict(orient="records"),
+            process_list,
+        )
 
         # summary logging
-        total_slides = len(process_df)
-        failed_sampling = process_df[process_df["sampling_status"] == "failed"]
+        total_slides = len(whole_slides)
+        failed_sampling = process_df[process_df["sampling_status"] == "failed"][
+            "sample_id"
+        ].nunique()
         print("=+=" * 10)
         print(f"Total number of slides: {total_slides}")
-        print(f"Failed sampling: {len(failed_sampling)}")
-        for annotation, pct in tissue_percentage.items():
-            if pct is None:
-                continue
-            if not tissue_key_present and annotation == "tissue":
-                continue
-            slides_with_tiles = [
-                slide.sample_id
-                for slide in whole_slides
-                if Path(
-                    coordinates_dir, annotation, f"{slide.sample_id}.tiles.npz"
-                ).is_file()
+        print(f"Failed sampling: {failed_sampling}")
+        for annotation in active_annotations:
+            no_tiles = process_df[
+                (process_df["annotation"] == annotation)
+                & (process_df["sampling_status"] == "success")
+                & (process_df["num_tiles"].fillna(0).astype(int) == 0)
             ]
-            no_tiles = process_df[~process_df["sample_id"].isin(slides_with_tiles)]
             print(f"No {annotation} tiles after sampling step: {len(no_tiles)}")
         print("=+=" * 10)
 

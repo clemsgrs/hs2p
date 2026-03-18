@@ -5,7 +5,7 @@ import numpy as np
 from hs2p.api import FilterConfig, SegmentationConfig, TilingConfig
 import hs2p.wsi as wsi_api
 import hs2p.wsi.wsi as wsimod
-from hs2p.wsi import SamplingParameters
+from hs2p.wsi import ResolvedSamplingSpec
 from tests.helpers.fake_wsi_backend import FakePyramidWSI, PyramidSpec
 
 
@@ -54,11 +54,12 @@ def _tiling_config(
     )
 
 
-def _sampling_parameters(*, tissue_threshold: float) -> SamplingParameters:
-    return SamplingParameters(
+def _sampling_spec(*, tissue_threshold: float) -> ResolvedSamplingSpec:
+    return ResolvedSamplingSpec(
         pixel_mapping={"background": 0, "tissue": 1},
         color_mapping={"background": None, "tissue": None},
         tissue_percentage={"background": None, "tissue": tissue_threshold},
+        active_annotations=("tissue",),
     )
 
 
@@ -76,7 +77,7 @@ def test_extract_coordinates_returns_exact_coordinates_for_rectangular_tissue(
         segment_params=_segmentation_config(),
         tiling_params=_tiling_config(tissue_threshold=0.0),
         filter_params=_filter_config(),
-        sampling_params=_sampling_parameters(tissue_threshold=0.0),
+        sampling_spec=_sampling_spec(tissue_threshold=0.0),
         disable_tqdm=True,
         num_workers=1,
     )
@@ -95,8 +96,8 @@ def test_extract_coordinates_respects_50_vs_51_percent_tissue_threshold(fake_bac
     )
     fake_backend(mask_l0)
 
-    sampling_at_50 = _sampling_parameters(tissue_threshold=0.50)
-    sampling_above_50 = _sampling_parameters(tissue_threshold=0.51)
+    sampling_at_50 = _sampling_spec(tissue_threshold=0.50)
+    sampling_above_50 = _sampling_spec(tissue_threshold=0.51)
 
     result_50 = wsi_api.extract_coordinates(
         wsi_path=Path("synthetic-slide.tif"),
@@ -105,7 +106,7 @@ def test_extract_coordinates_respects_50_vs_51_percent_tissue_threshold(fake_bac
         segment_params=_segmentation_config(),
         tiling_params=_tiling_config(tissue_threshold=0.50),
         filter_params=_filter_config(),
-        sampling_params=sampling_at_50,
+        sampling_spec=sampling_at_50,
         disable_tqdm=True,
         num_workers=1,
     )
@@ -116,7 +117,7 @@ def test_extract_coordinates_respects_50_vs_51_percent_tissue_threshold(fake_bac
         segment_params=_segmentation_config(),
         tiling_params=_tiling_config(tissue_threshold=0.51),
         filter_params=_filter_config(),
-        sampling_params=sampling_above_50,
+        sampling_spec=sampling_above_50,
         disable_tqdm=True,
         num_workers=1,
     )
@@ -165,7 +166,7 @@ def test_extract_coordinates_match_expected_coordinates_across_spacings(fake_bac
                 tissue_threshold=0.0,
             ),
             filter_params=_filter_config(),
-            sampling_params=_sampling_parameters(tissue_threshold=0.0),
+            sampling_spec=_sampling_spec(tissue_threshold=0.0),
             disable_tqdm=True,
             num_workers=1,
         )
@@ -270,7 +271,7 @@ def test_sample_coordinates_returns_zero_tile_result_for_tissue_free_annotation(
         segment_params=_segmentation_config(),
         tiling_params=_tiling_config(tissue_threshold=0.01),
         filter_params=_filter_config(),
-        sampling_params=_sampling_parameters(tissue_threshold=0.01),
+        sampling_spec=_sampling_spec(tissue_threshold=0.01),
         annotation="tissue",
         disable_tqdm=True,
         num_workers=1,
