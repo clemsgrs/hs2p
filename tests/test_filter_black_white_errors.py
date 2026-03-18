@@ -1,6 +1,8 @@
 import numpy as np
 import pytest
 
+from hs2p.api import FilterConfig
+
 wsi_mod = pytest.importorskip("hs2p.wsi.wsi")
 
 
@@ -16,7 +18,7 @@ def test_filter_black_white_tile_errors_warn_and_keep_tile():
 
     wsi.get_tile = _raise
 
-    filter_params = wsi_mod.FilterParameters(
+    filter_params = FilterConfig(
         ref_tile_size=16,
         a_t=1,
         a_h=1,
@@ -68,7 +70,7 @@ def test_filter_black_and_white_tiles_batches_reads_without_changing_decisions()
 
     wsi.get_tile = _get_tile
 
-    filter_params = wsi_mod.FilterParameters(
+    filter_params = FilterConfig(
         ref_tile_size=16,
         a_t=1,
         a_h=1,

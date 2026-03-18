@@ -4,7 +4,7 @@ import numpy as np
 
 from hs2p.api import SegmentationConfig, TilingConfig
 import hs2p.wsi as wsi_api
-from hs2p.wsi import SamplingParameters
+from hs2p.wsi import ResolvedSamplingSpec
 from hs2p.wsi.wsi import WholeSlideImage
 
 
@@ -33,11 +33,12 @@ def _tiling_config() -> TilingConfig:
     )
 
 
-def _sampling_parameters() -> SamplingParameters:
-    return SamplingParameters(
+def _sampling_spec() -> ResolvedSamplingSpec:
+    return ResolvedSamplingSpec(
         pixel_mapping={"background": 0, "tumor": 1, "stroma": 2},
         color_mapping={"background": None, "tumor": None, "stroma": None},
         tissue_percentage={"background": None, "tumor": 0.5, "stroma": 0.5},
+        active_annotations=("tumor", "stroma"),
     )
 
 
@@ -61,7 +62,7 @@ def test_filter_coordinates_returns_expected_per_class_subsets(fake_backend):
         tile_level=0,
         segment_params=_segmentation_config(),
         tiling_params=_tiling_config(),
-        sampling_params=_sampling_parameters(),
+        sampling_spec=_sampling_spec(),
     )
 
     assert filtered["tumor"] == [(8, 8), (16, 16)]
@@ -107,7 +108,7 @@ def test_filter_coordinates_reuses_loaded_mask_and_avoids_per_tile_mask_reads(
             spacing_at_level_0=None,
             segment=False,
             segment_params=None,
-            sampling_params=None,
+            sampling_spec=None,
             pixel_mapping=None,
         ):
             del (
@@ -115,7 +116,7 @@ def test_filter_coordinates_reuses_loaded_mask_and_avoids_per_tile_mask_reads(
                 spacing_at_level_0,
                 segment,
                 segment_params,
-                sampling_params,
+                sampling_spec,
                 pixel_mapping,
             )
             constructor_calls.append(
@@ -151,7 +152,7 @@ def test_filter_coordinates_reuses_loaded_mask_and_avoids_per_tile_mask_reads(
             use_padding=False,
             backend="asap",
         ),
-        sampling_params=_sampling_parameters(),
+        sampling_spec=_sampling_spec(),
     )
 
     assert constructor_calls == [
@@ -192,7 +193,7 @@ def test_filter_coordinates_vectorized_path_avoids_per_tile_crops_and_handles_bo
             spacing_at_level_0=None,
             segment=False,
             segment_params=None,
-            sampling_params=None,
+            sampling_spec=None,
             pixel_mapping=None,
         ):
             del (
@@ -201,7 +202,7 @@ def test_filter_coordinates_vectorized_path_avoids_per_tile_crops_and_handles_bo
                 spacing_at_level_0,
                 segment,
                 segment_params,
-                sampling_params,
+                sampling_spec,
                 pixel_mapping,
             )
             self.spacings = [1.0]
@@ -240,10 +241,11 @@ def test_filter_coordinates_vectorized_path_avoids_per_tile_crops_and_handles_bo
             use_padding=False,
             backend="asap",
         ),
-        sampling_params=SamplingParameters(
+        sampling_spec=ResolvedSamplingSpec(
             pixel_mapping={"background": 0, "tumor": 1},
             color_mapping={"background": None, "tumor": None},
             tissue_percentage={"background": None, "tumor": 0.5},
+            active_annotations=("tumor",),
         ),
     )
 
@@ -259,10 +261,11 @@ def test_load_segmentation_preserves_discrete_labels_with_nearest_neighbor(
     mask_l0[4:12, 8:12, 0] = 2
     fake_backend(mask_l0)
 
-    sampling_params = SamplingParameters(
+    sampling_spec = ResolvedSamplingSpec(
         pixel_mapping={"background": 0, "tumor": 1, "stroma": 2},
         color_mapping={"background": None, "tumor": None, "stroma": None},
         tissue_percentage={"background": None, "tumor": 0.0, "stroma": 0.0},
+        active_annotations=("tumor", "stroma"),
     )
 
     wsi = WholeSlideImage(
@@ -271,7 +274,7 @@ def test_load_segmentation_preserves_discrete_labels_with_nearest_neighbor(
         backend="asap",
         segment=True,
         segment_params=_segmentation_config(downsample=1),
-        sampling_params=sampling_params,
+        sampling_spec=sampling_spec,
     )
 
     assert set(np.unique(wsi.annotation_mask["tumor"]).tolist()) <= {0, 255}

@@ -23,7 +23,7 @@ The config dataclasses keep the main knobs explicit and fill secondary options f
   - Controls tissue segmentation before coordinates are extracted
 - `FilterConfig`
   - Controls contour and white/black filtering after segmentation
-- `QCConfig`
+- `PreviewConfig`
   - Controls whether batch preview images are written and at what downsample
 - `TilingResult`
   - In-memory tile coordinates plus read-level metadata for one slide
@@ -87,12 +87,12 @@ Typical downstream uses:
 When you are not using `tile_slides()`, the public preview helpers let you render the same kinds of QC assets explicitly:
 
 - `write_tiling_preview(result=..., output_dir=..., downsample=...)`
-  - Draws the returned tile grid on the slide overview and writes `visualization/tiling/{sample_id}.jpg`
+  - Draws the returned tile grid on the slide overview and writes `preview/tiling/{sample_id}.jpg`
   - Useful after `tile_slide()` when you want a quick visual check of coverage without switching to the batch API
 - `overlay_mask_on_slide(...)`
   - Overlays a tissue or annotation mask on the slide overview
   - Useful when you want to inspect the mask itself, independently of the tiling grid
-  - The default tissue preview used by `tile_slides(..., qc=QCConfig(save_mask_preview=True, ...))` hides background and overlays tissue in `[157, 219, 129]`
+  - The default tissue preview used by `tile_slides(..., preview=PreviewConfig(save_mask_preview=True, ...))` hides background and overlays tissue in `[157, 219, 129]`
 
 Example:
 
@@ -113,7 +113,7 @@ mask_overlay = overlay_mask_on_slide(
     downsample=32,
     backend=result.backend,
 )
-mask_overlay.save("output/visualization/mask/slide-1.jpg")
+mask_overlay.save("output/preview/mask/slide-1.jpg")
 ```
 
 ## Batch flow with previews
@@ -125,7 +125,7 @@ from pathlib import Path
 
 from hs2p import (
     FilterConfig,
-    QCConfig,
+    PreviewConfig,
     SegmentationConfig,
     SlideSpec,
     TilingConfig,
@@ -156,7 +156,7 @@ artifacts = tile_slides(
     ),
     segmentation=SegmentationConfig(downsample=64),
     filtering=FilterConfig(ref_tile_size=224, a_t=4, a_h=2),
-    qc=QCConfig(
+    preview=PreviewConfig(
         save_mask_preview=True,
         save_tiling_preview=True,
         downsample=32,
@@ -166,7 +166,7 @@ artifacts = tile_slides(
 )
 ```
 
-In this mode, `QCConfig` is useful because preview rendering is handled by `tile_slides()`, not by `tile_slide()`. Mask previews are rendered as tissue overlays rather than contour-and-hole line drawings.
+In this mode, `PreviewConfig` is useful because preview rendering is handled by `tile_slides()`, not by `tile_slide()`. Mask previews are rendered as tissue overlays rather than contour-and-hole line drawings.
 
 ## Results versus artifacts
 

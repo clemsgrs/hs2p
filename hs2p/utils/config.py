@@ -67,7 +67,7 @@ def setup(args):
     output_dir.mkdir(exist_ok=cfg.resume or args.skip_datetime, parents=True)
     cfg.output_dir = str(output_dir)
 
-    fix_random_seeds(0)
+    fix_random_seeds(int(cfg.seed))
     setup_logging(output=cfg.output_dir, level=logging.INFO)
     logger.info("git:\n  {}\n".format(get_sha()))
     cfg_path = write_config(cfg, cfg.output_dir, skip_logging=args.skip_logging)

@@ -1,5 +1,33 @@
+from dataclasses import dataclass
+
 import cv2
 import numpy as np
+
+
+@dataclass(frozen=True)
+class ResolvedTileGeometry:
+    target_tile_size_px: int
+    read_spacing_um: float
+    resize_factor: float
+    seg_spacing_um: float
+    level0_spacing_um: float
+
+    @property
+    def target_spacing_um(self) -> float:
+        return self.read_spacing_um * self.resize_factor
+
+    @property
+    def downsampled_tile_size_px(self) -> int:
+        scale = self.seg_spacing_um / self.target_spacing_um
+        return int(round(self.target_tile_size_px / scale, 0))
+
+    @property
+    def resized_tile_size_px(self) -> int:
+        return int(round(self.target_tile_size_px * self.resize_factor, 0))
+
+    @property
+    def level0_to_seg_scale(self) -> float:
+        return self.seg_spacing_um / self.level0_spacing_um
 
 
 class HasEnoughTissue(object):
@@ -8,33 +36,21 @@ class HasEnoughTissue(object):
         contour,
         contour_holes,
         tissue_mask,
-        target_tile_size,
-        tile_spacing,
-        resize_factor,
-        seg_spacing,
-        spacing_at_level_0,
+        geometry: ResolvedTileGeometry,
         pct=0.01,
     ):
         self.cont = contour
         self.holes = contour_holes
         self.mask = tissue_mask // 255
-        self.target_tile_size = target_tile_size
-        self.tile_spacing = tile_spacing
-        self.resize_factor = resize_factor
-        self.seg_spacing = seg_spacing
-        self.spacing_at_level_0 = spacing_at_level_0
+        self.geometry = geometry
         self.pct = pct
 
-        # downsample tile size from target_spacing to seg_spacing
-        # where contour and tissue masks are defined
-        target_spacing = self.tile_spacing * self.resize_factor
-        scale = self.seg_spacing / target_spacing
-        self.downsampled_tile_size = int(round(self.target_tile_size * 1 / scale, 0))
+        self.downsampled_tile_size = self.geometry.downsampled_tile_size_px
         assert (
             self.downsampled_tile_size > 0
         ), "downsampled tile_size is equal to zero, aborting; please consider using a smaller seg_params.downsample parameter"
 
-        self.tile_size_resized = int(round(target_tile_size * resize_factor, 0))
+        self.tile_size_resized = self.geometry.resized_tile_size_px
 
         # precompute the combined tissue mask
         self.precomputed_mask = self._precompute_tissue_mask()
@@ -79,7 +95,7 @@ class HasEnoughTissue(object):
                 - tissue_pcts is a list of tissue percentages for each tile.
         """
         # downsample coordinates from level 0 to seg_level
-        scale = self.seg_spacing / self.spacing_at_level_0
+        scale = self.geometry.level0_to_seg_scale
         downsampled_coords = coords * 1 / scale
         downsampled_coords = downsampled_coords.astype(int)
 
@@ -113,7 +129,7 @@ class HasEnoughTissue(object):
             np.ndarray: The binary mask for the tile (0 or 1).
         """
         # downsample coordinates from level 0 to seg_level
-        scale = self.seg_spacing / self.spacing_at_level_0
+        scale = self.geometry.level0_to_seg_scale
         x_tile = int(x / scale)
         y_tile = int(y / scale)
 

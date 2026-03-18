@@ -1,6 +1,6 @@
 from hs2p.api import (
     FilterConfig,
-    QCConfig,
+    PreviewConfig,
     SegmentationConfig,
     SlideSpec,
     TilingArtifacts,
@@ -18,7 +18,7 @@ from hs2p.wsi import (
     CoordinateExtractionResult,
     extract_coordinates,
     sample_coordinates,
-    visualize_coordinates,
+    write_coordinate_preview,
 )
 
 __version__ = "2.2.1"

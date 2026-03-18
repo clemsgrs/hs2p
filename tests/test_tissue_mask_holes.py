@@ -20,11 +20,13 @@ def test_precomputed_mask_subtracts_all_holes():
         contour=contour,
         contour_holes=holes,
         tissue_mask=tissue_mask,
-        target_tile_size=4,
-        tile_spacing=1.0,
-        resize_factor=1.0,
-        seg_spacing=1.0,
-        spacing_at_level_0=1.0,
+        geometry=utils_mod.ResolvedTileGeometry(
+            target_tile_size_px=4,
+            read_spacing_um=1.0,
+            resize_factor=1.0,
+            seg_spacing_um=1.0,
+            level0_spacing_um=1.0,
+        ),
         pct=0.01,
     )
 
@@ -45,11 +47,13 @@ def test_check_coordinates_returns_vectorized_outputs_with_expected_coverages():
         contour=contour,
         contour_holes=holes,
         tissue_mask=tissue_mask,
-        target_tile_size=4,
-        tile_spacing=1.0,
-        resize_factor=1.0,
-        seg_spacing=1.0,
-        spacing_at_level_0=1.0,
+        geometry=utils_mod.ResolvedTileGeometry(
+            target_tile_size_px=4,
+            read_spacing_um=1.0,
+            resize_factor=1.0,
+            seg_spacing_um=1.0,
+            level0_spacing_um=1.0,
+        ),
         pct=0.5,
     )
 

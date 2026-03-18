@@ -3,12 +3,15 @@ from pathlib import Path
 
 import pandas as pd
 
-from hs2p.api import (
-    QCConfig,
-    _build_cli_configs,
-    tile_slides,
+from hs2p.api import tile_slides
+from hs2p.configs.resolvers import (
+    resolve_filter_config,
+    resolve_preview_config,
+    resolve_read_tiles_from,
+    resolve_segmentation_config,
+    resolve_tiling_config,
 )
-from hs2p.utils import setup, load_csv, fix_random_seeds
+from hs2p.utils import setup, load_csv
 
 
 def get_args_parser(add_help: bool = True):
@@ -39,26 +42,21 @@ def get_args_parser(add_help: bool = True):
 def main(args):
     cfg = setup(args)
     output_dir = Path(cfg.output_dir)
-    fix_random_seeds(cfg.seed)
     whole_slides = load_csv(cfg)
-    tiling, segmentation, filtering = _build_cli_configs(cfg)
-    qc = QCConfig(
-        save_mask_preview=bool(cfg.visualize),
-        save_tiling_preview=bool(cfg.visualize),
-        downsample=cfg.tiling.visu_params.downsample,
-    )
+    tiling = resolve_tiling_config(cfg)
+    segmentation = resolve_segmentation_config(cfg)
+    filtering = resolve_filter_config(cfg)
+    preview = resolve_preview_config(cfg)
     artifacts = tile_slides(
         whole_slides,
         tiling=tiling,
         segmentation=segmentation,
         filtering=filtering,
-        qc=qc,
+        preview=preview,
         output_dir=output_dir,
         num_workers=cfg.speed.num_workers,
         resume=cfg.resume,
-        read_tiles_from=(
-            Path(cfg.tiling.read_tiles_from) if cfg.tiling.read_tiles_from else None
-        ),
+        read_tiles_from=resolve_read_tiles_from(cfg),
     )
     process_df = pd.read_csv(output_dir / "process_list.csv")
     failed_tiling = process_df[process_df["tiling_status"] == "failed"]
