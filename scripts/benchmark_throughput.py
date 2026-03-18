@@ -356,7 +356,7 @@ def write_config(
         "csv": str(csv_path),
         "output_dir": str(output_dir),
         "resume": False,
-        "visualize": False,
+        "save_previews": False,
         "seed": 0,
         "tiling": {
             "read_tiles_from": None,
@@ -390,9 +390,9 @@ def write_config(
                 "black_threshold": 25,
                 "fraction_threshold": 0.9,
             },
-            "visu_params": {"downsample": 32},
+            "preview": {"downsample": 32},
             "sampling_params": {
-                "independant_sampling": False,
+                "independent_sampling": False,
                 "pixel_mapping": [{"background": 0}, {"tissue": 1}],
                 "color_mapping": [{"background": None}, {"tissue": [157, 219, 129]}],
                 "tissue_percentage": [

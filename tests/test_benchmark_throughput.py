@@ -1,6 +1,8 @@
 import importlib.util
 from pathlib import Path
 
+from omegaconf import OmegaConf
+
 
 def _load_benchmark_module():
     module_path = (
@@ -68,3 +70,26 @@ def test_benchmark_records_worker_sweep_without_workload_label(
 
     assert seen_workers == [2, 4]
     assert [record["num_workers"] for record in records] == [2, 4]
+
+
+def test_write_config_uses_current_preview_and_sampling_keys(tmp_path: Path):
+    benchmark_mod = _load_benchmark_module()
+    config_path = tmp_path / "config.yaml"
+
+    benchmark_mod.write_config(
+        csv_path=tmp_path / "slides.csv",
+        output_dir=tmp_path / "output",
+        num_workers=4,
+        backend="asap",
+        target_spacing=0.5,
+        tile_size=256,
+        config_path=config_path,
+    )
+
+    cfg = OmegaConf.to_container(OmegaConf.load(config_path), resolve=True)
+
+    assert cfg["save_previews"] is False
+    assert "preview" in cfg["tiling"]
+    assert "visu_params" not in cfg["tiling"]
+    assert cfg["tiling"]["sampling_params"]["independent_sampling"] is False
+    assert "independant_sampling" not in cfg["tiling"]["sampling_params"]

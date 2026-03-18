@@ -165,8 +165,6 @@ def resolve_sampling_spec(
             pixel_mapping=pixel_mapping,
             color_mapping=color_mapping,
         )
-    else:
-        color_mapping = None
 
     return ResolvedSamplingSpec(
         pixel_mapping=pixel_mapping,
