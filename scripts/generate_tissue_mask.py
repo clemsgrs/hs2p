@@ -276,38 +276,27 @@ def load_wsi_at_spacing(
 ) -> tuple[np.ndarray, float]:
 
     wsi = wsd.WholeSlideImage(wsi_path, backend=backend)
-    base_spacings = list(wsi.spacings)
-
-    if spacing_at_level_0 is None:
-        spacings = base_spacings
-    else:
-        spacings = [spacing_at_level_0 * sp / base_spacings[0] for sp in base_spacings]
-
-    level, is_within_tolerance = get_best_level_for_spacing(
-        wsi, target_spacing, tolerance
+    level, read_spacing, effective_spacing, needs_resampling = _resolve_spacing_plan(
+        wsi=wsi,
+        target_spacing=target_spacing,
+        tolerance=tolerance,
+        spacing_at_level_0=spacing_at_level_0,
     )
+
+    # Use native backend spacing for get_slide so the backend's level lookup resolves
+    # correctly even when spacing_at_level_0 overrides the file metadata.
+    base_spacings = list(wsi.spacings)
     wsi_arr = wsi.get_slide(spacing=base_spacings[level])
 
-    if not is_within_tolerance:
-        # means the selected level's spacing is smaller than the target_spacing
-        # find power of 2 downsample factor to apply to the selected level to get as close as possible to the target_spacing
-        # we want the end spacing to be within the tolerance of the target_spacing
-        power = int(np.ceil(np.log2(target_spacing / spacings[level])))
-        final_spacing = spacings[level] * (2**power)
-        if abs(final_spacing - target_spacing) / target_spacing > tolerance:
-            raise ValueError(
-                f"Unable to achieve target spacing within tolerance after downsampling. Closest achievable spacing is {final_spacing:.2f} mpp, which is {abs(final_spacing - target_spacing) / target_spacing:.2%} away from the target spacing. Consider increasing the tolerance or adjusting the target spacing."
-            )
+    if needs_resampling:
+        scale = read_spacing / effective_spacing  # < 1: downscale to target spacing
         wsi_arr = cv2.resize(
             wsi_arr,
             dsize=None,
-            fx=final_spacing / spacings[level],
-            fy=final_spacing / spacings[level],
+            fx=scale,
+            fy=scale,
             interpolation=cv2.INTER_AREA,
         )
-        effective_spacing = final_spacing
-    else:
-        effective_spacing = spacings[level]
 
     return wsi_arr, effective_spacing
 
@@ -509,6 +498,7 @@ def _compute_level0_mask_with_coarse_roi_shortcut(
         tolerance=tolerance,
         spacing_at_level_0=spacing_at_level_0,
     )
+    native_level_spacing = list(wsi.spacings)[level]
 
     coarse_arr, coarse_effective_spacing = load_wsi_at_spacing(
         wsi_path=wsi_path,
@@ -577,7 +567,7 @@ def _compute_level0_mask_with_coarse_roi_shortcut(
                     ry0_l0,
                     rx1 - rx0,
                     ry1 - ry0,
-                    spacing=effective_spacing,
+                    spacing=native_level_spacing,
                     center=False,
                 )
                 tile_mask = segment_tissue_hsv(wsi_arr=tile, gaussian_sigma_px=sigma_px)

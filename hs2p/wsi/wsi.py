@@ -327,12 +327,25 @@ class WholeSlideImage(object):
             scale = seg_spacing / mask_spacing
 
         mask = self.mask.get_slide(spacing=mask_spacing)
-        width, height, _ = mask.shape
+        if mask.ndim == 3:
+            mask = mask[:, :, 0]
+        # WSD/OpenSlide may return non-integer values when reading pyramid levels
+        # (bilinear resampling from level 0 instead of reading stored pages).
+        # Fall back to a direct PIL read of the correct pyramid page to recover
+        # the exact label values defined in sampling_params.pixel_mapping.
+        known_values = set(sampling_params.pixel_mapping.values())
+        if not set(np.unique(mask).tolist()).issubset(known_values):
+            with Image.open(self.mask_path) as mask_img:
+                mask_img.seek(mask_level)
+                mask = np.array(mask_img)
+            if mask.ndim == 3:
+                mask = mask[:, :, 0]
+        height, width = mask.shape
 
         # resize the mask to the size of the slide at seg_spacing
         mask = cv2.resize(
             mask.astype(np.uint8),
-            (int(round(height / scale, 0)), int(round(width / scale, 0))),
+            (int(round(width / scale, 0)), int(round(height / scale, 0))),
             interpolation=cv2.INTER_NEAREST,
         )
 

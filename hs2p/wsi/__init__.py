@@ -338,7 +338,7 @@ def extract_coordinates(
         relative_diff = abs(starting_spacing - target_spacing) / target_spacing
         if relative_diff > tolerance:
             raise ValueError(
-                f"Desired spacing ({target_spacing}) is smaller than the whole-slide image starting spacing ({starting_spacing}) and does not fall within tolerance ({tolerance})"
+                f"Desired spacing ({target_spacing}) is smaller than the whole-slide image starting spacing ({starting_spacing}) and does not fall within tolerance ({tolerance:.0%})"
             )
     (
         coordinates,
@@ -421,7 +421,7 @@ def sample_coordinates(
         relative_diff = abs(starting_spacing - target_spacing) / target_spacing
         if relative_diff > tolerance:
             raise ValueError(
-                f"Desired spacing ({target_spacing}) is smaller than the whole-slide image starting spacing ({starting_spacing}) and does not fall within tolerance ({tolerance})"
+                f"Desired spacing ({target_spacing}) is smaller than the whole-slide image starting spacing ({starting_spacing}) and does not fall within tolerance ({tolerance:.0%})"
             )
     (
         coordinates,
