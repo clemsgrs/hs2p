@@ -11,6 +11,7 @@ from hs2p.configs.resolvers import (
     resolve_segmentation_config,
     resolve_tiling_config,
 )
+import hs2p.progress as progress
 from hs2p.utils import setup, load_csv
 
 
@@ -40,35 +41,54 @@ def get_args_parser(add_help: bool = True):
 
 
 def main(args):
-    cfg = setup(args)
-    output_dir = Path(cfg.output_dir)
-    whole_slides = load_csv(cfg)
-    tiling = resolve_tiling_config(cfg)
-    segmentation = resolve_segmentation_config(cfg)
-    filtering = resolve_filter_config(cfg)
-    preview = resolve_preview_config(cfg)
-    artifacts = tile_slides(
-        whole_slides,
-        tiling=tiling,
-        segmentation=segmentation,
-        filtering=filtering,
-        preview=preview,
-        output_dir=output_dir,
-        num_workers=cfg.speed.num_workers,
-        resume=cfg.resume,
-        read_tiles_from=resolve_read_tiles_from(cfg),
+    reporter = progress.create_cli_progress_reporter(
+        output_dir=getattr(args, "output_dir", None)
     )
-    process_df = pd.read_csv(output_dir / "process_list.csv")
-    failed_tiling = process_df[process_df["tiling_status"] == "failed"]
-    no_tiles = process_df[
-        (process_df["tiling_status"] == "success") & (process_df["num_tiles"] == 0)
-    ]
-    print("=+=" * 10)
-    print(f"Total number of slides: {len(process_df)}")
-    print(f"Failed tiling: {len(failed_tiling)}")
-    print(f"No tiles after tiling step: {len(no_tiles)}")
-    print(f"Slides with tiles: {sum(a.num_tiles > 0 for a in artifacts)}")
-    print("=+=" * 10)
+    with progress.activate_progress_reporter(reporter):
+        try:
+            cfg = setup(args)
+            output_dir = Path(cfg.output_dir)
+            whole_slides = load_csv(cfg)
+            tiling = resolve_tiling_config(cfg)
+            segmentation = resolve_segmentation_config(cfg)
+            filtering = resolve_filter_config(cfg)
+            preview = resolve_preview_config(cfg)
+            read_tiles_from = resolve_read_tiles_from(cfg)
+            progress.emit_progress(
+                "run.started",
+                command="tiling",
+                slide_count=len(whole_slides),
+                backend=tiling.backend,
+                target_spacing_um=tiling.target_spacing_um,
+                target_tile_size_px=tiling.target_tile_size_px,
+                output_dir=str(output_dir),
+                num_workers=int(cfg.speed.num_workers),
+                resume=bool(cfg.resume),
+                read_tiles_from=str(read_tiles_from) if read_tiles_from else None,
+            )
+            artifacts = tile_slides(
+                whole_slides,
+                tiling=tiling,
+                segmentation=segmentation,
+                filtering=filtering,
+                preview=preview,
+                output_dir=output_dir,
+                num_workers=cfg.speed.num_workers,
+                resume=cfg.resume,
+                read_tiles_from=read_tiles_from,
+            )
+            pd.read_csv(output_dir / "process_list.csv")
+            progress.emit_progress(
+                "run.finished",
+                command="tiling",
+                output_dir=str(output_dir),
+                process_list_path=str(output_dir / "process_list.csv"),
+                logs_dir=str(output_dir / "logs"),
+            )
+            return artifacts
+        except Exception as exc:
+            progress.emit_progress("run.failed", stage="tiling", error=str(exc))
+            raise
 
 
 if __name__ == "__main__":

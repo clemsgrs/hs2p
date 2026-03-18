@@ -136,6 +136,19 @@ python -m hs2p.sampling --config-file /path/to/config.yaml
 
 For sampling, add `tiling.sampling_params.pixel_mapping` and `tiling.sampling_params.tissue_percentage` for the annotations you want to keep.
 
+### Progress UX
+
+When stdout is an interactive terminal, both CLI entrypoints show live `rich` progress with:
+
+- slide-level batch progress
+- elapsed and remaining time
+- live tile counts for tiling discovery or sampling retention
+- final summary panels with output and `process_list.csv` locations
+
+When stdout is redirected or otherwise non-interactive, `hs2p` falls back to concise plain-text stage updates.
+
+If a run fails, check `output_dir/logs/log.txt` for the full log stream.
+
 More CLI details: [docs/cli.md](docs/cli.md)
 
 ## Outputs

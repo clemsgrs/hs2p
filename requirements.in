@@ -4,6 +4,7 @@ numpy<2
 pandas
 pillow
 tqdm
+rich
 wandb
 opencv-python
 wholeslidedata<0.0.16

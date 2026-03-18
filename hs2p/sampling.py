@@ -29,6 +29,7 @@ from hs2p.configs.resolvers import (
     resolve_tiling_config,
     validate_color_mapping,
 )
+import hs2p.progress as progress
 from hs2p.utils import setup, load_csv
 from hs2p.wsi import (
     CoordinateSelectionStrategy,
@@ -36,6 +37,10 @@ from hs2p.wsi import (
     execute_coordinate_request,
     write_coordinate_preview,
 )
+
+# Keep the tqdm module available for downstream monkeypatches and compatibility,
+# even though CLI progress is now reported through hs2p.progress.
+TQDM_COMPAT = tqdm
 
 
 def get_args_parser(add_help: bool = True):
@@ -405,166 +410,232 @@ def _validate_sampling_artifact_row(
 
 
 def main(args):
-
-    cfg = setup(args)
-    output_dir = Path(cfg.output_dir)
-
-    whole_slides = load_csv(cfg)
-    tiling_config = resolve_tiling_config(cfg)
-    segmentation_config = resolve_segmentation_config(cfg)
-    filter_config = resolve_filter_config(cfg)
-    resolved_sampling_spec = resolve_sampling_spec(cfg, tiling=tiling_config)
-    selection_strategy = resolve_sampling_strategy(cfg)
-    active_annotations = resolved_sampling_spec.active_annotations
-
-    process_list = output_dir / "process_list.csv"
-    if process_list.is_file() and cfg.resume:
-        process_df = pd.read_csv(process_list)
-        _validate_required_columns(
-            process_df,
-            required_columns={
-                "sample_id",
-                "annotation",
-                "image_path",
-                "mask_path",
-                "sampling_status",
-                "num_tiles",
-                "tiles_npz_path",
-                "tiles_meta_path",
-                "config_hash",
-                "error",
-                "traceback",
-            },
-            file_path=process_list,
-            file_label="sampling process_list.csv",
-        )
-        process_df["mask_path"] = process_df["mask_path"].apply(
-            lambda x: str(x) if pd.notna(x) else None
-        )
-    else:
-        process_df = pd.DataFrame(
-            _build_sampling_process_rows(
-                whole_slides=whole_slides,
-                active_annotations=active_annotations,
-            )
-        )
-
-    expected_hash_by_annotation = {
-        annotation: compute_effective_config_hash(
-            tiling=tiling_config,
-            segmentation=segmentation_config,
-            filtering=filter_config,
-            sampling_spec=resolved_sampling_spec,
-            selection_strategy=selection_strategy,
-            output_mode=CoordinateOutputMode.PER_ANNOTATION,
-            annotation=annotation,
-        )
-        for annotation in active_annotations
-    }
-    slides_to_process = []
-    for slide in whole_slides:
-        slide_rows = process_df[process_df["sample_id"] == slide.sample_id]
+    reporter = progress.create_cli_progress_reporter(
+        output_dir=getattr(args, "output_dir", None)
+    )
+    with progress.activate_progress_reporter(reporter):
         try:
-            if slide_rows.empty or set(slide_rows["annotation"].tolist()) != set(
-                active_annotations
-            ):
-                raise ValueError("sampling rows missing required annotations")
-            for annotation in active_annotations:
-                row = slide_rows[slide_rows["annotation"] == annotation]
-                if row.empty:
-                    raise ValueError("sampling row missing annotation")
-                _validate_sampling_artifact_row(
-                    row=row.iloc[0].to_dict(),
-                    whole_slide=slide,
-                    expected_hash=expected_hash_by_annotation[annotation],
+            cfg = setup(args)
+            output_dir = Path(cfg.output_dir)
+
+            whole_slides = load_csv(cfg)
+            tiling_config = resolve_tiling_config(cfg)
+            segmentation_config = resolve_segmentation_config(cfg)
+            filter_config = resolve_filter_config(cfg)
+            resolved_sampling_spec = resolve_sampling_spec(cfg, tiling=tiling_config)
+            selection_strategy = resolve_sampling_strategy(cfg)
+            active_annotations = resolved_sampling_spec.active_annotations
+            progress.emit_progress(
+                "run.started",
+                command="sampling",
+                slide_count=len(whole_slides),
+                backend=tiling_config.backend,
+                target_spacing_um=tiling_config.target_spacing_um,
+                target_tile_size_px=tiling_config.target_tile_size_px,
+                output_dir=str(output_dir),
+                num_workers=int(cfg.speed.num_workers),
+                resume=bool(cfg.resume),
+                read_tiles_from=None,
+            )
+
+            process_list = output_dir / "process_list.csv"
+            if process_list.is_file() and cfg.resume:
+                process_df = pd.read_csv(process_list)
+                _validate_required_columns(
+                    process_df,
+                    required_columns={
+                        "sample_id",
+                        "annotation",
+                        "image_path",
+                        "mask_path",
+                        "sampling_status",
+                        "num_tiles",
+                        "tiles_npz_path",
+                        "tiles_meta_path",
+                        "config_hash",
+                        "error",
+                        "traceback",
+                    },
+                    file_path=process_list,
+                    file_label="sampling process_list.csv",
+                )
+                process_df["mask_path"] = process_df["mask_path"].apply(
+                    lambda x: str(x) if pd.notna(x) else None
+                )
+            else:
+                process_df = pd.DataFrame(
+                    _build_sampling_process_rows(
+                        whole_slides=whole_slides,
+                        active_annotations=active_annotations,
+                    ),
+                    columns=[
+                        "sample_id",
+                        "annotation",
+                        "image_path",
+                        "mask_path",
+                        "sampling_status",
+                        "num_tiles",
+                        "tiles_npz_path",
+                        "tiles_meta_path",
+                        "config_hash",
+                        "error",
+                        "traceback",
+                    ],
+                )
+
+            expected_hash_by_annotation = {
+                annotation: compute_effective_config_hash(
+                    tiling=tiling_config,
+                    segmentation=segmentation_config,
+                    filtering=filter_config,
+                    sampling_spec=resolved_sampling_spec,
                     selection_strategy=selection_strategy,
+                    output_mode=CoordinateOutputMode.PER_ANNOTATION,
+                    annotation=annotation,
                 )
-        except Exception:
-            slides_to_process.append(slide)
+                for annotation in active_annotations
+            }
+            slides_to_process = []
+            for slide in whole_slides:
+                slide_rows = process_df[process_df["sample_id"] == slide.sample_id]
+                try:
+                    if slide_rows.empty or set(slide_rows["annotation"].tolist()) != set(
+                        active_annotations
+                    ):
+                        raise ValueError("sampling rows missing required annotations")
+                    for annotation in active_annotations:
+                        row = slide_rows[slide_rows["annotation"] == annotation]
+                        if row.empty:
+                            raise ValueError("sampling row missing annotation")
+                        _validate_sampling_artifact_row(
+                            row=row.iloc[0].to_dict(),
+                            whole_slide=slide,
+                            expected_hash=expected_hash_by_annotation[annotation],
+                            selection_strategy=selection_strategy,
+                        )
+                except Exception:
+                    slides_to_process.append(slide)
 
-    if slides_to_process:
-
-        total = len(slides_to_process)
-        parallel_workers, inner_workers = _resolve_sampling_workers(
-            cfg, slide_count=total
-        )
-
-        # setup directories for coordinates and previews
-        coordinates_dir = output_dir / "coordinates"
-        coordinates_dir.mkdir(exist_ok=True, parents=True)
-        mask_preview_dir = None
-        sampling_preview_dir = None
-        if cfg.save_previews:
-            preview_dir = output_dir / "preview"
-            mask_preview_dir = Path(preview_dir, "mask")
-            sampling_preview_dir = Path(preview_dir, "sampling")
-            mask_preview_dir.mkdir(exist_ok=True, parents=True)
-            sampling_preview_dir.mkdir(exist_ok=True, parents=True)
-
-        sampling_updates: dict[str, dict[str, str]] = {}
-        with mp.Pool(processes=parallel_workers) as pool:
-            args_list = [
-                {
-                    "sample_id": slide.sample_id,
-                    "wsi_path": slide.image_path,
-                    "mask_path": slide.mask_path,
-                    "cfg": cfg,
-                    "tiling_config": tiling_config,
-                    "segmentation_config": segmentation_config,
-                    "filter_config": filter_config,
-                    "mask_preview_dir": mask_preview_dir,
-                    "sampling_preview_dir": sampling_preview_dir,
-                    "resolved_sampling_spec": resolved_sampling_spec,
-                    "selection_strategy": selection_strategy,
-                    "disable_tqdm": True,
-                    "num_workers": inner_workers,
-                }
-                for slide in slides_to_process
-            ]
-            results = list(
-                tqdm.tqdm(
-                    pool.imap(process_slide_wrapper, args_list),
-                    total=total,
-                    desc="Slide sampling",
-                    unit="slide",
-                    leave=True,
+            total_slides = len(whole_slides)
+            if slides_to_process:
+                total = len(slides_to_process)
+                parallel_workers, inner_workers = _resolve_sampling_workers(
+                    cfg, slide_count=total
                 )
+
+                coordinates_dir = output_dir / "coordinates"
+                coordinates_dir.mkdir(exist_ok=True, parents=True)
+                mask_preview_dir = None
+                sampling_preview_dir = None
+                if cfg.save_previews:
+                    preview_dir = output_dir / "preview"
+                    mask_preview_dir = Path(preview_dir, "mask")
+                    sampling_preview_dir = Path(preview_dir, "sampling")
+                    mask_preview_dir.mkdir(exist_ok=True, parents=True)
+                    sampling_preview_dir.mkdir(exist_ok=True, parents=True)
+
+                progress.emit_progress("sampling.started", total=total)
+                sampling_updates: dict[str, dict[str, str]] = {}
+                completed = 0
+                failed = 0
+                sampled_tiles = 0
+                with mp.Pool(processes=parallel_workers) as pool:
+                    args_list = [
+                        {
+                            "sample_id": slide.sample_id,
+                            "wsi_path": slide.image_path,
+                            "mask_path": slide.mask_path,
+                            "cfg": cfg,
+                            "tiling_config": tiling_config,
+                            "segmentation_config": segmentation_config,
+                            "filter_config": filter_config,
+                            "mask_preview_dir": mask_preview_dir,
+                            "sampling_preview_dir": sampling_preview_dir,
+                            "resolved_sampling_spec": resolved_sampling_spec,
+                            "selection_strategy": selection_strategy,
+                            "disable_tqdm": True,
+                            "num_workers": inner_workers,
+                        }
+                        for slide in slides_to_process
+                    ]
+                    for result_sample_id, status_info in pool.imap(
+                        process_slide_wrapper, args_list
+                    ):
+                        sampling_updates[result_sample_id] = status_info
+                        sampled_tiles += sum(
+                            int(row.get("num_tiles", 0) or 0)
+                            for row in status_info["rows"]
+                            if row.get("sampling_status") == "success"
+                        )
+                        if status_info["status"] == "success":
+                            completed += 1
+                        else:
+                            failed += 1
+                        progress.emit_progress(
+                            "sampling.progress",
+                            total=total,
+                            completed=completed,
+                            failed=failed,
+                            pending=max(0, total - completed - failed),
+                            sampled_tiles=sampled_tiles,
+                        )
+
+                for result_sample_id, status_info in sampling_updates.items():
+                    process_df = process_df[process_df["sample_id"] != result_sample_id]
+                    process_df = pd.concat(
+                        [process_df, pd.DataFrame(status_info["rows"])],
+                        ignore_index=True,
+                    )
+                _write_process_list(
+                    process_df.to_dict(orient="records"),
+                    process_list,
+                )
+            else:
+                sampled_tiles = 0
+
+            failed_sampling = process_df[process_df["sampling_status"] == "failed"][
+                "sample_id"
+            ].nunique()
+            completed_sampling = total_slides - failed_sampling
+            zero_tile_successes_by_annotation = {
+                annotation: int(
+                    (
+                        (process_df["annotation"] == annotation)
+                        & (process_df["sampling_status"] == "success")
+                        & (process_df["num_tiles"].fillna(0).astype(int) == 0)
+                    ).sum()
+                )
+                for annotation in active_annotations
+            }
+            sampled_tiles = int(
+                process_df.loc[
+                    process_df["sampling_status"] == "success", "num_tiles"
+                ]
+                .fillna(0)
+                .astype(int)
+                .sum()
             )
-        for result_sample_id, status_info in results:
-            sampling_updates[result_sample_id] = status_info
-
-        for result_sample_id, status_info in sampling_updates.items():
-            process_df = process_df[process_df["sample_id"] != result_sample_id]
-            process_df = pd.concat(
-                [process_df, pd.DataFrame(status_info["rows"])],
-                ignore_index=True,
+            progress.emit_progress(
+                "sampling.finished",
+                total=total_slides,
+                completed=completed_sampling,
+                failed=int(failed_sampling),
+                pending=0,
+                sampled_tiles=sampled_tiles,
+                output_dir=str(output_dir),
+                process_list_path=str(process_list),
+                zero_tile_successes_by_annotation=zero_tile_successes_by_annotation,
             )
-        _write_process_list(
-            process_df.to_dict(orient="records"),
-            process_list,
-        )
-
-        # summary logging
-        total_slides = len(whole_slides)
-        failed_sampling = process_df[process_df["sampling_status"] == "failed"][
-            "sample_id"
-        ].nunique()
-        print("=+=" * 10)
-        print(f"Total number of slides: {total_slides}")
-        print(f"Failed sampling: {failed_sampling}")
-        for annotation in active_annotations:
-            no_tiles = process_df[
-                (process_df["annotation"] == annotation)
-                & (process_df["sampling_status"] == "success")
-                & (process_df["num_tiles"].fillna(0).astype(int) == 0)
-            ]
-            print(f"No {annotation} tiles after sampling step: {len(no_tiles)}")
-        print("=+=" * 10)
-
-    else:
-        print("=+=" * 10)
-        print("All slides have been sampled. Skipping sampling step.")
-        print("=+=" * 10)
+            progress.emit_progress(
+                "run.finished",
+                command="sampling",
+                output_dir=str(output_dir),
+                process_list_path=str(process_list),
+                logs_dir=str(output_dir / "logs"),
+            )
+        except Exception as exc:
+            progress.emit_progress("run.failed", stage="sampling", error=str(exc))
+            raise
 
 
 if __name__ == "__main__":
