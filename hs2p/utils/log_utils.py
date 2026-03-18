@@ -4,6 +4,21 @@ import os
 import sys
 from typing import Optional
 
+from hs2p.progress import emit_progress_log
+
+
+class _ProgressAwareStreamHandler(logging.Handler):
+    def __init__(self, *, stream) -> None:
+        super().__init__()
+        self.stream = stream
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            message = self.format(record)
+            emit_progress_log(message, stream=self.stream)
+        except Exception:
+            self.handleError(record)
+
 
 # So that calling _configure_logger multiple times won't add many handlers
 @functools.lru_cache()
@@ -46,7 +61,7 @@ def _configure_logger(
     formatter = logging.Formatter(fmt=fmt, datefmt=datefmt)
 
     # stdout logging for main worker only
-    handler = logging.StreamHandler(stream=sys.stdout)
+    handler = _ProgressAwareStreamHandler(stream=sys.stdout)
     handler.setLevel(logging.DEBUG)
     handler.setFormatter(formatter)
     logger.addHandler(handler)

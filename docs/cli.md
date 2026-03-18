@@ -52,6 +52,23 @@ Run sampling:
 python -m hs2p.sampling --config-file /path/to/config.yaml
 ```
 
+## Progress UX
+
+When stdout is an interactive terminal, `hs2p` uses `rich` to show live progress for both CLI entrypoints.
+
+- `hs2p.tiling`
+  - one slide-level progress bar for batch tiling
+  - discovered tile counts in the live task description
+  - a final summary panel with slide totals, failures, zero-tile successes, output directory, and `process_list.csv`
+- `hs2p.sampling`
+  - one slide-level progress bar for batch sampling
+  - cumulative kept-tile counts in the live task description
+  - a final summary panel with slide totals, failures, per-annotation zero-tile counts, output directory, and `process_list.csv`
+
+When stdout is redirected or otherwise non-interactive, `hs2p` falls back to plain-text stage updates and summaries.
+
+Detailed logs still go to `output_dir/logs/log.txt`, which is the best place to look when a run fails.
+
 ## Current config areas
 
 - `tiling.read_tiles_from`
