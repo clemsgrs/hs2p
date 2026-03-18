@@ -89,7 +89,7 @@ tiling_preview_path = write_tiling_preview(
     output_dir=Path("output"),
     downsample=32,
 )
-print(tiling_preview_path)  # output/visualization/tiling/slide-1.jpg ; low resolution preview of tiling result, good for QC
+print(tiling_preview_path)  # output/preview/tiling/slide-1.jpg ; low resolution preview of tiling result, good for QC
 
 mask_overlay = overlay_mask_on_slide(
     wsi_path=result.image_path,
@@ -97,7 +97,7 @@ mask_overlay = overlay_mask_on_slide(
     downsample=32,
     backend=result.backend,
 )
-mask_overlay.save("output/visualization/mask/slide-1.jpg")
+mask_overlay.save("output/preview/mask/slide-1.jpg")
 ```
 
 `result` is a [`TilingResult`](hs2p/api.py#L144) for one slide. It gives downstream pipelines the tile coordinates plus the metadata needed to relate those coordinates back to the slide pyramid and persist them as reusable named artifacts.
