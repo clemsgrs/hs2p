@@ -1,5 +1,7 @@
 import importlib.util
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -192,3 +194,79 @@ def test_load_single_slide_result_from_config_builds_fresh_tiling_result(tmp_pat
     assert result.read_step_px > 0
     assert result.step_px_lv0 > 0
     assert result.num_tiles > 0
+
+
+def test_benchmark_wsd_mode_reports_region_and_tile_progress(monkeypatch):
+    module = _load_benchmark_script_module()
+    result = _make_grid_result(columns=2, rows=1, tile_size_px=8)
+    plans = [
+        TileReadPlan(x=0, y=0, read_size_px=8, block_size=1),
+        TileReadPlan(x=8, y=0, read_size_px=8, block_size=1),
+    ]
+
+    class _FakeWSI:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def get_patch(self, *_args, **_kwargs):
+            return np.ones((8, 8, 3), dtype=np.uint8)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "wholeslidedata",
+        SimpleNamespace(WholeSlideImage=_FakeWSI),
+    )
+    updates: list[tuple[int, int]] = []
+
+    elapsed, tile_count, checksum = module.benchmark_wsd_mode(
+        result=result,
+        plans=plans,
+        read_step_px=8,
+        progress_callback=lambda regions, tiles: updates.append((regions, tiles)),
+    )
+
+    assert elapsed >= 0.0
+    assert tile_count == 2
+    assert checksum > 0
+    assert updates == [(1, 1), (1, 1)]
+
+
+def test_benchmark_cucim_batch_mode_reports_region_and_tile_progress(monkeypatch):
+    module = _load_benchmark_script_module()
+    result = _make_grid_result(columns=4, rows=4, tile_size_px=8)
+    plans = [
+        TileReadPlan(x=0, y=0, read_size_px=8, block_size=1),
+        TileReadPlan(x=0, y=0, read_size_px=32, block_size=4),
+    ]
+
+    class _FakeCuImage:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def read_region(self, locations, size, level, num_workers):
+            assert level == 0
+            assert num_workers == 2
+            return [
+                np.zeros((int(size[0]), int(size[1]), 3), dtype=np.uint8)
+                for _ in locations
+            ]
+
+    monkeypatch.setattr(
+        module,
+        "_require_cucim",
+        lambda: SimpleNamespace(CuImage=_FakeCuImage),
+    )
+    updates: list[tuple[int, int]] = []
+
+    elapsed, tile_count, checksum = module.benchmark_cucim_batch_mode(
+        result=result,
+        plans=plans,
+        read_step_px=8,
+        num_workers=2,
+        progress_callback=lambda regions, tiles: updates.append((regions, tiles)),
+    )
+
+    assert elapsed >= 0.0
+    assert tile_count == 17
+    assert checksum == 0
+    assert updates == [(1, 1), (1, 16)]

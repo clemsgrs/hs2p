@@ -178,34 +178,23 @@ def sort_coordinates_with_tissue(coordinates, tissue_percentages, contour_indice
     return sorted_coordinates, sorted_tissue_percentages, sorted_contour_indices
 
 
-def _infer_step_px_lv0_from_coordinates(
-    x: np.ndarray,
-    y: np.ndarray,
+def _compute_stride_metadata_from_geometry(
     *,
-    fallback: int,
-) -> int:
-    positive_diffs: list[np.ndarray] = []
-    if x.size > 1:
-        x_diffs = np.diff(np.unique(np.sort(x)))
-        x_diffs = x_diffs[x_diffs > 0]
-        if x_diffs.size > 0:
-            positive_diffs.append(x_diffs.astype(np.int64, copy=False))
-    if y.size > 1:
-        y_diffs = np.diff(np.unique(np.sort(y)))
-        y_diffs = y_diffs[y_diffs > 0]
-        if y_diffs.size > 0:
-            positive_diffs.append(y_diffs.astype(np.int64, copy=False))
-    if not positive_diffs:
-        return int(fallback)
-
-    inferred = int(min(int(diffs.min()) for diffs in positive_diffs))
-    if inferred <= 0:
-        return int(fallback)
-    if inferred < fallback:
-        return inferred
-    if inferred % fallback == 0:
-        return int(fallback)
-    return inferred
+    tiling_params: TilingConfig,
+    read_tile_size_px: int,
+    tile_level: int,
+    level_downsamples: list[tuple[float, float]],
+) -> tuple[int, int]:
+    read_step_px = max(1, int(read_tile_size_px * (1.0 - tiling_params.overlap)))
+    tile_downsample = level_downsamples[tile_level]
+    step_x_lv0 = int(round(read_step_px * tile_downsample[0], 0))
+    step_y_lv0 = int(round(read_step_px * tile_downsample[1], 0))
+    if step_x_lv0 != step_y_lv0:
+        raise ValueError(
+            "anisotropic level-0 step is not supported for scalar step_px_lv0 metadata: "
+            f"x={step_x_lv0}, y={step_y_lv0}"
+        )
+    return read_step_px, step_x_lv0
 
 
 def get_mask_coverage(mask: np.ndarray, val: int):
@@ -301,6 +290,25 @@ def _read_aligned_mask(
         (int(target_width), int(target_height)),
         interpolation=cv2.INTER_NEAREST,
     )
+
+
+def _pad_array_to_shape(
+    arr: np.ndarray, *, target_width: int, target_height: int
+) -> np.ndarray:
+    """Pad an array on the bottom and right without resampling its contents."""
+    if arr.shape[1] == target_width and arr.shape[0] == target_height:
+        return arr
+    if arr.shape[1] > target_width or arr.shape[0] > target_height:
+        raise ValueError(
+            "Cannot pad an array to a smaller shape; expected the target canvas to be at least as large as the source"
+        )
+    if arr.ndim == 2:
+        padded = np.zeros((target_height, target_width), dtype=arr.dtype)
+        padded[: arr.shape[0], : arr.shape[1]] = arr
+        return padded
+    padded = np.zeros((target_height, target_width, arr.shape[2]), dtype=arr.dtype)
+    padded[: arr.shape[0], : arr.shape[1], :] = arr
+    return padded
 
 
 def _extract_padded_crop(
@@ -430,12 +438,11 @@ def _extract_coordinate_result_from_wsi(
     )
     x = np.array([x for x, _ in sorted_coordinates], dtype=np.int64)
     y = np.array([y for _, y in sorted_coordinates], dtype=np.int64)
-    read_step_px = int(round(read_tile_size_px * (1.0 - tiling_params.overlap), 0))
-    fallback_step_px_lv0 = int(round(tile_size_lv0 * (1.0 - tiling_params.overlap), 0))
-    step_px_lv0 = _infer_step_px_lv0_from_coordinates(
-        x,
-        y,
-        fallback=fallback_step_px_lv0,
+    read_step_px, step_px_lv0 = _compute_stride_metadata_from_geometry(
+        tiling_params=tiling_params,
+        read_tile_size_px=read_tile_size_px,
+        tile_level=tile_level,
+        level_downsamples=wsi.level_downsamples,
     )
     return CoordinateExtractionResult(
         contour_indices=sorted_contour_indices,
@@ -862,6 +869,7 @@ def overlay_mask_on_slide(
     vis_level = wsi_object.get_best_level_for_downsample_custom(downsample)
     wsi_arr = wsi_object.get_slide(vis_level)
     height, width, _ = wsi_arr.shape
+    base_width, base_height = width, height
 
     wsi = Image.fromarray(wsi_arr).convert("RGBA")
     if tile_size_lv0 is not None:
@@ -895,11 +903,11 @@ def overlay_mask_on_slide(
             scale = mask_width / width
 
         mask_arr = mask_object.get_slide(spacing=mask_spacing)
-        mask_arr = mask_arr[:, :, 0]
-        mask_height, mask_width = mask_arr.shape
+        if mask_arr.ndim == 3:
+            mask_arr = mask_arr[:, :, 0]
         mask_arr = cv2.resize(
             mask_arr.astype(np.uint8),
-            (int(round(mask_width / scale, 0)), int(round(mask_height / scale, 0))),
+            (base_width, base_height),
             interpolation=cv2.INTER_NEAREST,
         )
     elif mask_arr is not None:
@@ -907,12 +915,19 @@ def overlay_mask_on_slide(
             mask_arr = mask_arr[:, :, 0]
         mask_arr = cv2.resize(
             mask_arr.astype(np.uint8),
-            (width, height),
+            (base_width, base_height),
             interpolation=cv2.INTER_NEAREST,
         )
     else:
         raise ValueError(
             "Provide annotation_mask_path or mask_arr to overlay_mask_on_slide()"
+        )
+
+    if tile_size_lv0 is not None and (width != base_width or height != base_height):
+        mask_arr = _pad_array_to_shape(
+            mask_arr,
+            target_width=width,
+            target_height=height,
         )
 
     mask = Image.fromarray(mask_arr)

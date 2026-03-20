@@ -58,6 +58,78 @@ def _install_fake_rich_console(monkeypatch, *, is_terminal: bool):
     monkeypatch.setitem(sys.modules, "rich.console", fake_console)
 
 
+def _install_fake_rich_progress(monkeypatch):
+    fake_progress = types.ModuleType("rich.progress")
+
+    class FakeProgress:
+        def __init__(self, *args, **kwargs):
+            self.tasks = {}
+            self.next_task_id = 1
+
+        def start(self):
+            return None
+
+        def stop(self):
+            return None
+
+        def add_task(self, description, total=None):
+            task_id = self.next_task_id
+            self.next_task_id += 1
+            self.tasks[task_id] = {
+                "description": description,
+                "total": total,
+                "completed": 0,
+            }
+            return task_id
+
+        def update(self, task_id, **kwargs):
+            self.tasks[task_id].update(kwargs)
+
+    class _Identity:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    fake_progress.BarColumn = _Identity
+    fake_progress.MofNCompleteColumn = _Identity
+    fake_progress.Progress = FakeProgress
+    fake_progress.SpinnerColumn = _Identity
+    fake_progress.TaskProgressColumn = _Identity
+    fake_progress.TextColumn = _Identity
+    fake_progress.TimeElapsedColumn = _Identity
+    fake_progress.TimeRemainingColumn = _Identity
+    monkeypatch.setitem(sys.modules, "rich.progress", fake_progress)
+
+
+def _install_fake_rich_summary_types(monkeypatch):
+    fake_panel = types.ModuleType("rich.panel")
+    fake_table = types.ModuleType("rich.table")
+
+    class FakePanel:
+        @staticmethod
+        def fit(table, title=None, border_style=None):
+            return SimpleNamespace(table=table, title=title, border_style=border_style)
+
+    class FakeTable:
+        def __init__(self, *args, **kwargs):
+            self.columns = []
+            self.rows = []
+
+        def add_column(self, *args, **kwargs):
+            self.columns.append((args, kwargs))
+
+        def add_row(self, *args):
+            self.rows.append(args)
+
+        @staticmethod
+        def grid(*args, **kwargs):
+            return FakeTable(*args, **kwargs)
+
+    fake_panel.Panel = FakePanel
+    fake_table.Table = FakeTable
+    monkeypatch.setitem(sys.modules, "rich.panel", fake_panel)
+    monkeypatch.setitem(sys.modules, "rich.table", fake_table)
+
+
 def _tiling_config() -> TilingConfig:
     return TilingConfig(
         backend="asap",
@@ -140,6 +212,50 @@ def test_create_cli_progress_reporter_falls_back_when_stdout_is_not_terminal(
     reporter = progress.create_cli_progress_reporter(output_dir="out")
 
     assert isinstance(reporter, progress.PlainTextCliProgressReporter)
+
+
+def test_rich_tiling_summary_uses_zero_tile_label_without_process_list(monkeypatch):
+    import hs2p.progress as progress
+
+    _install_fake_rich_console(monkeypatch, is_terminal=True)
+    _install_fake_rich_progress(monkeypatch)
+    _install_fake_rich_summary_types(monkeypatch)
+
+    captured = {}
+
+    class FakeConsole:
+        def print(self, *args, **kwargs):
+            captured["printed"] = args
+
+    reporter = progress.RichCliProgressReporter(output_dir="out", console=FakeConsole())
+    monkeypatch.setattr(
+        reporter,
+        "_print_summary",
+        lambda title, rows: captured.update({"title": title, "rows": rows}),
+    )
+
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="tiling.finished",
+            payload={
+                "total": 3,
+                "completed": 2,
+                "failed": 1,
+                "zero_tile_successes": 4,
+                "discovered_tiles": 7,
+                "process_list_path": "ignored.csv",
+            },
+        )
+    )
+
+    assert captured["title"] == "Tiling Summary"
+    assert captured["rows"] == [
+        ("Slides", "3"),
+        ("Completed", "2"),
+        ("Failed", "1"),
+        ("Zero-tile", "4"),
+        ("Total tiles", "7"),
+    ]
 
 
 def test_tiling_main_installs_progress_reporter_only_during_pipeline_run(

@@ -8,13 +8,23 @@ import statistics
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 import numpy as np
+from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
 
 
 MODE_CONFIG = {
@@ -39,6 +49,8 @@ MODE_CONFIG = {
         "description": "CuCIM batched dense 8x8/4x4 supertile reads",
     },
 }
+
+ProgressCallback = Callable[[int, int], None]
 
 
 def parse_args() -> argparse.Namespace:
@@ -173,11 +185,166 @@ def _consume_region_tiles(
     return checksum, tile_count
 
 
+class BenchmarkProgressReporter:
+    def __init__(
+        self,
+        *,
+        total_runs: int,
+        console: Console | None = None,
+        force_rich: bool | None = None,
+        plain_update_interval_s: float = 2.0,
+    ) -> None:
+        self.total_runs = max(1, int(total_runs))
+        self.console = console or Console()
+        self.use_rich = self.console.is_terminal if force_rich is None else force_rich
+        self.plain_update_interval_s = max(0.1, float(plain_update_interval_s))
+        self._progress: Progress | None = None
+        self._overall_task_id: int | None = None
+        self._run_task_id: int | None = None
+        self._active_total_regions = 0
+        self._active_total_tiles = 0
+        self._active_completed_regions = 0
+        self._active_completed_tiles = 0
+        self._last_plain_update = 0.0
+
+    def __enter__(self) -> "BenchmarkProgressReporter":
+        if self.use_rich:
+            self._progress = Progress(
+                SpinnerColumn(),
+                TextColumn("[bold]{task.description}"),
+                BarColumn(bar_width=None),
+                MofNCompleteColumn(),
+                TextColumn("tiles {task.fields[tiles_status]}"),
+                TimeElapsedColumn(),
+                TimeRemainingColumn(),
+                console=self.console,
+                transient=False,
+                expand=True,
+            )
+            self._progress.start()
+            self._overall_task_id = self._progress.add_task(
+                "[cyan]All benchmark runs",
+                total=self.total_runs,
+                tiles_status="",
+            )
+        return self
+
+    def __exit__(self, exc_type, exc, exc_tb) -> None:
+        if self._progress is not None:
+            self._progress.stop()
+
+    def print_banner(self, *, result, modes: list[str], repeat: int, warmup: int) -> None:
+        self.console.print(
+            (
+                f"[bold]Benchmarking[/bold] sample={result.sample_id} "
+                f"tiles={int(result.num_tiles):,} read_tile={int(result.read_tile_size_px)}px "
+                f"modes={', '.join(modes)} repeat={int(repeat)} warmup={int(warmup)}"
+            ),
+            highlight=False,
+        )
+
+    def start_run(
+        self,
+        *,
+        run_counter: int,
+        phase: str,
+        mode: str,
+        iteration_index: int,
+        iteration_total: int,
+        total_regions: int,
+        total_tiles: int,
+    ) -> None:
+        self._active_total_regions = max(1, int(total_regions))
+        self._active_total_tiles = max(1, int(total_tiles))
+        self._active_completed_regions = 0
+        self._active_completed_tiles = 0
+        self._last_plain_update = 0.0
+        description = (
+            f"[green]{run_counter}/{self.total_runs}[/green] "
+            f"{phase} {mode} ({int(iteration_index) + 1}/{int(iteration_total)})"
+        )
+        if self._progress is not None and self._overall_task_id is not None:
+            if self._run_task_id is not None:
+                self._progress.remove_task(self._run_task_id)
+            self._progress.update(
+                self._overall_task_id,
+                description=f"[cyan]All benchmark runs ({run_counter}/{self.total_runs})",
+            )
+            self._run_task_id = self._progress.add_task(
+                description,
+                total=self._active_total_regions,
+                completed=0,
+                tiles_status=f"0/{self._active_total_tiles:,}",
+            )
+            self._progress.refresh()
+            return
+        self.console.print(
+            (
+                f"[{run_counter}/{self.total_runs}] {phase} {mode} "
+                f"({int(iteration_index) + 1}/{int(iteration_total)}) "
+                f"regions=0/{self._active_total_regions:,} "
+                f"tiles=0/{self._active_total_tiles:,}"
+            ),
+            highlight=False,
+        )
+
+    def advance(self, regions: int, tiles: int) -> None:
+        self._active_completed_regions += int(regions)
+        self._active_completed_tiles += int(tiles)
+        tiles_status = f"{self._active_completed_tiles:,}/{self._active_total_tiles:,}"
+        if self._progress is not None and self._run_task_id is not None:
+            self._progress.update(
+                self._run_task_id,
+                advance=int(regions),
+                tiles_status=tiles_status,
+            )
+            return
+        now = time.monotonic()
+        if (
+            self._last_plain_update == 0.0
+            or now - self._last_plain_update >= self.plain_update_interval_s
+            or self._active_completed_regions >= self._active_total_regions
+        ):
+            self.console.print(
+                (
+                    f"  progress regions={self._active_completed_regions:,}/"
+                    f"{self._active_total_regions:,} "
+                    f"tiles={tiles_status}"
+                ),
+                highlight=False,
+            )
+            self._last_plain_update = now
+
+    def finish_run(self) -> None:
+        if self._progress is not None and self._overall_task_id is not None:
+            if self._run_task_id is not None:
+                self._progress.update(
+                    self._run_task_id,
+                    completed=self._active_total_regions,
+                    tiles_status=(
+                        f"{self._active_total_tiles:,}/{self._active_total_tiles:,}"
+                    ),
+                )
+            self._progress.advance(self._overall_task_id, 1)
+
+    def print_result_row(self, row: dict[str, Any]) -> None:
+        self.console.print(
+            (
+                f"{row['mode']:<24} rep={int(row['repeat_index']) + 1} "
+                f"tiles={int(row['tiles']):>7,d} regions={int(row['regions']):>7,d} "
+                f"elapsed={float(row['elapsed_s']):>8.3f}s "
+                f"throughput={float(row['tiles_per_second']):>10,.0f} tiles/s"
+            ),
+            highlight=False,
+        )
+
+
 def benchmark_wsd_mode(
     *,
     result,
     plans,
     read_step_px: int,
+    progress_callback: ProgressCallback | None = None,
 ) -> tuple[float, int, int]:
     import wholeslidedata as wsd
 
@@ -203,6 +370,8 @@ def benchmark_wsd_mode(
         )
         checksum += region_checksum
         tile_count += region_tiles
+        if progress_callback is not None:
+            progress_callback(1, region_tiles)
     elapsed = time.perf_counter() - start
     return elapsed, tile_count, checksum
 
@@ -222,6 +391,7 @@ def benchmark_cucim_batch_mode(
     plans,
     read_step_px: int,
     num_workers: int,
+    progress_callback: ProgressCallback | None = None,
 ) -> tuple[float, int, int]:
     from hs2p.benchmarking import group_read_plans_by_read_size
 
@@ -248,6 +418,8 @@ def benchmark_cucim_batch_mode(
             )
             checksum += region_checksum
             tile_count += region_tiles
+            if progress_callback is not None:
+                progress_callback(1, region_tiles)
     elapsed = time.perf_counter() - start
     return elapsed, tile_count, checksum
 
@@ -259,6 +431,7 @@ def run_mode(
     repeat_index: int,
     read_step_px: int,
     num_workers: int,
+    progress_callback: ProgressCallback | None = None,
 ) -> dict[str, Any]:
     from hs2p.benchmarking import build_read_plans
 
@@ -271,6 +444,7 @@ def run_mode(
             result=result,
             plans=plans,
             read_step_px=read_step_px,
+            progress_callback=progress_callback,
         )
     elif mode_cfg["reader"] == "cucim_batch":
         elapsed, tile_count, checksum = benchmark_cucim_batch_mode(
@@ -278,6 +452,7 @@ def run_mode(
             plans=plans,
             read_step_px=read_step_px,
             num_workers=num_workers,
+            progress_callback=progress_callback,
         )
     else:
         raise ValueError(f"Unsupported mode: {mode}")
@@ -305,16 +480,6 @@ def run_mode(
         "checksum": checksum,
         "num_workers": int(num_workers),
     }
-
-
-def print_result_row(row: dict[str, Any]) -> None:
-    print(
-        f"{row['mode']:<24} rep={int(row['repeat_index']) + 1} "
-        f"tiles={int(row['tiles']):>7,d} regions={int(row['regions']):>7,d} "
-        f"elapsed={float(row['elapsed_s']):>8.3f}s "
-        f"throughput={float(row['tiles_per_second']):>10,.0f} tiles/s",
-        flush=True,
-    )
 
 
 def load_single_slide_result_from_config(
@@ -351,7 +516,7 @@ def load_single_slide_result_from_config(
 
 
 def main() -> int:
-    from hs2p.benchmarking import limit_tiling_result
+    from hs2p.benchmarking import build_read_plans, limit_tiling_result
 
     args = parse_args()
     result = load_single_slide_result_from_config(
@@ -363,41 +528,65 @@ def main() -> int:
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     total_runs = len(args.modes) * (int(args.warmup) + int(args.repeat))
-    run_counter = 0
 
     if any(mode.startswith("cucim_") for mode in args.modes):
         _require_cucim()
 
     timed_rows: list[dict[str, Any]] = []
-    for mode in args.modes:
-        for warmup_idx in range(int(args.warmup)):
-            run_counter += 1
-            print(
-                f"[{run_counter}/{total_runs}] warmup {mode} ({warmup_idx + 1}/{args.warmup})",
-                flush=True,
-            )
-            run_mode(
-                mode=mode,
-                result=result,
-                repeat_index=warmup_idx,
-                read_step_px=read_step_px,
-                num_workers=int(args.num_workers),
-            )
-        for repeat_index in range(int(args.repeat)):
-            run_counter += 1
-            print(
-                f"[{run_counter}/{total_runs}] timed {mode} ({repeat_index + 1}/{args.repeat})",
-                flush=True,
-            )
-            row = run_mode(
-                mode=mode,
-                result=result,
-                repeat_index=repeat_index,
-                read_step_px=read_step_px,
-                num_workers=int(args.num_workers),
-            )
-            print_result_row(row)
-            timed_rows.append(row)
+    run_counter = 0
+    with BenchmarkProgressReporter(total_runs=total_runs) as reporter:
+        reporter.print_banner(
+            result=result,
+            modes=list(args.modes),
+            repeat=int(args.repeat),
+            warmup=int(args.warmup),
+        )
+        for mode in args.modes:
+            mode_cfg = MODE_CONFIG[mode]
+            plans = build_read_plans(result, use_supertiles=mode_cfg["use_supertiles"])
+            total_tiles = sum(int(plan.block_size) * int(plan.block_size) for plan in plans)
+            for warmup_idx in range(int(args.warmup)):
+                run_counter += 1
+                reporter.start_run(
+                    run_counter=run_counter,
+                    phase="warmup",
+                    mode=mode,
+                    iteration_index=warmup_idx,
+                    iteration_total=int(args.warmup),
+                    total_regions=len(plans),
+                    total_tiles=total_tiles,
+                )
+                run_mode(
+                    mode=mode,
+                    result=result,
+                    repeat_index=warmup_idx,
+                    read_step_px=read_step_px,
+                    num_workers=int(args.num_workers),
+                    progress_callback=reporter.advance,
+                )
+                reporter.finish_run()
+            for repeat_index in range(int(args.repeat)):
+                run_counter += 1
+                reporter.start_run(
+                    run_counter=run_counter,
+                    phase="timed",
+                    mode=mode,
+                    iteration_index=repeat_index,
+                    iteration_total=int(args.repeat),
+                    total_regions=len(plans),
+                    total_tiles=total_tiles,
+                )
+                row = run_mode(
+                    mode=mode,
+                    result=result,
+                    repeat_index=repeat_index,
+                    read_step_px=read_step_px,
+                    num_workers=int(args.num_workers),
+                    progress_callback=reporter.advance,
+                )
+                reporter.finish_run()
+                reporter.print_result_row(row)
+                timed_rows.append(row)
 
     summary_rows = summarize_results(timed_rows)
     runs_csv_path = write_csv(timed_rows, args.output_dir / "benchmark_runs.csv")
