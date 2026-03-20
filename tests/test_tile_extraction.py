@@ -12,6 +12,7 @@ from PIL import Image
 
 from hs2p.api import (
     TilingResult,
+    _iter_cucim_tile_arrays_for_tar_extraction,
     _iter_wsd_tile_arrays_for_tar_extraction,
     extract_tiles_to_tar,
 )
@@ -362,6 +363,45 @@ class TestExtractTilesToTar:
         assert tar_path.is_file()
         assert out_result is result
         mock_wsd.assert_called_once_with(result.image_path, backend="cucim")
+
+    def test_cucim_iterator_groups_dense_4x4_grid_into_one_batched_read(
+        self, monkeypatch
+    ):
+        result = _make_grid_tiling_result(columns=4, rows=4, tile_size=16, step_px=16)
+        result.backend = "cucim"
+        grouped_region = _make_grouped_region(block_size=4, tile_size=16, step_px=16)
+
+        mock_cu_image = MagicMock()
+        mock_cu_image.read_region.return_value = iter([grouped_region])
+        fake_cucim = types.SimpleNamespace(CuImage=MagicMock(return_value=mock_cu_image))
+
+        import hs2p.api as api_mod
+
+        monkeypatch.setattr(
+            api_mod.importlib,
+            "import_module",
+            lambda name: fake_cucim if name == "cucim" else None,
+        )
+
+        tiles = list(
+            _iter_cucim_tile_arrays_for_tar_extraction(
+                result=result,
+                num_workers=7,
+            )
+        )
+
+        assert len(tiles) == 16
+        fake_cucim.CuImage.assert_called_once_with(str(result.image_path))
+        mock_cu_image.read_region.assert_called_once_with(
+            [(0, 0)],
+            (64, 64),
+            level=0,
+            num_workers=7,
+        )
+        assert int(tiles[0][0, 0, 0]) == 1
+        assert int(tiles[1][0, 0, 0]) == 2
+        assert int(tiles[4][0, 0, 0]) == 5
+        assert int(tiles[-1][0, 0, 0]) == 16
 
     def test_wsd_iterator_groups_dense_8x8_grid_into_one_read(self):
         result = _make_grid_tiling_result(columns=8, rows=8, tile_size=16, step_px=16)

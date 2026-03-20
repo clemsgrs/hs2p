@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import multiprocessing as mp
+from dataclasses import replace
 from pathlib import Path
 
 from hs2p.api import (
@@ -38,6 +39,7 @@ from hs2p.wsi import (
     execute_coordinate_request,
     write_coordinate_preview,
 )
+from hs2p.wsi.backend import resolve_backend
 
 # Keep the tqdm module available for downstream monkeypatches and compatibility,
 # even though CLI progress is now reported through hs2p.progress.
@@ -215,6 +217,20 @@ def process_slide(
     if selection_strategy is None:
         selection_strategy = _selection_strategy_from_cfg(cfg)
     try:
+        backend_selection = resolve_backend(
+            cfg.tiling.backend,
+            wsi_path=wsi_path,
+            mask_path=mask_path,
+        )
+        if backend_selection.reason is not None:
+            progress.emit_progress_log(
+                f"[backend] {sample_id}: {backend_selection.reason}"
+            )
+        effective_tiling_config = (
+            tiling_config
+            if backend_selection.backend == tiling_config.backend
+            else replace(tiling_config, backend=backend_selection.backend)
+        )
         preview_palette, color_mapping = _build_sampling_preview_assets(
             resolved_sampling_spec,
             save_previews=cfg.save_previews
@@ -235,9 +251,9 @@ def process_slide(
             UnifiedCoordinateRequest(
                 wsi_path=wsi_path,
                 mask_path=mask_path,
-                backend=cfg.tiling.backend,
+                backend=backend_selection.backend,
                 segment_params=segmentation_config,
-                tiling_params=tiling_config,
+                tiling_params=effective_tiling_config,
                 filter_params=filter_config,
                 sampling_spec=resolved_sampling_spec,
                 selection_strategy=selection_strategy,
@@ -267,9 +283,9 @@ def process_slide(
                     sample_id=sample_id,
                     image_path=wsi_path,
                     mask_path=mask_path,
-                    backend=cfg.tiling.backend,
+                    backend=backend_selection.backend,
                     cfg=cfg,
-                    tiling_config=tiling_config,
+                    tiling_config=effective_tiling_config,
                     segmentation_config=segmentation_config,
                     filter_config=filter_config,
                     annotation=annotation,
@@ -286,7 +302,7 @@ def process_slide(
                         save_dir=sampling_preview_dir,
                         sample_id=sample_id,
                         downsample=cfg.tiling.preview.downsample,
-                        backend=cfg.tiling.backend,
+                        backend=backend_selection.backend,
                         mask_path=mask_path,
                         annotation=annotation,
                         palette=preview_palette,
@@ -294,7 +310,7 @@ def process_slide(
                         color_mapping=color_mapping,
                     )
             config_hash = compute_effective_config_hash(
-                tiling=tiling_config,
+                tiling=effective_tiling_config,
                 segmentation=segmentation_config,
                 filtering=filter_config,
                 sampling_spec=resolved_sampling_spec,

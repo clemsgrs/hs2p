@@ -11,7 +11,7 @@ seed: 0 # seed for reproducibility
 
 tiling:
   read_coordinates_from: # path to a directory containing {sample_id}.coordinates.npz and {sample_id}.coordinates.meta.json (leave empty to compute tiles)
-  backend: "asap" # backend to use for slide reading
+  backend: "auto" # backend to use for slide reading; auto prefers CuCIM when supported and falls back to ASAP/openslide
   params:
     target_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel
     tolerance: 0.05 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)

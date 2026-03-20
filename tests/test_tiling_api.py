@@ -1599,7 +1599,6 @@ def test_write_process_list_removes_temp_file_on_failure(monkeypatch, tmp_path: 
 
 def test_config_dataclasses_apply_package_defaults_for_secondary_parameters():
     tiling = TilingConfig(
-        backend="openslide",
         target_spacing_um=0.5,
         target_tile_size_px=224,
         tolerance=0.07,
@@ -1611,7 +1610,8 @@ def test_config_dataclasses_apply_package_defaults_for_secondary_parameters():
 
     assert tiling.drop_holes == default_config.tiling.params.drop_holes
     assert tiling.use_padding == default_config.tiling.params.use_padding
-    assert tiling.backend == "openslide"
+    assert tiling.backend == "auto"
+    assert tiling.requested_backend == "auto"
     assert segmentation.sthresh == default_config.tiling.seg_params.sthresh
     assert segmentation.sthresh_up == default_config.tiling.seg_params.sthresh_up
     assert segmentation.mthresh == default_config.tiling.seg_params.mthresh

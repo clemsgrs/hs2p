@@ -7,7 +7,7 @@ import numpy as np
 
 from hs2p.api import (
     TilingResult,
-    _iter_wsd_read_plans_for_tar_extraction,
+    _iter_grouped_read_plans_for_tar_extraction,
     _resolve_read_step_px,
     _resolve_step_px_lv0,
 )
@@ -50,7 +50,7 @@ def build_read_plans(
             read_size_px=int(plan.read_size_px),
             block_size=int(plan.block_size),
         )
-        for plan in _iter_wsd_read_plans_for_tar_extraction(
+        for plan in _iter_grouped_read_plans_for_tar_extraction(
             result=result,
             read_step_px=read_step_px,
             step_px_lv0=step_px_lv0,

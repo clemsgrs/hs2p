@@ -2,6 +2,8 @@ from dataclasses import dataclass
 
 from ._loader import default_config
 
+AUTO_BACKEND = "auto"
+
 _DEFAULT_TILING = default_config.tiling
 _DEFAULT_TILING_PARAMS = _DEFAULT_TILING.params
 _DEFAULT_SEGMENTATION = _DEFAULT_TILING.seg_params
@@ -12,7 +14,6 @@ _DEFAULT_FILTERING = _DEFAULT_TILING.filter_params
 class TilingConfig:
     """Control tile extraction at a target physical resolution."""
 
-    backend: str
     target_spacing_um: float
     target_tile_size_px: int
     tolerance: float
@@ -20,6 +21,12 @@ class TilingConfig:
     tissue_threshold: float
     drop_holes: bool = bool(_DEFAULT_TILING_PARAMS.drop_holes)
     use_padding: bool = bool(_DEFAULT_TILING_PARAMS.use_padding)
+    backend: str = AUTO_BACKEND
+
+    @property
+    def requested_backend(self) -> str:
+        """Backend requested by config before runtime auto-resolution."""
+        return self.backend
 
 
 @dataclass(frozen=True)
