@@ -794,11 +794,18 @@ def test_save_sampling_coordinates_uses_annotation_threshold_and_sampling_mode_i
         color_mapping={"background": None, "tumor": None, "stroma": None},
         tissue_percentage={"background": None, "tumor": 0.7, "stroma": 0.2},
     )
-    extraction = SimpleNamespace(
+    extraction = sampling_mod.CoordinateExtractionResult(
+        contour_indices=[],
+        tissue_percentages=[],
+        x=np.array([], dtype=np.int64),
+        y=np.array([], dtype=np.int64),
         read_level=0,
         read_spacing_um=0.5,
         read_tile_size_px=256,
+        read_step_px=256,
+        resize_factor=1.0,
         tile_size_lv0=256,
+        step_px_lv0=256,
     )
     sampling_mod._save_sampling_coordinates(
         sample_id="sample-1",
@@ -817,6 +824,8 @@ def test_save_sampling_coordinates_uses_annotation_threshold_and_sampling_mode_i
 
     result = captured["result"]
     assert result.tissue_threshold == 0.7
+    assert result.read_step_px == 256
+    assert result.step_px_lv0 == 256
     assert result.config_hash == sampling_mod.compute_effective_config_hash(
         tiling=tiling_config,
         segmentation=segmentation_config,
@@ -871,11 +880,18 @@ def test_save_sampling_coordinates_writes_sampling_metadata_fields(tmp_path):
         color_mapping={"background": None, "tumor": None},
         tissue_percentage={"background": None, "tumor": 0.7},
     )
-    extraction = SimpleNamespace(
+    extraction = sampling_mod.CoordinateExtractionResult(
+        contour_indices=[],
+        tissue_percentages=[],
+        x=np.array([], dtype=np.int64),
+        y=np.array([], dtype=np.int64),
         read_level=0,
         read_spacing_um=0.5,
         read_tile_size_px=256,
+        read_step_px=256,
+        resize_factor=1.0,
         tile_size_lv0=256,
+        step_px_lv0=256,
     )
     artifacts = sampling_mod._save_sampling_coordinates(
         sample_id="sample-1",
@@ -896,3 +912,20 @@ def test_save_sampling_coordinates_writes_sampling_metadata_fields(tmp_path):
     assert meta["annotation"] == "tumor"
     assert meta["selection_strategy"] == "joint_sampling"
     assert meta["output_mode"] == "per_annotation"
+    assert meta["read_step_px"] == 256
+    assert meta["step_px_lv0"] == 256
+
+
+def test_coordinate_extraction_result_requires_stride_metadata():
+    with pytest.raises(TypeError):
+        sampling_mod.CoordinateExtractionResult(
+            contour_indices=[],
+            tissue_percentages=[],
+            x=np.array([], dtype=np.int64),
+            y=np.array([], dtype=np.int64),
+            read_level=0,
+            read_spacing_um=0.5,
+            read_tile_size_px=256,
+            resize_factor=1.0,
+            tile_size_lv0=256,
+        )

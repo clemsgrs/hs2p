@@ -155,9 +155,8 @@ class RichCliProgressReporter:
                     ("Slides", str(payload["total"])),
                     ("Completed", str(payload["completed"])),
                     ("Failed", str(payload["failed"])),
-                    ("Zero-tile successes", str(payload["zero_tile_successes"])),
-                    ("Tiles", str(payload["discovered_tiles"])),
-                    ("Process list", payload["process_list_path"]),
+                    ("Zero-tile", str(payload["zero_tile_successes"])),
+                    ("Total tiles", str(payload["discovered_tiles"])),
                 ],
             )
             return

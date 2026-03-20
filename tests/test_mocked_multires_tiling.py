@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -176,6 +177,99 @@ def test_extract_coordinates_match_expected_coordinates_across_spacings(fake_bac
         assert result.read_level == exp["tile_level"]
         assert result.resize_factor == exp["resize_factor"]
         assert result.tile_size_lv0 == exp["tile_size_lv0"]
+
+
+def test_extract_coordinate_result_preserves_stride_when_contours_have_offset_origins():
+    class FakeWSI:
+        level_downsamples = [(1.0, 1.0)]
+
+        def get_tile_coordinates(
+            self,
+            tiling_params,
+            filter_params,
+            annotation=None,
+            disable_tqdm=False,
+            num_workers=1,
+        ):
+            del tiling_params, filter_params, annotation, disable_tqdm, num_workers
+            return (
+                [
+                    (0, 0),
+                    (0, 224),
+                    (224, 0),
+                    (224, 224),
+                    (225, 0),
+                    (225, 224),
+                ],
+                [1.0] * 6,
+                [0, 0, 0, 0, 1, 1],
+                0,
+                1.0,
+                224,
+            )
+
+        def get_level_spacing(self, level):
+            assert level == 0
+            return 0.5
+
+    result = wsi_api._extract_coordinate_result_from_wsi(
+        wsi=FakeWSI(),
+        tiling_params=SimpleNamespace(
+            target_tile_size_px=224,
+            overlap=0.0,
+        ),
+        filter_params=SimpleNamespace(),
+        disable_tqdm=True,
+        num_workers=1,
+    )
+
+    assert result.read_step_px == 224
+    assert result.step_px_lv0 == 224
+
+
+def test_extract_coordinate_result_uses_actual_overlap_stride_in_level0_pixels():
+    class FakeWSI:
+        level_downsamples = [(1.0, 1.0), (2.0, 2.0)]
+
+        def get_tile_coordinates(
+            self,
+            tiling_params,
+            filter_params,
+            annotation=None,
+            disable_tqdm=False,
+            num_workers=1,
+        ):
+            del tiling_params, filter_params, annotation, disable_tqdm, num_workers
+            return (
+                [
+                    (100, 100),
+                    (100, 502),
+                    (502, 100),
+                    (502, 502),
+                ],
+                [1.0] * 4,
+                [0, 0, 0, 0],
+                1,
+                1.0,
+                448,
+            )
+
+        def get_level_spacing(self, level):
+            return [0.5, 1.0][level]
+
+    result = wsi_api._extract_coordinate_result_from_wsi(
+        wsi=FakeWSI(),
+        tiling_params=SimpleNamespace(
+            target_tile_size_px=224,
+            overlap=0.1,
+        ),
+        filter_params=SimpleNamespace(),
+        disable_tqdm=True,
+        num_workers=1,
+    )
+
+    assert result.read_step_px == 201
+    assert result.step_px_lv0 == 402
 
 
 def test_extract_coordinates_segments_maskless_slides_without_annotation_pct_crash(

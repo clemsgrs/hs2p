@@ -136,9 +136,9 @@ When enabled, every candidate tile that passes the tissue mask check is read fro
 
 When `save_tiles: true`, HS2P also writes a `tiles/{sample_id}.tiles.tar` archive with JPEG-encoded tile images.
 
-- For non-CuCIM backends, tar extraction uses the existing sequential reader.
+- For non-CuCIM backends, tar extraction still uses the `wholeslidedata` reader, but dense `8x8` and `4x4` tile blocks are coalesced into larger contiguous reads before slicing them back into tiles.
 - For `tiling.backend: cucim`, tar extraction uses a CuCIM batch-read fast path and reuses the per-slide worker count from `speed.num_workers`.
-- Installing CuCIM is optional. If `backend: cucim` is selected but CuCIM is not installed, HS2P falls back to the sequential export path and emits a warning.
+- Installing CuCIM is optional. If `backend: cucim` is selected but CuCIM is not installed, HS2P falls back to the `wholeslidedata` export path and emits a warning.
 
 ## Resume and precomputed artifacts
 

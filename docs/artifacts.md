@@ -45,8 +45,12 @@ Each successful output produces:
   - Native spacing of the level that was read
 - `read_tile_size_px`
   - Tile width and height at the read level before mapping back to level 0
+- `read_step_px`
+  - Step between neighboring tile origins at the read level
 - `tile_size_lv0`
   - Tile width and height expressed in level-0 pixels
+- `step_px_lv0`
+  - Step between neighboring tile origins in level-0 pixels
 - `overlap`
   - Requested overlap fraction between neighboring tiles
 - `tissue_threshold`

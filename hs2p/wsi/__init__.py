@@ -73,7 +73,9 @@ class CoordinateExtractionResult:
         read_level: Pyramid level actually read from the slide.
         read_spacing_um: Native spacing of the pyramid level that was read.
         read_tile_size_px: Tile width and height at the read level.
+        read_step_px: Step between neighboring tiles at the read level.
         resize_factor: Resize factor between the read level and requested spacing.
+        step_px_lv0: Step between neighboring tiles in level-0 pixels.
         tile_size_lv0: Tile width and height expressed in level-0 pixels.
     """
 
@@ -84,8 +86,10 @@ class CoordinateExtractionResult:
     read_level: int
     read_spacing_um: float
     read_tile_size_px: int
+    read_step_px: int
     resize_factor: float
     tile_size_lv0: int
+    step_px_lv0: int
 
     def __init__(
         self,
@@ -97,8 +101,10 @@ class CoordinateExtractionResult:
         read_level: int,
         read_spacing_um: float,
         read_tile_size_px: int,
+        read_step_px: int,
         resize_factor: float,
         tile_size_lv0: int,
+        step_px_lv0: int,
         coordinates: list[tuple[int, int]] | None = None,
     ):
         if x is None or y is None:
@@ -116,6 +122,10 @@ class CoordinateExtractionResult:
             expected_y = np.array([coord[1] for coord in coordinates], dtype=np.int64)
             if not np.array_equal(x, expected_x) or not np.array_equal(y, expected_y):
                 raise ValueError("coordinates must match the provided x and y arrays")
+        if int(read_step_px) <= 0:
+            raise ValueError(f"read_step_px must be > 0, got {read_step_px}")
+        if int(step_px_lv0) <= 0:
+            raise ValueError(f"step_px_lv0 must be > 0, got {step_px_lv0}")
 
         self.contour_indices = list(contour_indices)
         self.tissue_percentages = list(tissue_percentages)
@@ -124,8 +134,10 @@ class CoordinateExtractionResult:
         self.read_level = read_level
         self.read_spacing_um = read_spacing_um
         self.read_tile_size_px = read_tile_size_px
+        self.read_step_px = int(read_step_px)
         self.resize_factor = resize_factor
         self.tile_size_lv0 = tile_size_lv0
+        self.step_px_lv0 = int(step_px_lv0)
 
     @property
     def coordinates(self) -> list[tuple[int, int]]:
@@ -164,6 +176,25 @@ def sort_coordinates_with_tissue(coordinates, tissue_percentages, contour_indice
     sorted_tissue_percentages = [dedup_tissue_percentages[idx] for idx in order]
     sorted_contour_indices = [dedup_contour_indices[idx] for idx in order]
     return sorted_coordinates, sorted_tissue_percentages, sorted_contour_indices
+
+
+def _compute_stride_metadata_from_geometry(
+    *,
+    tiling_params: TilingConfig,
+    read_tile_size_px: int,
+    tile_level: int,
+    level_downsamples: list[tuple[float, float]],
+) -> tuple[int, int]:
+    read_step_px = max(1, int(read_tile_size_px * (1.0 - tiling_params.overlap)))
+    tile_downsample = level_downsamples[tile_level]
+    step_x_lv0 = int(round(read_step_px * tile_downsample[0], 0))
+    step_y_lv0 = int(round(read_step_px * tile_downsample[1], 0))
+    if step_x_lv0 != step_y_lv0:
+        raise ValueError(
+            "anisotropic level-0 step is not supported for scalar step_px_lv0 metadata: "
+            f"x={step_x_lv0}, y={step_y_lv0}"
+        )
+    return read_step_px, step_x_lv0
 
 
 def get_mask_coverage(mask: np.ndarray, val: int):
@@ -259,6 +290,25 @@ def _read_aligned_mask(
         (int(target_width), int(target_height)),
         interpolation=cv2.INTER_NEAREST,
     )
+
+
+def _pad_array_to_shape(
+    arr: np.ndarray, *, target_width: int, target_height: int
+) -> np.ndarray:
+    """Pad an array on the bottom and right without resampling its contents."""
+    if arr.shape[1] == target_width and arr.shape[0] == target_height:
+        return arr
+    if arr.shape[1] > target_width or arr.shape[0] > target_height:
+        raise ValueError(
+            "Cannot pad an array to a smaller shape; expected the target canvas to be at least as large as the source"
+        )
+    if arr.ndim == 2:
+        padded = np.zeros((target_height, target_width), dtype=arr.dtype)
+        padded[: arr.shape[0], : arr.shape[1]] = arr
+        return padded
+    padded = np.zeros((target_height, target_width, arr.shape[2]), dtype=arr.dtype)
+    padded[: arr.shape[0], : arr.shape[1], :] = arr
+    return padded
 
 
 def _extract_padded_crop(
@@ -388,6 +438,12 @@ def _extract_coordinate_result_from_wsi(
     )
     x = np.array([x for x, _ in sorted_coordinates], dtype=np.int64)
     y = np.array([y for _, y in sorted_coordinates], dtype=np.int64)
+    read_step_px, step_px_lv0 = _compute_stride_metadata_from_geometry(
+        tiling_params=tiling_params,
+        read_tile_size_px=read_tile_size_px,
+        tile_level=tile_level,
+        level_downsamples=wsi.level_downsamples,
+    )
     return CoordinateExtractionResult(
         contour_indices=sorted_contour_indices,
         tissue_percentages=sorted_tissue_percentages,
@@ -396,8 +452,10 @@ def _extract_coordinate_result_from_wsi(
         read_level=tile_level,
         read_spacing_um=tile_spacing,
         read_tile_size_px=read_tile_size_px,
+        read_step_px=read_step_px,
         resize_factor=resize_factor,
         tile_size_lv0=tile_size_lv0,
+        step_px_lv0=step_px_lv0,
     )
 
 
@@ -597,8 +655,10 @@ def execute_coordinate_request(
             read_level=merged_result.read_level,
             read_spacing_um=merged_result.read_spacing_um,
             read_tile_size_px=merged_result.read_tile_size_px,
+            read_step_px=merged_result.read_step_px,
             resize_factor=merged_result.resize_factor,
             tile_size_lv0=merged_result.tile_size_lv0,
+            step_px_lv0=merged_result.step_px_lv0,
         )
     return UnifiedCoordinateResponse(per_annotation_results=per_annotation_results)
 
@@ -809,6 +869,7 @@ def overlay_mask_on_slide(
     vis_level = wsi_object.get_best_level_for_downsample_custom(downsample)
     wsi_arr = wsi_object.get_slide(vis_level)
     height, width, _ = wsi_arr.shape
+    base_width, base_height = width, height
 
     wsi = Image.fromarray(wsi_arr).convert("RGBA")
     if tile_size_lv0 is not None:
@@ -842,11 +903,11 @@ def overlay_mask_on_slide(
             scale = mask_width / width
 
         mask_arr = mask_object.get_slide(spacing=mask_spacing)
-        mask_arr = mask_arr[:, :, 0]
-        mask_height, mask_width = mask_arr.shape
+        if mask_arr.ndim == 3:
+            mask_arr = mask_arr[:, :, 0]
         mask_arr = cv2.resize(
             mask_arr.astype(np.uint8),
-            (int(round(mask_width / scale, 0)), int(round(mask_height / scale, 0))),
+            (base_width, base_height),
             interpolation=cv2.INTER_NEAREST,
         )
     elif mask_arr is not None:
@@ -854,12 +915,19 @@ def overlay_mask_on_slide(
             mask_arr = mask_arr[:, :, 0]
         mask_arr = cv2.resize(
             mask_arr.astype(np.uint8),
-            (width, height),
+            (base_width, base_height),
             interpolation=cv2.INTER_NEAREST,
         )
     else:
         raise ValueError(
             "Provide annotation_mask_path or mask_arr to overlay_mask_on_slide()"
+        )
+
+    if tile_size_lv0 is not None and (width != base_width or height != base_height):
+        mask_arr = _pad_array_to_shape(
+            mask_arr,
+            target_width=width,
+            target_height=height,
         )
 
     mask = Image.fromarray(mask_arr)

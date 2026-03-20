@@ -1,8 +1,8 @@
 """Tests for extract_tiles_to_tar() and the save_tiles pipeline option."""
 
 import io
-import types
 import tarfile
+import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -10,7 +10,11 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from hs2p.api import TilingResult, extract_tiles_to_tar
+from hs2p.api import (
+    TilingResult,
+    _iter_wsd_tile_arrays_for_tar_extraction,
+    extract_tiles_to_tar,
+)
 from hs2p.configs.models import FilterConfig
 
 
@@ -18,7 +22,11 @@ def _make_tiling_result(
     num_tiles: int = 3,
     tile_size: int = 256,
     sample_id: str = "slide-1",
+    *,
+    step_px: int | None = None,
 ) -> TilingResult:
+    if step_px is None:
+        step_px = tile_size
     return TilingResult(
         sample_id=sample_id,
         image_path=Path("/data/slide-1.svs"),
@@ -37,6 +45,8 @@ def _make_tiling_result(
         tissue_threshold=0.1,
         num_tiles=num_tiles,
         config_hash="abc123",
+        read_step_px=step_px,
+        step_px_lv0=step_px,
     )
 
 
@@ -45,6 +55,60 @@ def _solid_patch(color: tuple[int, int, int], size: int = 256) -> np.ndarray:
     arr = np.empty((size, size, 3), dtype=np.uint8)
     arr[:] = color
     return arr
+
+
+def _make_grid_tiling_result(
+    *,
+    columns: int,
+    rows: int,
+    tile_size: int,
+    step_px: int,
+) -> TilingResult:
+    x_coords: list[int] = []
+    y_coords: list[int] = []
+    for x_idx in range(columns):
+        for y_idx in range(rows):
+            x_coords.append(x_idx * step_px)
+            y_coords.append(y_idx * step_px)
+    return TilingResult(
+        sample_id="grid-slide",
+        image_path=Path("/data/grid-slide.svs"),
+        mask_path=None,
+        backend="openslide",
+        x=np.asarray(x_coords, dtype=np.int64),
+        y=np.asarray(y_coords, dtype=np.int64),
+        tile_index=np.arange(columns * rows, dtype=np.int32),
+        target_spacing_um=0.5,
+        target_tile_size_px=tile_size,
+        read_level=0,
+        read_spacing_um=0.5,
+        read_tile_size_px=tile_size,
+        tile_size_lv0=tile_size,
+        overlap=0.0 if step_px == tile_size else 1.0 - (step_px / tile_size),
+        tissue_threshold=0.1,
+        num_tiles=columns * rows,
+        config_hash="grid-hash",
+        read_step_px=step_px,
+        step_px_lv0=step_px,
+    )
+
+
+def _make_grouped_region(
+    *,
+    block_size: int,
+    tile_size: int,
+    step_px: int,
+) -> np.ndarray:
+    region_size = tile_size + (block_size - 1) * step_px
+    region = np.zeros((region_size, region_size, 3), dtype=np.uint8)
+    for x_idx in range(block_size):
+        for y_idx in range(block_size):
+            tile_index = x_idx * block_size + y_idx
+            value = tile_index + 1
+            y0 = y_idx * step_px
+            x0 = x_idx * step_px
+            region[y0 : y0 + tile_size, x0 : x0 + tile_size] = value
+    return region
 
 
 class TestExtractTilesToTar:
@@ -298,6 +362,104 @@ class TestExtractTilesToTar:
         assert tar_path.is_file()
         assert out_result is result
         mock_wsd.assert_called_once_with(result.image_path, backend="cucim")
+
+    def test_wsd_iterator_groups_dense_8x8_grid_into_one_read(self):
+        result = _make_grid_tiling_result(columns=8, rows=8, tile_size=16, step_px=16)
+        grouped_region = _make_grouped_region(block_size=8, tile_size=16, step_px=16)
+
+        mock_wsi = MagicMock()
+        mock_wsi.get_patch.side_effect = [grouped_region]
+
+        with patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi):
+            tiles = list(_iter_wsd_tile_arrays_for_tar_extraction(result=result))
+
+        assert len(tiles) == 64
+        assert mock_wsi.get_patch.call_count == 1
+        mock_wsi.get_patch.assert_called_once_with(
+            0,
+            0,
+            128,
+            128,
+            spacing=0.5,
+            center=False,
+        )
+        assert int(tiles[0][0, 0, 0]) == 1
+        assert int(tiles[1][0, 0, 0]) == 2
+        assert int(tiles[8][0, 0, 0]) == 9
+        assert int(tiles[-1][0, 0, 0]) == 64
+
+    def test_wsd_iterator_groups_dense_4x4_grid_into_one_read(self):
+        result = _make_grid_tiling_result(columns=4, rows=4, tile_size=16, step_px=16)
+        grouped_region = _make_grouped_region(block_size=4, tile_size=16, step_px=16)
+
+        mock_wsi = MagicMock()
+        mock_wsi.get_patch.side_effect = [grouped_region]
+
+        with patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi):
+            tiles = list(_iter_wsd_tile_arrays_for_tar_extraction(result=result))
+
+        assert len(tiles) == 16
+        mock_wsi.get_patch.assert_called_once_with(
+            0,
+            0,
+            64,
+            64,
+            spacing=0.5,
+            center=False,
+        )
+        assert int(tiles[0][0, 0, 0]) == 1
+        assert int(tiles[-1][0, 0, 0]) == 16
+
+    def test_wsd_iterator_uses_stride_based_group_size_when_tiles_overlap(self):
+        result = _make_grid_tiling_result(columns=4, rows=4, tile_size=32, step_px=24)
+        grouped_region = _make_grouped_region(block_size=4, tile_size=32, step_px=24)
+
+        mock_wsi = MagicMock()
+        mock_wsi.get_patch.side_effect = [grouped_region]
+
+        with patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi):
+            tiles = list(_iter_wsd_tile_arrays_for_tar_extraction(result=result))
+
+        assert len(tiles) == 16
+        mock_wsi.get_patch.assert_called_once_with(
+            0,
+            0,
+            104,
+            104,
+            spacing=0.5,
+            center=False,
+        )
+
+    def test_wsd_iterator_falls_back_to_single_tile_reads_for_incomplete_4x4_grid(self):
+        result = _make_grid_tiling_result(columns=4, rows=4, tile_size=16, step_px=16)
+        keep_mask = np.ones(result.num_tiles, dtype=bool)
+        keep_mask[-1] = False
+        result = TilingResult(
+            **{
+                **{
+                    field.name: getattr(result, field.name)
+                    for field in result.__dataclass_fields__.values()
+                },
+                "x": result.x[keep_mask],
+                "y": result.y[keep_mask],
+                "tile_index": np.arange(15, dtype=np.int32),
+                "num_tiles": 15,
+            }
+        )
+
+        mock_wsi = MagicMock()
+        mock_wsi.get_patch.side_effect = [
+            _solid_patch((idx, idx, idx), size=16) for idx in range(15)
+        ]
+
+        with patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi):
+            tiles = list(_iter_wsd_tile_arrays_for_tar_extraction(result=result))
+
+        assert len(tiles) == 15
+        assert mock_wsi.get_patch.call_count == 15
+        for call in mock_wsi.get_patch.call_args_list:
+            args = call.args
+            assert args[2:] == (16, 16)
 
 
 class TestNeedsPixelFiltering:
