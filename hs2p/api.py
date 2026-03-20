@@ -24,7 +24,6 @@ from hs2p.configs import (
 )
 from hs2p.configs.resolvers import build_default_sampling_spec
 from hs2p.progress import emit_progress, emit_progress_log
-from hs2p.stderr_utils import run_with_filtered_stderr
 from hs2p.wsi import (
     CoordinateOutputMode,
     CoordinateSelectionStrategy,
@@ -645,7 +644,7 @@ def _iter_cucim_tile_arrays_for_tar_extraction(
     if result.backend != "cucim":
         return None
     try:
-        cucim = run_with_filtered_stderr(lambda: importlib.import_module("cucim"))
+        cucim = importlib.import_module("cucim")
     except ModuleNotFoundError:
         warnings.warn(
             "CuCIM is unavailable for backend='cucim'; falling back to sequential wholeslidedata tile extraction.",
