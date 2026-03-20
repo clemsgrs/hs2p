@@ -5,6 +5,7 @@ import numpy as np
 
 import hs2p.api as api_mod
 import hs2p.wsi.backend as backend_mod
+import hs2p.wsi.wsi as wsi_mod
 
 
 def test_resolve_backend_prefers_cucim_when_supported(monkeypatch):
@@ -58,6 +59,68 @@ def test_resolve_backend_respects_explicit_override(monkeypatch):
     assert selection.tried == ("asap",)
     assert selection.reason is None
     assert calls == []
+
+
+def test_backend_probe_coerces_cucim_paths_to_strings(monkeypatch):
+    seen_paths: list[tuple[object, str]] = []
+
+    def _fake_wholeslideimage(path, *, backend: str):
+        seen_paths.append((path, backend))
+        return SimpleNamespace()
+
+    backend_mod._backend_can_open_slide.cache_clear()
+    monkeypatch.setattr(backend_mod.wsd, "WholeSlideImage", _fake_wholeslideimage)
+
+    assert backend_mod._backend_can_open_slide(
+        wsi_path="/tmp/slide.tiff",
+        mask_path="/tmp/mask.tiff",
+        backend="cucim",
+    )
+    assert seen_paths == [
+        ("/tmp/slide.tiff", "cucim"),
+        ("/tmp/mask.tiff", "cucim"),
+    ]
+
+
+def test_wholeslideimage_coerces_cucim_paths_to_strings(monkeypatch):
+    seen_paths: list[tuple[object, str]] = []
+
+    class _FakeSlide:
+        spacings = [0.5]
+        shapes = [(100, 100)]
+
+    def _fake_wholeslideimage(path, *, backend: str):
+        seen_paths.append((path, backend))
+        return _FakeSlide()
+
+    monkeypatch.setattr(
+        wsi_mod,
+        "resolve_backend",
+        lambda requested_backend, *, wsi_path, mask_path=None: backend_mod.BackendSelection(
+            backend="cucim",
+            tried=("cucim",),
+        ),
+    )
+    monkeypatch.setattr(wsi_mod.wsd, "WholeSlideImage", _fake_wholeslideimage)
+    monkeypatch.setattr(wsi_mod.WholeSlideImage, "load_segmentation", lambda *args, **kwargs: 0)
+
+    wsi_mod.WholeSlideImage(
+        path=Path("/tmp/slide.tiff"),
+        mask_path=Path("/tmp/mask.tiff"),
+        backend="auto",
+        sampling_spec=wsi_mod.ResolvedSamplingSpec(
+            pixel_mapping={"background": 0, "tumor": 1},
+            color_mapping={"background": None, "tumor": None},
+            tissue_percentage={"background": None, "tumor": 0.1},
+            active_annotations=("tumor",),
+        ),
+        segment_params=SimpleNamespace(),
+    )
+
+    assert seen_paths == [
+        ("/tmp/slide.tiff", "cucim"),
+        ("/tmp/mask.tiff", "cucim"),
+    ]
 
 
 def test_tile_slide_uses_resolved_backend_for_hash_and_result(monkeypatch):

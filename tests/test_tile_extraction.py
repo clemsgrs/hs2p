@@ -362,7 +362,7 @@ class TestExtractTilesToTar:
 
         assert tar_path.is_file()
         assert out_result is result
-        mock_wsd.assert_called_once_with(result.image_path, backend="cucim")
+        mock_wsd.assert_called_once_with(str(result.image_path), backend="cucim")
 
     def test_cucim_iterator_groups_dense_4x4_grid_into_one_batched_read(
         self, monkeypatch

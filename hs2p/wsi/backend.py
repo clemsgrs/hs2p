@@ -24,6 +24,17 @@ def _normalize_path(path: Path | None) -> str | None:
     return str(Path(path))
 
 
+def coerce_wsd_path(path: Path | str, *, backend: str) -> Path | str:
+    """Return a path object compatible with the requested WSD backend.
+
+    CuCIM-backed WSD opens require plain strings, while the other backends
+    accept pathlib objects.
+    """
+    if backend == "cucim":
+        return str(path)
+    return Path(path)
+
+
 def _is_cucim_supported_format(wsi_path: Path) -> bool:
     suffix = wsi_path.suffix.lower()
     return suffix in CUCIM_SUPPORTED_SUFFIXES
@@ -37,9 +48,12 @@ def _backend_can_open_slide(
     backend: str,
 ) -> bool:
     try:
-        wsd.WholeSlideImage(Path(wsi_path), backend=backend)
+        wsd.WholeSlideImage(coerce_wsd_path(wsi_path, backend=backend), backend=backend)
         if mask_path is not None:
-            wsd.WholeSlideImage(Path(mask_path), backend=backend)
+            wsd.WholeSlideImage(
+                coerce_wsd_path(mask_path, backend=backend),
+                backend=backend,
+            )
         return True
     except Exception:
         return False

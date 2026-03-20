@@ -24,7 +24,6 @@ from hs2p.configs import (
 )
 from hs2p.configs.resolvers import build_default_sampling_spec
 from hs2p.progress import emit_progress, emit_progress_log
-from hs2p.stderr_utils import run_with_filtered_stderr
 from hs2p.wsi import (
     CoordinateOutputMode,
     CoordinateSelectionStrategy,
@@ -33,7 +32,7 @@ from hs2p.wsi import (
     overlay_mask_on_slide as _overlay_mask_on_slide,
     write_coordinate_preview,
 )
-from hs2p.wsi.backend import resolve_backend
+from hs2p.wsi.backend import coerce_wsd_path, resolve_backend
 
 
 @dataclass(frozen=True)
@@ -645,7 +644,7 @@ def _iter_cucim_tile_arrays_for_tar_extraction(
     if result.backend != "cucim":
         return None
     try:
-        cucim = run_with_filtered_stderr(lambda: importlib.import_module("cucim"))
+        cucim = importlib.import_module("cucim")
     except ModuleNotFoundError:
         warnings.warn(
             "CuCIM is unavailable for backend='cucim'; falling back to sequential wholeslidedata tile extraction.",
@@ -695,7 +694,10 @@ def _iter_wsd_tile_arrays_for_tar_extraction(
 ):
     import wholeslidedata as wsd
 
-    wsi = wsd.WholeSlideImage(result.image_path, backend=result.backend)
+    wsi = wsd.WholeSlideImage(
+        coerce_wsd_path(result.image_path, backend=result.backend),
+        backend=result.backend,
+    )
     read_step_px = _resolve_read_step_px(result)
     step_px_lv0 = _resolve_step_px_lv0(result)
     for read_plan in _iter_grouped_read_plans_for_tar_extraction(
