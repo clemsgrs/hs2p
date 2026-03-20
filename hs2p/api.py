@@ -1,4 +1,5 @@
 import hashlib
+import importlib
 import io
 import json
 import multiprocessing as mp
@@ -487,6 +488,7 @@ def extract_tiles_to_tar(
     jpeg_quality: int = 90,
     tiles_dir: Path | None = None,
     filter_params: FilterConfig | None = None,
+    num_workers: int = 4,
 ) -> tuple[Path, TilingResult]:
     """Extract tile images from a WSI and save them as a JPEG tar archive.
 
@@ -494,14 +496,11 @@ def extract_tiles_to_tar(
     during extraction so that pixel data is read only once.  The returned
     ``TilingResult`` has its coordinate arrays trimmed to the surviving tiles.
     """
-    import wholeslidedata as wsd
     from PIL import Image
 
     tiles_dir = Path(tiles_dir) if tiles_dir is not None else Path(output_dir) / "tiles"
     tiles_dir.mkdir(parents=True, exist_ok=True)
     tar_path = tiles_dir / f"{result.sample_id}.tiles.tar"
-
-    wsi = wsd.WholeSlideImage(result.image_path, backend=result.backend)
 
     do_filter_white = filter_params is not None and filter_params.filter_white
     do_filter_black = filter_params is not None and filter_params.filter_black
@@ -520,15 +519,12 @@ def extract_tiles_to_tar(
             temp_tar_path = Path(tmp.name)
 
         with tarfile.open(temp_tar_path, "w") as tf:
-            for i in range(result.num_tiles):
-                tile_arr = wsi.get_patch(
-                    int(result.x[i]),
-                    int(result.y[i]),
-                    int(result.read_tile_size_px),
-                    int(result.read_tile_size_px),
-                    spacing=float(result.read_spacing_um),
-                    center=False,
+            for i, tile_arr in enumerate(
+                _iter_tile_arrays_for_tar_extraction(
+                    result=result,
+                    num_workers=num_workers,
                 )
+            ):
                 if tile_arr.shape[2] > 3:
                     tile_arr = tile_arr[:, :, :3]
 
@@ -599,6 +595,76 @@ def extract_tiles_to_tar(
         output_mode=result.output_mode,
     )
     return tar_path, filtered_result
+
+
+def _iter_tile_arrays_for_tar_extraction(
+    *,
+    result: TilingResult,
+    num_workers: int,
+):
+    tile_arrays = _iter_cucim_tile_arrays_for_tar_extraction(
+        result=result,
+        num_workers=num_workers,
+    )
+    if tile_arrays is not None:
+        yield from tile_arrays
+        return
+    yield from _iter_wsd_tile_arrays_for_tar_extraction(result=result)
+
+
+def _iter_cucim_tile_arrays_for_tar_extraction(
+    *,
+    result: TilingResult,
+    num_workers: int,
+):
+    if result.backend != "cucim":
+        return None
+    try:
+        cucim = importlib.import_module("cucim")
+    except ModuleNotFoundError:
+        warnings.warn(
+            "CuCIM is unavailable for backend='cucim'; falling back to sequential wholeslidedata tile extraction.",
+            UserWarning,
+            stacklevel=2,
+        )
+        return None
+
+    cu_image = cucim.CuImage(str(result.image_path))
+    locations = [
+        (int(x), int(y))
+        for x, y in zip(
+            result.x.astype(np.int64, copy=False).tolist(),
+            result.y.astype(np.int64, copy=False).tolist(),
+        )
+    ]
+    read_size = (int(result.read_tile_size_px), int(result.read_tile_size_px))
+    return (
+        np.asarray(region)
+        for region in cu_image.read_region(
+            locations,
+            read_size,
+            level=int(result.read_level),
+            num_workers=max(1, int(num_workers)),
+        )
+    )
+
+
+def _iter_wsd_tile_arrays_for_tar_extraction(
+    *,
+    result: TilingResult,
+):
+    import wholeslidedata as wsd
+
+    wsi = wsd.WholeSlideImage(result.image_path, backend=result.backend)
+    for i in range(result.num_tiles):
+        yield wsi.get_patch(
+            int(result.x[i]),
+            int(result.y[i]),
+            int(result.read_tile_size_px),
+            int(result.read_tile_size_px),
+            spacing=float(result.read_spacing_um),
+            center=False,
+        )
 
 
 def _needs_pixel_filtering(filtering: FilterConfig) -> bool:
@@ -1000,6 +1066,7 @@ def _compute_tiling_result_from_request(
                 result,
                 output_dir=request.output_dir,
                 filter_params=request.filtering if _needs_pixel_filtering(request.filtering) else None,
+                num_workers=request.num_workers,
             )
         artifact = save_tiling_result(result, output_dir=request.output_dir)
         artifact = TilingArtifacts(

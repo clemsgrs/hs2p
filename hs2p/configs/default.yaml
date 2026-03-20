@@ -5,6 +5,7 @@ resume: false # resume from a previous run
 resume_dirname: # directory name to resume from
 
 save_previews: true # save preview images of slide tiling and mask overlays
+save_tiles: false # save extracted tiles as {sample_id}.tiles.tar in addition to coordinate artifacts
 
 seed: 0 # seed for reproducibility
 
