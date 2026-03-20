@@ -17,7 +17,7 @@ def resolve_tiling_config(cfg: Any) -> TilingConfig:
         tissue_threshold=cfg.tiling.params.tissue_threshold,
         drop_holes=cfg.tiling.params.drop_holes,
         use_padding=cfg.tiling.params.use_padding,
-        backend=cfg.tiling.backend,
+        backend=(getattr(cfg.tiling, "backend", None) or "auto"),
     )
 
 

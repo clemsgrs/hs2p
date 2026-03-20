@@ -9,6 +9,7 @@ from PIL import Image, ImageOps
 from collections import defaultdict
 
 from hs2p.configs import FilterConfig, SegmentationConfig, TilingConfig
+from hs2p.progress import emit_progress_log
 from .wsi import (
     ResolvedSamplingSpec,
     WholeSlideImage,
@@ -376,6 +377,10 @@ def _save_overlay_preview(
     overlay.save(mask_preview_path)
 
 
+def _backend_name(wsi, fallback: str) -> str:
+    return str(getattr(wsi, "backend", fallback))
+
+
 def _build_default_tissue_sampling_spec(
     tiling_params: TilingConfig,
 ) -> ResolvedSamplingSpec:
@@ -593,7 +598,7 @@ def execute_coordinate_request(
             if preview_path is not None:
                 _save_request_preview(
                     wsi_path=request.wsi_path,
-                    backend=request.backend,
+                    backend=_backend_name(wsi, request.backend),
                     wsi=wsi,
                     preview_path=preview_path,
                     preview_downsample=request.preview_downsample,
@@ -616,7 +621,7 @@ def execute_coordinate_request(
     if request.mask_preview_path is not None:
         _save_request_preview(
             wsi_path=request.wsi_path,
-            backend=request.backend,
+            backend=_backend_name(wsi, request.backend),
             wsi=wsi,
             preview_path=request.mask_preview_path,
             preview_downsample=request.preview_downsample,

@@ -1,6 +1,7 @@
 import hashlib
 import importlib
 import io
+import itertools
 import json
 import multiprocessing as mp
 import tarfile
@@ -23,6 +24,7 @@ from hs2p.configs import (
 )
 from hs2p.configs.resolvers import build_default_sampling_spec
 from hs2p.progress import emit_progress, emit_progress_log
+from hs2p.stderr_utils import run_with_filtered_stderr
 from hs2p.wsi import (
     CoordinateOutputMode,
     CoordinateSelectionStrategy,
@@ -31,6 +33,7 @@ from hs2p.wsi import (
     overlay_mask_on_slide as _overlay_mask_on_slide,
     write_coordinate_preview,
 )
+from hs2p.wsi.backend import resolve_backend
 
 
 @dataclass(frozen=True)
@@ -367,15 +370,29 @@ def tile_slide(
         if whole_slide.mask_path is not None
         else None
     )
+    backend_selection = resolve_backend(
+        tiling.requested_backend,
+        wsi_path=whole_slide.image_path,
+        mask_path=whole_slide.mask_path,
+    )
+    if backend_selection.reason is not None:
+        emit_progress_log(
+            f"[backend] {whole_slide.sample_id}: {backend_selection.reason}"
+        )
+    effective_tiling = (
+        tiling
+        if backend_selection.backend == tiling.backend
+        else replace(tiling, backend=backend_selection.backend)
+    )
     return _compute_tiling_result(
         whole_slide,
-        tiling=tiling,
+        tiling=effective_tiling,
         segmentation=segmentation,
         filtering=filtering,
         mask_preview_path=None,
         num_workers=num_workers,
         config_hash=compute_effective_config_hash(
-            tiling=tiling,
+            tiling=effective_tiling,
             segmentation=segmentation,
             filtering=filtering,
             sampling_spec=sampling_spec,
@@ -628,7 +645,7 @@ def _iter_cucim_tile_arrays_for_tar_extraction(
     if result.backend != "cucim":
         return None
     try:
-        cucim = importlib.import_module("cucim")
+        cucim = run_with_filtered_stderr(lambda: importlib.import_module("cucim"))
     except ModuleNotFoundError:
         warnings.warn(
             "CuCIM is unavailable for backend='cucim'; falling back to sequential wholeslidedata tile extraction.",
@@ -638,23 +655,38 @@ def _iter_cucim_tile_arrays_for_tar_extraction(
         return None
 
     cu_image = cucim.CuImage(str(result.image_path))
-    locations = [
-        (int(x), int(y))
-        for x, y in zip(
-            result.x.astype(np.int64, copy=False).tolist(),
-            result.y.astype(np.int64, copy=False).tolist(),
-        )
-    ]
-    read_size = (int(result.read_tile_size_px), int(result.read_tile_size_px))
-    return (
-        np.asarray(region)
-        for region in cu_image.read_region(
-            locations,
-            read_size,
-            level=int(result.read_level),
-            num_workers=max(1, int(num_workers)),
+    read_step_px = _resolve_read_step_px(result)
+    step_px_lv0 = _resolve_step_px_lv0(result)
+    read_plans = list(
+        _iter_grouped_read_plans_for_tar_extraction(
+            result=result,
+            read_step_px=read_step_px,
+            step_px_lv0=step_px_lv0,
         )
     )
+
+    def _iter_tiles():
+        for read_size_px, plan_group in itertools.groupby(
+            read_plans,
+            key=lambda plan: int(plan.read_size_px),
+        ):
+            size_plans = list(plan_group)
+            locations = [(int(plan.x), int(plan.y)) for plan in size_plans]
+            regions = cu_image.read_region(
+                locations,
+                (int(read_size_px), int(read_size_px)),
+                level=int(result.read_level),
+                num_workers=max(1, int(num_workers)),
+            )
+            for read_plan, region in zip(size_plans, regions):
+                yield from _iter_tile_arrays_from_read_plan_region(
+                    np.asarray(region),
+                    read_plan=read_plan,
+                    tile_size_px=int(result.read_tile_size_px),
+                    read_step_px=read_step_px,
+                )
+
+    return _iter_tiles()
 
 
 def _iter_wsd_tile_arrays_for_tar_extraction(
@@ -666,7 +698,7 @@ def _iter_wsd_tile_arrays_for_tar_extraction(
     wsi = wsd.WholeSlideImage(result.image_path, backend=result.backend)
     read_step_px = _resolve_read_step_px(result)
     step_px_lv0 = _resolve_step_px_lv0(result)
-    for read_plan in _iter_wsd_read_plans_for_tar_extraction(
+    for read_plan in _iter_grouped_read_plans_for_tar_extraction(
         result=result,
         read_step_px=read_step_px,
         step_px_lv0=step_px_lv0,
@@ -680,17 +712,12 @@ def _iter_wsd_tile_arrays_for_tar_extraction(
             center=False,
         )
         region = np.asarray(region)
-        if read_plan.block_size == 1:
-            yield region
-            continue
-        for x_idx in range(read_plan.block_size):
-            x0 = x_idx * read_step_px
-            for y_idx in range(read_plan.block_size):
-                y0 = y_idx * read_step_px
-                yield region[
-                    y0 : y0 + int(result.read_tile_size_px),
-                    x0 : x0 + int(result.read_tile_size_px),
-                ]
+        yield from _iter_tile_arrays_from_read_plan_region(
+            region,
+            read_plan=read_plan,
+            tile_size_px=int(result.read_tile_size_px),
+            read_step_px=read_step_px,
+        )
 
 
 @dataclass(frozen=True)
@@ -699,6 +726,26 @@ class _WSDTarReadPlan:
     y: int
     read_size_px: int
     block_size: int
+
+
+def _iter_tile_arrays_from_read_plan_region(
+    region: np.ndarray,
+    *,
+    read_plan: _WSDTarReadPlan,
+    tile_size_px: int,
+    read_step_px: int,
+):
+    if read_plan.block_size == 1:
+        yield region
+        return
+    for x_idx in range(read_plan.block_size):
+        x0 = x_idx * read_step_px
+        for y_idx in range(read_plan.block_size):
+            y0 = y_idx * read_step_px
+            yield region[
+                y0 : y0 + tile_size_px,
+                x0 : x0 + tile_size_px,
+            ]
 
 
 def _resolve_read_step_px(result: TilingResult) -> int:
@@ -731,7 +778,7 @@ def _resolve_step_px_lv0(result: TilingResult) -> int:
     )
 
 
-def _iter_wsd_read_plans_for_tar_extraction(
+def _iter_grouped_read_plans_for_tar_extraction(
     *,
     result: TilingResult,
     read_step_px: int,
@@ -1192,9 +1239,10 @@ def _compute_tiling_result_from_request(
             if defer_pixel_filtering
             else request.filtering
         )
+        effective_tiling = request.tiling
         result = _compute_tiling_result(
             request.whole_slide,
-            tiling=request.tiling,
+            tiling=effective_tiling,
             segmentation=request.segmentation,
             filtering=effective_filtering,
             mask_preview_path=request.mask_preview_path,
@@ -1312,35 +1360,53 @@ def tile_slides(
         for row in existing_df.to_dict(orient="records"):
             if row.get("tiling_status") == "success":
                 existing_successes[str(row["sample_id"])] = row
-    expected_hashes: dict[bool, str] = {}
+    expected_hashes: dict[tuple[bool, str], str] = {}
 
-    def _expected_hash_for_slide(whole_slide: SlideSpec) -> str:
-        key = whole_slide.mask_path is not None
-        if key not in expected_hashes:
-            sampling_spec = build_default_sampling_spec(tiling) if key else None
-            expected_hashes[key] = compute_effective_config_hash(
-                tiling=tiling,
-                segmentation=segmentation,
-                filtering=filtering,
-                sampling_spec=sampling_spec,
-                selection_strategy=(
-                    CoordinateSelectionStrategy.MERGED_DEFAULT_TILING
-                    if sampling_spec is not None
-                    else None
-                ),
-                output_mode=(
-                    CoordinateOutputMode.SINGLE_OUTPUT
-                    if sampling_spec is not None
-                    else None
-                ),
+    def _resolve_effective_tiling(whole_slide: SlideSpec) -> TilingConfig:
+        backend_selection = resolve_backend(
+            tiling.backend,
+            wsi_path=whole_slide.image_path,
+            mask_path=whole_slide.mask_path,
+        )
+        if backend_selection.reason is not None:
+            emit_progress_log(
+                f"[backend] {whole_slide.sample_id}: {backend_selection.reason}"
             )
-        return expected_hashes[key]
+        return (
+            tiling
+            if backend_selection.backend == tiling.requested_backend
+            else replace(tiling, backend=backend_selection.backend)
+        )
 
     planned_work: list[_PlannedSlideWork] = []
     compute_requests: list[_SlideComputeRequest] = []
     for whole_slide in whole_slides:
         try:
-            expected_hash = _expected_hash_for_slide(whole_slide)
+            effective_tiling = _resolve_effective_tiling(whole_slide)
+            key = (whole_slide.mask_path is not None, effective_tiling.backend)
+            if key not in expected_hashes:
+                sampling_spec = (
+                    build_default_sampling_spec(effective_tiling)
+                    if whole_slide.mask_path is not None
+                    else None
+                )
+                expected_hashes[key] = compute_effective_config_hash(
+                    tiling=effective_tiling,
+                    segmentation=segmentation,
+                    filtering=filtering,
+                    sampling_spec=sampling_spec,
+                    selection_strategy=(
+                        CoordinateSelectionStrategy.MERGED_DEFAULT_TILING
+                        if sampling_spec is not None
+                        else None
+                    ),
+                    output_mode=(
+                        CoordinateOutputMode.SINGLE_OUTPUT
+                        if sampling_spec is not None
+                        else None
+                    ),
+                )
+            expected_hash = expected_hashes[key]
             artifact: TilingArtifacts | None = None
             if whole_slide.sample_id in existing_successes:
                 row = existing_successes[whole_slide.sample_id]
@@ -1373,7 +1439,7 @@ def tile_slides(
             compute_request = _SlideComputeRequest(
                 input_index=len(planned_work),
                 whole_slide=whole_slide,
-                tiling=tiling,
+                tiling=effective_tiling,
                 segmentation=segmentation,
                 filtering=filtering,
                 config_hash=expected_hash,

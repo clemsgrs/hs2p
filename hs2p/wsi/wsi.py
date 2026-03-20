@@ -11,6 +11,7 @@ import wholeslidedata as wsd
 from PIL import Image
 
 from hs2p.configs import FilterConfig, SegmentationConfig, TilingConfig
+from hs2p.wsi.backend import resolve_backend
 from hs2p.wsi.utils import HasEnoughTissue, ResolvedTileGeometry
 
 # ignore all warnings from wholeslidedata
@@ -74,7 +75,10 @@ class WholeSlideImage(object):
         self.path = path
         self.name = path.stem.replace(" ", "_")
         self.fmt = path.suffix
-        self.wsi = wsd.WholeSlideImage(path, backend=backend)
+        self.requested_backend = backend
+        selection = resolve_backend(backend, wsi_path=path, mask_path=mask_path)
+        self.backend = selection.backend
+        self.wsi = wsd.WholeSlideImage(path, backend=self.backend)
 
         self._scaled_contours_cache = {}  # add a cache for scaled contours
         self._scaled_holes_cache = {}  # add a cache for scaled holes
@@ -85,7 +89,6 @@ class WholeSlideImage(object):
         self.spacings = self.get_spacings()  # physical spacings, possibly overridden via spacing_at_level_0
         self.level_dimensions = self.wsi.shapes
         self.level_downsamples = self.get_downsamples()
-        self.backend = backend
         self.pixel_mapping = pixel_mapping
 
         self.mask_path = mask_path
@@ -94,7 +97,7 @@ class WholeSlideImage(object):
                 raise ValueError(
                     "sampling_spec is required when loading a mask-backed slide"
                 )
-            self.mask = wsd.WholeSlideImage(mask_path, backend=backend)
+            self.mask = wsd.WholeSlideImage(mask_path, backend=self.backend)
             self.seg_level = self.load_segmentation(
                 segment_params,
                 sampling_spec=sampling_spec,

@@ -167,3 +167,6 @@ tasks/
 docs/documentation.md
 docs/documentation.md
 docs/documentation.md
+data/
+*.csv
+*.yaml
