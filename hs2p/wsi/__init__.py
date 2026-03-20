@@ -377,6 +377,10 @@ def _save_overlay_preview(
     overlay.save(mask_preview_path)
 
 
+def _backend_name(wsi, fallback: str) -> str:
+    return str(getattr(wsi, "backend", fallback))
+
+
 def _build_default_tissue_sampling_spec(
     tiling_params: TilingConfig,
 ) -> ResolvedSamplingSpec:
@@ -569,8 +573,6 @@ def execute_coordinate_request(
         sampling_spec=request.sampling_spec,
         spacing_at_level_0=request.spacing_at_level_0,
     )
-    if wsi.backend_reason is not None:
-        emit_progress_log(f"[backend] {wsi.path.stem}: {wsi.backend_reason}")
     _validate_requested_spacing(wsi=wsi, tiling_params=request.tiling_params)
 
     if request.selection_strategy == CoordinateSelectionStrategy.INDEPENDENT_SAMPLING:
@@ -596,7 +598,7 @@ def execute_coordinate_request(
             if preview_path is not None:
                 _save_request_preview(
                     wsi_path=request.wsi_path,
-                    backend=wsi.backend,
+                    backend=_backend_name(wsi, request.backend),
                     wsi=wsi,
                     preview_path=preview_path,
                     preview_downsample=request.preview_downsample,
@@ -619,7 +621,7 @@ def execute_coordinate_request(
     if request.mask_preview_path is not None:
         _save_request_preview(
             wsi_path=request.wsi_path,
-            backend=wsi.backend,
+            backend=_backend_name(wsi, request.backend),
             wsi=wsi,
             preview_path=request.mask_preview_path,
             preview_downsample=request.preview_downsample,

@@ -78,7 +78,6 @@ class WholeSlideImage(object):
         self.requested_backend = backend
         selection = resolve_backend(backend, wsi_path=path, mask_path=mask_path)
         self.backend = selection.backend
-        self.backend_reason = selection.reason
         self.wsi = wsd.WholeSlideImage(path, backend=self.backend)
 
         self._scaled_contours_cache = {}  # add a cache for scaled contours

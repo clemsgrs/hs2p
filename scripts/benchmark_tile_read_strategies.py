@@ -26,6 +26,7 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
+from hs2p.stderr_utils import run_with_filtered_stderr
 
 MODE_CONFIG = {
     "regular_wsd": {
@@ -379,7 +380,7 @@ def benchmark_wsd_mode(
 
 def _require_cucim():
     try:
-        return importlib.import_module("cucim")
+        return run_with_filtered_stderr(lambda: importlib.import_module("cucim"))
     except ModuleNotFoundError as exc:
         raise RuntimeError(
             "CuCIM is required for the requested benchmark modes but is not installed."
@@ -397,7 +398,7 @@ def benchmark_cucim_batch_mode(
     from hs2p.benchmarking import group_read_plans_by_read_size
 
     cucim = _require_cucim()
-    cu_image = cucim.CuImage(str(result.image_path))
+    cu_image = run_with_filtered_stderr(lambda: cucim.CuImage(str(result.image_path)))
     tile_size_px = int(result.read_tile_size_px)
     checksum = 0
     tile_count = 0
