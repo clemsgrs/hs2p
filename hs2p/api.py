@@ -98,6 +98,8 @@ class TilingResult:
     tissue_threshold: float
     num_tiles: int
     config_hash: str
+    read_step_px: int | None = None
+    step_px_lv0: int | None = None
     tissue_fraction: np.ndarray | None = None
     annotation: str | None = None
     selection_strategy: str | None = None
@@ -281,6 +283,8 @@ def _compute_tiling_result(
                 ),
             )
         ),
+        read_step_px=extraction.read_step_px,
+        step_px_lv0=extraction.step_px_lv0,
         selection_strategy=(
             CoordinateSelectionStrategy.MERGED_DEFAULT_TILING
             if sampling_spec is not None
@@ -424,7 +428,9 @@ def save_tiling_result(
         "read_level": result.read_level,
         "read_spacing_um": result.read_spacing_um,
         "read_tile_size_px": result.read_tile_size_px,
+        "read_step_px": result.read_step_px,
         "tile_size_lv0": result.tile_size_lv0,
+        "step_px_lv0": result.step_px_lv0,
         "overlap": result.overlap,
         "tissue_threshold": result.tissue_threshold,
         "num_tiles": result.num_tiles,
@@ -585,6 +591,8 @@ def extract_tiles_to_tar(
         tissue_threshold=result.tissue_threshold,
         num_tiles=len(kept),
         config_hash=result.config_hash,
+        read_step_px=result.read_step_px,
+        step_px_lv0=result.step_px_lv0,
         tissue_fraction=(
             result.tissue_fraction[kept]
             if result.tissue_fraction is not None
@@ -656,14 +664,137 @@ def _iter_wsd_tile_arrays_for_tar_extraction(
     import wholeslidedata as wsd
 
     wsi = wsd.WholeSlideImage(result.image_path, backend=result.backend)
-    for i in range(result.num_tiles):
-        yield wsi.get_patch(
-            int(result.x[i]),
-            int(result.y[i]),
-            int(result.read_tile_size_px),
-            int(result.read_tile_size_px),
+    read_step_px = _resolve_read_step_px(result)
+    step_px_lv0 = _resolve_step_px_lv0(result)
+    for read_plan in _iter_wsd_read_plans_for_tar_extraction(
+        result=result,
+        read_step_px=read_step_px,
+        step_px_lv0=step_px_lv0,
+    ):
+        region = wsi.get_patch(
+            int(read_plan.x),
+            int(read_plan.y),
+            int(read_plan.read_size_px),
+            int(read_plan.read_size_px),
             spacing=float(result.read_spacing_um),
             center=False,
+        )
+        region = np.asarray(region)
+        if read_plan.block_size == 1:
+            yield region
+            continue
+        for x_idx in range(read_plan.block_size):
+            x0 = x_idx * read_step_px
+            for y_idx in range(read_plan.block_size):
+                y0 = y_idx * read_step_px
+                yield region[
+                    y0 : y0 + int(result.read_tile_size_px),
+                    x0 : x0 + int(result.read_tile_size_px),
+                ]
+
+
+@dataclass(frozen=True)
+class _WSDTarReadPlan:
+    x: int
+    y: int
+    read_size_px: int
+    block_size: int
+
+
+def _resolve_read_step_px(result: TilingResult) -> int:
+    if result.read_step_px is not None:
+        return int(result.read_step_px)
+    return max(
+        1,
+        int(round(int(result.read_tile_size_px) * (1.0 - float(result.overlap)), 0)),
+    )
+
+
+def _resolve_step_px_lv0(result: TilingResult) -> int:
+    if result.step_px_lv0 is not None:
+        return int(result.step_px_lv0)
+    if result.x.size > 1:
+        unique_x = np.unique(np.sort(result.x.astype(np.int64, copy=False)))
+        diffs = np.diff(unique_x)
+        diffs = diffs[diffs > 0]
+        if diffs.size > 0:
+            return int(diffs.min())
+    if result.y.size > 1:
+        unique_y = np.unique(np.sort(result.y.astype(np.int64, copy=False)))
+        diffs = np.diff(unique_y)
+        diffs = diffs[diffs > 0]
+        if diffs.size > 0:
+            return int(diffs.min())
+    return max(
+        1,
+        int(round(int(result.tile_size_lv0) * (1.0 - float(result.overlap)), 0)),
+    )
+
+
+def _iter_wsd_read_plans_for_tar_extraction(
+    *,
+    result: TilingResult,
+    read_step_px: int,
+    step_px_lv0: int,
+):
+    if step_px_lv0 <= 0:
+        step_px_lv0 = int(result.tile_size_lv0)
+    coord_to_index = {
+        (int(x), int(y)): idx
+        for idx, (x, y) in enumerate(
+            zip(
+                result.x.astype(np.int64, copy=False).tolist(),
+                result.y.astype(np.int64, copy=False).tolist(),
+            )
+        )
+    }
+    consumed = np.zeros(result.num_tiles, dtype=bool)
+    block_sizes = (8, 4)
+    tile_size_px = int(result.read_tile_size_px)
+
+    for idx in range(result.num_tiles):
+        if consumed[idx]:
+            continue
+        x0 = int(result.x[idx])
+        y0 = int(result.y[idx])
+        grouped = False
+        for block_size in block_sizes:
+            if result.num_tiles < block_size * block_size:
+                continue
+            indices: list[int] = []
+            for x_idx in range(block_size):
+                for y_idx in range(block_size):
+                    coord = (
+                        x0 + x_idx * step_px_lv0,
+                        y0 + y_idx * step_px_lv0,
+                    )
+                    match_idx = coord_to_index.get(coord)
+                    if match_idx is None or consumed[match_idx]:
+                        indices = []
+                        break
+                    indices.append(match_idx)
+                if not indices or len(indices) < (x_idx + 1) * block_size:
+                    break
+            if not indices:
+                continue
+            for match_idx in indices:
+                consumed[match_idx] = True
+            yield _WSDTarReadPlan(
+                x=x0,
+                y=y0,
+                read_size_px=tile_size_px + (block_size - 1) * read_step_px,
+                block_size=block_size,
+            )
+            grouped = True
+            break
+        if grouped:
+            continue
+        consumed[idx] = True
+        yield _WSDTarReadPlan(
+            x=x0,
+            y=y0,
+            read_size_px=tile_size_px,
+            block_size=1,
         )
 
 
@@ -741,6 +872,16 @@ def load_tiling_result(
         tissue_threshold=float(meta["tissue_threshold"]),
         num_tiles=int(meta["num_tiles"]),
         config_hash=str(meta["config_hash"]),
+        read_step_px=(
+            int(meta["read_step_px"])
+            if meta.get("read_step_px") is not None
+            else None
+        ),
+        step_px_lv0=(
+            int(meta["step_px_lv0"])
+            if meta.get("step_px_lv0") is not None
+            else None
+        ),
         annotation=(
             str(meta["annotation"]) if meta.get("annotation") is not None else None
         ),

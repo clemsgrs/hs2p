@@ -73,7 +73,9 @@ class CoordinateExtractionResult:
         read_level: Pyramid level actually read from the slide.
         read_spacing_um: Native spacing of the pyramid level that was read.
         read_tile_size_px: Tile width and height at the read level.
+        read_step_px: Step between neighboring tiles at the read level.
         resize_factor: Resize factor between the read level and requested spacing.
+        step_px_lv0: Step between neighboring tiles in level-0 pixels.
         tile_size_lv0: Tile width and height expressed in level-0 pixels.
     """
 
@@ -84,8 +86,10 @@ class CoordinateExtractionResult:
     read_level: int
     read_spacing_um: float
     read_tile_size_px: int
+    read_step_px: int | None = None
     resize_factor: float
     tile_size_lv0: int
+    step_px_lv0: int | None = None
 
     def __init__(
         self,
@@ -97,8 +101,10 @@ class CoordinateExtractionResult:
         read_level: int,
         read_spacing_um: float,
         read_tile_size_px: int,
+        read_step_px: int | None = None,
         resize_factor: float,
         tile_size_lv0: int,
+        step_px_lv0: int | None = None,
         coordinates: list[tuple[int, int]] | None = None,
     ):
         if x is None or y is None:
@@ -124,8 +130,10 @@ class CoordinateExtractionResult:
         self.read_level = read_level
         self.read_spacing_um = read_spacing_um
         self.read_tile_size_px = read_tile_size_px
+        self.read_step_px = read_step_px
         self.resize_factor = resize_factor
         self.tile_size_lv0 = tile_size_lv0
+        self.step_px_lv0 = step_px_lv0
 
     @property
     def coordinates(self) -> list[tuple[int, int]]:
@@ -164,6 +172,36 @@ def sort_coordinates_with_tissue(coordinates, tissue_percentages, contour_indice
     sorted_tissue_percentages = [dedup_tissue_percentages[idx] for idx in order]
     sorted_contour_indices = [dedup_contour_indices[idx] for idx in order]
     return sorted_coordinates, sorted_tissue_percentages, sorted_contour_indices
+
+
+def _infer_step_px_lv0_from_coordinates(
+    x: np.ndarray,
+    y: np.ndarray,
+    *,
+    fallback: int,
+) -> int:
+    positive_diffs: list[np.ndarray] = []
+    if x.size > 1:
+        x_diffs = np.diff(np.unique(np.sort(x)))
+        x_diffs = x_diffs[x_diffs > 0]
+        if x_diffs.size > 0:
+            positive_diffs.append(x_diffs.astype(np.int64, copy=False))
+    if y.size > 1:
+        y_diffs = np.diff(np.unique(np.sort(y)))
+        y_diffs = y_diffs[y_diffs > 0]
+        if y_diffs.size > 0:
+            positive_diffs.append(y_diffs.astype(np.int64, copy=False))
+    if not positive_diffs:
+        return int(fallback)
+
+    inferred = int(min(int(diffs.min()) for diffs in positive_diffs))
+    if inferred <= 0:
+        return int(fallback)
+    if inferred < fallback:
+        return inferred
+    if inferred % fallback == 0:
+        return int(fallback)
+    return inferred
 
 
 def get_mask_coverage(mask: np.ndarray, val: int):
@@ -388,6 +426,13 @@ def _extract_coordinate_result_from_wsi(
     )
     x = np.array([x for x, _ in sorted_coordinates], dtype=np.int64)
     y = np.array([y for _, y in sorted_coordinates], dtype=np.int64)
+    read_step_px = int(round(read_tile_size_px * (1.0 - tiling_params.overlap), 0))
+    fallback_step_px_lv0 = int(round(tile_size_lv0 * (1.0 - tiling_params.overlap), 0))
+    step_px_lv0 = _infer_step_px_lv0_from_coordinates(
+        x,
+        y,
+        fallback=fallback_step_px_lv0,
+    )
     return CoordinateExtractionResult(
         contour_indices=sorted_contour_indices,
         tissue_percentages=sorted_tissue_percentages,
@@ -396,8 +441,10 @@ def _extract_coordinate_result_from_wsi(
         read_level=tile_level,
         read_spacing_um=tile_spacing,
         read_tile_size_px=read_tile_size_px,
+        read_step_px=read_step_px,
         resize_factor=resize_factor,
         tile_size_lv0=tile_size_lv0,
+        step_px_lv0=step_px_lv0,
     )
 
 
@@ -597,8 +644,10 @@ def execute_coordinate_request(
             read_level=merged_result.read_level,
             read_spacing_um=merged_result.read_spacing_um,
             read_tile_size_px=merged_result.read_tile_size_px,
+            read_step_px=merged_result.read_step_px,
             resize_factor=merged_result.resize_factor,
             tile_size_lv0=merged_result.tile_size_lv0,
+            step_px_lv0=merged_result.step_px_lv0,
         )
     return UnifiedCoordinateResponse(per_annotation_results=per_annotation_results)
 

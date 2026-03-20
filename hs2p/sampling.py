@@ -178,6 +178,8 @@ def _save_sampling_coordinates(
             output_mode=output_mode,
             annotation=annotation,
         ),
+        read_step_px=extraction.read_step_px,
+        step_px_lv0=extraction.step_px_lv0,
         annotation=annotation,
         selection_strategy=selection_strategy,
         output_mode=output_mode,

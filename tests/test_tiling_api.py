@@ -94,6 +94,8 @@ def _fake_extraction() -> CoordinateExtractionResult:
         read_tile_size_px=448,
         resize_factor=2.0,
         tile_size_lv0=448,
+        read_step_px=448,
+        step_px_lv0=448,
     )
 
 
@@ -123,6 +125,8 @@ def _build_result(
         tissue_threshold=0.1,
         num_tiles=1,
         config_hash=config_hash,
+        read_step_px=224,
+        step_px_lv0=224,
     )
 
 
@@ -324,6 +328,8 @@ def test_save_tiling_result_writes_expected_npz_and_json(tmp_path: Path):
         tissue_threshold=0.1,
         num_tiles=2,
         config_hash="abc123",
+        read_step_px=224,
+        step_px_lv0=224,
     )
 
     artifacts = save_tiling_result(result, output_dir=tmp_path)
@@ -357,8 +363,10 @@ def test_save_tiling_result_writes_expected_npz_and_json(tmp_path: Path):
         "overlap",
         "read_level",
         "read_spacing_um",
+        "read_step_px",
         "read_tile_size_px",
         "sample_id",
+        "step_px_lv0",
         "target_spacing_um",
         "target_tile_size_px",
         "tile_size_lv0",
@@ -373,8 +381,10 @@ def test_save_tiling_result_writes_expected_npz_and_json(tmp_path: Path):
         "target_tile_size_px": 224,
         "read_level": 0,
         "read_spacing_um": 0.5,
+        "read_step_px": 224,
         "read_tile_size_px": 224,
         "tile_size_lv0": 224,
+        "step_px_lv0": 224,
         "overlap": 0.0,
         "tissue_threshold": 0.1,
         "num_tiles": 2,
@@ -402,6 +412,8 @@ def test_save_and_load_tiling_result_round_trip(tmp_path: Path):
         tissue_threshold=0.2,
         num_tiles=2,
         config_hash="roundtrip-hash",
+        read_step_px=202,
+        step_px_lv0=202,
     )
 
     artifacts = save_tiling_result(result, output_dir=tmp_path)
@@ -413,7 +425,9 @@ def test_save_and_load_tiling_result_round_trip(tmp_path: Path):
     assert loaded.backend == result.backend
     assert loaded.read_level == result.read_level
     assert loaded.read_spacing_um == result.read_spacing_um
+    assert loaded.read_step_px == result.read_step_px
     assert loaded.read_tile_size_px == result.read_tile_size_px
+    assert loaded.step_px_lv0 == result.step_px_lv0
     assert loaded.tile_size_lv0 == result.tile_size_lv0
     assert loaded.overlap == result.overlap
     assert loaded.tissue_threshold == result.tissue_threshold

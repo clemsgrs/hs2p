@@ -113,7 +113,7 @@ def test_generated_tiles_match_checked_in_artifacts(real_fixture_paths, tmp_path
     for key in generated.files:
         np.testing.assert_array_equal(generated[key], golden_tiles[key])
 
-    assert set(meta) == set(golden_meta)
+    assert set(meta) >= set(golden_meta)
     assert meta["sample_id"] == golden_meta["sample_id"] == "test-wsi"
     assert (
         Path(meta["image_path"]).name
@@ -130,7 +130,9 @@ def test_generated_tiles_match_checked_in_artifacts(real_fixture_paths, tmp_path
     assert meta["target_tile_size_px"] == golden_meta["target_tile_size_px"]
     assert meta["read_level"] == golden_meta["read_level"]
     assert meta["read_spacing_um"] == pytest.approx(golden_meta["read_spacing_um"])
+    assert meta["read_step_px"] == meta["read_tile_size_px"]
     assert meta["read_tile_size_px"] == golden_meta["read_tile_size_px"]
+    assert meta["step_px_lv0"] == meta["tile_size_lv0"]
     assert meta["tile_size_lv0"] == golden_meta["tile_size_lv0"]
     assert meta["overlap"] == pytest.approx(golden_meta["overlap"])
     assert meta["tissue_threshold"] == pytest.approx(golden_meta["tissue_threshold"])

@@ -27,14 +27,14 @@ You can also upload your own pyramidal WSI (up to 1 GB).
 pip install hs2p
 ```
 
-Optional CuCIM install for faster tile tar export when using `tiling.backend="cucim"`:
+Optional cuCIM install for faster tile tar export when using `tiling.backend="cucim"`:
 
 ```bash
 pip install cucim-cu12
 ```
 
-Use the CuCIM wheel that matches your CUDA runtime. The base `hs2p` install does not
-require CuCIM.
+Use the cuCIM wheel that matches your CUDA runtime. The base `hs2p` install does not
+require cuCIM.
 
 ## Workflows
 
@@ -134,7 +134,7 @@ For a first run, start from [hs2p/configs/default.yaml](hs2p/configs/default.yam
 Optional:
 
 - `save_tiles`
-  - also write `tiles/{sample_id}.tiles.tar` archives; with `tiling.backend="cucim"` this uses batched CuCIM reads during tar extraction
+  - also write `tiles/{sample_id}.tiles.tar` archives; with `tiling.backend="cucim"` this uses batched CuCIM reads during tar extraction, and other backends coalesce dense `8x8` / `4x4` regions before slicing them back into tiles
 
 Run tiling:
 
