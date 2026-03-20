@@ -33,7 +33,7 @@ from hs2p.wsi import (
     overlay_mask_on_slide as _overlay_mask_on_slide,
     write_coordinate_preview,
 )
-from hs2p.wsi.backend import resolve_backend
+from hs2p.wsi.backend import coerce_wsd_path, resolve_backend
 
 
 @dataclass(frozen=True)
@@ -695,7 +695,10 @@ def _iter_wsd_tile_arrays_for_tar_extraction(
 ):
     import wholeslidedata as wsd
 
-    wsi = wsd.WholeSlideImage(result.image_path, backend=result.backend)
+    wsi = wsd.WholeSlideImage(
+        coerce_wsd_path(result.image_path, backend=result.backend),
+        backend=result.backend,
+    )
     read_step_px = _resolve_read_step_px(result)
     step_px_lv0 = _resolve_step_px_lv0(result)
     for read_plan in _iter_grouped_read_plans_for_tar_extraction(
