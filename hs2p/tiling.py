@@ -7,7 +7,7 @@ from hs2p.api import tile_slides
 from hs2p.configs.resolvers import (
     resolve_filter_config,
     resolve_preview_config,
-    resolve_read_tiles_from,
+    resolve_read_coordinates_from,
     resolve_segmentation_config,
     resolve_tiling_config,
 )
@@ -53,7 +53,7 @@ def main(args):
             segmentation = resolve_segmentation_config(cfg)
             filtering = resolve_filter_config(cfg)
             preview = resolve_preview_config(cfg)
-            read_tiles_from = resolve_read_tiles_from(cfg)
+            read_coordinates_from = resolve_read_coordinates_from(cfg)
             progress.emit_progress(
                 "run.started",
                 command="tiling",
@@ -64,7 +64,9 @@ def main(args):
                 output_dir=str(output_dir),
                 num_workers=int(cfg.speed.num_workers),
                 resume=bool(cfg.resume),
-                read_tiles_from=str(read_tiles_from) if read_tiles_from else None,
+                read_coordinates_from=(
+                    str(read_coordinates_from) if read_coordinates_from else None
+                ),
             )
             artifacts = tile_slides(
                 whole_slides,
@@ -75,7 +77,7 @@ def main(args):
                 output_dir=output_dir,
                 num_workers=cfg.speed.num_workers,
                 resume=cfg.resume,
-                read_tiles_from=read_tiles_from,
+                read_coordinates_from=read_coordinates_from,
             )
             pd.read_csv(output_dir / "process_list.csv")
             progress.emit_progress(

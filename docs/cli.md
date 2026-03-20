@@ -71,8 +71,8 @@ Detailed logs still go to `output_dir/logs/log.txt`, which is the best place to 
 
 ## Current config areas
 
-- `tiling.read_tiles_from`
-  - Optional directory containing precomputed `{sample_id}.tiles.npz` and `{sample_id}.tiles.meta.json`
+- `tiling.read_coordinates_from`
+  - Optional directory containing precomputed `{sample_id}.coordinates.npz` and `{sample_id}.coordinates.meta.json`
 - `tiling.params`
   - Core tiling resolution, tile size, overlap, and tissue-threshold settings
 - `tiling.seg_params`
@@ -124,6 +124,6 @@ When enabled, every candidate tile that passes the tissue mask check is read fro
 
 - `resume: true` expects the current `process_list.csv` schema and current-format artifacts
 - reused tiling artifacts are validated against `sample_id`, `config_hash`, `image_path`, and `mask_path`
-- `tiling.read_tiles_from` is the supported way to reuse precomputed tiling outputs
+- `tiling.read_coordinates_from` is the supported way to reuse precomputed tiling outputs
 
 For the exact output files and field meanings, see [artifacts.md](artifacts.md).

@@ -1,11 +1,13 @@
 import hashlib
+import io
 import json
 import multiprocessing as mp
+import tarfile
 import tempfile
 import traceback
 import warnings
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict, dataclass, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass, replace
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -107,17 +109,18 @@ class TilingArtifacts:
 
     Attributes:
         sample_id: Sample identifier that names the artifact files.
-        tiles_npz_path: Path to the saved ``.tiles.npz`` coordinate artifact.
-        tiles_meta_path: Path to the saved ``.tiles.meta.json`` metadata artifact.
+        coordinates_npz_path: Path to the saved ``.coordinates.npz`` coordinate artifact.
+        coordinates_meta_path: Path to the saved ``.coordinates.meta.json`` metadata artifact.
         num_tiles: Number of tiles stored in the artifact pair.
         mask_preview_path: Optional path to the saved mask preview image.
         tiling_preview_path: Optional path to the saved tiling preview image.
     """
 
     sample_id: str
-    tiles_npz_path: Path
-    tiles_meta_path: Path
+    coordinates_npz_path: Path
+    coordinates_meta_path: Path
     num_tiles: int
+    tiles_tar_path: Path | None = None
     mask_preview_path: Path | None = None
     tiling_preview_path: Path | None = None
 
@@ -387,17 +390,17 @@ def save_tiling_result(
     result: TilingResult,
     output_dir: Path,
     *,
-    coordinates_dir: Path | None = None,
+    tiles_dir: Path | None = None,
 ) -> TilingArtifacts:
     _validate_result_consistency(result)
-    coordinates_dir = (
-        Path(coordinates_dir)
-        if coordinates_dir is not None
-        else Path(output_dir) / "coordinates"
+    tiles_dir = (
+        Path(tiles_dir)
+        if tiles_dir is not None
+        else Path(output_dir) / "tiles"
     )
-    coordinates_dir.mkdir(parents=True, exist_ok=True)
-    npz_path = coordinates_dir / f"{result.sample_id}.tiles.npz"
-    meta_path = coordinates_dir / f"{result.sample_id}.tiles.meta.json"
+    tiles_dir.mkdir(parents=True, exist_ok=True)
+    npz_path = tiles_dir / f"{result.sample_id}.coordinates.npz"
+    meta_path = tiles_dir / f"{result.sample_id}.coordinates.meta.json"
 
     payload = {
         "tile_index": result.tile_index.astype(np.int32, copy=False),
@@ -439,7 +442,7 @@ def save_tiling_result(
         with tempfile.NamedTemporaryFile(
             mode="wb",
             suffix=".npz",
-            dir=coordinates_dir,
+            dir=tiles_dir,
             delete=False,
         ) as handle:
             temp_npz_path = Path(handle.name)
@@ -449,7 +452,7 @@ def save_tiling_result(
         with tempfile.NamedTemporaryFile(
             mode="w",
             suffix=".json",
-            dir=coordinates_dir,
+            dir=tiles_dir,
             delete=False,
         ) as handle:
             temp_meta_path = Path(handle.name)
@@ -471,33 +474,158 @@ def save_tiling_result(
             temp_meta_path.unlink(missing_ok=True)
     return TilingArtifacts(
         sample_id=result.sample_id,
-        tiles_npz_path=npz_path,
-        tiles_meta_path=meta_path,
+        coordinates_npz_path=npz_path,
+        coordinates_meta_path=meta_path,
         num_tiles=result.num_tiles,
     )
 
 
+def extract_tiles_to_tar(
+    result: TilingResult,
+    output_dir: Path,
+    *,
+    jpeg_quality: int = 90,
+    tiles_dir: Path | None = None,
+    filter_params: FilterConfig | None = None,
+) -> tuple[Path, TilingResult]:
+    """Extract tile images from a WSI and save them as a JPEG tar archive.
+
+    When *filter_params* requests white/black filtering the tiles are checked
+    during extraction so that pixel data is read only once.  The returned
+    ``TilingResult`` has its coordinate arrays trimmed to the surviving tiles.
+    """
+    import wholeslidedata as wsd
+    from PIL import Image
+
+    tiles_dir = Path(tiles_dir) if tiles_dir is not None else Path(output_dir) / "tiles"
+    tiles_dir.mkdir(parents=True, exist_ok=True)
+    tar_path = tiles_dir / f"{result.sample_id}.tiles.tar"
+
+    wsi = wsd.WholeSlideImage(result.image_path, backend=result.backend)
+
+    do_filter_white = filter_params is not None and filter_params.filter_white
+    do_filter_black = filter_params is not None and filter_params.filter_black
+    white_thresh = getattr(filter_params, "white_threshold", 220) if filter_params else 220
+    black_thresh = getattr(filter_params, "black_threshold", 25) if filter_params else 25
+    frac_thresh = getattr(filter_params, "fraction_threshold", 0.9) if filter_params else 0.9
+
+    kept_indices: list[int] = []
+    tile_counter = 0
+
+    temp_tar_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            suffix=".tar", dir=tiles_dir, delete=False
+        ) as tmp:
+            temp_tar_path = Path(tmp.name)
+
+        with tarfile.open(temp_tar_path, "w") as tf:
+            for i in range(result.num_tiles):
+                tile_arr = wsi.get_patch(
+                    int(result.x[i]),
+                    int(result.y[i]),
+                    int(result.read_tile_size_px),
+                    int(result.read_tile_size_px),
+                    spacing=float(result.read_spacing_um),
+                    center=False,
+                )
+                if tile_arr.shape[2] > 3:
+                    tile_arr = tile_arr[:, :, :3]
+
+                if do_filter_white or do_filter_black:
+                    total_pixels = tile_arr.shape[0] * tile_arr.shape[1]
+                    if do_filter_white:
+                        white_frac = np.all(tile_arr > white_thresh, axis=-1).sum() / total_pixels
+                        if white_frac > frac_thresh:
+                            continue
+                    if do_filter_black:
+                        black_frac = np.all(tile_arr < black_thresh, axis=-1).sum() / total_pixels
+                        if black_frac > frac_thresh:
+                            continue
+
+                img = Image.fromarray(tile_arr).convert("RGB")
+                if result.read_tile_size_px != result.target_tile_size_px:
+                    img = img.resize(
+                        (result.target_tile_size_px, result.target_tile_size_px),
+                        Image.LANCZOS,
+                    )
+
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=jpeg_quality)
+                buf.seek(0)
+
+                info = tarfile.TarInfo(name=f"{tile_counter:06d}.jpg")
+                info.size = buf.getbuffer().nbytes
+                tf.addfile(info, buf)
+
+                kept_indices.append(i)
+                tile_counter += 1
+
+        temp_tar_path.replace(tar_path)
+        temp_tar_path = None
+    finally:
+        if temp_tar_path is not None:
+            temp_tar_path.unlink(missing_ok=True)
+
+    if len(kept_indices) == result.num_tiles:
+        return tar_path, result
+
+    kept = np.asarray(kept_indices, dtype=np.int64)
+    filtered_result = TilingResult(
+        sample_id=result.sample_id,
+        image_path=result.image_path,
+        mask_path=result.mask_path,
+        backend=result.backend,
+        x=result.x[kept],
+        y=result.y[kept],
+        tile_index=np.arange(len(kept), dtype=np.int32),
+        target_spacing_um=result.target_spacing_um,
+        target_tile_size_px=result.target_tile_size_px,
+        read_level=result.read_level,
+        read_spacing_um=result.read_spacing_um,
+        read_tile_size_px=result.read_tile_size_px,
+        tile_size_lv0=result.tile_size_lv0,
+        overlap=result.overlap,
+        tissue_threshold=result.tissue_threshold,
+        num_tiles=len(kept),
+        config_hash=result.config_hash,
+        tissue_fraction=(
+            result.tissue_fraction[kept]
+            if result.tissue_fraction is not None
+            else None
+        ),
+        annotation=result.annotation,
+        selection_strategy=result.selection_strategy,
+        output_mode=result.output_mode,
+    )
+    return tar_path, filtered_result
+
+
+def _needs_pixel_filtering(filtering: FilterConfig) -> bool:
+    return bool(filtering.filter_white or filtering.filter_black)
+
+
 def load_tiling_result(
-    tiles_npz_path: Path,
-    tiles_meta_path: Path,
+    coordinates_npz_path: Path,
+    coordinates_meta_path: Path,
 ) -> TilingResult:
     try:
-        tiles = np.load(tiles_npz_path, allow_pickle=False)
+        tiles = np.load(coordinates_npz_path, allow_pickle=False)
     except Exception as exc:
         raise ValueError(
-            f"Unable to load tiling npz artifact {tiles_npz_path}: {exc}"
+            f"Unable to load tiling npz artifact {coordinates_npz_path}: {exc}"
         ) from exc
     try:
-        meta = json.loads(Path(tiles_meta_path).read_text())
+        meta = json.loads(Path(coordinates_meta_path).read_text())
     except Exception as exc:
         raise ValueError(
-            f"Unable to load tiling metadata artifact {tiles_meta_path}: {exc}"
+            f"Unable to load tiling metadata artifact {coordinates_meta_path}: {exc}"
         ) from exc
     required_npz_keys = {"tile_index", "x", "y"}
     missing_npz_keys = sorted(required_npz_keys - set(tiles.files))
     if missing_npz_keys:
         raise ValueError(
-            f"Invalid tiling npz artifact {tiles_npz_path}; missing keys: "
+            f"Invalid tiling npz artifact {coordinates_npz_path}; missing keys: "
             + ", ".join(missing_npz_keys)
         )
     required_meta_keys = {
@@ -519,7 +647,7 @@ def load_tiling_result(
     missing_meta_keys = sorted(required_meta_keys - set(meta))
     if missing_meta_keys:
         raise ValueError(
-            f"Invalid tiling metadata artifact {tiles_meta_path}; missing keys: "
+            f"Invalid tiling metadata artifact {coordinates_meta_path}; missing keys: "
             + ", ".join(missing_meta_keys)
         )
     x = tiles["x"].astype(np.int64, copy=False)
@@ -566,12 +694,12 @@ def load_tiling_result(
 def validate_tiling_artifacts(
     *,
     whole_slide: SlideSpec,
-    tiles_npz_path: Path,
-    tiles_meta_path: Path,
+    coordinates_npz_path: Path,
+    coordinates_meta_path: Path,
     expected_config_hash: str,
 ) -> TilingArtifacts:
     result = load_tiling_result(
-        tiles_npz_path=tiles_npz_path, tiles_meta_path=tiles_meta_path
+        coordinates_npz_path=coordinates_npz_path, coordinates_meta_path=coordinates_meta_path
     )
     if result.sample_id != whole_slide.sample_id:
         raise ValueError(
@@ -595,8 +723,8 @@ def validate_tiling_artifacts(
         )
     return TilingArtifacts(
         sample_id=result.sample_id,
-        tiles_npz_path=tiles_npz_path,
-        tiles_meta_path=tiles_meta_path,
+        coordinates_npz_path=coordinates_npz_path,
+        coordinates_meta_path=coordinates_meta_path,
         num_tiles=result.num_tiles,
     )
 
@@ -618,21 +746,21 @@ def _validate_whole_slides(whole_slides: Sequence[SlideSpec]) -> None:
 def _maybe_load_existing_artifacts(
     *,
     whole_slide: SlideSpec,
-    read_tiles_from: Path,
+    read_coordinates_from: Path,
     expected_config_hash: str,
 ) -> TilingArtifacts | None:
-    npz_path = read_tiles_from / f"{whole_slide.sample_id}.tiles.npz"
-    meta_path = read_tiles_from / f"{whole_slide.sample_id}.tiles.meta.json"
+    npz_path = read_coordinates_from / f"{whole_slide.sample_id}.coordinates.npz"
+    meta_path = read_coordinates_from / f"{whole_slide.sample_id}.coordinates.meta.json"
     if not npz_path.is_file() and not meta_path.is_file():
         return None
     if not npz_path.is_file() or not meta_path.is_file():
         raise ValueError(
-            f"Missing tiling sidecar for sample_id={whole_slide.sample_id} in {read_tiles_from}"
+            f"Missing tiling sidecar for sample_id={whole_slide.sample_id} in {read_coordinates_from}"
         )
     return validate_tiling_artifacts(
         whole_slide=whole_slide,
-        tiles_npz_path=npz_path,
-        tiles_meta_path=meta_path,
+        coordinates_npz_path=npz_path,
+        coordinates_meta_path=meta_path,
         expected_config_hash=expected_config_hash,
     )
 
@@ -751,6 +879,7 @@ class _SlideComputeRequest:
     output_dir: Path
     num_workers: int
     include_result: bool = False
+    save_tiles: bool = False
 
 
 @dataclass(frozen=True)
@@ -773,9 +902,10 @@ def _build_success_artifact(
 ) -> TilingArtifacts:
     return TilingArtifacts(
         sample_id=base_artifact.sample_id,
-        tiles_npz_path=base_artifact.tiles_npz_path,
-        tiles_meta_path=base_artifact.tiles_meta_path,
+        coordinates_npz_path=base_artifact.coordinates_npz_path,
+        coordinates_meta_path=base_artifact.coordinates_meta_path,
         num_tiles=base_artifact.num_tiles,
+        tiles_tar_path=base_artifact.tiles_tar_path,
         mask_preview_path=mask_preview_path,
         tiling_preview_path=tiling_preview_path,
     )
@@ -794,8 +924,9 @@ def _build_success_process_row(
         ),
         "tiling_status": "success",
         "num_tiles": artifact.num_tiles,
-        "tiles_npz_path": str(artifact.tiles_npz_path),
-        "tiles_meta_path": str(artifact.tiles_meta_path),
+        "coordinates_npz_path": str(artifact.coordinates_npz_path),
+        "coordinates_meta_path": str(artifact.coordinates_meta_path),
+        "tiles_tar_path": str(artifact.tiles_tar_path) if artifact.tiles_tar_path is not None else np.nan,
         "error": np.nan,
         "traceback": np.nan,
     }
@@ -815,8 +946,9 @@ def _build_failure_process_row(
         ),
         "tiling_status": "failed",
         "num_tiles": 0,
-        "tiles_npz_path": np.nan,
-        "tiles_meta_path": np.nan,
+        "coordinates_npz_path": np.nan,
+        "coordinates_meta_path": np.nan,
+        "tiles_tar_path": np.nan,
         "error": error,
         "traceback": traceback_text,
     }
@@ -847,16 +979,36 @@ def _compute_tiling_result_from_request(
     request: _SlideComputeRequest,
 ) -> _SlideComputeResponse:
     try:
+        defer_pixel_filtering = request.save_tiles and _needs_pixel_filtering(request.filtering)
+        effective_filtering = (
+            replace(request.filtering, filter_white=False, filter_black=False)
+            if defer_pixel_filtering
+            else request.filtering
+        )
         result = _compute_tiling_result(
             request.whole_slide,
             tiling=request.tiling,
             segmentation=request.segmentation,
-            filtering=request.filtering,
+            filtering=effective_filtering,
             mask_preview_path=request.mask_preview_path,
             num_workers=request.num_workers,
             config_hash=request.config_hash,
         )
+        tiles_tar_path: Path | None = None
+        if request.save_tiles:
+            tiles_tar_path, result = extract_tiles_to_tar(
+                result,
+                output_dir=request.output_dir,
+                filter_params=request.filtering if _needs_pixel_filtering(request.filtering) else None,
+            )
         artifact = save_tiling_result(result, output_dir=request.output_dir)
+        artifact = TilingArtifacts(
+            sample_id=artifact.sample_id,
+            coordinates_npz_path=artifact.coordinates_npz_path,
+            coordinates_meta_path=artifact.coordinates_meta_path,
+            num_tiles=artifact.num_tiles,
+            tiles_tar_path=tiles_tar_path,
+        )
         mask_preview_path = (
             request.mask_preview_path
             if request.mask_preview_path is not None
@@ -903,7 +1055,7 @@ def _write_tiling_preview_from_artifacts(
     output_dir: Path,
     downsample: int,
 ) -> Path | None:
-    result = load_tiling_result(artifact.tiles_npz_path, artifact.tiles_meta_path)
+    result = load_tiling_result(artifact.coordinates_npz_path, artifact.coordinates_meta_path)
     return write_tiling_preview(
         result=result,
         output_dir=output_dir,
@@ -921,7 +1073,8 @@ def tile_slides(
     output_dir: Path,
     num_workers: int = 1,
     resume: bool = False,
-    read_tiles_from: Path | None = None,
+    read_coordinates_from: Path | None = None,
+    save_tiles: bool = False,
 ) -> list[TilingArtifacts]:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -940,8 +1093,8 @@ def tile_slides(
                 "mask_path",
                 "tiling_status",
                 "num_tiles",
-                "tiles_npz_path",
-                "tiles_meta_path",
+                "coordinates_npz_path",
+                "coordinates_meta_path",
                 "error",
                 "traceback",
             },
@@ -983,18 +1136,18 @@ def tile_slides(
             artifact: TilingArtifacts | None = None
             if whole_slide.sample_id in existing_successes:
                 row = existing_successes[whole_slide.sample_id]
-                npz_path = Path(str(row["tiles_npz_path"]))
-                meta_path = Path(str(row["tiles_meta_path"]))
+                npz_path = Path(str(row["coordinates_npz_path"]))
+                meta_path = Path(str(row["coordinates_meta_path"]))
                 artifact = validate_tiling_artifacts(
                     whole_slide=whole_slide,
-                    tiles_npz_path=npz_path,
-                    tiles_meta_path=meta_path,
+                    coordinates_npz_path=npz_path,
+                    coordinates_meta_path=meta_path,
                     expected_config_hash=expected_hash,
                 )
-            if read_tiles_from is not None and artifact is None:
+            if read_coordinates_from is not None and artifact is None:
                 artifact = _maybe_load_existing_artifacts(
                     whole_slide=whole_slide,
-                    read_tiles_from=Path(read_tiles_from),
+                    read_coordinates_from=Path(read_coordinates_from),
                     expected_config_hash=expected_hash,
                 )
             if artifact is not None:
@@ -1019,6 +1172,7 @@ def tile_slides(
                 mask_preview_path=mask_preview_path,
                 output_dir=output_dir,
                 num_workers=1,
+                save_tiles=save_tiles,
             )
             planned_work.append(
                 _PlannedSlideWork(
@@ -1222,6 +1376,7 @@ def tile_slides(
                     output_dir=request.output_dir,
                     num_workers=worker_inner_workers,
                     include_result=False,
+                    save_tiles=request.save_tiles,
                 )
                 for request in compute_requests
             ]
@@ -1247,6 +1402,7 @@ def tile_slides(
                     output_dir=request.output_dir,
                     num_workers=worker_inner_workers,
                     include_result=True,
+                    save_tiles=request.save_tiles,
                 )
                 for request in compute_requests
             ]

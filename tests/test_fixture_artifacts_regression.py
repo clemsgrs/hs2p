@@ -83,16 +83,16 @@ def _run_and_save_tiles(
         num_workers=1,
     )
     artifacts = save_tiling_result(result, output_dir=output_dir)
-    generated = np.load(artifacts.tiles_npz_path, allow_pickle=False)
-    meta = json.loads(artifacts.tiles_meta_path.read_text())
+    generated = np.load(artifacts.coordinates_npz_path, allow_pickle=False)
+    meta = json.loads(artifacts.coordinates_meta_path.read_text())
     return result, artifacts, generated, meta
 
 
 def test_generated_tiles_match_checked_in_artifacts(real_fixture_paths, tmp_path: Path):
     wsi_path, mask_path = real_fixture_paths
     gt_dir = wsi_path.parent.parent / "gt"
-    gt_npz_path = gt_dir / "test-wsi.tiles.npz"
-    gt_meta_path = gt_dir / "test-wsi.tiles.meta.json"
+    gt_npz_path = gt_dir / "test-wsi.coordinates.npz"
+    gt_meta_path = gt_dir / "test-wsi.coordinates.meta.json"
     assert gt_npz_path.is_file(), f"Missing golden coordinates: {gt_npz_path}"
     assert gt_meta_path.is_file(), f"Missing golden metadata: {gt_meta_path}"
 

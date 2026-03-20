@@ -37,8 +37,8 @@ def resolve_preview_config(cfg: Any) -> PreviewConfig:
     )
 
 
-def resolve_read_tiles_from(cfg: Any) -> Path | None:
-    value = cfg.tiling.read_tiles_from
+def resolve_read_coordinates_from(cfg: Any) -> Path | None:
+    value = cfg.tiling.read_coordinates_from
     if not value:
         return None
     return Path(value)

@@ -105,7 +105,7 @@ def _base_cli_cfg(tmp_path: Path, *, resume: bool = False) -> SimpleNamespace:
         speed=SimpleNamespace(num_workers=1),
         tiling=SimpleNamespace(
             backend="asap",
-            read_tiles_from=None,
+            read_coordinates_from=None,
             params=SimpleNamespace(
                 target_spacing_um=0.5,
                 target_tile_size_px=256,
@@ -163,7 +163,7 @@ def test_tiling_main_installs_progress_reporter_only_during_pipeline_run(
     )
     monkeypatch.setattr(tiling_mod, "resolve_filter_config", lambda cfg: _filter_config())
     monkeypatch.setattr(tiling_mod, "resolve_preview_config", lambda cfg: None)
-    monkeypatch.setattr(tiling_mod, "resolve_read_tiles_from", lambda cfg: None)
+    monkeypatch.setattr(tiling_mod, "resolve_read_coordinates_from", lambda cfg: None)
     monkeypatch.setattr(progress, "create_cli_progress_reporter", lambda **kwargs: reporter)
 
     def _fake_tile_slides(*args, **kwargs):
@@ -178,9 +178,9 @@ def test_tiling_main_installs_progress_reporter_only_during_pipeline_run(
                     "mask_path": np.nan,
                     "tiling_status": "success",
                     "num_tiles": 2,
-                    "tiles_npz_path": str(output_dir / "coordinates" / "slide-1.tiles.npz"),
-                    "tiles_meta_path": str(
-                        output_dir / "coordinates" / "slide-1.tiles.meta.json"
+                    "coordinates_npz_path": str(output_dir / "tiles" / "slide-1.coordinates.npz"),
+                    "coordinates_meta_path": str(
+                        output_dir / "tiles" / "slide-1.coordinates.meta.json"
                     ),
                     "error": np.nan,
                     "traceback": np.nan,
@@ -190,8 +190,8 @@ def test_tiling_main_installs_progress_reporter_only_during_pipeline_run(
         return [
             TilingArtifacts(
                 sample_id="slide-1",
-                tiles_npz_path=output_dir / "coordinates" / "slide-1.tiles.npz",
-                tiles_meta_path=output_dir / "coordinates" / "slide-1.tiles.meta.json",
+                coordinates_npz_path=output_dir / "tiles" / "slide-1.coordinates.npz",
+                coordinates_meta_path=output_dir / "tiles" / "slide-1.coordinates.meta.json",
                 num_tiles=2,
             )
         ]
@@ -225,9 +225,9 @@ def test_tile_slides_emits_progress_for_reused_success_and_failure(
                 "mask_path": np.nan,
                 "tiling_status": "success",
                 "num_tiles": 2,
-                "tiles_npz_path": str(run_dir / "coordinates" / "slide-a.tiles.npz"),
-                "tiles_meta_path": str(
-                    run_dir / "coordinates" / "slide-a.tiles.meta.json"
+                "coordinates_npz_path": str(run_dir / "tiles" / "slide-a.coordinates.npz"),
+                "coordinates_meta_path": str(
+                    run_dir / "tiles" / "slide-a.coordinates.meta.json"
                 ),
                 "error": np.nan,
                 "traceback": np.nan,
@@ -239,10 +239,10 @@ def test_tile_slides_emits_progress_for_reused_success_and_failure(
         whole_slide = kwargs["whole_slide"]
         return TilingArtifacts(
             sample_id=whole_slide.sample_id,
-            tiles_npz_path=run_dir / "coordinates" / f"{whole_slide.sample_id}.tiles.npz",
-            tiles_meta_path=run_dir
-            / "coordinates"
-            / f"{whole_slide.sample_id}.tiles.meta.json",
+            coordinates_npz_path=run_dir / "tiles" / f"{whole_slide.sample_id}.coordinates.npz",
+            coordinates_meta_path=run_dir
+            / "tiles"
+            / f"{whole_slide.sample_id}.coordinates.meta.json",
             num_tiles=2,
         )
 
@@ -254,8 +254,8 @@ def test_tile_slides_emits_progress_for_reused_success_and_failure(
                 ok=True,
                 artifact=TilingArtifacts(
                     sample_id="slide-b",
-                    tiles_npz_path=run_dir / "coordinates" / "slide-b.tiles.npz",
-                    tiles_meta_path=run_dir / "coordinates" / "slide-b.tiles.meta.json",
+                    coordinates_npz_path=run_dir / "tiles" / "slide-b.coordinates.npz",
+                    coordinates_meta_path=run_dir / "tiles" / "slide-b.coordinates.meta.json",
                     num_tiles=1,
                 ),
                 mask_preview_path=None,
@@ -396,17 +396,17 @@ def test_sampling_main_emits_progress_and_run_summary(monkeypatch, tmp_path: Pat
                     "mask_path": None,
                     "sampling_status": "success",
                     "num_tiles": 3,
-                    "tiles_npz_path": str(
+                    "coordinates_npz_path": str(
                         Path(kwargs["cfg"].output_dir)
-                        / "coordinates"
+                        / "tiles"
                         / "tumor"
-                        / f"{sample_id}.tiles.npz"
+                        / f"{sample_id}.coordinates.npz"
                     ),
-                    "tiles_meta_path": str(
+                    "coordinates_meta_path": str(
                         Path(kwargs["cfg"].output_dir)
-                        / "coordinates"
+                        / "tiles"
                         / "tumor"
-                        / f"{sample_id}.tiles.meta.json"
+                        / f"{sample_id}.coordinates.meta.json"
                     ),
                     "config_hash": "hash",
                     "error": np.nan,
@@ -422,8 +422,8 @@ def test_sampling_main_emits_progress_and_run_summary(monkeypatch, tmp_path: Pat
                 "mask_path": None,
                 "sampling_status": "failed",
                 "num_tiles": 0,
-                "tiles_npz_path": np.nan,
-                "tiles_meta_path": np.nan,
+                "coordinates_npz_path": np.nan,
+                "coordinates_meta_path": np.nan,
                 "config_hash": "hash",
                 "error": "boom",
                 "traceback": "traceback",
@@ -496,8 +496,8 @@ def test_sampling_main_emits_finished_summary_when_resume_has_no_work(
                 "mask_path": np.nan,
                 "sampling_status": "success",
                 "num_tiles": 0,
-                "tiles_npz_path": np.nan,
-                "tiles_meta_path": np.nan,
+                "coordinates_npz_path": np.nan,
+                "coordinates_meta_path": np.nan,
                 "config_hash": "expected-hash",
                 "error": np.nan,
                 "traceback": np.nan,

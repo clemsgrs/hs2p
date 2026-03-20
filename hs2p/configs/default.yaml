@@ -9,7 +9,7 @@ save_previews: true # save preview images of slide tiling and mask overlays
 seed: 0 # seed for reproducibility
 
 tiling:
-  read_tiles_from: # path to a directory containing {sample_id}.tiles.npz and {sample_id}.tiles.meta.json (leave empty to compute tiles)
+  read_coordinates_from: # path to a directory containing {sample_id}.coordinates.npz and {sample_id}.coordinates.meta.json (leave empty to compute tiles)
   backend: "asap" # backend to use for slide reading
   params:
     target_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel

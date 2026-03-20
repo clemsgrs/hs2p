@@ -26,8 +26,8 @@ jobs:
           test -d tests
           test -f tests/fixtures/input/test-wsi.tif
           test -f tests/fixtures/input/test-mask.tif
-          test -f tests/fixtures/gt/test-wsi.tiles.npz
-          test -f tests/fixtures/gt/test-wsi.tiles.meta.json
+          test -f tests/fixtures/gt/test-wsi.coordinates.npz
+          test -f tests/fixtures/gt/test-wsi.coordinates.meta.json
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

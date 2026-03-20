@@ -182,10 +182,10 @@ def _save_sampling_coordinates(
         selection_strategy=selection_strategy,
         output_mode=output_mode,
     )
-    annotation_dir = Path(cfg.output_dir, "coordinates", annotation)
+    annotation_dir = Path(cfg.output_dir, "tiles", annotation)
     annotation_dir.mkdir(parents=True, exist_ok=True)
     return save_tiling_result(
-        result, output_dir=cfg.output_dir, coordinates_dir=annotation_dir
+        result, output_dir=cfg.output_dir, tiles_dir=annotation_dir
     )
 
 
@@ -307,11 +307,11 @@ def process_slide(
                     "mask_path": str(mask_path) if mask_path is not None else None,
                     "sampling_status": "success",
                     "num_tiles": len(coordinates),
-                    "tiles_npz_path": (
-                        str(artifacts.tiles_npz_path) if artifacts is not None else np.nan
+                    "coordinates_npz_path": (
+                        str(artifacts.coordinates_npz_path) if artifacts is not None else np.nan
                     ),
-                    "tiles_meta_path": (
-                        str(artifacts.tiles_meta_path)
+                    "coordinates_meta_path": (
+                        str(artifacts.coordinates_meta_path)
                         if artifacts is not None
                         else np.nan
                     ),
@@ -338,8 +338,8 @@ def process_slide(
                     "mask_path": str(mask_path) if mask_path is not None else None,
                     "sampling_status": "failed",
                     "num_tiles": 0,
-                    "tiles_npz_path": np.nan,
-                    "tiles_meta_path": np.nan,
+                    "coordinates_npz_path": np.nan,
+                    "coordinates_meta_path": np.nan,
                     "config_hash": np.nan,
                     "error": str(e),
                     "traceback": str(traceback.format_exc()),
@@ -366,8 +366,8 @@ def _build_sampling_process_rows(
                     ),
                     "sampling_status": "tbp",
                     "num_tiles": 0,
-                    "tiles_npz_path": np.nan,
-                    "tiles_meta_path": np.nan,
+                    "coordinates_npz_path": np.nan,
+                    "coordinates_meta_path": np.nan,
                     "config_hash": np.nan,
                     "error": np.nan,
                     "traceback": np.nan,
@@ -390,8 +390,8 @@ def _validate_sampling_artifact_row(
     num_tiles = int(row.get("num_tiles", 0))
     if num_tiles == 0:
         return
-    npz_path = Path(str(row["tiles_npz_path"]))
-    meta_path = Path(str(row["tiles_meta_path"]))
+    npz_path = Path(str(row["coordinates_npz_path"]))
+    meta_path = Path(str(row["coordinates_meta_path"]))
     result = load_tiling_result(npz_path, meta_path)
     if result.sample_id != whole_slide.sample_id:
         raise ValueError("sampling sample_id mismatch")
@@ -435,7 +435,7 @@ def main(args):
                 output_dir=str(output_dir),
                 num_workers=int(cfg.speed.num_workers),
                 resume=bool(cfg.resume),
-                read_tiles_from=None,
+                read_coordinates_from=None,
             )
 
             process_list = output_dir / "process_list.csv"
@@ -450,8 +450,8 @@ def main(args):
                         "mask_path",
                         "sampling_status",
                         "num_tiles",
-                        "tiles_npz_path",
-                        "tiles_meta_path",
+                        "coordinates_npz_path",
+                        "coordinates_meta_path",
                         "config_hash",
                         "error",
                         "traceback",
@@ -475,8 +475,8 @@ def main(args):
                         "mask_path",
                         "sampling_status",
                         "num_tiles",
-                        "tiles_npz_path",
-                        "tiles_meta_path",
+                        "coordinates_npz_path",
+                        "coordinates_meta_path",
                         "config_hash",
                         "error",
                         "traceback",
@@ -523,8 +523,8 @@ def main(args):
                     cfg, slide_count=total
                 )
 
-                coordinates_dir = output_dir / "coordinates"
-                coordinates_dir.mkdir(exist_ok=True, parents=True)
+                tiles_dir = output_dir / "tiles"
+                tiles_dir.mkdir(exist_ok=True, parents=True)
                 mask_preview_dir = None
                 sampling_preview_dir = None
                 if cfg.save_previews:
