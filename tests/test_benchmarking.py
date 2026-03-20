@@ -1,0 +1,139 @@
+from pathlib import Path
+
+import numpy as np
+
+from hs2p.api import TilingResult
+from hs2p.benchmarking import (
+    TileReadPlan,
+    build_read_plans,
+    group_read_plans_by_read_size,
+    iter_tiles_from_region,
+    limit_tiling_result,
+)
+
+
+def _make_grid_result(
+    *,
+    columns: int,
+    rows: int,
+    tile_size_px: int,
+    step_px: int | None = None,
+) -> TilingResult:
+    if step_px is None:
+        step_px = tile_size_px
+    x_coords: list[int] = []
+    y_coords: list[int] = []
+    for x_idx in range(columns):
+        for y_idx in range(rows):
+            x_coords.append(x_idx * step_px)
+            y_coords.append(y_idx * step_px)
+    return TilingResult(
+        sample_id="bench-slide",
+        image_path=Path("/tmp/bench-slide.svs"),
+        mask_path=None,
+        backend="openslide",
+        x=np.asarray(x_coords, dtype=np.int64),
+        y=np.asarray(y_coords, dtype=np.int64),
+        tile_index=np.arange(columns * rows, dtype=np.int32),
+        target_spacing_um=0.5,
+        target_tile_size_px=tile_size_px,
+        read_level=0,
+        read_spacing_um=0.5,
+        read_tile_size_px=tile_size_px,
+        tile_size_lv0=tile_size_px,
+        overlap=0.0 if step_px == tile_size_px else 1.0 - (step_px / tile_size_px),
+        tissue_threshold=0.1,
+        num_tiles=columns * rows,
+        config_hash="bench-hash",
+        read_step_px=step_px,
+        step_px_lv0=step_px,
+    )
+
+
+def _make_grouped_region(*, block_size: int, tile_size_px: int, step_px: int) -> np.ndarray:
+    region_size = tile_size_px + (block_size - 1) * step_px
+    region = np.zeros((region_size, region_size, 3), dtype=np.uint8)
+    for x_idx in range(block_size):
+        for y_idx in range(block_size):
+            tile_value = x_idx * block_size + y_idx + 1
+            x0 = x_idx * step_px
+            y0 = y_idx * step_px
+            region[y0 : y0 + tile_size_px, x0 : x0 + tile_size_px] = tile_value
+    return region
+
+
+def test_build_read_plans_without_supertiles_uses_one_plan_per_tile():
+    result = _make_grid_result(columns=3, rows=1, tile_size_px=32)
+
+    plans = build_read_plans(result, use_supertiles=False)
+
+    assert plans == [
+        TileReadPlan(x=0, y=0, read_size_px=32, block_size=1),
+        TileReadPlan(x=32, y=0, read_size_px=32, block_size=1),
+        TileReadPlan(x=64, y=0, read_size_px=32, block_size=1),
+    ]
+
+
+def test_build_read_plans_with_supertiles_prefers_dense_8x8_blocks():
+    result = _make_grid_result(columns=8, rows=8, tile_size_px=32)
+
+    plans = build_read_plans(result, use_supertiles=True)
+
+    assert plans == [TileReadPlan(x=0, y=0, read_size_px=256, block_size=8)]
+
+
+def test_build_read_plans_with_supertiles_uses_4x4_when_8x8_is_not_available():
+    result = _make_grid_result(columns=4, rows=4, tile_size_px=32)
+
+    plans = build_read_plans(result, use_supertiles=True)
+
+    assert plans == [TileReadPlan(x=0, y=0, read_size_px=128, block_size=4)]
+
+
+def test_group_read_plans_by_read_size_preserves_first_seen_order():
+    plans = [
+        TileReadPlan(x=0, y=0, read_size_px=256, block_size=8),
+        TileReadPlan(x=512, y=0, read_size_px=32, block_size=1),
+        TileReadPlan(x=768, y=0, read_size_px=256, block_size=8),
+    ]
+
+    grouped = group_read_plans_by_read_size(plans)
+
+    assert list(grouped) == [256, 32]
+    assert grouped[256] == [plans[0], plans[2]]
+    assert grouped[32] == [plans[1]]
+
+
+def test_iter_tiles_from_region_slices_in_x_major_order():
+    region = _make_grouped_region(block_size=4, tile_size_px=8, step_px=8)
+    plan = TileReadPlan(x=0, y=0, read_size_px=32, block_size=4)
+
+    tiles = list(iter_tiles_from_region(region, plan, tile_size_px=8, read_step_px=8))
+
+    assert len(tiles) == 16
+    assert int(tiles[0][0, 0, 0]) == 1
+    assert int(tiles[1][0, 0, 0]) == 2
+    assert int(tiles[4][0, 0, 0]) == 5
+    assert int(tiles[-1][0, 0, 0]) == 16
+
+
+def test_iter_tiles_from_region_uses_stride_for_overlap_reads():
+    region = _make_grouped_region(block_size=4, tile_size_px=12, step_px=8)
+    plan = TileReadPlan(x=0, y=0, read_size_px=36, block_size=4)
+
+    tiles = list(iter_tiles_from_region(region, plan, tile_size_px=12, read_step_px=8))
+
+    assert len(tiles) == 16
+    assert tiles[0].shape == (12, 12, 3)
+    assert int(tiles[1][0, 0, 0]) == 2
+
+
+def test_limit_tiling_result_trims_arrays_and_reindexes_tiles():
+    result = _make_grid_result(columns=3, rows=2, tile_size_px=16)
+
+    limited = limit_tiling_result(result, max_tiles=4)
+
+    assert limited.num_tiles == 4
+    np.testing.assert_array_equal(limited.x, np.array([0, 0, 16, 16], dtype=np.int64))
+    np.testing.assert_array_equal(limited.y, np.array([0, 16, 0, 16], dtype=np.int64))
+    np.testing.assert_array_equal(limited.tile_index, np.array([0, 1, 2, 3], dtype=np.int32))

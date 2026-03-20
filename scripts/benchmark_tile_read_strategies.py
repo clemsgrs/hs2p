@@ -1,0 +1,383 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import csv
+import importlib
+import statistics
+import sys
+import time
+from pathlib import Path
+from typing import Any
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+import numpy as np
+
+
+MODE_CONFIG = {
+    "regular_wsd": {
+        "reader": "wsd",
+        "use_supertiles": False,
+        "description": "wholeslidedata tile-by-tile reads",
+    },
+    "supertiles_wsd": {
+        "reader": "wsd",
+        "use_supertiles": True,
+        "description": "wholeslidedata dense 8x8/4x4 supertile reads",
+    },
+    "cucim_batch_regular": {
+        "reader": "cucim_batch",
+        "use_supertiles": False,
+        "description": "CuCIM batched regular tile reads",
+    },
+    "cucim_batch_supertiles": {
+        "reader": "cucim_batch",
+        "use_supertiles": True,
+        "description": "CuCIM batched dense 8x8/4x4 supertile reads",
+    },
+}
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Benchmark tile-read strategies on an existing hs2p tiling artifact."
+        ),
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--coordinates-npz",
+        type=Path,
+        required=True,
+        help="Path to {sample_id}.coordinates.npz.",
+    )
+    parser.add_argument(
+        "--coordinates-meta",
+        type=Path,
+        required=True,
+        help="Path to {sample_id}.coordinates.meta.json.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        required=True,
+        help="Directory where benchmark CSV outputs are written.",
+    )
+    parser.add_argument(
+        "--modes",
+        nargs="+",
+        choices=tuple(MODE_CONFIG),
+        default=list(MODE_CONFIG),
+        help="Read strategies to benchmark.",
+    )
+    parser.add_argument(
+        "--repeat",
+        type=int,
+        default=3,
+        help="Number of timed repetitions per mode.",
+    )
+    parser.add_argument(
+        "--warmup",
+        type=int,
+        default=1,
+        help="Untimed warmup repetitions per mode.",
+    )
+    parser.add_argument(
+        "--max-tiles",
+        type=int,
+        default=0,
+        help="Use only the first N tiles from the artifact. Set to 0 to use all tiles.",
+    )
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=4,
+        help="Worker count passed to CuCIM batch reads.",
+    )
+    return parser.parse_args()
+
+
+def write_csv(rows: list[dict[str, Any]], path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not rows:
+        raise ValueError(f"No rows available for CSV output: {path}")
+    fieldnames = list(rows[0].keys())
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    return path
+
+
+def summarize_results(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(str(row["mode"]), []).append(row)
+
+    summary_rows: list[dict[str, Any]] = []
+    for mode, mode_rows in grouped.items():
+        elapsed = [float(row["elapsed_s"]) for row in mode_rows]
+        tiles_per_second = [float(row["tiles_per_second"]) for row in mode_rows]
+        megapixels_per_second = [
+            float(row["megapixels_per_second"]) for row in mode_rows
+        ]
+        summary_rows.append(
+            {
+                "mode": mode,
+                "description": mode_rows[0]["description"],
+                "repeat": len(mode_rows),
+                "tiles": int(mode_rows[0]["tiles"]),
+                "regions": int(mode_rows[0]["regions"]),
+                "regions_per_tile": float(mode_rows[0]["regions_per_tile"]),
+                "mean_elapsed_s": round(statistics.mean(elapsed), 6),
+                "std_elapsed_s": round(
+                    statistics.pstdev(elapsed) if len(elapsed) > 1 else 0.0,
+                    6,
+                ),
+                "mean_tiles_per_second": round(statistics.mean(tiles_per_second), 2),
+                "std_tiles_per_second": round(
+                    statistics.pstdev(tiles_per_second)
+                    if len(tiles_per_second) > 1
+                    else 0.0,
+                    2,
+                ),
+                "mean_megapixels_per_second": round(
+                    statistics.mean(megapixels_per_second), 2
+                ),
+            }
+        )
+    return summary_rows
+
+
+def _touch_tile(tile: np.ndarray) -> int:
+    arr = np.asarray(tile)
+    return int(arr[0, 0].sum()) + int(arr[-1, -1].sum())
+
+
+def _consume_region_tiles(
+    region: np.ndarray,
+    *,
+    block_size: int,
+    tile_size_px: int,
+    read_step_px: int,
+) -> tuple[int, int]:
+    from hs2p.benchmarking import TileReadPlan, iter_tiles_from_region
+
+    checksum = 0
+    tile_count = 0
+    for tile in iter_tiles_from_region(
+        region,
+        plan=TileReadPlan(x=0, y=0, read_size_px=int(region.shape[0]), block_size=block_size),
+        tile_size_px=tile_size_px,
+        read_step_px=read_step_px,
+    ):
+        checksum += _touch_tile(tile)
+        tile_count += 1
+    return checksum, tile_count
+
+
+def benchmark_wsd_mode(
+    *,
+    result,
+    plans,
+    read_step_px: int,
+) -> tuple[float, int, int]:
+    import wholeslidedata as wsd
+
+    wsi = wsd.WholeSlideImage(result.image_path, backend=result.backend)
+    tile_size_px = int(result.read_tile_size_px)
+    checksum = 0
+    tile_count = 0
+    start = time.perf_counter()
+    for plan in plans:
+        region = wsi.get_patch(
+            int(plan.x),
+            int(plan.y),
+            int(plan.read_size_px),
+            int(plan.read_size_px),
+            spacing=float(result.read_spacing_um),
+            center=False,
+        )
+        region_checksum, region_tiles = _consume_region_tiles(
+            np.asarray(region),
+            block_size=int(plan.block_size),
+            tile_size_px=tile_size_px,
+            read_step_px=read_step_px,
+        )
+        checksum += region_checksum
+        tile_count += region_tiles
+    elapsed = time.perf_counter() - start
+    return elapsed, tile_count, checksum
+
+
+def _require_cucim():
+    try:
+        return importlib.import_module("cucim")
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "CuCIM is required for the requested benchmark modes but is not installed."
+        ) from exc
+
+
+def benchmark_cucim_batch_mode(
+    *,
+    result,
+    plans,
+    read_step_px: int,
+    num_workers: int,
+) -> tuple[float, int, int]:
+    from hs2p.benchmarking import group_read_plans_by_read_size
+
+    cucim = _require_cucim()
+    cu_image = cucim.CuImage(str(result.image_path))
+    tile_size_px = int(result.read_tile_size_px)
+    checksum = 0
+    tile_count = 0
+    start = time.perf_counter()
+    for read_size_px, size_plans in group_read_plans_by_read_size(plans).items():
+        locations = [(int(plan.x), int(plan.y)) for plan in size_plans]
+        regions = cu_image.read_region(
+            locations,
+            (int(read_size_px), int(read_size_px)),
+            level=int(result.read_level),
+            num_workers=max(1, int(num_workers)),
+        )
+        for plan, region in zip(size_plans, regions):
+            region_checksum, region_tiles = _consume_region_tiles(
+                np.asarray(region),
+                block_size=int(plan.block_size),
+                tile_size_px=tile_size_px,
+                read_step_px=read_step_px,
+            )
+            checksum += region_checksum
+            tile_count += region_tiles
+    elapsed = time.perf_counter() - start
+    return elapsed, tile_count, checksum
+
+
+def run_mode(
+    *,
+    mode: str,
+    result,
+    repeat_index: int,
+    read_step_px: int,
+    num_workers: int,
+) -> dict[str, Any]:
+    from hs2p.benchmarking import build_read_plans
+
+    mode_cfg = MODE_CONFIG[mode]
+    plans = build_read_plans(result, use_supertiles=mode_cfg["use_supertiles"])
+    pixels_read = sum(int(plan.read_size_px) * int(plan.read_size_px) for plan in plans)
+
+    if mode_cfg["reader"] == "wsd":
+        elapsed, tile_count, checksum = benchmark_wsd_mode(
+            result=result,
+            plans=plans,
+            read_step_px=read_step_px,
+        )
+    elif mode_cfg["reader"] == "cucim_batch":
+        elapsed, tile_count, checksum = benchmark_cucim_batch_mode(
+            result=result,
+            plans=plans,
+            read_step_px=read_step_px,
+            num_workers=num_workers,
+        )
+    else:
+        raise ValueError(f"Unsupported mode: {mode}")
+
+    return {
+        "sample_id": result.sample_id,
+        "image_path": str(result.image_path),
+        "mode": mode,
+        "description": mode_cfg["description"],
+        "repeat_index": repeat_index,
+        "tiles": tile_count,
+        "regions": len(plans),
+        "regions_per_tile": round(len(plans) / max(tile_count, 1), 6),
+        "read_level": int(result.read_level),
+        "read_tile_size_px": int(result.read_tile_size_px),
+        "read_step_px": int(read_step_px),
+        "step_px_lv0": int(result.step_px_lv0 or result.tile_size_lv0),
+        "elapsed_s": round(elapsed, 6),
+        "tiles_per_second": round(tile_count / elapsed if elapsed > 0 else 0.0, 2),
+        "megapixels_read": round(pixels_read / 1_000_000.0, 6),
+        "megapixels_per_second": round(
+            (pixels_read / 1_000_000.0) / elapsed if elapsed > 0 else 0.0,
+            2,
+        ),
+        "checksum": checksum,
+        "num_workers": int(num_workers),
+    }
+
+
+def print_result_row(row: dict[str, Any]) -> None:
+    print(
+        f"{row['mode']:<24} rep={int(row['repeat_index']) + 1} "
+        f"tiles={int(row['tiles']):>7,d} regions={int(row['regions']):>7,d} "
+        f"elapsed={float(row['elapsed_s']):>8.3f}s "
+        f"throughput={float(row['tiles_per_second']):>10,.0f} tiles/s",
+        flush=True,
+    )
+
+
+def main() -> int:
+    from hs2p.api import load_tiling_result
+    from hs2p.benchmarking import limit_tiling_result
+
+    args = parse_args()
+    result = load_tiling_result(args.coordinates_npz, args.coordinates_meta)
+    result = limit_tiling_result(result, max_tiles=int(args.max_tiles))
+    read_step_px = int(result.read_step_px or result.read_tile_size_px)
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+
+    total_runs = len(args.modes) * (int(args.warmup) + int(args.repeat))
+    run_counter = 0
+
+    if any(mode.startswith("cucim_") for mode in args.modes):
+        _require_cucim()
+
+    timed_rows: list[dict[str, Any]] = []
+    for mode in args.modes:
+        for warmup_idx in range(int(args.warmup)):
+            run_counter += 1
+            print(
+                f"[{run_counter}/{total_runs}] warmup {mode} ({warmup_idx + 1}/{args.warmup})",
+                flush=True,
+            )
+            run_mode(
+                mode=mode,
+                result=result,
+                repeat_index=warmup_idx,
+                read_step_px=read_step_px,
+                num_workers=int(args.num_workers),
+            )
+        for repeat_index in range(int(args.repeat)):
+            run_counter += 1
+            print(
+                f"[{run_counter}/{total_runs}] timed {mode} ({repeat_index + 1}/{args.repeat})",
+                flush=True,
+            )
+            row = run_mode(
+                mode=mode,
+                result=result,
+                repeat_index=repeat_index,
+                read_step_px=read_step_px,
+                num_workers=int(args.num_workers),
+            )
+            print_result_row(row)
+            timed_rows.append(row)
+
+    summary_rows = summarize_results(timed_rows)
+    runs_csv_path = write_csv(timed_rows, args.output_dir / "benchmark_runs.csv")
+    summary_csv_path = write_csv(summary_rows, args.output_dir / "benchmark_summary.csv")
+
+    print(f"\nWrote {runs_csv_path}", flush=True)
+    print(f"Wrote {summary_csv_path}", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
