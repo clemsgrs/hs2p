@@ -136,8 +136,8 @@ def summarize_results(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "description": mode_rows[0]["description"],
                 "repeat": len(mode_rows),
                 "tiles": int(mode_rows[0]["tiles"]),
-                "regions": int(mode_rows[0]["regions"]),
-                "regions_per_tile": float(mode_rows[0]["regions_per_tile"]),
+                "read_calls": int(mode_rows[0]["read_calls"]),
+                "tiles_per_read": float(mode_rows[0]["tiles_per_read"]),
                 "mean_elapsed_s": round(statistics.mean(elapsed), 6),
                 "std_elapsed_s": round(
                     statistics.pstdev(elapsed) if len(elapsed) > 1 else 0.0,
@@ -201,9 +201,9 @@ class BenchmarkProgressReporter:
         self._progress: Progress | None = None
         self._overall_task_id: int | None = None
         self._run_task_id: int | None = None
-        self._active_total_regions = 0
+        self._active_total_read_calls = 0
         self._active_total_tiles = 0
-        self._active_completed_regions = 0
+        self._active_completed_read_calls = 0
         self._active_completed_tiles = 0
         self._last_plain_update = 0.0
 
@@ -251,12 +251,12 @@ class BenchmarkProgressReporter:
         mode: str,
         iteration_index: int,
         iteration_total: int,
-        total_regions: int,
+        total_read_calls: int,
         total_tiles: int,
     ) -> None:
-        self._active_total_regions = max(1, int(total_regions))
+        self._active_total_read_calls = max(1, int(total_read_calls))
         self._active_total_tiles = max(1, int(total_tiles))
-        self._active_completed_regions = 0
+        self._active_completed_read_calls = 0
         self._active_completed_tiles = 0
         self._last_plain_update = 0.0
         description = (
@@ -272,24 +272,24 @@ class BenchmarkProgressReporter:
             )
             self._run_task_id = self._progress.add_task(
                 description,
-                total=self._active_total_regions,
+                total=self._active_total_read_calls,
                 completed=0,
                 tiles_status=f"0/{self._active_total_tiles:,}",
             )
             self._progress.refresh()
             return
-        self.console.print(
-            (
-                f"[{run_counter}/{self.total_runs}] {phase} {mode} "
-                f"({int(iteration_index) + 1}/{int(iteration_total)}) "
-                f"regions=0/{self._active_total_regions:,} "
-                f"tiles=0/{self._active_total_tiles:,}"
-            ),
-            highlight=False,
-        )
+            self.console.print(
+                (
+                    f"[{run_counter}/{self.total_runs}] {phase} {mode} "
+                    f"({int(iteration_index) + 1}/{int(iteration_total)}) "
+                    f"read_calls=0/{self._active_total_read_calls:,} "
+                    f"tiles=0/{self._active_total_tiles:,}"
+                ),
+                highlight=False,
+            )
 
     def advance(self, regions: int, tiles: int) -> None:
-        self._active_completed_regions += int(regions)
+        self._active_completed_read_calls += int(regions)
         self._active_completed_tiles += int(tiles)
         tiles_status = f"{self._active_completed_tiles:,}/{self._active_total_tiles:,}"
         if self._progress is not None and self._run_task_id is not None:
@@ -303,12 +303,12 @@ class BenchmarkProgressReporter:
         if (
             self._last_plain_update == 0.0
             or now - self._last_plain_update >= self.plain_update_interval_s
-            or self._active_completed_regions >= self._active_total_regions
+            or self._active_completed_read_calls >= self._active_total_read_calls
         ):
             self.console.print(
                 (
-                    f"  progress regions={self._active_completed_regions:,}/"
-                    f"{self._active_total_regions:,} "
+                    f"  progress read_calls={self._active_completed_read_calls:,}/"
+                    f"{self._active_total_read_calls:,} "
                     f"tiles={tiles_status}"
                 ),
                 highlight=False,
@@ -320,7 +320,7 @@ class BenchmarkProgressReporter:
             if self._run_task_id is not None:
                 self._progress.update(
                     self._run_task_id,
-                    completed=self._active_total_regions,
+                    completed=self._active_total_read_calls,
                     tiles_status=(
                         f"{self._active_total_tiles:,}/{self._active_total_tiles:,}"
                     ),
@@ -331,7 +331,8 @@ class BenchmarkProgressReporter:
         self.console.print(
             (
                 f"{row['mode']:<24} rep={int(row['repeat_index']) + 1} "
-                f"tiles={int(row['tiles']):>7,d} regions={int(row['regions']):>7,d} "
+                f"tiles={int(row['tiles']):>7,d} "
+                f"read_calls={int(row['read_calls']):>7,d} "
                 f"elapsed={float(row['elapsed_s']):>8.3f}s "
                 f"throughput={float(row['tiles_per_second']):>10,.0f} tiles/s"
             ),
@@ -464,8 +465,8 @@ def run_mode(
         "description": mode_cfg["description"],
         "repeat_index": repeat_index,
         "tiles": tile_count,
-        "regions": len(plans),
-        "regions_per_tile": round(len(plans) / max(tile_count, 1), 6),
+        "read_calls": len(plans),
+        "tiles_per_read": round(tile_count / max(len(plans), 1), 6),
         "read_level": int(result.read_level),
         "read_tile_size_px": int(result.read_tile_size_px),
         "read_step_px": int(read_step_px),
@@ -553,7 +554,7 @@ def main() -> int:
                     mode=mode,
                     iteration_index=warmup_idx,
                     iteration_total=int(args.warmup),
-                    total_regions=len(plans),
+                    total_read_calls=len(plans),
                     total_tiles=total_tiles,
                 )
                 run_mode(
@@ -573,7 +574,7 @@ def main() -> int:
                     mode=mode,
                     iteration_index=repeat_index,
                     iteration_total=int(args.repeat),
-                    total_regions=len(plans),
+                    total_read_calls=len(plans),
                     total_tiles=total_tiles,
                 )
                 row = run_mode(
