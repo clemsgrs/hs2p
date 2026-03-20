@@ -78,6 +78,7 @@ def main(args):
                 num_workers=cfg.speed.num_workers,
                 resume=cfg.resume,
                 read_coordinates_from=read_coordinates_from,
+                save_tiles=bool(getattr(cfg, "save_tiles", False)),
             )
             pd.read_csv(output_dir / "process_list.csv")
             progress.emit_progress(

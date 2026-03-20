@@ -37,6 +37,7 @@ from hs2p.configs import (
 from hs2p.utils import load_csv
 from hs2p.wsi import CoordinateExtractionResult
 import hs2p.wsi.wsi as wsi_mod
+import hs2p.api as api_mod
 
 
 @pytest.fixture
@@ -709,6 +710,84 @@ def test_tile_slides_assigns_inner_workers_when_batch_is_small(
 
     assert seen["pool_processes"] == 2
     assert seen["inner_workers"] == [4, 4]
+
+
+def test_compute_request_passes_inner_workers_to_tile_extraction(
+    monkeypatch, tmp_path: Path
+):
+    seen = {}
+
+    def _fake_compute_tiling_result(*args, **kwargs):
+        del args, kwargs
+        return TilingResult(
+            sample_id="slide-1",
+            image_path=Path("slide-1.svs"),
+            mask_path=None,
+            backend="cucim",
+            x=np.array([10], dtype=np.int64),
+            y=np.array([20], dtype=np.int64),
+            tile_index=np.array([0], dtype=np.int32),
+            target_spacing_um=0.5,
+            target_tile_size_px=224,
+            read_level=0,
+            read_spacing_um=0.5,
+            read_tile_size_px=224,
+            tile_size_lv0=224,
+            overlap=0.0,
+            tissue_threshold=0.1,
+            num_tiles=1,
+            config_hash="hash",
+        )
+
+    def _fake_extract_tiles_to_tar(result, output_dir, *, filter_params=None, num_workers=1, **kwargs):
+        del output_dir, filter_params, kwargs
+        seen["num_workers"] = num_workers
+        return tmp_path / "tiles" / "slide-1.tiles.tar", result
+
+    def _fake_save_tiling_result(result, output_dir, *, tiles_dir=None):
+        del tiles_dir
+        tiles_dir = Path(output_dir) / "tiles"
+        tiles_dir.mkdir(parents=True, exist_ok=True)
+        npz_path = tiles_dir / f"{result.sample_id}.coordinates.npz"
+        meta_path = tiles_dir / f"{result.sample_id}.coordinates.meta.json"
+        npz_path.write_bytes(b"npz")
+        meta_path.write_text("{}")
+        return TilingArtifacts(
+            sample_id=result.sample_id,
+            coordinates_npz_path=npz_path,
+            coordinates_meta_path=meta_path,
+            num_tiles=result.num_tiles,
+        )
+
+    request = api_mod._SlideComputeRequest(
+        input_index=0,
+        whole_slide=SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs")),
+        tiling=TilingConfig(
+            backend="cucim",
+            target_spacing_um=0.5,
+            target_tile_size_px=224,
+            tolerance=0.07,
+            overlap=0.0,
+            tissue_threshold=0.1,
+            drop_holes=False,
+            use_padding=True,
+        ),
+        segmentation=SegmentationConfig(64, 8, 255, 7, 4, False, True),
+        filtering=FilterConfig(224, 4, 2, 8, False, False, 220, 25, 0.9),
+        config_hash="hash",
+        mask_preview_path=None,
+        output_dir=tmp_path,
+        num_workers=6,
+        save_tiles=True,
+    )
+
+    monkeypatch.setattr(api_mod, "_compute_tiling_result", _fake_compute_tiling_result)
+    monkeypatch.setattr(api_mod, "extract_tiles_to_tar", _fake_extract_tiles_to_tar)
+    monkeypatch.setattr(api_mod, "save_tiling_result", _fake_save_tiling_result)
+    response = api_mod._compute_tiling_result_from_request(request)
+
+    assert response.ok
+    assert seen["num_workers"] == 6
 
 
 def test_save_tiling_result_rejects_invalid_tile_index(tmp_path: Path):

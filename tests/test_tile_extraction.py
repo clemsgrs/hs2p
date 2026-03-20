@@ -1,11 +1,13 @@
 """Tests for extract_tiles_to_tar() and the save_tiles pipeline option."""
 
 import io
+import types
 import tarfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 from PIL import Image
 
 from hs2p.api import TilingResult, extract_tiles_to_tar
@@ -227,6 +229,75 @@ class TestExtractTilesToTar:
             )
 
         assert out_result is result  # unchanged
+
+    def test_cucim_backend_uses_batched_read_region(self, monkeypatch, tmp_path: Path):
+        result = _make_tiling_result(num_tiles=2)
+        result.backend = "cucim"
+        result.read_level = 3
+        result.read_tile_size_px = 128
+
+        regions = [_solid_patch((10, 20, 30), size=128), _solid_patch((40, 50, 60), size=128)]
+        mock_cu_image = MagicMock()
+        mock_cu_image.read_region.return_value = iter(regions)
+        fake_cucim = types.SimpleNamespace(CuImage=MagicMock(return_value=mock_cu_image))
+
+        import hs2p.api as api_mod
+
+        monkeypatch.setattr(
+            api_mod.importlib,
+            "import_module",
+            lambda name: fake_cucim if name == "cucim" else None,
+        )
+
+        with patch("wholeslidedata.WholeSlideImage") as mock_wsd:
+            tar_path, out_result = extract_tiles_to_tar(
+                result,
+                output_dir=tmp_path,
+                num_workers=5,
+            )
+
+        assert tar_path.is_file()
+        assert out_result is result
+        fake_cucim.CuImage.assert_called_once_with(str(result.image_path))
+        mock_cu_image.read_region.assert_called_once_with(
+            [(0, 0), (256, 0)],
+            (128, 128),
+            level=3,
+            num_workers=5,
+        )
+        mock_wsd.assert_not_called()
+
+    def test_cucim_backend_falls_back_to_wsd_when_cucim_is_unavailable(
+        self, monkeypatch, tmp_path: Path
+    ):
+        result = _make_tiling_result(num_tiles=1)
+        result.backend = "cucim"
+
+        mock_wsi = MagicMock()
+        mock_wsi.get_patch.return_value = _solid_patch((70, 80, 90))
+
+        import hs2p.api as api_mod
+
+        def _import_module(name):
+            if name == "cucim":
+                raise ModuleNotFoundError("No module named 'cucim'")
+            raise AssertionError(f"unexpected module import: {name}")
+
+        monkeypatch.setattr(api_mod.importlib, "import_module", _import_module)
+
+        with pytest.warns(UserWarning, match="CuCIM is unavailable"), patch(
+            "wholeslidedata.WholeSlideImage",
+            return_value=mock_wsi,
+        ) as mock_wsd:
+            tar_path, out_result = extract_tiles_to_tar(
+                result,
+                output_dir=tmp_path,
+                num_workers=4,
+            )
+
+        assert tar_path.is_file()
+        assert out_result is result
+        mock_wsd.assert_called_once_with(result.image_path, backend="cucim")
 
 
 class TestNeedsPixelFiltering:

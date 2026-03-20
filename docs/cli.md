@@ -52,6 +52,16 @@ Run sampling:
 python -m hs2p.sampling --config-file /path/to/config.yaml
 ```
 
+Optional CuCIM install for faster tar export with `save_tiles: true` and
+`tiling.backend: cucim`:
+
+```bash
+pip install cucim-cu12
+```
+
+Use the CuCIM wheel that matches your CUDA runtime. Non-CuCIM backends continue to
+use the default sequential tile export path.
+
 ## Progress UX
 
 When stdout is an interactive terminal, `hs2p` uses `rich` to show live progress for both CLI entrypoints.
@@ -85,8 +95,10 @@ Detailed logs still go to `output_dir/logs/log.txt`, which is the best place to 
   - Annotation-specific sampling rules for `hs2p.sampling`
 - `save_previews`
   - Global switch for writing mask and tiling previews to disk
+- `save_tiles`
+  - Global switch for writing `tiles/{sample_id}.tiles.tar` alongside coordinate artifacts
 - `speed.num_workers`
-  - Parallelism for slide processing
+  - Parallelism for slide processing, and the per-slide worker budget reused by CuCIM batched tile extraction when `tiling.backend: cucim`
 
 ## Sampling-specific settings
 
@@ -119,6 +131,14 @@ The tissue percentage check itself (`check_coordinates`) is entirely in-memory â
 These filters are **disabled by default** and should stay off unless your dataset contains a meaningful fraction of pen marks, blank regions, or background tiles that tissue segmentation does not catch.
 
 When enabled, every candidate tile that passes the tissue mask check is read from the slide at full resolution and its pixel values inspected. This is the **only step in the tiling pipeline that reads actual tile pixel data**. For slides with large internal JPEG tiles (common in some scanner formats), each read triggers a full JPEG decode of the underlying tile block â€” which can be an order of magnitude slower than the rest of the pipeline per slide.
+
+### Saved tile export (`save_tiles`)
+
+When `save_tiles: true`, HS2P also writes a `tiles/{sample_id}.tiles.tar` archive with JPEG-encoded tile images.
+
+- For non-CuCIM backends, tar extraction uses the existing sequential reader.
+- For `tiling.backend: cucim`, tar extraction uses a CuCIM batch-read fast path and reuses the per-slide worker count from `speed.num_workers`.
+- Installing CuCIM is optional. If `backend: cucim` is selected but CuCIM is not installed, HS2P falls back to the sequential export path and emits a warning.
 
 ## Resume and precomputed artifacts
 

@@ -38,6 +38,7 @@ def _base_cfg(tmp_path: Path, csv_path: Path) -> SimpleNamespace:
         output_dir=str(tmp_path / "output"),
         resume=False,
         save_previews=False,
+        save_tiles=False,
         speed=SimpleNamespace(num_workers=1),
         tiling=SimpleNamespace(
             read_coordinates_from=None,
@@ -102,9 +103,11 @@ def test_tiling_main_smoke_uses_current_schema_and_manifest(
         num_workers,
         resume,
         read_coordinates_from,
+        save_tiles,
     ):
         del tiling, segmentation, filtering, preview, num_workers, resume, read_coordinates_from
         captured["whole_slides"] = whole_slides
+        captured["save_tiles"] = save_tiles
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         process_df = pd.DataFrame(
@@ -148,6 +151,7 @@ def test_tiling_main_smoke_uses_current_schema_and_manifest(
             mask_path=Path("slide-1-mask.png"),
         )
     ]
+    assert captured["save_tiles"] is False
     process_df = pd.read_csv(Path(cfg.output_dir) / "process_list.csv")
     assert list(process_df.columns) == [
         "sample_id",
