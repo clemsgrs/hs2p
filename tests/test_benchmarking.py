@@ -1,3 +1,4 @@
+import importlib.util
 from pathlib import Path
 
 import numpy as np
@@ -60,6 +61,22 @@ def _make_grouped_region(*, block_size: int, tile_size_px: int, step_px: int) ->
             y0 = y_idx * step_px
             region[y0 : y0 + tile_size_px, x0 : x0 + tile_size_px] = tile_value
     return region
+
+
+def _load_benchmark_script_module():
+    script_path = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "benchmark_tile_read_strategies.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "benchmark_tile_read_strategies_script",
+        script_path,
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_build_read_plans_without_supertiles_uses_one_plan_per_tile():
@@ -137,3 +154,41 @@ def test_limit_tiling_result_trims_arrays_and_reindexes_tiles():
     np.testing.assert_array_equal(limited.x, np.array([0, 0, 16, 16], dtype=np.int64))
     np.testing.assert_array_equal(limited.y, np.array([0, 16, 0, 16], dtype=np.int64))
     np.testing.assert_array_equal(limited.tile_index, np.array([0, 1, 2, 3], dtype=np.int32))
+
+
+def test_load_single_slide_result_from_config_builds_fresh_tiling_result(tmp_path: Path):
+    module = _load_benchmark_script_module()
+    fixture_dir = Path(__file__).resolve().parent / "fixtures" / "input"
+    csv_path = tmp_path / "slides.csv"
+    csv_path.write_text(
+        "sample_id,image_path,mask_path\n"
+        f"test-wsi,{fixture_dir / 'test-wsi.tif'},{fixture_dir / 'test-mask.tif'}\n"
+    )
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        f"csv: {csv_path}\n"
+        f"output_dir: {tmp_path / 'output'}\n"
+        "save_previews: false\n"
+        "save_tiles: false\n"
+        "resume: false\n"
+        "tiling:\n"
+        "  backend: asap\n"
+        "  params:\n"
+        "    target_spacing_um: 0.5\n"
+        "    target_tile_size_px: 224\n"
+        "    tolerance: 0.05\n"
+        "    overlap: 0.0\n"
+        "    tissue_threshold: 0.1\n"
+        "    drop_holes: false\n"
+        "    use_padding: true\n"
+    )
+
+    result = module.load_single_slide_result_from_config(
+        config_file=config_path,
+        num_workers=1,
+    )
+
+    assert result.sample_id == "test-wsi"
+    assert result.read_step_px > 0
+    assert result.step_px_lv0 > 0
+    assert result.num_tiles > 0

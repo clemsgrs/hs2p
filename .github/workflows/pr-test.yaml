@@ -55,7 +55,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Run revamped tests in container
+      - name: Run default fast tests in container
         run: |
           set -euo pipefail
           docker run --rm \
@@ -63,3 +63,12 @@ jobs:
             -w /workspace \
             hs2p:${{ github.sha }} \
             bash -lc "python -m pip install --no-cache-dir pytest pytest-cov && MPLCONFIGDIR=/tmp/mpl python -m pytest -q tests"
+
+      - name: Run fixture integration regressions in container
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/workspace" \
+            -w /workspace \
+            hs2p:${{ github.sha }} \
+            bash -lc "python -m pip install --no-cache-dir pytest pytest-cov && MPLCONFIGDIR=/tmp/mpl python -m pytest -q -m integration tests/test_fixture_artifacts_regression.py tests/test_real_fixture_smoke_regression.py"

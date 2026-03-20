@@ -44,21 +44,15 @@ MODE_CONFIG = {
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Benchmark tile-read strategies on an existing hs2p tiling artifact."
+            "Benchmark tile-read strategies from a fresh tiling result generated from an hs2p config file."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "--coordinates-npz",
+        "--config-file",
         type=Path,
         required=True,
-        help="Path to {sample_id}.coordinates.npz.",
-    )
-    parser.add_argument(
-        "--coordinates-meta",
-        type=Path,
-        required=True,
-        help="Path to {sample_id}.coordinates.meta.json.",
+        help="Path to an hs2p config file whose CSV contains exactly one slide.",
     )
     parser.add_argument(
         "--output-dir",
@@ -323,14 +317,49 @@ def print_result_row(row: dict[str, Any]) -> None:
     )
 
 
+def load_single_slide_result_from_config(
+    *,
+    config_file: Path,
+    num_workers: int,
+):
+    from hs2p.api import tile_slide
+    from hs2p.configs.resolvers import (
+        resolve_filter_config,
+        resolve_segmentation_config,
+        resolve_tiling_config,
+    )
+    from hs2p.utils import load_csv
+    from hs2p.utils.config import get_cfg_from_file
+
+    cfg = get_cfg_from_file(config_file)
+    whole_slides = load_csv(cfg)
+    if len(whole_slides) != 1:
+        raise ValueError(
+            f"Benchmark config must resolve to exactly one slide, got {len(whole_slides)}"
+        )
+    tiling = resolve_tiling_config(cfg)
+    segmentation = resolve_segmentation_config(cfg)
+    filtering = resolve_filter_config(cfg)
+    result = tile_slide(
+        whole_slide=whole_slides[0],
+        tiling=tiling,
+        segmentation=segmentation,
+        filtering=filtering,
+        num_workers=int(num_workers),
+    )
+    return result
+
+
 def main() -> int:
-    from hs2p.api import load_tiling_result
     from hs2p.benchmarking import limit_tiling_result
 
     args = parse_args()
-    result = load_tiling_result(args.coordinates_npz, args.coordinates_meta)
+    result = load_single_slide_result_from_config(
+        config_file=args.config_file,
+        num_workers=int(args.num_workers),
+    )
     result = limit_tiling_result(result, max_tiles=int(args.max_tiles))
-    read_step_px = int(result.read_step_px or result.read_tile_size_px)
+    read_step_px = int(result.read_step_px)
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     total_runs = len(args.modes) * (int(args.warmup) + int(args.repeat))
