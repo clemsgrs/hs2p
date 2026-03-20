@@ -81,8 +81,8 @@ result = tile_slide(
 
 artifacts = save_tiling_result(result, output_dir=Path("output"))
 
-print(artifacts.tiles_npz_path)   # output/coordinates/slide-1.tiles.npz ; more info in docs/artifacts.md
-print(artifacts.tiles_meta_path)  # output/coordinates/slide-1.tiles.meta.json ; more info in docs/artifacts.md
+print(artifacts.coordinates_npz_path)   # output/tiles/slide-1.coordinates.npz ; more info in docs/artifacts.md
+print(artifacts.coordinates_meta_path)  # output/tiles/slide-1.coordinates.meta.json ; more info in docs/artifacts.md
 
 tiling_preview_path = write_tiling_preview(
     result=result,
@@ -155,8 +155,8 @@ More CLI details: [docs/cli.md](docs/cli.md)
 
 `hs2p` writes explicit named artifacts rather than anonymous coordinate dumps.
 
-- Tiling writes `coordinates/{sample_id}.tiles.npz` and `coordinates/{sample_id}.tiles.meta.json`
-- Sampling writes the same pair under `coordinates/<annotation>/`
+- Tiling writes `tiles/{sample_id}.coordinates.npz` and `tiles/{sample_id}.coordinates.meta.json`
+- Sampling writes the same pair under `tiles/<annotation>/`
 - Batch runs also write `process_list.csv`
 - Saved coordinate arrays use a deterministic column-major order: numeric `x` first, then numeric `y` within each shared `x`
 

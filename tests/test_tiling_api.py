@@ -329,14 +329,14 @@ def test_save_tiling_result_writes_expected_npz_and_json(tmp_path: Path):
 
     assert artifacts == TilingArtifacts(
         sample_id="slide-2",
-        tiles_npz_path=tmp_path / "coordinates" / "slide-2.tiles.npz",
-        tiles_meta_path=tmp_path / "coordinates" / "slide-2.tiles.meta.json",
+        coordinates_npz_path=tmp_path / "tiles" / "slide-2.coordinates.npz",
+        coordinates_meta_path=tmp_path / "tiles" / "slide-2.coordinates.meta.json",
         num_tiles=2,
         mask_preview_path=None,
         tiling_preview_path=None,
     )
 
-    tiles = np.load(artifacts.tiles_npz_path, allow_pickle=False)
+    tiles = np.load(artifacts.coordinates_npz_path, allow_pickle=False)
     assert set(tiles.files) == {"tile_index", "x", "y", "tissue_fraction"}
     np.testing.assert_array_equal(tiles["tile_index"], np.array([0, 1], dtype=np.int32))
     np.testing.assert_array_equal(tiles["x"], np.array([10, 30], dtype=np.int64))
@@ -346,7 +346,7 @@ def test_save_tiling_result_writes_expected_npz_and_json(tmp_path: Path):
         np.array([0.3, 0.7], dtype=np.float32),
     )
 
-    meta = json.loads(artifacts.tiles_meta_path.read_text())
+    meta = json.loads(artifacts.coordinates_meta_path.read_text())
     assert set(meta) == {
         "backend",
         "config_hash",
@@ -404,7 +404,7 @@ def test_save_and_load_tiling_result_round_trip(tmp_path: Path):
     )
 
     artifacts = save_tiling_result(result, output_dir=tmp_path)
-    loaded = load_tiling_result(artifacts.tiles_npz_path, artifacts.tiles_meta_path)
+    loaded = load_tiling_result(artifacts.coordinates_npz_path, artifacts.coordinates_meta_path)
 
     assert loaded.sample_id == result.sample_id
     assert loaded.image_path == result.image_path
@@ -490,18 +490,18 @@ def test_tile_slides_defers_preview_writes_until_after_next_slide_compute(
             config_hash="hash",
         )
 
-    def _fake_save_tiling_result(result, output_dir, coordinates_dir=None):
-        del coordinates_dir
-        coordinates_dir = Path(output_dir) / "coordinates"
-        coordinates_dir.mkdir(parents=True, exist_ok=True)
-        npz_path = coordinates_dir / f"{result.sample_id}.tiles.npz"
-        meta_path = coordinates_dir / f"{result.sample_id}.tiles.meta.json"
+    def _fake_save_tiling_result(result, output_dir, tiles_dir=None):
+        del tiles_dir
+        tiles_dir = Path(output_dir) / "tiles"
+        tiles_dir.mkdir(parents=True, exist_ok=True)
+        npz_path = tiles_dir / f"{result.sample_id}.coordinates.npz"
+        meta_path = tiles_dir / f"{result.sample_id}.coordinates.meta.json"
         npz_path.write_bytes(b"npz")
         meta_path.write_text("{}")
         return TilingArtifacts(
             sample_id=result.sample_id,
-            tiles_npz_path=npz_path,
-            tiles_meta_path=meta_path,
+            coordinates_npz_path=npz_path,
+            coordinates_meta_path=meta_path,
             num_tiles=result.num_tiles,
         )
 
@@ -569,10 +569,10 @@ def test_tile_slides_uses_slide_level_pool_and_preserves_input_order(
 
     def _fake_compute_and_save(request):
         seen["inner_workers"].append(request.num_workers)
-        coordinates_dir = Path(request.output_dir) / "coordinates"
-        coordinates_dir.mkdir(parents=True, exist_ok=True)
-        npz_path = coordinates_dir / f"{request.whole_slide.sample_id}.tiles.npz"
-        meta_path = coordinates_dir / f"{request.whole_slide.sample_id}.tiles.meta.json"
+        tiles_dir = Path(request.output_dir) / "tiles"
+        tiles_dir.mkdir(parents=True, exist_ok=True)
+        npz_path = tiles_dir / f"{request.whole_slide.sample_id}.coordinates.npz"
+        meta_path = tiles_dir / f"{request.whole_slide.sample_id}.coordinates.meta.json"
         npz_path.write_bytes(b"npz")
         meta_path.write_text("{}")
         return SimpleNamespace(
@@ -581,8 +581,8 @@ def test_tile_slides_uses_slide_level_pool_and_preserves_input_order(
             ok=True,
             artifact=TilingArtifacts(
                 sample_id=request.whole_slide.sample_id,
-                tiles_npz_path=npz_path,
-                tiles_meta_path=meta_path,
+                coordinates_npz_path=npz_path,
+                coordinates_meta_path=meta_path,
                 num_tiles=1,
             ),
             mask_preview_path=None,
@@ -653,10 +653,10 @@ def test_tile_slides_assigns_inner_workers_when_batch_is_small(
 
     def _fake_compute_and_save(request):
         seen["inner_workers"].append(request.num_workers)
-        coordinates_dir = Path(request.output_dir) / "coordinates"
-        coordinates_dir.mkdir(parents=True, exist_ok=True)
-        npz_path = coordinates_dir / f"{request.whole_slide.sample_id}.tiles.npz"
-        meta_path = coordinates_dir / f"{request.whole_slide.sample_id}.tiles.meta.json"
+        tiles_dir = Path(request.output_dir) / "tiles"
+        tiles_dir.mkdir(parents=True, exist_ok=True)
+        npz_path = tiles_dir / f"{request.whole_slide.sample_id}.coordinates.npz"
+        meta_path = tiles_dir / f"{request.whole_slide.sample_id}.coordinates.meta.json"
         npz_path.write_bytes(b"npz")
         meta_path.write_text("{}")
         return SimpleNamespace(
@@ -665,8 +665,8 @@ def test_tile_slides_assigns_inner_workers_when_batch_is_small(
             ok=True,
             artifact=TilingArtifacts(
                 sample_id=request.whole_slide.sample_id,
-                tiles_npz_path=npz_path,
-                tiles_meta_path=meta_path,
+                coordinates_npz_path=npz_path,
+                coordinates_meta_path=meta_path,
                 num_tiles=1,
             ),
             mask_preview_path=None,
@@ -767,7 +767,7 @@ def test_save_tiling_result_cleans_up_partial_outputs_when_metadata_write_fails(
     monkeypatch, tmp_path: Path
 ):
     result = _build_result(sample_id="slide-clean", image_path="slide-clean.svs")
-    coordinates_dir = tmp_path / "coordinates"
+    tiles_dir = tmp_path / "tiles"
 
     def _raise_json(*args, **kwargs):
         raise RuntimeError("json failure")
@@ -777,9 +777,9 @@ def test_save_tiling_result_cleans_up_partial_outputs_when_metadata_write_fails(
     with pytest.raises(RuntimeError, match="json failure"):
         save_tiling_result(result, output_dir=tmp_path)
 
-    assert not (coordinates_dir / "slide-clean.tiles.npz").exists()
-    assert not (coordinates_dir / "slide-clean.tiles.meta.json").exists()
-    assert list(coordinates_dir.glob("*")) == []
+    assert not (tiles_dir / "slide-clean.coordinates.npz").exists()
+    assert not (tiles_dir / "slide-clean.coordinates.meta.json").exists()
+    assert list(tiles_dir.glob("*")) == []
 
 
 def test_tile_slide_rejects_tissue_fraction_shape_mismatch(
@@ -817,8 +817,8 @@ def test_validate_tiling_artifacts_rejects_mismatched_hash(tmp_path: Path):
     with pytest.raises(ValueError, match="config_hash"):
         validate_tiling_artifacts(
             whole_slide=SlideSpec(sample_id="slide-3", image_path=Path("slide-3.svs")),
-            tiles_npz_path=artifacts.tiles_npz_path,
-            tiles_meta_path=artifacts.tiles_meta_path,
+            coordinates_npz_path=artifacts.coordinates_npz_path,
+            coordinates_meta_path=artifacts.coordinates_meta_path,
             expected_config_hash="different-hash",
         )
 
@@ -832,8 +832,8 @@ def test_validate_tiling_artifacts_rejects_mismatched_image_path(tmp_path: Path)
             whole_slide=SlideSpec(
                 sample_id="slide-4", image_path=Path("requested-slide.svs")
             ),
-            tiles_npz_path=artifacts.tiles_npz_path,
-            tiles_meta_path=artifacts.tiles_meta_path,
+            coordinates_npz_path=artifacts.coordinates_npz_path,
+            coordinates_meta_path=artifacts.coordinates_meta_path,
             expected_config_hash="actual-hash",
         )
 
@@ -853,8 +853,8 @@ def test_validate_tiling_artifacts_rejects_mismatched_mask_path(tmp_path: Path):
                 image_path=Path("slide-5.svs"),
                 mask_path=Path("requested-mask.png"),
             ),
-            tiles_npz_path=artifacts.tiles_npz_path,
-            tiles_meta_path=artifacts.tiles_meta_path,
+            coordinates_npz_path=artifacts.coordinates_npz_path,
+            coordinates_meta_path=artifacts.coordinates_meta_path,
             expected_config_hash="actual-hash",
         )
 
@@ -892,15 +892,15 @@ def test_tile_slides_writes_process_list_and_can_reuse_precomputed_tiles(
         segmentation=segmentation_config,
         filtering=filter_config,
         output_dir=tmp_path / "run",
-        read_tiles_from=precomputed_artifacts.tiles_npz_path.parent,
+        read_coordinates_from=precomputed_artifacts.coordinates_npz_path.parent,
         resume=False,
     )
 
     assert len(artifacts) == 1
     artifact = artifacts[0]
     assert isinstance(artifact, TilingArtifacts)
-    assert artifact.tiles_npz_path == precomputed_artifacts.tiles_npz_path
-    assert artifact.tiles_meta_path == precomputed_artifacts.tiles_meta_path
+    assert artifact.coordinates_npz_path == precomputed_artifacts.coordinates_npz_path
+    assert artifact.coordinates_meta_path == precomputed_artifacts.coordinates_meta_path
     assert artifact.num_tiles == 2
 
     process_df = pd.read_csv(tmp_path / "run" / "process_list.csv")
@@ -910,8 +910,9 @@ def test_tile_slides_writes_process_list_and_can_reuse_precomputed_tiles(
         "mask_path",
         "tiling_status",
         "num_tiles",
-        "tiles_npz_path",
-        "tiles_meta_path",
+        "coordinates_npz_path",
+        "coordinates_meta_path",
+        "tiles_tar_path",
         "error",
         "traceback",
     ]
@@ -921,8 +922,8 @@ def test_tile_slides_writes_process_list_and_can_reuse_precomputed_tiles(
     assert pd.isna(row["mask_path"])
     assert row["tiling_status"] == "success"
     assert row["num_tiles"] == 2
-    assert row["tiles_npz_path"] == str(precomputed_artifacts.tiles_npz_path)
-    assert row["tiles_meta_path"] == str(precomputed_artifacts.tiles_meta_path)
+    assert row["coordinates_npz_path"] == str(precomputed_artifacts.coordinates_npz_path)
+    assert row["coordinates_meta_path"] == str(precomputed_artifacts.coordinates_meta_path)
     assert pd.isna(row["error"])
     assert pd.isna(row["traceback"])
 
@@ -1042,8 +1043,8 @@ def test_tile_slides_resume_marks_stale_artifact_as_failed(
                 "mask_path": np.nan,
                 "tiling_status": "success",
                 "num_tiles": 1,
-                "tiles_npz_path": str(artifacts.tiles_npz_path),
-                "tiles_meta_path": str(artifacts.tiles_meta_path),
+                "coordinates_npz_path": str(artifacts.coordinates_npz_path),
+                "coordinates_meta_path": str(artifacts.coordinates_meta_path),
                 "error": np.nan,
                 "traceback": np.nan,
             }
@@ -1072,8 +1073,8 @@ def test_tile_slides_resume_marks_stale_artifact_as_failed(
     assert row["sample_id"] == "slide-6"
     assert row["tiling_status"] == "failed"
     assert row["num_tiles"] == 0
-    assert pd.isna(row["tiles_npz_path"])
-    assert pd.isna(row["tiles_meta_path"])
+    assert pd.isna(row["coordinates_npz_path"])
+    assert pd.isna(row["coordinates_meta_path"])
     assert "image_path mismatch" in row["error"]
 
 
@@ -1120,8 +1121,8 @@ def test_tile_slides_computes_resume_hash_once_per_batch(
                 "mask_path": np.nan,
                 "tiling_status": "success",
                 "num_tiles": 1,
-                "tiles_npz_path": "slide-1.tiles.npz",
-                "tiles_meta_path": "slide-1.tiles.meta.json",
+                "coordinates_npz_path": "slide-1.coordinates.npz",
+                "coordinates_meta_path": "slide-1.coordinates.meta.json",
                 "error": np.nan,
                 "traceback": np.nan,
             },
@@ -1131,8 +1132,8 @@ def test_tile_slides_computes_resume_hash_once_per_batch(
                 "mask_path": np.nan,
                 "tiling_status": "success",
                 "num_tiles": 1,
-                "tiles_npz_path": "slide-2.tiles.npz",
-                "tiles_meta_path": "slide-2.tiles.meta.json",
+                "coordinates_npz_path": "slide-2.coordinates.npz",
+                "coordinates_meta_path": "slide-2.coordinates.meta.json",
                 "error": np.nan,
                 "traceback": np.nan,
             },
@@ -1149,8 +1150,8 @@ def test_tile_slides_computes_resume_hash_once_per_batch(
         sample_id = kwargs["whole_slide"].sample_id
         return TilingArtifacts(
             sample_id=sample_id,
-            tiles_npz_path=Path(f"{sample_id}.tiles.npz"),
-            tiles_meta_path=Path(f"{sample_id}.tiles.meta.json"),
+            coordinates_npz_path=Path(f"{sample_id}.coordinates.npz"),
+            coordinates_meta_path=Path(f"{sample_id}.coordinates.meta.json"),
             num_tiles=1,
         )
 
@@ -1256,8 +1257,8 @@ def test_load_csv_rejects_duplicate_sample_id(tmp_path: Path):
 
 
 def test_load_tiling_result_rejects_missing_npz_keys(tmp_path: Path):
-    npz_path = tmp_path / "broken.tiles.npz"
-    meta_path = tmp_path / "broken.tiles.meta.json"
+    npz_path = tmp_path / "broken.coordinates.npz"
+    meta_path = tmp_path / "broken.coordinates.meta.json"
     np.savez(
         npz_path,
         tile_index=np.array([0], dtype=np.int32),
@@ -1289,8 +1290,8 @@ def test_load_tiling_result_rejects_missing_npz_keys(tmp_path: Path):
 
 
 def test_load_tiling_result_wraps_corrupt_npz_errors_with_path(tmp_path: Path):
-    npz_path = tmp_path / "corrupt.tiles.npz"
-    meta_path = tmp_path / "corrupt.tiles.meta.json"
+    npz_path = tmp_path / "corrupt.coordinates.npz"
+    meta_path = tmp_path / "corrupt.coordinates.meta.json"
     npz_path.write_bytes(b"not a valid npz")
     meta_path.write_text(
         json.dumps(
@@ -1314,14 +1315,14 @@ def test_load_tiling_result_wraps_corrupt_npz_errors_with_path(tmp_path: Path):
     )
 
     with pytest.raises(
-        ValueError, match=r"Unable to load tiling npz artifact .*corrupt\.tiles\.npz"
+        ValueError, match=r"Unable to load tiling npz artifact .*corrupt\.coordinates\.npz"
     ):
         load_tiling_result(npz_path, meta_path)
 
 
 def test_load_tiling_result_rejects_missing_meta_keys(tmp_path: Path):
-    npz_path = tmp_path / "broken-meta.tiles.npz"
-    meta_path = tmp_path / "broken-meta.tiles.meta.json"
+    npz_path = tmp_path / "broken-meta.coordinates.npz"
+    meta_path = tmp_path / "broken-meta.coordinates.meta.json"
     np.savez(
         npz_path,
         tile_index=np.array([0], dtype=np.int32),

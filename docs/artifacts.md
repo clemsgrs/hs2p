@@ -4,15 +4,15 @@ HS2P writes explicit named artifacts for both the Python API and the CLI.
 
 ## Coordinate artifact locations
 
-- Tiling writes one pair per slide under `coordinates/`
-- Sampling writes one pair per annotation under `coordinates/<annotation>/`
+- Tiling writes one pair per slide under `tiles/`
+- Sampling writes one pair per annotation under `tiles/<annotation>/`
 
 Each successful output produces:
 
-- `{sample_id}.tiles.npz`
-- `{sample_id}.tiles.meta.json`
+- `{sample_id}.coordinates.npz`
+- `{sample_id}.coordinates.meta.json`
 
-## `.tiles.npz`
+## `.coordinates.npz`
 
 - `tile_index`
   - Contiguous tile ids from `0` to `num_tiles - 1`
@@ -25,7 +25,7 @@ Each successful output produces:
 - `tissue_fraction`
   - Optional per-tile tissue coverage measured during extraction
 
-## `.tiles.meta.json`
+## `.coordinates.meta.json`
 
 - `sample_id`
   - Sample identifier that produced the artifact and names the files
@@ -69,8 +69,8 @@ Tiling columns:
 - `mask_path`
 - `tiling_status`
 - `num_tiles`
-- `tiles_npz_path`
-- `tiles_meta_path`
+- `coordinates_npz_path`
+- `coordinates_meta_path`
 - `error`
 - `traceback`
 

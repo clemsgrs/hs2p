@@ -28,7 +28,7 @@ The config dataclasses keep the main knobs explicit and fill secondary options f
 - `TilingResult`
   - In-memory tile coordinates plus read-level metadata for one slide
 - `TilingArtifacts`
-  - Paths to the saved `.tiles.npz` and `.tiles.meta.json` outputs
+  - Paths to the saved `.coordinates.npz` and `.coordinates.meta.json` outputs
   - Can also carry preview-image paths when batch QC is enabled in `tile_slides()`
 
 For field-by-field details, see the dataclass docstrings in [hs2p/api.py](../hs2p/api.py).
@@ -185,8 +185,8 @@ You can round-trip a saved result later:
 from hs2p import load_tiling_result
 
 loaded = load_tiling_result(
-    tiles_npz_path=artifacts.tiles_npz_path,
-    tiles_meta_path=artifacts.tiles_meta_path,
+    coordinates_npz_path=artifacts.coordinates_npz_path,
+    coordinates_meta_path=artifacts.coordinates_meta_path,
 )
 ```
 

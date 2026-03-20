@@ -359,7 +359,7 @@ def write_config(
         "save_previews": False,
         "seed": 0,
         "tiling": {
-            "read_tiles_from": None,
+            "read_coordinates_from": None,
             "backend": backend,
             "params": {
                 "target_spacing_um": target_spacing,

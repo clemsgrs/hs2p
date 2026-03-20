@@ -596,8 +596,8 @@ def test_sampling_main_defaults_inner_slide_workers_to_one(monkeypatch, tmp_path
                         ),
                         "sampling_status": "success",
                         "num_tiles": 0,
-                        "tiles_npz_path": np.nan,
-                        "tiles_meta_path": np.nan,
+                        "coordinates_npz_path": np.nan,
+                        "coordinates_meta_path": np.nan,
                         "config_hash": "hash",
                         "error": np.nan,
                         "traceback": np.nan,
@@ -718,8 +718,8 @@ def test_sampling_main_rejects_explicit_inner_slide_workers_override(
                         ),
                         "sampling_status": "success",
                         "num_tiles": 0,
-                        "tiles_npz_path": np.nan,
-                        "tiles_meta_path": np.nan,
+                        "coordinates_npz_path": np.nan,
+                        "coordinates_meta_path": np.nan,
                         "config_hash": "hash",
                         "error": np.nan,
                         "traceback": np.nan,
@@ -745,15 +745,15 @@ def test_save_sampling_coordinates_uses_annotation_threshold_and_sampling_mode_i
         ),
     )
 
-    def _fake_save_tiling_result(result, output_dir, coordinates_dir=None):
+    def _fake_save_tiling_result(result, output_dir, tiles_dir=None):
         captured["result"] = result
         captured["output_dir"] = output_dir
-        captured["coordinates_dir"] = coordinates_dir
+        captured["tiles_dir"] = tiles_dir
         return SimpleNamespace(
             sample_id=result.sample_id,
-            tiles_npz_path=Path(coordinates_dir) / f"{result.sample_id}.tiles.npz",
-            tiles_meta_path=Path(coordinates_dir)
-            / f"{result.sample_id}.tiles.meta.json",
+            coordinates_npz_path=Path(tiles_dir) / f"{result.sample_id}.coordinates.npz",
+            coordinates_meta_path=Path(tiles_dir)
+            / f"{result.sample_id}.coordinates.meta.json",
             num_tiles=result.num_tiles,
         )
 
@@ -826,7 +826,7 @@ def test_save_sampling_coordinates_uses_annotation_threshold_and_sampling_mode_i
         output_mode=sampling_mod.CoordinateOutputMode.PER_ANNOTATION,
         annotation="tumor",
     )
-    assert captured["coordinates_dir"] == tmp_path / "coordinates" / "tumor"
+    assert captured["tiles_dir"] == tmp_path / "tiles" / "tumor"
 
 
 def test_save_sampling_coordinates_writes_sampling_metadata_fields(tmp_path):
@@ -892,7 +892,7 @@ def test_save_sampling_coordinates_writes_sampling_metadata_fields(tmp_path):
         resolved_sampling_spec=resolved_sampling_spec,
     )
 
-    meta = json.loads(artifacts.tiles_meta_path.read_text())
+    meta = json.loads(artifacts.coordinates_meta_path.read_text())
     assert meta["annotation"] == "tumor"
     assert meta["selection_strategy"] == "joint_sampling"
     assert meta["output_mode"] == "per_annotation"

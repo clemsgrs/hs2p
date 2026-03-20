@@ -40,7 +40,7 @@ def _base_cfg(tmp_path: Path, csv_path: Path) -> SimpleNamespace:
         save_previews=False,
         speed=SimpleNamespace(num_workers=1),
         tiling=SimpleNamespace(
-            read_tiles_from=None,
+            read_coordinates_from=None,
             backend="asap",
             params=SimpleNamespace(
                 target_spacing_um=0.5,
@@ -101,9 +101,9 @@ def test_tiling_main_smoke_uses_current_schema_and_manifest(
         output_dir,
         num_workers,
         resume,
-        read_tiles_from,
+        read_coordinates_from,
     ):
-        del tiling, segmentation, filtering, preview, num_workers, resume, read_tiles_from
+        del tiling, segmentation, filtering, preview, num_workers, resume, read_coordinates_from
         captured["whole_slides"] = whole_slides
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -115,12 +115,13 @@ def test_tiling_main_smoke_uses_current_schema_and_manifest(
                     "mask_path": "slide-1-mask.png",
                     "tiling_status": "success",
                     "num_tiles": 2,
-                    "tiles_npz_path": str(
-                        output_dir / "coordinates" / "slide-1.tiles.npz"
+                    "coordinates_npz_path": str(
+                        output_dir / "tiles" / "slide-1.coordinates.npz"
                     ),
-                    "tiles_meta_path": str(
-                        output_dir / "coordinates" / "slide-1.tiles.meta.json"
+                    "coordinates_meta_path": str(
+                        output_dir / "tiles" / "slide-1.coordinates.meta.json"
                     ),
+                    "tiles_tar_path": np.nan,
                     "error": np.nan,
                     "traceback": np.nan,
                 }
@@ -130,8 +131,8 @@ def test_tiling_main_smoke_uses_current_schema_and_manifest(
         return [
             TilingArtifacts(
                 sample_id="slide-1",
-                tiles_npz_path=output_dir / "coordinates" / "slide-1.tiles.npz",
-                tiles_meta_path=output_dir / "coordinates" / "slide-1.tiles.meta.json",
+                coordinates_npz_path=output_dir / "tiles" / "slide-1.coordinates.npz",
+                coordinates_meta_path=output_dir / "tiles" / "slide-1.coordinates.meta.json",
                 num_tiles=2,
             )
         ]
@@ -154,8 +155,9 @@ def test_tiling_main_smoke_uses_current_schema_and_manifest(
         "mask_path",
         "tiling_status",
         "num_tiles",
-        "tiles_npz_path",
-        "tiles_meta_path",
+        "coordinates_npz_path",
+        "coordinates_meta_path",
+        "tiles_tar_path",
         "error",
         "traceback",
     ]
@@ -195,15 +197,15 @@ def test_sampling_main_smoke_uses_current_schema_and_manifest(
     monkeypatch.setattr(sampling_mod.mp, "Pool", _FakePool)
 
     def _fake_process_slide_wrapper(kwargs):
-        annotation_dir = Path(kwargs["cfg"].output_dir) / "coordinates" / "tumor"
+        annotation_dir = Path(kwargs["cfg"].output_dir) / "tiles" / "tumor"
         annotation_dir.mkdir(parents=True, exist_ok=True)
         np.savez(
-            annotation_dir / f"{kwargs['sample_id']}.tiles.npz",
+            annotation_dir / f"{kwargs['sample_id']}.coordinates.npz",
             tile_index=np.array([0], dtype=np.int32),
             x=np.array([10], dtype=np.int64),
             y=np.array([20], dtype=np.int64),
         )
-        meta_path = annotation_dir / f"{kwargs['sample_id']}.tiles.meta.json"
+        meta_path = annotation_dir / f"{kwargs['sample_id']}.coordinates.meta.json"
         meta_path.write_text(
             '{"sample_id":"slide-1","image_path":"slide-1.svs","mask_path":"slide-1-mask.png","backend":"asap","target_spacing_um":0.5,"target_tile_size_px":256,"read_level":0,"read_spacing_um":0.5,"read_tile_size_px":256,"tile_size_lv0":256,"overlap":0.0,"tissue_threshold":0.1,"num_tiles":1,"config_hash":"hash","annotation":"tumor","selection_strategy":"independent_sampling","output_mode":"per_annotation"}\n'
         )
@@ -217,8 +219,8 @@ def test_sampling_main_smoke_uses_current_schema_and_manifest(
                     "mask_path": "slide-1-mask.png",
                     "sampling_status": "success",
                     "num_tiles": 1,
-                    "tiles_npz_path": str(annotation_dir / f"{kwargs['sample_id']}.tiles.npz"),
-                    "tiles_meta_path": str(meta_path),
+                    "coordinates_npz_path": str(annotation_dir / f"{kwargs['sample_id']}.coordinates.npz"),
+                    "coordinates_meta_path": str(meta_path),
                     "config_hash": "hash",
                     "error": np.nan,
                     "traceback": np.nan,
@@ -240,8 +242,8 @@ def test_sampling_main_smoke_uses_current_schema_and_manifest(
         "mask_path",
         "sampling_status",
         "num_tiles",
-        "tiles_npz_path",
-        "tiles_meta_path",
+        "coordinates_npz_path",
+        "coordinates_meta_path",
         "config_hash",
         "error",
         "traceback",
@@ -253,11 +255,11 @@ def test_sampling_main_smoke_uses_current_schema_and_manifest(
     assert row["mask_path"] == "slide-1-mask.png"
     assert row["sampling_status"] == "success"
     assert row["num_tiles"] == 1
-    assert row["tiles_npz_path"].endswith("coordinates/tumor/slide-1.tiles.npz")
-    assert row["tiles_meta_path"].endswith("coordinates/tumor/slide-1.tiles.meta.json")
+    assert row["coordinates_npz_path"].endswith("tiles/tumor/slide-1.coordinates.npz")
+    assert row["coordinates_meta_path"].endswith("tiles/tumor/slide-1.coordinates.meta.json")
     assert row["config_hash"] == "hash"
     assert pd.isna(row["error"])
     assert pd.isna(row["traceback"])
     assert (
-        Path(cfg.output_dir) / "coordinates" / "tumor" / "slide-1.tiles.npz"
+        Path(cfg.output_dir) / "tiles" / "tumor" / "slide-1.coordinates.npz"
     ).is_file()
