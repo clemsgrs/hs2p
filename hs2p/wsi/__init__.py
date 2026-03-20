@@ -86,10 +86,10 @@ class CoordinateExtractionResult:
     read_level: int
     read_spacing_um: float
     read_tile_size_px: int
-    read_step_px: int | None = None
+    read_step_px: int
     resize_factor: float
     tile_size_lv0: int
-    step_px_lv0: int | None = None
+    step_px_lv0: int
 
     def __init__(
         self,
@@ -101,10 +101,10 @@ class CoordinateExtractionResult:
         read_level: int,
         read_spacing_um: float,
         read_tile_size_px: int,
-        read_step_px: int | None = None,
+        read_step_px: int,
         resize_factor: float,
         tile_size_lv0: int,
-        step_px_lv0: int | None = None,
+        step_px_lv0: int,
         coordinates: list[tuple[int, int]] | None = None,
     ):
         if x is None or y is None:
@@ -122,6 +122,10 @@ class CoordinateExtractionResult:
             expected_y = np.array([coord[1] for coord in coordinates], dtype=np.int64)
             if not np.array_equal(x, expected_x) or not np.array_equal(y, expected_y):
                 raise ValueError("coordinates must match the provided x and y arrays")
+        if int(read_step_px) <= 0:
+            raise ValueError(f"read_step_px must be > 0, got {read_step_px}")
+        if int(step_px_lv0) <= 0:
+            raise ValueError(f"step_px_lv0 must be > 0, got {step_px_lv0}")
 
         self.contour_indices = list(contour_indices)
         self.tissue_percentages = list(tissue_percentages)
@@ -130,10 +134,10 @@ class CoordinateExtractionResult:
         self.read_level = read_level
         self.read_spacing_um = read_spacing_um
         self.read_tile_size_px = read_tile_size_px
-        self.read_step_px = read_step_px
+        self.read_step_px = int(read_step_px)
         self.resize_factor = resize_factor
         self.tile_size_lv0 = tile_size_lv0
-        self.step_px_lv0 = step_px_lv0
+        self.step_px_lv0 = int(step_px_lv0)
 
     @property
     def coordinates(self) -> list[tuple[int, int]]:

@@ -32,6 +32,7 @@ from hs2p.configs.resolvers import (
 import hs2p.progress as progress
 from hs2p.utils import setup, load_csv
 from hs2p.wsi import (
+    CoordinateExtractionResult,
     CoordinateSelectionStrategy,
     UnifiedCoordinateRequest,
     execute_coordinate_request,
@@ -141,7 +142,7 @@ def _save_sampling_coordinates(
     filter_config: FilterConfig,
     annotation: str,
     coordinates: list[tuple[int, int]],
-    extraction,
+    extraction: CoordinateExtractionResult,
     resolved_sampling_spec: ResolvedSamplingSpec,
     selection_strategy: str | None = None,
     output_mode: str = CoordinateOutputMode.PER_ANNOTATION,

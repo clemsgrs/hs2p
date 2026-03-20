@@ -888,8 +888,10 @@ def test_tile_slide_rejects_tissue_fraction_shape_mismatch(
             read_level=1,
             read_spacing_um=1.0,
             read_tile_size_px=448,
+            read_step_px=448,
             resize_factor=2.0,
             tile_size_lv0=448,
+            step_px_lv0=448,
         )
 
     monkeypatch.setattr("hs2p.api.extract_coordinates", _bad_extraction)
@@ -1039,8 +1041,10 @@ def test_tile_slides_omits_tiling_preview_path_when_no_tiles(
             read_level=0,
             read_spacing_um=0.5,
             read_tile_size_px=224,
+            read_step_px=224,
             resize_factor=1.0,
             tile_size_lv0=224,
+            step_px_lv0=224,
         ),
     )
     monkeypatch.setattr(
@@ -1526,8 +1530,10 @@ def test_coordinate_extraction_result_is_not_tuple_iterable():
         read_level=0,
         read_spacing_um=0.5,
         read_tile_size_px=224,
+        read_step_px=224,
         resize_factor=1.0,
         tile_size_lv0=224,
+        step_px_lv0=224,
     )
 
     with pytest.raises(TypeError, match="not iterable"):
@@ -1543,8 +1549,10 @@ def test_coordinate_extraction_result_rebuilds_coordinates_from_x_and_y_arrays()
         read_level=0,
         read_spacing_um=0.5,
         read_tile_size_px=224,
+        read_step_px=224,
         resize_factor=1.0,
         tile_size_lv0=224,
+        step_px_lv0=224,
     )
 
     assert result.coordinates == [(10, 20), (30, 40)]
