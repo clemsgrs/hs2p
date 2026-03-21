@@ -141,15 +141,15 @@ def benchmark_tile_store(
                     )
                     tile_arr = np.asarray(img)
 
-                jpeg_bytes = _jpeg_encoder.encode(
+                encoded = _jpeg_encoder.encode(
                     tile_arr, quality=jpeg_quality,
                 )
-                buf = io.BytesIO(jpeg_bytes)
+                buf = io.BytesIO(encoded)
                 t2 = time.perf_counter()
                 encode_s += t2 - t1
 
                 info = tarfile.TarInfo(name=f"{tile_count:06d}.jpg")
-                info.size = len(jpeg_bytes)
+                info.size = len(encoded)
                 tf.addfile(info, buf)
                 t3 = time.perf_counter()
                 write_s += t3 - t2
