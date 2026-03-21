@@ -18,9 +18,9 @@ WORKDIR /opt/app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libtiff-dev \
-    libturbojpeg0-dev \
     zlib1g-dev \
     curl \
+    cmake \
     vim screen \
     zip unzip \
     git \
@@ -30,6 +30,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip python3-dev python-is-python3 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# libjpeg-turbo 3.x (required by PyTurboJPEG>=2)
+ARG LIBJPEG_TURBO_VERSION=3.1.0
+RUN curl -fsSL https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/${LIBJPEG_TURBO_VERSION}/libjpeg-turbo-${LIBJPEG_TURBO_VERSION}.tar.gz \
+      | tar xz -C /tmp \
+    && cd /tmp/libjpeg-turbo-${LIBJPEG_TURBO_VERSION} \
+    && cmake -G"Unix Makefiles" -DCMAKE_INSTALL_PREFIX=/usr/local . \
+    && make -j"$(nproc)" && make install \
+    && ldconfig \
+    && rm -rf /tmp/libjpeg-turbo-${LIBJPEG_TURBO_VERSION}
 
 # ASAP
 ARG ASAP_URL=https://github.com/computationalpathologygroup/ASAP/releases/download/ASAP-2.2-(Nightly)/ASAP-2.2-Ubuntu2204.deb

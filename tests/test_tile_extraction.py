@@ -470,7 +470,7 @@ class TestExtractTilesToTar:
             center=False,
         )
 
-    def test_wsd_iterator_falls_back_to_single_tile_reads_for_incomplete_4x4_grid(self):
+    def test_wsd_iterator_uses_2x2_blocks_for_incomplete_4x4_grid(self):
         result = _make_grid_tiling_result(columns=4, rows=4, tile_size=16, step_px=16)
         keep_mask = np.ones(result.num_tiles, dtype=bool)
         keep_mask[-1] = False
@@ -488,18 +488,23 @@ class TestExtractTilesToTar:
         )
 
         mock_wsi = MagicMock()
+        # 3 reads at 32x32 (2x2 blocks) + 3 reads at 16x16 (single tiles)
         mock_wsi.get_patch.side_effect = [
-            _solid_patch((idx, idx, idx), size=16) for idx in range(15)
+            _solid_patch((1, 1, 1), size=32),
+            _solid_patch((2, 2, 2), size=32),
+            _solid_patch((3, 3, 3), size=32),
+            _solid_patch((4, 4, 4), size=16),
+            _solid_patch((5, 5, 5), size=16),
+            _solid_patch((6, 6, 6), size=16),
         ]
 
         with patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi):
             tiles = list(_iter_wsd_tile_arrays_for_tar_extraction(result=result))
 
         assert len(tiles) == 15
-        assert mock_wsi.get_patch.call_count == 15
-        for call in mock_wsi.get_patch.call_args_list:
-            args = call.args
-            assert args[2:] == (16, 16)
+        assert mock_wsi.get_patch.call_count == 6
+        read_sizes = [call.args[2] for call in mock_wsi.get_patch.call_args_list]
+        assert read_sizes == [32, 32, 32, 16, 16, 16]
 
 
 class TestNeedsPixelFiltering:
