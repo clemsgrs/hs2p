@@ -18,6 +18,7 @@ WORKDIR /opt/app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libtiff-dev \
+    libturbojpeg0-dev \
     zlib1g-dev \
     curl \
     vim screen \
