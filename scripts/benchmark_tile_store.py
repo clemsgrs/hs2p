@@ -94,7 +94,10 @@ def benchmark_tile_store(
     progress_callback: ProgressCallback | None = None,
 ) -> dict[str, float | int]:
     """Run one extraction pass and return per-phase timing metrics."""
+    import turbojpeg
     from PIL import Image
+
+    _jpeg_encoder = turbojpeg.TurboJPEG()
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -130,20 +133,23 @@ def benchmark_tile_store(
                 if tile_arr.shape[2] > 3:
                     tile_arr = tile_arr[:, :, :3]
 
-                img = Image.fromarray(tile_arr).convert("RGB")
                 if result.read_tile_size_px != result.target_tile_size_px:
+                    img = Image.fromarray(tile_arr).convert("RGB")
                     img = img.resize(
                         (result.target_tile_size_px, result.target_tile_size_px),
                         Image.LANCZOS,
                     )
-                buf = io.BytesIO()
-                img.save(buf, format="JPEG", quality=jpeg_quality)
-                buf.seek(0)
+                    tile_arr = np.asarray(img)
+
+                jpeg_bytes = _jpeg_encoder.encode(
+                    tile_arr, quality=jpeg_quality,
+                )
+                buf = io.BytesIO(jpeg_bytes)
                 t2 = time.perf_counter()
                 encode_s += t2 - t1
 
                 info = tarfile.TarInfo(name=f"{tile_count:06d}.jpg")
-                info.size = buf.getbuffer().nbytes
+                info.size = len(jpeg_bytes)
                 tf.addfile(info, buf)
                 t3 = time.perf_counter()
                 write_s += t3 - t2

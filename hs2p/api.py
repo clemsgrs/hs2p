@@ -518,7 +518,10 @@ def extract_tiles_to_tar(
     during extraction so that pixel data is read only once.  The returned
     ``TilingResult`` has its coordinate arrays trimmed to the surviving tiles.
     """
+    import turbojpeg
     from PIL import Image
+
+    _jpeg_encoder = turbojpeg.TurboJPEG()
 
     tiles_dir = Path(tiles_dir) if tiles_dir is not None else Path(output_dir) / "tiles"
     tiles_dir.mkdir(parents=True, exist_ok=True)
@@ -561,19 +564,21 @@ def extract_tiles_to_tar(
                         if black_frac > frac_thresh:
                             continue
 
-                img = Image.fromarray(tile_arr).convert("RGB")
                 if result.read_tile_size_px != result.target_tile_size_px:
+                    img = Image.fromarray(tile_arr).convert("RGB")
                     img = img.resize(
                         (result.target_tile_size_px, result.target_tile_size_px),
                         Image.LANCZOS,
                     )
+                    tile_arr = np.asarray(img)
 
-                buf = io.BytesIO()
-                img.save(buf, format="JPEG", quality=jpeg_quality)
-                buf.seek(0)
+                jpeg_bytes = _jpeg_encoder.encode(
+                    tile_arr, quality=jpeg_quality,
+                )
+                buf = io.BytesIO(jpeg_bytes)
 
                 info = tarfile.TarInfo(name=f"{tile_counter:06d}.jpg")
-                info.size = buf.getbuffer().nbytes
+                info.size = len(jpeg_bytes)
                 tf.addfile(info, buf)
 
                 kept_indices.append(i)
@@ -798,7 +803,7 @@ def _iter_grouped_read_plans_for_tar_extraction(
         )
     }
     consumed = np.zeros(result.num_tiles, dtype=bool)
-    block_sizes = (8, 4)
+    block_sizes = (8, 4, 2)
     tile_size_px = int(result.read_tile_size_px)
 
     for idx in range(result.num_tiles):
