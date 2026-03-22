@@ -170,7 +170,7 @@ def _consume_region_tiles(
     tile_size_px: int,
     read_step_px: int,
 ) -> tuple[int, int]:
-    from hs2p.benchmarking import TileReadPlan, iter_tiles_from_region
+    from scripts.benchmark_tile_utils import TileReadPlan, iter_tiles_from_region
 
     checksum = 0
     tile_count = 0
@@ -394,7 +394,7 @@ def benchmark_cucim_batch_mode(
     num_workers: int,
     progress_callback: ProgressCallback | None = None,
 ) -> tuple[float, int, int]:
-    from hs2p.benchmarking import group_read_plans_by_read_size
+    from scripts.benchmark_tile_utils import group_read_plans_by_read_size
 
     cucim = _require_cucim()
     cu_image = cucim.CuImage(str(result.image_path))
@@ -434,7 +434,7 @@ def run_mode(
     num_workers: int,
     progress_callback: ProgressCallback | None = None,
 ) -> dict[str, Any]:
-    from hs2p.benchmarking import build_read_plans
+    from scripts.benchmark_tile_utils import build_read_plans
 
     mode_cfg = MODE_CONFIG[mode]
     plans = build_read_plans(result, use_supertiles=mode_cfg["use_supertiles"])
@@ -517,7 +517,7 @@ def load_single_slide_result_from_config(
 
 
 def main() -> int:
-    from hs2p.benchmarking import build_read_plans, limit_tiling_result
+    from scripts.benchmark_tile_utils import build_read_plans, limit_tiling_result
 
     args = parse_args()
     result = load_single_slide_result_from_config(

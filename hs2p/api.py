@@ -1,3 +1,4 @@
+import csv
 import hashlib
 import importlib
 import io
@@ -380,7 +381,7 @@ def tile_slide(
         )
     effective_tiling = (
         tiling
-        if backend_selection.backend == tiling.backend
+        if backend_selection.backend == tiling.requested_backend
         else replace(tiling, backend=backend_selection.backend)
     )
     return _compute_tiling_result(
@@ -432,8 +433,6 @@ def save_tiling_result(
         payload["tissue_fraction"] = result.tissue_fraction.astype(
             np.float32, copy=False
         )
-    np.savez(npz_path, **payload)
-
     meta = {
         "sample_id": result.sample_id,
         "image_path": str(result.image_path),
@@ -508,6 +507,8 @@ def extract_tiles_to_tar(
     output_dir: Path,
     *,
     jpeg_quality: int = 90,
+    jpeg_backend: str = "turbojpeg",
+    supertile_sizes: Sequence[int] | None = None,
     tiles_dir: Path | None = None,
     filter_params: FilterConfig | None = None,
     num_workers: int = 4,
@@ -520,9 +521,17 @@ def extract_tiles_to_tar(
     """
     from PIL import Image
 
+    jpeg_backend = str(jpeg_backend)
+    _jpeg_encoder = None
+    if jpeg_backend == "turbojpeg":
+        import turbojpeg
+
+        _jpeg_encoder = turbojpeg.TurboJPEG()
+
     tiles_dir = Path(tiles_dir) if tiles_dir is not None else Path(output_dir) / "tiles"
     tiles_dir.mkdir(parents=True, exist_ok=True)
     tar_path = tiles_dir / f"{result.sample_id}.tiles.tar"
+    manifest_path = tiles_dir / f"{result.sample_id}.tiles.manifest.csv"
 
     do_filter_white = filter_params is not None and filter_params.filter_white
     do_filter_black = filter_params is not None and filter_params.filter_black
@@ -531,22 +540,34 @@ def extract_tiles_to_tar(
     frac_thresh = getattr(filter_params, "fraction_threshold", 0.9) if filter_params else 0.9
 
     kept_indices: list[int] = []
-    tile_counter = 0
 
     temp_tar_path: Path | None = None
+    temp_manifest_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
             suffix=".tar", dir=tiles_dir, delete=False
         ) as tmp:
             temp_tar_path = Path(tmp.name)
+        with tempfile.NamedTemporaryFile(
+            suffix=".manifest.csv", dir=tiles_dir, delete=False, mode="w", newline=""
+        ) as tmp_manifest:
+            temp_manifest_path = Path(tmp_manifest.name)
 
-        with tarfile.open(temp_tar_path, "w") as tf:
-            for i, tile_arr in enumerate(
-                _iter_tile_arrays_for_tar_extraction(
+        with (
+            tarfile.open(temp_tar_path, "w") as tf,
+            temp_manifest_path.open("w", newline="") as manifest_handle,
+        ):
+            manifest_writer = csv.DictWriter(
+                manifest_handle,
+                fieldnames=["tile_index", "x", "y"],
+            )
+            manifest_writer.writeheader()
+            for record in _iter_tile_records_for_tar_extraction(
                     result=result,
                     num_workers=num_workers,
-                )
-            ):
+                    supertile_sizes=supertile_sizes,
+                ):
+                tile_arr = record.tile_arr
                 if tile_arr.shape[2] > 3:
                     tile_arr = tile_arr[:, :, :3]
 
@@ -561,34 +582,59 @@ def extract_tiles_to_tar(
                         if black_frac > frac_thresh:
                             continue
 
-                img = Image.fromarray(tile_arr).convert("RGB")
                 if result.read_tile_size_px != result.target_tile_size_px:
+                    img = Image.fromarray(tile_arr).convert("RGB")
                     img = img.resize(
                         (result.target_tile_size_px, result.target_tile_size_px),
                         Image.LANCZOS,
                     )
+                    tile_arr = np.asarray(img)
 
-                buf = io.BytesIO()
-                img.save(buf, format="JPEG", quality=jpeg_quality)
-                buf.seek(0)
+                if jpeg_backend == "turbojpeg":
+                    assert _jpeg_encoder is not None
+                    jpeg_bytes = _jpeg_encoder.encode(
+                        tile_arr,
+                        quality=jpeg_quality,
+                        pixel_format=turbojpeg.TJPF_RGB,
+                        jpeg_subsample=turbojpeg.TJSAMP_420,
+                    )
+                elif jpeg_backend == "pil":
+                    img = Image.fromarray(tile_arr).convert("RGB")
+                    buf = io.BytesIO()
+                    img.save(buf, format="JPEG", quality=jpeg_quality)
+                    jpeg_bytes = buf.getvalue()
+                else:
+                    raise ValueError(f"Unsupported jpeg_backend: {jpeg_backend}")
+                buf = io.BytesIO(jpeg_bytes)
 
-                info = tarfile.TarInfo(name=f"{tile_counter:06d}.jpg")
-                info.size = buf.getbuffer().nbytes
+                tile_index = int(result.tile_index[record.tile_index])
+                info = tarfile.TarInfo(name=_format_tar_member_name(tile_index))
+                info.size = len(jpeg_bytes)
                 tf.addfile(info, buf)
 
-                kept_indices.append(i)
-                tile_counter += 1
+                manifest_writer.writerow(
+                    {
+                        "tile_index": tile_index,
+                        "x": int(record.x),
+                        "y": int(record.y),
+                    }
+                )
+                kept_indices.append(record.tile_index)
 
         temp_tar_path.replace(tar_path)
         temp_tar_path = None
+        temp_manifest_path.replace(manifest_path)
+        temp_manifest_path = None
     finally:
         if temp_tar_path is not None:
             temp_tar_path.unlink(missing_ok=True)
+        if temp_manifest_path is not None:
+            temp_manifest_path.unlink(missing_ok=True)
 
     if len(kept_indices) == result.num_tiles:
         return tar_path, result
 
-    kept = np.asarray(kept_indices, dtype=np.int64)
+    kept = np.asarray(sorted(kept_indices), dtype=np.int64)
     filtered_result = TilingResult(
         sample_id=result.sample_id,
         image_path=result.image_path,
@@ -625,21 +671,42 @@ def _iter_tile_arrays_for_tar_extraction(
     *,
     result: TilingResult,
     num_workers: int,
+    supertile_sizes: Sequence[int] | None = None,
 ):
-    tile_arrays = _iter_cucim_tile_arrays_for_tar_extraction(
+    tile_records = _iter_tile_records_for_tar_extraction(
         result=result,
         num_workers=num_workers,
+        supertile_sizes=supertile_sizes,
     )
-    if tile_arrays is not None:
-        yield from tile_arrays
-        return
-    yield from _iter_wsd_tile_arrays_for_tar_extraction(result=result)
+    for record in tile_records:
+        yield record.tile_arr
 
 
-def _iter_cucim_tile_arrays_for_tar_extraction(
+def _iter_tile_records_for_tar_extraction(
     *,
     result: TilingResult,
     num_workers: int,
+    supertile_sizes: Sequence[int] | None = None,
+):
+    tile_records = _iter_cucim_tile_records_for_tar_extraction(
+        result=result,
+        num_workers=num_workers,
+        supertile_sizes=supertile_sizes,
+    )
+    if tile_records is not None:
+        yield from tile_records
+        return
+    yield from _iter_wsd_tile_records_for_tar_extraction(
+        result=result,
+        supertile_sizes=supertile_sizes,
+    )
+
+
+def _iter_cucim_tile_records_for_tar_extraction(
+    *,
+    result: TilingResult,
+    num_workers: int,
+    supertile_sizes: Sequence[int] | None = None,
 ):
     if result.backend != "cucim":
         return None
@@ -661,6 +728,7 @@ def _iter_cucim_tile_arrays_for_tar_extraction(
             result=result,
             read_step_px=read_step_px,
             step_px_lv0=step_px_lv0,
+            supertile_sizes=supertile_sizes,
         )
     )
 
@@ -678,7 +746,7 @@ def _iter_cucim_tile_arrays_for_tar_extraction(
                 num_workers=max(1, int(num_workers)),
             )
             for read_plan, region in zip(size_plans, regions):
-                yield from _iter_tile_arrays_from_read_plan_region(
+                yield from _iter_tile_records_from_read_plan_region(
                     np.asarray(region),
                     read_plan=read_plan,
                     tile_size_px=int(result.read_tile_size_px),
@@ -688,9 +756,29 @@ def _iter_cucim_tile_arrays_for_tar_extraction(
     return _iter_tiles()
 
 
-def _iter_wsd_tile_arrays_for_tar_extraction(
+def _iter_cucim_tile_arrays_for_tar_extraction(
     *,
     result: TilingResult,
+    num_workers: int,
+):
+    tile_records = _iter_cucim_tile_records_for_tar_extraction(
+        result=result,
+        num_workers=num_workers,
+    )
+    if tile_records is None:
+        return None
+
+    def _iter_tiles():
+        for record in tile_records:
+            yield record.tile_arr
+
+    return _iter_tiles()
+
+
+def _iter_wsd_tile_records_for_tar_extraction(
+    *,
+    result: TilingResult,
+    supertile_sizes: Sequence[int] | None = None,
 ):
     import wholeslidedata as wsd
 
@@ -704,6 +792,7 @@ def _iter_wsd_tile_arrays_for_tar_extraction(
         result=result,
         read_step_px=read_step_px,
         step_px_lv0=step_px_lv0,
+        supertile_sizes=supertile_sizes,
     ):
         region = wsi.get_patch(
             int(read_plan.x),
@@ -714,12 +803,25 @@ def _iter_wsd_tile_arrays_for_tar_extraction(
             center=False,
         )
         region = np.asarray(region)
-        yield from _iter_tile_arrays_from_read_plan_region(
+        yield from _iter_tile_records_from_read_plan_region(
             region,
             read_plan=read_plan,
             tile_size_px=int(result.read_tile_size_px),
             read_step_px=read_step_px,
         )
+
+
+def _iter_wsd_tile_arrays_for_tar_extraction(
+    *,
+    result: TilingResult,
+):
+    tile_records = _iter_wsd_tile_records_for_tar_extraction(result=result)
+
+    def _iter_tiles():
+        for record in tile_records:
+            yield record.tile_arr
+
+    return _iter_tiles()
 
 
 @dataclass(frozen=True)
@@ -728,26 +830,51 @@ class _WSDTarReadPlan:
     y: int
     read_size_px: int
     block_size: int
+    tile_indices: tuple[int, ...]
 
 
-def _iter_tile_arrays_from_read_plan_region(
+@dataclass(frozen=True)
+class _TarTileRecord:
+    tile_index: int
+    x: int
+    y: int
+    tile_arr: np.ndarray
+
+
+def _iter_tile_records_from_read_plan_region(
     region: np.ndarray,
     *,
     read_plan: _WSDTarReadPlan,
     tile_size_px: int,
     read_step_px: int,
 ):
+    region = np.asarray(region)
     if read_plan.block_size == 1:
-        yield region
+        yield _TarTileRecord(
+            tile_index=int(read_plan.tile_indices[0]),
+            x=int(read_plan.x),
+            y=int(read_plan.y),
+            tile_arr=region,
+        )
         return
+    tile_index_iter = iter(int(idx) for idx in read_plan.tile_indices)
     for x_idx in range(read_plan.block_size):
         x0 = x_idx * read_step_px
         for y_idx in range(read_plan.block_size):
             y0 = y_idx * read_step_px
-            yield region[
-                y0 : y0 + tile_size_px,
-                x0 : x0 + tile_size_px,
-            ]
+            yield _TarTileRecord(
+                tile_index=next(tile_index_iter),
+                x=int(read_plan.x + x0),
+                y=int(read_plan.y + y0),
+                tile_arr=region[
+                    y0 : y0 + tile_size_px,
+                    x0 : x0 + tile_size_px,
+                ],
+            )
+
+
+def _format_tar_member_name(tile_index: int) -> str:
+    return f"{int(tile_index):06d}.jpg"
 
 
 def _resolve_read_step_px(result: TilingResult) -> int:
@@ -785,7 +912,20 @@ def _iter_grouped_read_plans_for_tar_extraction(
     result: TilingResult,
     read_step_px: int,
     step_px_lv0: int,
+    supertile_sizes: Sequence[int] | None = None,
 ):
+    if supertile_sizes is None:
+        supertile_sizes = (8, 4, 2)
+    grouped_sizes = tuple(
+        sorted(
+            {
+                int(size)
+                for size in supertile_sizes
+                if int(size) > 1
+            },
+            reverse=True,
+        )
+    )
     if step_px_lv0 <= 0:
         step_px_lv0 = int(result.tile_size_lv0)
     coord_to_index = {
@@ -798,53 +938,65 @@ def _iter_grouped_read_plans_for_tar_extraction(
         )
     }
     consumed = np.zeros(result.num_tiles, dtype=bool)
-    block_sizes = (8, 4)
     tile_size_px = int(result.read_tile_size_px)
+    grouped_plans: dict[int, list[_WSDTarReadPlan]] = {
+        size: [] for size in grouped_sizes
+    }
+    grouped_plans[1] = []
+
+    def _build_grouped_plan(idx: int, block_size: int) -> _WSDTarReadPlan | None:
+        if consumed[idx]:
+            return None
+        x0 = int(result.x[idx])
+        y0 = int(result.y[idx])
+        indices: list[int] = []
+        for x_idx in range(block_size):
+            for y_idx in range(block_size):
+                coord = (
+                    x0 + x_idx * step_px_lv0,
+                    y0 + y_idx * step_px_lv0,
+                )
+                match_idx = coord_to_index.get(coord)
+                if match_idx is None or consumed[match_idx]:
+                    return None
+                indices.append(match_idx)
+            if len(indices) < (x_idx + 1) * block_size:
+                return None
+        return _WSDTarReadPlan(
+            x=x0,
+            y=y0,
+            read_size_px=tile_size_px + (block_size - 1) * read_step_px,
+            block_size=block_size,
+            tile_indices=tuple(indices),
+        )
+
+    for block_size in grouped_sizes:
+        if result.num_tiles < block_size * block_size:
+            continue
+        for idx in range(result.num_tiles):
+            plan = _build_grouped_plan(idx, block_size)
+            if plan is None:
+                continue
+            for match_idx in plan.tile_indices:
+                consumed[match_idx] = True
+            grouped_plans[block_size].append(plan)
 
     for idx in range(result.num_tiles):
         if consumed[idx]:
             continue
-        x0 = int(result.x[idx])
-        y0 = int(result.y[idx])
-        grouped = False
-        for block_size in block_sizes:
-            if result.num_tiles < block_size * block_size:
-                continue
-            indices: list[int] = []
-            for x_idx in range(block_size):
-                for y_idx in range(block_size):
-                    coord = (
-                        x0 + x_idx * step_px_lv0,
-                        y0 + y_idx * step_px_lv0,
-                    )
-                    match_idx = coord_to_index.get(coord)
-                    if match_idx is None or consumed[match_idx]:
-                        indices = []
-                        break
-                    indices.append(match_idx)
-                if not indices or len(indices) < (x_idx + 1) * block_size:
-                    break
-            if not indices:
-                continue
-            for match_idx in indices:
-                consumed[match_idx] = True
-            yield _WSDTarReadPlan(
-                x=x0,
-                y=y0,
-                read_size_px=tile_size_px + (block_size - 1) * read_step_px,
-                block_size=block_size,
-            )
-            grouped = True
-            break
-        if grouped:
-            continue
         consumed[idx] = True
-        yield _WSDTarReadPlan(
-            x=x0,
-            y=y0,
-            read_size_px=tile_size_px,
-            block_size=1,
+        grouped_plans[1].append(
+            _WSDTarReadPlan(
+                x=int(result.x[idx]),
+                y=int(result.y[idx]),
+                read_size_px=tile_size_px,
+                block_size=1,
+                tile_indices=(idx,),
+            )
         )
+
+    for block_size in (*grouped_sizes, 1):
+        yield from grouped_plans[block_size]
 
 
 def _needs_pixel_filtering(filtering: FilterConfig) -> bool:
@@ -1134,6 +1286,7 @@ class _SlideComputeRequest:
     mask_preview_path: Path | None
     output_dir: Path
     num_workers: int
+    jpeg_backend: str = "turbojpeg"
     include_result: bool = False
     save_tiles: bool = False
 
@@ -1231,7 +1384,7 @@ def _finalize_pending_tiling_preview(
     )
     return artifact, row
 
-def _compute_tiling_result_from_request(
+def _compute_and_save_tiling_artifacts_from_request(
     request: _SlideComputeRequest,
 ) -> _SlideComputeResponse:
     try:
@@ -1256,6 +1409,7 @@ def _compute_tiling_result_from_request(
             tiles_tar_path, result = extract_tiles_to_tar(
                 result,
                 output_dir=request.output_dir,
+                jpeg_backend=request.jpeg_backend,
                 filter_params=request.filtering if _needs_pixel_filtering(request.filtering) else None,
                 num_workers=request.num_workers,
             )
@@ -1289,9 +1443,6 @@ def _compute_tiling_result_from_request(
             error=str(exc),
             traceback_text=traceback.format_exc(),
         )
-
-
-_compute_and_save_tiling_artifacts_from_request = _compute_tiling_result_from_request
 
 
 def _resolve_tiling_worker_allocation(
@@ -1333,6 +1484,7 @@ def tile_slides(
     resume: bool = False,
     read_coordinates_from: Path | None = None,
     save_tiles: bool = False,
+    jpeg_backend: str = "turbojpeg",
 ) -> list[TilingArtifacts]:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1448,6 +1600,7 @@ def tile_slides(
                 mask_preview_path=mask_preview_path,
                 output_dir=output_dir,
                 num_workers=1,
+                jpeg_backend=str(jpeg_backend),
                 save_tiles=save_tiles,
             )
             planned_work.append(
@@ -1651,6 +1804,7 @@ def tile_slides(
                     mask_preview_path=request.mask_preview_path,
                     output_dir=request.output_dir,
                     num_workers=worker_inner_workers,
+                    jpeg_backend=request.jpeg_backend,
                     include_result=False,
                     save_tiles=request.save_tiles,
                 )
@@ -1677,6 +1831,7 @@ def tile_slides(
                     mask_preview_path=request.mask_preview_path,
                     output_dir=request.output_dir,
                     num_workers=worker_inner_workers,
+                    jpeg_backend=request.jpeg_backend,
                     include_result=True,
                     save_tiles=request.save_tiles,
                 )

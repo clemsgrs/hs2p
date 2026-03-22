@@ -1,0 +1,102 @@
+name: Bench – tile store throughput
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read   # needed to download artifacts from other runs
+
+jobs:
+  bench:
+    name: Worker sweep (2 / 4 / 8)
+    runs-on: ubuntu-latest
+
+    steps:
+      # ------------------------------------------------------------------ #
+      # 1. Source                                                            #
+      # ------------------------------------------------------------------ #
+      - uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------ #
+      # 2. Build Docker image (layer cache keyed to Dockerfile + deps)      #
+      # ------------------------------------------------------------------ #
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build hs2p image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: hs2p-bench:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ------------------------------------------------------------------ #
+      # 3. Run benchmark inside the image                                   #
+      #    Mount repo at /opt/app so the current code is tested, not the   #
+      #    snapshot that was baked into the image.                          #
+      # ------------------------------------------------------------------ #
+      - name: Run tile-store benchmark (workers = 2 4 8)
+        run: |
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -v "$PWD:/opt/app" \
+            -w /opt/app \
+            hs2p-bench \
+            bash -c "
+              pip install -e . -q &&
+              python scripts/benchmark_tile_store.py \
+                --config-file benchmarks/bench-fixture.yaml \
+                --output-dir  bench-out \
+                --workers 2 4 8 \
+                --repeat  3 \
+                --jpeg-quality 90
+            "
+
+      # ------------------------------------------------------------------ #
+      # 4. Download baseline from the latest successful master run          #
+      # ------------------------------------------------------------------ #
+      - name: Download baseline artifact from master
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Look for the most recent successful run of this workflow on the
+        # default branch.  Skip gracefully if none exists yet.
+        run: |
+          DEFAULT_BRANCH="${{ github.event.repository.default_branch }}"
+          RUN_ID=$(gh run list \
+            --repo "$GITHUB_REPOSITORY" \
+            --branch "$DEFAULT_BRANCH" \
+            --workflow "bench-tile-store.yml" \
+            --status success \
+            --limit 1 \
+            --json databaseId \
+            --jq '.[0].databaseId // empty')
+
+          if [ -z "$RUN_ID" ]; then
+            echo "No previous successful run found on ${DEFAULT_BRANCH} – skipping baseline download."
+          else
+            echo "Downloading baseline from run ${RUN_ID}"
+            gh run download "$RUN_ID" \
+              --repo "$GITHUB_REPOSITORY" \
+              --name bench-tile-store-results \
+              --dir bench-baseline \
+            || echo "Artifact download failed – skipping baseline comparison."
+          fi
+
+      # ------------------------------------------------------------------ #
+      # 5. Upload results                                                    #
+      # ------------------------------------------------------------------ #
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-tile-store-results
+          path: |
+            bench-out/benchmark_runs.csv
+            bench-out/benchmark_summary.csv
+            bench-out/throughput.png
+          retention-days: 90

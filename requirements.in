@@ -3,6 +3,7 @@ h5py
 numpy<2
 pandas
 pillow
+PyTurboJPEG
 tqdm
 rich
 wandb

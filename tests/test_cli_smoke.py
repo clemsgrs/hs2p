@@ -39,7 +39,7 @@ def _base_cfg(tmp_path: Path, csv_path: Path) -> SimpleNamespace:
         resume=False,
         save_previews=False,
         save_tiles=False,
-        speed=SimpleNamespace(num_workers=1),
+        speed=SimpleNamespace(num_workers=1, jpeg_backend="turbojpeg"),
         tiling=SimpleNamespace(
             read_coordinates_from=None,
             backend="asap",
@@ -104,10 +104,12 @@ def test_tiling_main_smoke_uses_current_schema_and_manifest(
         resume,
         read_coordinates_from,
         save_tiles,
+        jpeg_backend,
     ):
         del tiling, segmentation, filtering, preview, num_workers, resume, read_coordinates_from
         captured["whole_slides"] = whole_slides
         captured["save_tiles"] = save_tiles
+        captured["jpeg_backend"] = jpeg_backend
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         process_df = pd.DataFrame(
@@ -152,6 +154,7 @@ def test_tiling_main_smoke_uses_current_schema_and_manifest(
         )
     ]
     assert captured["save_tiles"] is False
+    assert captured["jpeg_backend"] == "turbojpeg"
     process_df = pd.read_csv(Path(cfg.output_dir) / "process_list.csv")
     assert list(process_df.columns) == [
         "sample_id",

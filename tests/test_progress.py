@@ -174,7 +174,7 @@ def _base_cli_cfg(tmp_path: Path, *, resume: bool = False) -> SimpleNamespace:
         output_dir=str(tmp_path / "output"),
         resume=resume,
         save_previews=False,
-        speed=SimpleNamespace(num_workers=1),
+        speed=SimpleNamespace(num_workers=1, jpeg_backend="turbojpeg"),
         tiling=SimpleNamespace(
             backend="asap",
             read_coordinates_from=None,

@@ -17,6 +17,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+import numpy as np
+
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
@@ -77,6 +79,19 @@ def parse_args() -> argparse.Namespace:
         default=90,
         help="JPEG encoding quality (1-100).",
     )
+    parser.add_argument(
+        "--jpeg-backend",
+        choices=("turbojpeg", "pil"),
+        default=argparse.SUPPRESS,
+        help="JPEG encoder used for the benchmark only.",
+    )
+    parser.add_argument(
+        "--supertile-sizes",
+        type=int,
+        nargs="+",
+        default=[8, 4, 2],
+        help="Supertile sizes to allow in the read planner, largest first.",
+    )
     return parser.parse_args()
 
 
@@ -89,12 +104,21 @@ def benchmark_tile_store(
     *,
     result,
     jpeg_quality: int,
+    jpeg_backend: str = "turbojpeg",
+    supertile_sizes: tuple[int, ...] | None = None,
     num_workers: int,
     output_dir: Path,
     progress_callback: ProgressCallback | None = None,
 ) -> dict[str, float | int]:
     """Run one extraction pass and return per-phase timing metrics."""
     from PIL import Image
+
+    jpeg_backend = str(jpeg_backend)
+    _jpeg_encoder = None
+    if jpeg_backend == "turbojpeg":
+        import turbojpeg
+
+        _jpeg_encoder = turbojpeg.TurboJPEG()
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -115,7 +139,9 @@ def benchmark_tile_store(
 
         with tarfile.open(temp_tar_path, "w") as tf:
             iterator = _iter_tile_arrays_for_tar_extraction(
-                result=result, num_workers=num_workers,
+                result=result,
+                num_workers=num_workers,
+                supertile_sizes=supertile_sizes,
             )
 
             while True:
@@ -130,20 +156,35 @@ def benchmark_tile_store(
                 if tile_arr.shape[2] > 3:
                     tile_arr = tile_arr[:, :, :3]
 
-                img = Image.fromarray(tile_arr).convert("RGB")
                 if result.read_tile_size_px != result.target_tile_size_px:
+                    img = Image.fromarray(tile_arr).convert("RGB")
                     img = img.resize(
                         (result.target_tile_size_px, result.target_tile_size_px),
                         Image.LANCZOS,
                     )
-                buf = io.BytesIO()
-                img.save(buf, format="JPEG", quality=jpeg_quality)
-                buf.seek(0)
+                    tile_arr = np.asarray(img)
+
+                if jpeg_backend == "turbojpeg":
+                    assert _jpeg_encoder is not None
+                    encoded = _jpeg_encoder.encode(
+                        tile_arr,
+                        quality=jpeg_quality,
+                        pixel_format=turbojpeg.TJPF_RGB,
+                        jpeg_subsample=turbojpeg.TJSAMP_420,
+                    )
+                elif jpeg_backend == "pil":
+                    img = Image.fromarray(tile_arr).convert("RGB")
+                    buf = io.BytesIO()
+                    img.save(buf, format="JPEG", quality=jpeg_quality)
+                    encoded = buf.getvalue()
+                else:
+                    raise ValueError(f"Unsupported jpeg_backend: {jpeg_backend}")
+                buf = io.BytesIO(encoded)
                 t2 = time.perf_counter()
                 encode_s += t2 - t1
 
                 info = tarfile.TarInfo(name=f"{tile_count:06d}.jpg")
-                info.size = buf.getbuffer().nbytes
+                info.size = len(encoded)
                 tf.addfile(info, buf)
                 t3 = time.perf_counter()
                 write_s += t3 - t2
@@ -168,6 +209,20 @@ def benchmark_tile_store(
     }
 
 
+def resolve_jpeg_backend(
+    *,
+    config_file: Path,
+    cli_jpeg_backend: str | None = None,
+) -> str:
+    from hs2p.utils.config import get_cfg_from_file
+
+    if cli_jpeg_backend is not None:
+        return str(cli_jpeg_backend)
+
+    cfg = get_cfg_from_file(config_file)
+    return str(getattr(cfg.speed, "jpeg_backend", "turbojpeg"))
+
+
 # ------------------------------------------------------------------
 # Result formatting
 # ------------------------------------------------------------------
@@ -180,6 +235,7 @@ def build_result_row(
     repeat_index: int,
     tiles: int,
     jpeg_quality: int,
+    jpeg_backend: str,
     num_workers: int,
     read_s: float,
     encode_s: float,
@@ -193,6 +249,7 @@ def build_result_row(
         "repeat_index": repeat_index,
         "tiles": tiles,
         "jpeg_quality": jpeg_quality,
+        "jpeg_backend": jpeg_backend,
         "num_workers": num_workers,
         "read_s": round(read_s, 6),
         "encode_s": round(encode_s, 6),
@@ -238,6 +295,7 @@ def summarize_results(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "num_workers": nw,
                 "tiles": int(nw_rows[0]["tiles"]),
                 "jpeg_quality": int(nw_rows[0]["jpeg_quality"]),
+                "jpeg_backend": str(nw_rows[0]["jpeg_backend"]),
                 "mean_read_s": _mean(read_s),
                 "mean_encode_s": _mean(encode_s),
                 "mean_write_s": _mean(write_s),
@@ -274,6 +332,7 @@ def plot_results(
     output_path: Path,
     max_tiles: int,
     jpeg_quality: int,
+    jpeg_backend: str,
 ) -> None:
     workers = [int(r["num_workers"]) for r in summary_rows]
     tps     = [float(r["mean_tiles_per_second"]) for r in summary_rows]
@@ -339,7 +398,10 @@ def plot_results(
     tiles_label = f"{max_tiles:,}" if max_tiles > 0 else "all"
     fig.text(0.13, 0.97, "Tile Store Throughput",
              ha="left", va="top", fontsize=14, fontweight="bold", color=_C_TEXT)
-    fig.text(0.13, 0.925, f"JPEG quality={jpeg_quality}  ·  tiles={tiles_label}",
+    fig.text(
+        0.13,
+        0.925,
+        f"JPEG backend={jpeg_backend}  ·  quality={jpeg_quality}  ·  tiles={tiles_label}",
              ha="left", va="top", fontsize=8.5, color=_C_MUTED)
 
     # inset table: read/encode/write breakdown per worker count
@@ -385,15 +447,20 @@ def plot_results(
 
 
 def main() -> int:
-    from benchmark_tile_read_strategies import (
+    from scripts.benchmark_tile_read_strategies import (
         BenchmarkProgressReporter,
         load_single_slide_result_from_config,
         write_csv,
     )
-    from hs2p.benchmarking import limit_tiling_result
+    from scripts.benchmark_tile_utils import limit_tiling_result
 
     args = parse_args()
     workers = sorted(args.workers)
+    jpeg_backend = resolve_jpeg_backend(
+        config_file=args.config_file,
+        cli_jpeg_backend=getattr(args, "jpeg_backend", None),
+    )
+    supertile_sizes = tuple(int(size) for size in args.supertile_sizes)
 
     result = load_single_slide_result_from_config(
         config_file=args.config_file,
@@ -429,6 +496,8 @@ def main() -> int:
                 benchmark_tile_store(
                     result=result,
                     jpeg_quality=int(args.jpeg_quality),
+                    jpeg_backend=jpeg_backend,
+                    supertile_sizes=supertile_sizes,
                     num_workers=nw,
                     output_dir=args.output_dir,
                     progress_callback=reporter.advance,
@@ -449,6 +518,8 @@ def main() -> int:
                 metrics = benchmark_tile_store(
                     result=result,
                     jpeg_quality=int(args.jpeg_quality),
+                    jpeg_backend=jpeg_backend,
+                    supertile_sizes=supertile_sizes,
                     num_workers=nw,
                     output_dir=args.output_dir,
                     progress_callback=reporter.advance,
@@ -461,6 +532,7 @@ def main() -> int:
                     repeat_index=repeat_index,
                     tiles=metrics["tile_count"],
                     jpeg_quality=int(args.jpeg_quality),
+                    jpeg_backend=jpeg_backend,
                     num_workers=nw,
                     read_s=metrics["read_s"],
                     encode_s=metrics["encode_s"],
@@ -496,6 +568,7 @@ def main() -> int:
             output_path=chart_path,
             max_tiles=int(args.max_tiles),
             jpeg_quality=int(args.jpeg_quality),
+            jpeg_backend=jpeg_backend,
         )
 
     return 0

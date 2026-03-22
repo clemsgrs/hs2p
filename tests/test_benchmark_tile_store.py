@@ -1,10 +1,14 @@
 import importlib.util
 import statistics
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+
+pytestmark = pytest.mark.script
 
 
 def _load_benchmark_module():
@@ -27,6 +31,7 @@ def test_build_result_row_computes_percentages_and_throughput():
         repeat_index=0,
         tiles=100,
         jpeg_quality=90,
+        jpeg_backend="turbojpeg",
         num_workers=4,
         read_s=1.0,
         encode_s=2.0,
@@ -39,6 +44,7 @@ def test_build_result_row_computes_percentages_and_throughput():
     assert row["repeat_index"] == 0
     assert row["tiles"] == 100
     assert row["jpeg_quality"] == 90
+    assert row["jpeg_backend"] == "turbojpeg"
     assert row["num_workers"] == 4
     assert row["read_s"] == 1.0
     assert row["encode_s"] == 2.0
@@ -61,6 +67,7 @@ def test_summarize_results_computes_mean_and_std():
             repeat_index=i,
             tiles=100,
             jpeg_quality=90,
+            jpeg_backend="turbojpeg",
             num_workers=4,
             read_s=r,
             encode_s=e,
@@ -75,6 +82,7 @@ def test_summarize_results_computes_mean_and_std():
     s = summary[0]
     assert s["tiles"] == 100
     assert s["jpeg_quality"] == 90
+    assert s["jpeg_backend"] == "turbojpeg"
     assert s["num_workers"] == 4
 
     expected_totals = [4.0, 4.2, 3.8]
@@ -114,6 +122,32 @@ def test_benchmark_tile_store_accumulates_per_phase_times(tmp_path, monkeypatch)
     assert metrics["total_s"] >= metrics["read_s"] + metrics["encode_s"] + metrics["write_s"]
     # temp tar cleaned up
     assert not list(tmp_path.glob("*.tar"))
+
+
+def test_benchmark_tile_store_forwards_supertile_sizes(tmp_path, monkeypatch):
+    mod = _load_benchmark_module()
+    tiles = [np.zeros((64, 64, 3), dtype=np.uint8)]
+    seen: dict[str, tuple[int, ...] | None] = {}
+
+    def _iter_tiles(**kwargs):
+        seen["supertile_sizes"] = kwargs.get("supertile_sizes")
+        return iter(tiles)
+
+    monkeypatch.setattr(mod, "_iter_tile_arrays_for_tar_extraction", _iter_tiles)
+
+    result_stub = MagicMock()
+    result_stub.read_tile_size_px = 64
+    result_stub.target_tile_size_px = 64
+
+    mod.benchmark_tile_store(
+        result=result_stub,
+        jpeg_quality=90,
+        num_workers=4,
+        output_dir=tmp_path,
+        supertile_sizes=(16, 8, 4, 2),
+    )
+
+    assert seen["supertile_sizes"] == (16, 8, 4, 2)
 
 
 def test_benchmark_tile_store_handles_empty_iterator(tmp_path, monkeypatch):
@@ -166,3 +200,118 @@ def test_progress_callback_called_per_tile(tmp_path, monkeypatch):
     assert callback.call_count == 5
     for call in callback.call_args_list:
         assert call == ((1, 1),)
+
+
+def test_benchmark_tile_store_uses_rgb_420_turbojpeg(monkeypatch, tmp_path):
+    mod = _load_benchmark_module()
+    tiles = [np.zeros((64, 64, 3), dtype=np.uint8)]
+    monkeypatch.setattr(
+        mod, "_iter_tile_arrays_for_tar_extraction", lambda **kwargs: iter(tiles)
+    )
+
+    captured: dict[str, int] = {}
+
+    class _FakeTurboJPEG:
+        def encode(
+            self,
+            img_array,
+            quality=85,
+            pixel_format=None,
+            jpeg_subsample=None,
+            flags=0,
+            dst=None,
+            lossless=False,
+            icc_profile=None,
+        ):
+            captured["quality"] = quality
+            captured["pixel_format"] = pixel_format
+            captured["jpeg_subsample"] = jpeg_subsample
+            return b"jpeg"
+
+    monkeypatch.setitem(
+        sys.modules,
+        "turbojpeg",
+        SimpleNamespace(
+            TurboJPEG=lambda: _FakeTurboJPEG(),
+            TJPF_RGB=0,
+            TJSAMP_420=2,
+        ),
+    )
+
+    result_stub = MagicMock()
+    result_stub.read_tile_size_px = 64
+    result_stub.target_tile_size_px = 64
+
+    metrics = mod.benchmark_tile_store(
+        result=result_stub,
+        jpeg_quality=90,
+        num_workers=4,
+        output_dir=tmp_path,
+    )
+
+    assert captured == {
+        "quality": 90,
+        "pixel_format": 0,
+        "jpeg_subsample": 2,
+    }
+    assert metrics["tile_count"] == 1
+
+
+def test_benchmark_tile_store_uses_pil_backend(monkeypatch, tmp_path):
+    mod = _load_benchmark_module()
+    tiles = [np.zeros((128, 128, 3), dtype=np.uint8)]
+    monkeypatch.setattr(
+        mod, "_iter_tile_arrays_for_tar_extraction", lambda **kwargs: iter(tiles)
+    )
+
+    result_stub = MagicMock()
+    result_stub.read_tile_size_px = 128
+    result_stub.target_tile_size_px = 64
+
+    metrics = mod.benchmark_tile_store(
+        result=result_stub,
+        jpeg_quality=90,
+        jpeg_backend="pil",
+        num_workers=4,
+        output_dir=tmp_path,
+    )
+
+    assert metrics["tile_count"] == 1
+    assert metrics["jpeg_bytes"] > 0
+    assert metrics["encode_s"] > 0
+
+
+def test_resolve_jpeg_backend_prefers_config(tmp_path):
+    mod = _load_benchmark_module()
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "csv: slides.csv\n"
+        "output_dir: out\n"
+        "speed:\n"
+        "  jpeg_backend: pil\n"
+    )
+
+    assert mod.resolve_jpeg_backend(config_file=config_path) == "pil"
+
+
+def test_benchmark_fixture_requests_turbojpeg_backend():
+    mod = _load_benchmark_module()
+    config_path = Path(__file__).resolve().parents[1] / "benchmarks" / "bench-fixture.yaml"
+
+    assert mod.resolve_jpeg_backend(config_file=config_path) == "turbojpeg"
+
+
+def test_resolve_jpeg_backend_prefers_cli_override(tmp_path):
+    mod = _load_benchmark_module()
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "csv: slides.csv\n"
+        "output_dir: out\n"
+        "speed:\n"
+        "  jpeg_backend: pil\n"
+    )
+
+    assert (
+        mod.resolve_jpeg_backend(config_file=config_path, cli_jpeg_backend="turbojpeg")
+        == "turbojpeg"
+    )

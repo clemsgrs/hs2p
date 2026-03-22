@@ -4,15 +4,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from hs2p.api import TilingResult
-from hs2p.benchmarking import (
-    TileReadPlan,
-    build_read_plans,
-    group_read_plans_by_read_size,
-    iter_tiles_from_region,
-    limit_tiling_result,
-)
+
+pytestmark = pytest.mark.script
 
 
 def _make_grid_result(
@@ -53,6 +49,34 @@ def _make_grid_result(
     )
 
 
+def _make_custom_result(
+    *,
+    coords: list[tuple[int, int]],
+    tile_size_px: int,
+) -> TilingResult:
+    return TilingResult(
+        sample_id="bench-slide",
+        image_path=Path("/tmp/bench-slide.svs"),
+        mask_path=None,
+        backend="openslide",
+        x=np.asarray([x for x, _ in coords], dtype=np.int64),
+        y=np.asarray([y for _, y in coords], dtype=np.int64),
+        tile_index=np.arange(len(coords), dtype=np.int32),
+        target_spacing_um=0.5,
+        target_tile_size_px=tile_size_px,
+        read_level=0,
+        read_spacing_um=0.5,
+        read_tile_size_px=tile_size_px,
+        tile_size_lv0=tile_size_px,
+        overlap=0.0,
+        tissue_threshold=0.1,
+        num_tiles=len(coords),
+        config_hash="bench-hash",
+        read_step_px=tile_size_px,
+        step_px_lv0=tile_size_px,
+    )
+
+
 def _make_grouped_region(*, block_size: int, tile_size_px: int, step_px: int) -> np.ndarray:
     region_size = tile_size_px + (block_size - 1) * step_px
     region = np.zeros((region_size, region_size, 3), dtype=np.uint8)
@@ -77,46 +101,89 @@ def _load_benchmark_script_module():
     )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_benchmark_utils_module():
+    module_path = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "benchmark_tile_utils.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "benchmark_tile_utils",
+        module_path,
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
 
 def test_build_read_plans_without_supertiles_uses_one_plan_per_tile():
+    mod = _load_benchmark_utils_module()
     result = _make_grid_result(columns=3, rows=1, tile_size_px=32)
 
-    plans = build_read_plans(result, use_supertiles=False)
+    plans = mod.build_read_plans(result, use_supertiles=False)
 
     assert plans == [
-        TileReadPlan(x=0, y=0, read_size_px=32, block_size=1),
-        TileReadPlan(x=32, y=0, read_size_px=32, block_size=1),
-        TileReadPlan(x=64, y=0, read_size_px=32, block_size=1),
+        mod.TileReadPlan(x=0, y=0, read_size_px=32, block_size=1),
+        mod.TileReadPlan(x=32, y=0, read_size_px=32, block_size=1),
+        mod.TileReadPlan(x=64, y=0, read_size_px=32, block_size=1),
     ]
 
 
 def test_build_read_plans_with_supertiles_prefers_dense_8x8_blocks():
+    mod = _load_benchmark_utils_module()
     result = _make_grid_result(columns=8, rows=8, tile_size_px=32)
 
-    plans = build_read_plans(result, use_supertiles=True)
+    plans = mod.build_read_plans(result, use_supertiles=True)
 
-    assert plans == [TileReadPlan(x=0, y=0, read_size_px=256, block_size=8)]
+    assert plans == [mod.TileReadPlan(x=0, y=0, read_size_px=256, block_size=8)]
 
 
 def test_build_read_plans_with_supertiles_uses_4x4_when_8x8_is_not_available():
+    mod = _load_benchmark_utils_module()
     result = _make_grid_result(columns=4, rows=4, tile_size_px=32)
 
-    plans = build_read_plans(result, use_supertiles=True)
+    plans = mod.build_read_plans(result, use_supertiles=True)
 
-    assert plans == [TileReadPlan(x=0, y=0, read_size_px=128, block_size=4)]
+    assert plans == [mod.TileReadPlan(x=0, y=0, read_size_px=128, block_size=4)]
+
+
+def test_build_read_plans_with_supertiles_prioritizes_larger_blocks_before_singles():
+    mod = _load_benchmark_utils_module()
+    result = _make_custom_result(
+        coords=[
+            (0, 0),
+            (100, 0),
+            (100, 16),
+            (116, 0),
+            (116, 16),
+        ],
+        tile_size_px=16,
+    )
+
+    plans = mod.build_read_plans(result, use_supertiles=True)
+
+    assert plans == [
+        mod.TileReadPlan(x=100, y=0, read_size_px=32, block_size=2),
+        mod.TileReadPlan(x=0, y=0, read_size_px=16, block_size=1),
+    ]
 
 
 def test_group_read_plans_by_read_size_preserves_first_seen_order():
+    mod = _load_benchmark_utils_module()
     plans = [
-        TileReadPlan(x=0, y=0, read_size_px=256, block_size=8),
-        TileReadPlan(x=512, y=0, read_size_px=32, block_size=1),
-        TileReadPlan(x=768, y=0, read_size_px=256, block_size=8),
+        mod.TileReadPlan(x=0, y=0, read_size_px=256, block_size=8),
+        mod.TileReadPlan(x=512, y=0, read_size_px=32, block_size=1),
+        mod.TileReadPlan(x=768, y=0, read_size_px=256, block_size=8),
     ]
 
-    grouped = group_read_plans_by_read_size(plans)
+    grouped = mod.group_read_plans_by_read_size(plans)
 
     assert list(grouped) == [256, 32]
     assert grouped[256] == [plans[0], plans[2]]
@@ -124,10 +191,11 @@ def test_group_read_plans_by_read_size_preserves_first_seen_order():
 
 
 def test_iter_tiles_from_region_slices_in_x_major_order():
+    mod = _load_benchmark_utils_module()
     region = _make_grouped_region(block_size=4, tile_size_px=8, step_px=8)
-    plan = TileReadPlan(x=0, y=0, read_size_px=32, block_size=4)
+    plan = mod.TileReadPlan(x=0, y=0, read_size_px=32, block_size=4)
 
-    tiles = list(iter_tiles_from_region(region, plan, tile_size_px=8, read_step_px=8))
+    tiles = list(mod.iter_tiles_from_region(region, plan, tile_size_px=8, read_step_px=8))
 
     assert len(tiles) == 16
     assert int(tiles[0][0, 0, 0]) == 1
@@ -137,10 +205,11 @@ def test_iter_tiles_from_region_slices_in_x_major_order():
 
 
 def test_iter_tiles_from_region_uses_stride_for_overlap_reads():
+    mod = _load_benchmark_utils_module()
     region = _make_grouped_region(block_size=4, tile_size_px=12, step_px=8)
-    plan = TileReadPlan(x=0, y=0, read_size_px=36, block_size=4)
+    plan = mod.TileReadPlan(x=0, y=0, read_size_px=36, block_size=4)
 
-    tiles = list(iter_tiles_from_region(region, plan, tile_size_px=12, read_step_px=8))
+    tiles = list(mod.iter_tiles_from_region(region, plan, tile_size_px=12, read_step_px=8))
 
     assert len(tiles) == 16
     assert tiles[0].shape == (12, 12, 3)
@@ -148,9 +217,10 @@ def test_iter_tiles_from_region_uses_stride_for_overlap_reads():
 
 
 def test_limit_tiling_result_trims_arrays_and_reindexes_tiles():
+    mod = _load_benchmark_utils_module()
     result = _make_grid_result(columns=3, rows=2, tile_size_px=16)
 
-    limited = limit_tiling_result(result, max_tiles=4)
+    limited = mod.limit_tiling_result(result, max_tiles=4)
 
     assert limited.num_tiles == 4
     np.testing.assert_array_equal(limited.x, np.array([0, 0, 16, 16], dtype=np.int64))
@@ -198,10 +268,11 @@ def test_load_single_slide_result_from_config_builds_fresh_tiling_result(tmp_pat
 
 def test_benchmark_wsd_mode_reports_region_and_tile_progress(monkeypatch):
     module = _load_benchmark_script_module()
+    utils = _load_benchmark_utils_module()
     result = _make_grid_result(columns=2, rows=1, tile_size_px=8)
     plans = [
-        TileReadPlan(x=0, y=0, read_size_px=8, block_size=1),
-        TileReadPlan(x=8, y=0, read_size_px=8, block_size=1),
+        utils.TileReadPlan(x=0, y=0, read_size_px=8, block_size=1),
+        utils.TileReadPlan(x=8, y=0, read_size_px=8, block_size=1),
     ]
 
     class _FakeWSI:
@@ -233,10 +304,11 @@ def test_benchmark_wsd_mode_reports_region_and_tile_progress(monkeypatch):
 
 def test_benchmark_cucim_batch_mode_reports_region_and_tile_progress(monkeypatch):
     module = _load_benchmark_script_module()
+    utils = _load_benchmark_utils_module()
     result = _make_grid_result(columns=4, rows=4, tile_size_px=8)
     plans = [
-        TileReadPlan(x=0, y=0, read_size_px=8, block_size=1),
-        TileReadPlan(x=0, y=0, read_size_px=32, block_size=4),
+        utils.TileReadPlan(x=0, y=0, read_size_px=8, block_size=1),
+        utils.TileReadPlan(x=0, y=0, read_size_px=32, block_size=4),
     ]
 
     class _FakeCuImage:

@@ -753,9 +753,18 @@ def test_compute_request_passes_inner_workers_to_tile_extraction(
             config_hash="hash",
         )
 
-    def _fake_extract_tiles_to_tar(result, output_dir, *, filter_params=None, num_workers=1, **kwargs):
+    def _fake_extract_tiles_to_tar(
+        result,
+        output_dir,
+        *,
+        filter_params=None,
+        num_workers=1,
+        jpeg_backend="turbojpeg",
+        **kwargs,
+    ):
         del output_dir, filter_params, kwargs
         seen["num_workers"] = num_workers
+        seen["jpeg_backend"] = jpeg_backend
         return tmp_path / "tiles" / "slide-1.tiles.tar", result
 
     def _fake_save_tiling_result(result, output_dir, *, tiles_dir=None):
@@ -792,16 +801,18 @@ def test_compute_request_passes_inner_workers_to_tile_extraction(
         mask_preview_path=None,
         output_dir=tmp_path,
         num_workers=6,
+        jpeg_backend="pil",
         save_tiles=True,
     )
 
     monkeypatch.setattr(api_mod, "_compute_tiling_result", _fake_compute_tiling_result)
     monkeypatch.setattr(api_mod, "extract_tiles_to_tar", _fake_extract_tiles_to_tar)
     monkeypatch.setattr(api_mod, "save_tiling_result", _fake_save_tiling_result)
-    response = api_mod._compute_tiling_result_from_request(request)
+    response = api_mod._compute_and_save_tiling_artifacts_from_request(request)
 
     assert response.ok
     assert seen["num_workers"] == 6
+    assert seen["jpeg_backend"] == "pil"
 
 
 def test_save_tiling_result_rejects_invalid_tile_index(tmp_path: Path):
