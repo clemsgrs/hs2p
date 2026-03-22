@@ -447,12 +447,12 @@ def plot_results(
 
 
 def main() -> int:
-    from benchmark_tile_read_strategies import (
+    from scripts.benchmark_tile_read_strategies import (
         BenchmarkProgressReporter,
         load_single_slide_result_from_config,
         write_csv,
     )
-    from hs2p.benchmarking import limit_tiling_result
+    from scripts.benchmark_tile_utils import limit_tiling_result
 
     args = parse_args()
     workers = sorted(args.workers)
