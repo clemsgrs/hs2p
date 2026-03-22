@@ -3,12 +3,13 @@ requires = ["setuptools>=42.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.pytest.ini_options]
-addopts = "--cov=hs2p -m 'not integration'"
+addopts = "--cov=hs2p -m 'not integration and not script'"
 testpaths = [
     "tests",
 ]
 markers = [
     "integration: backend-dependent or fixture-dependent integration coverage excluded from the default fast test run",
+    "script: tests for standalone or local-only scripts excluded from the default CI run",
 ]
 
 [tool.mypy]

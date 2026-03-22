@@ -2,6 +2,8 @@ import pytest
 
 from scripts.generate_tissue_mask import _resolve_spacing_plan
 
+pytestmark = pytest.mark.script
+
 
 class _SpacingPlanWSI:
     def __init__(self, spacings: list[float], shapes: list[tuple[int, int]]) -> None:

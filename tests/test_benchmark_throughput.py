@@ -1,7 +1,10 @@
 import importlib.util
 from pathlib import Path
 
+import pytest
 from omegaconf import OmegaConf
+
+pytestmark = pytest.mark.script
 
 
 def _load_benchmark_module():

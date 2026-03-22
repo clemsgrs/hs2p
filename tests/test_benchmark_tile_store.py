@@ -8,6 +8,8 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
+pytestmark = pytest.mark.script
+
 
 def _load_benchmark_module():
     module_path = (

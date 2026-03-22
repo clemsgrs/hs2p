@@ -4,8 +4,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from hs2p.api import TilingResult
+
+pytestmark = pytest.mark.script
 
 
 def _make_grid_result(

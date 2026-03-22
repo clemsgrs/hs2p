@@ -9,6 +9,8 @@ import openslide
 import pytest
 import tifffile
 
+pytestmark = pytest.mark.script
+
 
 def _load_script_module():
 	script_path = Path(__file__).resolve().parent.parent / "scripts" / "generate_tissue_mask_pyramid.py"
@@ -448,4 +450,3 @@ def test_segment_tissue_hsv_uses_gaussian_blur_when_sigma_positive(monkeypatch):
 	script.segment_tissue_hsv(wsi_arr=wsi_arr, gaussian_sigma_px=1.5)
 
 	assert call_counter["count"] == 1
-

@@ -4,8 +4,11 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from tests.helpers.fake_wsi_backend import FakePyramidWSI, PyramidSpec
+
+pytestmark = pytest.mark.script
 
 
 def _load_script_module():
