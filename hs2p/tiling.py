@@ -1,8 +1,6 @@
 import argparse
 from pathlib import Path
 
-import pandas as pd
-
 from hs2p.api import tile_slides
 from hs2p.configs.resolvers import (
     resolve_filter_config,
@@ -54,6 +52,7 @@ def main(args):
             filtering = resolve_filter_config(cfg)
             preview = resolve_preview_config(cfg)
             read_coordinates_from = resolve_read_coordinates_from(cfg)
+            jpeg_backend = str(getattr(cfg.speed, "jpeg_backend", "turbojpeg"))
             progress.emit_progress(
                 "run.started",
                 command="tiling",
@@ -79,8 +78,8 @@ def main(args):
                 resume=cfg.resume,
                 read_coordinates_from=read_coordinates_from,
                 save_tiles=bool(getattr(cfg, "save_tiles", False)),
+                jpeg_backend=jpeg_backend,
             )
-            pd.read_csv(output_dir / "process_list.csv")
             progress.emit_progress(
                 "run.finished",
                 command="tiling",

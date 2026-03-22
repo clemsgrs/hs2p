@@ -53,6 +53,34 @@ def _make_grid_result(
     )
 
 
+def _make_custom_result(
+    *,
+    coords: list[tuple[int, int]],
+    tile_size_px: int,
+) -> TilingResult:
+    return TilingResult(
+        sample_id="bench-slide",
+        image_path=Path("/tmp/bench-slide.svs"),
+        mask_path=None,
+        backend="openslide",
+        x=np.asarray([x for x, _ in coords], dtype=np.int64),
+        y=np.asarray([y for _, y in coords], dtype=np.int64),
+        tile_index=np.arange(len(coords), dtype=np.int32),
+        target_spacing_um=0.5,
+        target_tile_size_px=tile_size_px,
+        read_level=0,
+        read_spacing_um=0.5,
+        read_tile_size_px=tile_size_px,
+        tile_size_lv0=tile_size_px,
+        overlap=0.0,
+        tissue_threshold=0.1,
+        num_tiles=len(coords),
+        config_hash="bench-hash",
+        read_step_px=tile_size_px,
+        step_px_lv0=tile_size_px,
+    )
+
+
 def _make_grouped_region(*, block_size: int, tile_size_px: int, step_px: int) -> np.ndarray:
     region_size = tile_size_px + (block_size - 1) * step_px
     region = np.zeros((region_size, region_size, 3), dtype=np.uint8)
@@ -107,6 +135,26 @@ def test_build_read_plans_with_supertiles_uses_4x4_when_8x8_is_not_available():
     plans = build_read_plans(result, use_supertiles=True)
 
     assert plans == [TileReadPlan(x=0, y=0, read_size_px=128, block_size=4)]
+
+
+def test_build_read_plans_with_supertiles_prioritizes_larger_blocks_before_singles():
+    result = _make_custom_result(
+        coords=[
+            (0, 0),
+            (100, 0),
+            (100, 16),
+            (116, 0),
+            (116, 16),
+        ],
+        tile_size_px=16,
+    )
+
+    plans = build_read_plans(result, use_supertiles=True)
+
+    assert plans == [
+        TileReadPlan(x=100, y=0, read_size_px=32, block_size=2),
+        TileReadPlan(x=0, y=0, read_size_px=16, block_size=1),
+    ]
 
 
 def test_group_read_plans_by_read_size_preserves_first_seen_order():

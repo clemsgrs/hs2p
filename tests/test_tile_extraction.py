@@ -1,8 +1,10 @@
 """Tests for extract_tiles_to_tar() and the save_tiles pipeline option."""
 
+import csv
 import io
 import tarfile
 import types
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -13,6 +15,7 @@ from PIL import Image
 from hs2p.api import (
     TilingResult,
     _iter_cucim_tile_arrays_for_tar_extraction,
+    _iter_grouped_read_plans_for_tar_extraction,
     _iter_wsd_tile_arrays_for_tar_extraction,
     extract_tiles_to_tar,
 )
@@ -94,6 +97,37 @@ def _make_grid_tiling_result(
     )
 
 
+def _make_custom_tiling_result(
+    *,
+    coords: list[tuple[int, int]],
+    tile_size: int,
+    sample_id: str = "custom-slide",
+) -> TilingResult:
+    x_coords = [x for x, _ in coords]
+    y_coords = [y for _, y in coords]
+    return TilingResult(
+        sample_id=sample_id,
+        image_path=Path("/data/custom-slide.svs"),
+        mask_path=None,
+        backend="openslide",
+        x=np.asarray(x_coords, dtype=np.int64),
+        y=np.asarray(y_coords, dtype=np.int64),
+        tile_index=np.arange(len(coords), dtype=np.int32),
+        target_spacing_um=0.5,
+        target_tile_size_px=tile_size,
+        read_level=0,
+        read_spacing_um=0.5,
+        read_tile_size_px=tile_size,
+        tile_size_lv0=tile_size,
+        overlap=0.0,
+        tissue_threshold=0.1,
+        num_tiles=len(coords),
+        config_hash="custom-hash",
+        read_step_px=tile_size,
+        step_px_lv0=tile_size,
+    )
+
+
 def _make_grouped_region(
     *,
     block_size: int,
@@ -142,6 +176,167 @@ class TestExtractTilesToTar:
 
         # No filtering — result unchanged
         assert out_result is result
+
+        manifest_path = tmp_path / "tiles" / "slide-1.tiles.manifest.csv"
+        with manifest_path.open(newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        assert rows == [
+            {"tile_index": "0", "x": "0", "y": "0"},
+            {"tile_index": "1", "x": "256", "y": "0"},
+            {"tile_index": "2", "x": "512", "y": "0"},
+        ]
+
+    def test_names_tar_members_from_original_tile_index(self, tmp_path: Path):
+        coords = [
+            (0, 0),
+            (100, 0),
+            (100, 16),
+            (116, 0),
+            (116, 16),
+        ]
+        result = _make_custom_tiling_result(coords=coords, tile_size=16)
+
+        grouped_region = _make_grouped_region(block_size=2, tile_size=16, step_px=16)
+        single_patch = _solid_patch((9, 9, 9), size=16)
+
+        mock_wsi = MagicMock()
+        mock_wsi.get_patch.side_effect = [grouped_region, single_patch]
+
+        with patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi):
+            tar_path, out_result = extract_tiles_to_tar(result, output_dir=tmp_path)
+
+        assert out_result is result
+
+        with tarfile.open(tar_path, "r") as tf:
+            assert [member.name for member in tf.getmembers()] == [
+                "000001.jpg",
+                "000002.jpg",
+                "000003.jpg",
+                "000004.jpg",
+                "000000.jpg",
+            ]
+
+        manifest_path = tmp_path / "tiles" / "custom-slide.tiles.manifest.csv"
+        with manifest_path.open(newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        assert rows == [
+            {"tile_index": "1", "x": "100", "y": "0"},
+            {"tile_index": "2", "x": "100", "y": "16"},
+            {"tile_index": "3", "x": "116", "y": "0"},
+            {"tile_index": "4", "x": "116", "y": "16"},
+            {"tile_index": "0", "x": "0", "y": "0"},
+        ]
+
+    def test_grouped_read_plans_follow_custom_supertile_sizes(self):
+        result = _make_grid_tiling_result(
+            columns=4,
+            rows=4,
+            tile_size=16,
+            step_px=16,
+        )
+
+        plans = list(
+            _iter_grouped_read_plans_for_tar_extraction(
+                result=result,
+                read_step_px=16,
+                step_px_lv0=16,
+                supertile_sizes=(2,),
+            )
+        )
+
+        assert len(plans) == 4
+        assert all(plan.block_size == 2 for plan in plans)
+
+        plans = list(
+            _iter_grouped_read_plans_for_tar_extraction(
+                result=result,
+                read_step_px=16,
+                step_px_lv0=16,
+                supertile_sizes=(4, 2),
+            )
+        )
+
+        assert len(plans) == 1
+        assert plans[0].block_size == 4
+
+    def test_uses_rgb_420_turbojpeg_encoding(self, tmp_path: Path, monkeypatch):
+        result = _make_tiling_result(num_tiles=1)
+        mock_wsi = MagicMock()
+        mock_wsi.get_patch.return_value = _solid_patch((12, 34, 56))
+
+        captured: dict[str, int] = {}
+
+        class _FakeTurboJPEG:
+            def encode(
+                self,
+                img_array,
+                quality=85,
+                pixel_format=None,
+                jpeg_subsample=None,
+                flags=0,
+                dst=None,
+                lossless=False,
+                icc_profile=None,
+            ):
+                captured["quality"] = quality
+                captured["pixel_format"] = pixel_format
+                captured["jpeg_subsample"] = jpeg_subsample
+                return b"jpeg"
+
+        monkeypatch.setitem(
+            sys.modules,
+            "turbojpeg",
+            types.SimpleNamespace(
+                TurboJPEG=lambda: _FakeTurboJPEG(),
+                TJPF_RGB=0,
+                TJSAMP_420=2,
+            ),
+        )
+
+        with patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi):
+            tar_path, _ = extract_tiles_to_tar(result, output_dir=tmp_path)
+
+        assert tar_path.is_file()
+        assert captured == {
+            "quality": 90,
+            "pixel_format": 0,
+            "jpeg_subsample": 2,
+        }
+
+    def test_uses_pil_encoding_when_requested(self, tmp_path: Path, monkeypatch):
+        result = _make_tiling_result(num_tiles=1)
+        mock_wsi = MagicMock()
+        mock_wsi.get_patch.return_value = _solid_patch((12, 34, 56))
+
+        turbojpeg_called = False
+
+        class _FakeTurboJPEG:
+            def __init__(self, *_args, **_kwargs):
+                nonlocal turbojpeg_called
+                turbojpeg_called = True
+
+            def encode(self, *_args, **_kwargs):
+                raise AssertionError("TurboJPEG should not be used for PIL backend")
+
+        monkeypatch.setitem(
+            sys.modules,
+            "turbojpeg",
+            types.SimpleNamespace(
+                TurboJPEG=lambda: _FakeTurboJPEG(),
+                TJPF_RGB=0,
+                TJSAMP_420=2,
+            ),
+        )
+
+        with patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi):
+            tar_path, _ = extract_tiles_to_tar(
+                result,
+                output_dir=tmp_path,
+                jpeg_backend="pil",
+            )
+
+        assert tar_path.is_file()
+        assert turbojpeg_called is False
 
     def test_white_filtering_drops_white_tile(self, tmp_path: Path):
         result = _make_tiling_result(num_tiles=3)
