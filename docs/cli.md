@@ -132,6 +132,30 @@ These filters are **disabled by default** and should stay off unless your datase
 
 When enabled, every candidate tile that passes the tissue mask check is read from the slide at full resolution and its pixel values inspected. This is the **only step in the tiling pipeline that reads actual tile pixel data**. For slides with large internal JPEG tiles (common in some scanner formats), each read triggers a full JPEG decode of the underlying tile block — which can be an order of magnitude slower than the rest of the pipeline per slide.
 
+### GPU-accelerated tile decoding (`gpu_decode`)
+
+When `save_tiles: true` and `tiling.backend: cucim`, you can enable GPU-accelerated batch decoding by passing `gpu_decode=True` to `extract_tiles_to_tar` or `tile_slides` in the Python API:
+
+```python
+from hs2p.api import tile_slides, extract_tiles_to_tar
+
+# via tile_slides
+tile_slides(..., save_tiles=True, gpu_decode=True)
+
+# or directly
+extract_tiles_to_tar(result, output_dir, gpu_decode=True)
+```
+
+When enabled, two things happen:
+1. `ENABLE_CUSLIDE2=1` is set in the process environment before CuCIM is imported, activating NVIDIA's cuSlide2 GPU-accelerated SVS/TIFF reader.
+2. `device="cuda"` is passed to `read_region`, so batch JPEG decoding runs on the GPU via nvImageCodec.
+
+This can give a significant speedup (measured ~3.8× for batch decoding) on `.svs` and `.tif` files.
+
+**Requirements:** `libnuma1` must be installed and `nvImageCodec` must be available (included with `cucim-cu12`). If the installed CuCIM version does not support `device="cuda"`, hs2p falls back silently to CPU decoding.
+
+**Default:** `False` — opt in explicitly.
+
 ### Saved tile export (`save_tiles`)
 
 When `save_tiles: true`, HS2P also writes a `tiles/{sample_id}.tiles.tar` archive with JPEG-encoded tile images.

@@ -442,6 +442,58 @@ class TestExtractTilesToTar:
             img = Image.open(io.BytesIO(data))
             assert img.size == (224, 224)
 
+    def test_resizing_uses_bilinear_resampling(self, tmp_path: Path):
+        result = _make_tiling_result(num_tiles=1, tile_size=224)
+        result = TilingResult(
+            **{
+                **{f.name: getattr(result, f.name) for f in result.__dataclass_fields__.values()},
+                "read_tile_size_px": 512,
+                "target_tile_size_px": 224,
+            }
+        )
+
+        mock_wsi = MagicMock()
+        mock_wsi.get_patch.return_value = _solid_patch((100, 100, 100), size=512)
+
+        resize_calls: list[int] = []
+        bilinear = Image.Resampling.BILINEAR
+        original_fromarray = Image.fromarray
+
+        class _ResizeSpy:
+            def __init__(self, image: Image.Image):
+                self._image = image
+
+            def convert(self, mode: str):
+                self._image = self._image.convert(mode)
+                return self
+
+            def resize(self, size, resample=None, box=None, reducing_gap=None):
+                resize_calls.append(resample)
+                self._image = self._image.resize(
+                    size,
+                    resample=resample,
+                    box=box,
+                    reducing_gap=reducing_gap,
+                )
+                return self
+
+            def __array__(self, dtype=None):
+                return np.asarray(self._image, dtype=dtype)
+
+            def save(self, *args, **kwargs):
+                return self._image.save(*args, **kwargs)
+
+        def _fromarray_spy(*args, **kwargs):
+            return _ResizeSpy(original_fromarray(*args, **kwargs))
+
+        with (
+            patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi),
+            patch("PIL.Image.fromarray", side_effect=_fromarray_spy),
+        ):
+            extract_tiles_to_tar(result, output_dir=tmp_path)
+
+        assert resize_calls == [bilinear]
+
     def test_strips_alpha_channel(self, tmp_path: Path):
         result = _make_tiling_result(num_tiles=1)
         rgba = np.zeros((256, 256, 4), dtype=np.uint8)
@@ -514,6 +566,7 @@ class TestExtractTilesToTar:
                 result,
                 output_dir=tmp_path,
                 num_workers=5,
+                gpu_decode=False,
             )
 
         assert tar_path.is_file()
@@ -582,6 +635,7 @@ class TestExtractTilesToTar:
             _iter_cucim_tile_arrays_for_tar_extraction(
                 result=result,
                 num_workers=7,
+                gpu_decode=False,
             )
         )
 
@@ -597,6 +651,140 @@ class TestExtractTilesToTar:
         assert int(tiles[1][0, 0, 0]) == 2
         assert int(tiles[4][0, 0, 0]) == 5
         assert int(tiles[-1][0, 0, 0]) == 16
+
+    def test_cucim_iterator_batches_multiple_2x2_plans_in_one_read_call(
+        self, monkeypatch
+    ):
+        result = _make_custom_tiling_result(
+            coords=[
+                (0, 0),
+                (0, 16),
+                (16, 0),
+                (16, 16),
+                (100, 0),
+                (100, 16),
+                (116, 0),
+                (116, 16),
+                (300, 0),
+            ],
+            tile_size=16,
+        )
+        result.backend = "cucim"
+
+        grouped_region_a = _make_grouped_region(block_size=2, tile_size=16, step_px=16)
+        grouped_region_b = _make_grouped_region(block_size=2, tile_size=16, step_px=16)
+        single_region = _solid_patch((99, 99, 99), size=16)
+
+        mock_cu_image = MagicMock()
+        mock_cu_image.read_region.side_effect = [
+            iter([grouped_region_a, grouped_region_b]),
+            iter([single_region]),
+        ]
+        fake_cucim = types.SimpleNamespace(CuImage=MagicMock(return_value=mock_cu_image))
+
+        import hs2p.api as api_mod
+
+        monkeypatch.setattr(
+            api_mod.importlib,
+            "import_module",
+            lambda name: fake_cucim if name == "cucim" else None,
+        )
+
+        tiles = list(
+            _iter_cucim_tile_arrays_for_tar_extraction(
+                result=result,
+                num_workers=3,
+                gpu_decode=False,
+            )
+        )
+
+        assert len(tiles) == 9
+        assert mock_cu_image.read_region.call_count == 2
+        assert mock_cu_image.read_region.call_args_list[0].kwargs == {
+            "level": 0,
+            "num_workers": 3,
+        }
+        assert mock_cu_image.read_region.call_args_list[0].args == (
+            [(0, 0), (100, 0)],
+            (32, 32),
+        )
+        assert mock_cu_image.read_region.call_args_list[1].args == (
+            [(300, 0)],
+            (16, 16),
+        )
+
+    def test_cucim_iterator_groups_same_size_plans_even_when_interleaved(
+        self, monkeypatch
+    ):
+        result = _make_tiling_result(num_tiles=1, tile_size=16)
+        result.backend = "cucim"
+
+        import hs2p.api as api_mod
+
+        interleaved_plans = [
+            api_mod._WSDTarReadPlan(
+                x=0,
+                y=0,
+                read_size_px=32,
+                block_size=2,
+                tile_indices=(0, 1, 2, 3),
+            ),
+            api_mod._WSDTarReadPlan(
+                x=200,
+                y=0,
+                read_size_px=16,
+                block_size=1,
+                tile_indices=(4,),
+            ),
+            api_mod._WSDTarReadPlan(
+                x=100,
+                y=0,
+                read_size_px=32,
+                block_size=2,
+                tile_indices=(5, 6, 7, 8),
+            ),
+        ]
+
+        grouped_region_a = _make_grouped_region(block_size=2, tile_size=16, step_px=16)
+        grouped_region_b = _make_grouped_region(block_size=2, tile_size=16, step_px=16)
+        single_region = _solid_patch((77, 77, 77), size=16)
+
+        mock_cu_image = MagicMock()
+        mock_cu_image.read_region.side_effect = [
+            iter([grouped_region_a, grouped_region_b]),
+            iter([single_region]),
+        ]
+        fake_cucim = types.SimpleNamespace(CuImage=MagicMock(return_value=mock_cu_image))
+
+        monkeypatch.setattr(
+            api_mod,
+            "_iter_grouped_read_plans_for_tar_extraction",
+            lambda **kwargs: iter(interleaved_plans),
+        )
+        monkeypatch.setattr(
+            api_mod.importlib,
+            "import_module",
+            lambda name: fake_cucim if name == "cucim" else None,
+        )
+
+        tiles = list(
+            _iter_cucim_tile_arrays_for_tar_extraction(
+                result=result,
+                num_workers=2,
+                gpu_decode=False,
+            )
+        )
+
+        assert len(tiles) == 9
+        assert mock_cu_image.read_region.call_count == 2
+        assert mock_cu_image.read_region.call_args_list[0].args == (
+            [(0, 0), (100, 0)],
+            (32, 32),
+        )
+        assert mock_cu_image.read_region.call_args_list[1].args == (
+            [(200, 0)],
+            (16, 16),
+        )
 
     def test_wsd_iterator_groups_dense_8x8_grid_into_one_read(self):
         result = _make_grid_tiling_result(columns=8, rows=8, tile_size=16, step_px=16)

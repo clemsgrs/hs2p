@@ -275,31 +275,42 @@ def test_benchmark_wsd_mode_reports_region_and_tile_progress(monkeypatch):
         utils.TileReadPlan(x=8, y=0, read_size_px=8, block_size=1),
     ]
 
+    seen: dict[str, object] = {}
+
     class _FakeWSI:
         def __init__(self, *_args, **_kwargs):
-            pass
+            seen["args"] = _args
+            seen["kwargs"] = _kwargs
 
         def get_patch(self, *_args, **_kwargs):
             return np.ones((8, 8, 3), dtype=np.uint8)
 
-    monkeypatch.setitem(
-        sys.modules,
-        "wholeslidedata",
-        SimpleNamespace(WholeSlideImage=_FakeWSI),
+    monkeypatch.setattr(
+        module,
+        "coerce_wsd_path",
+        lambda image_path, backend: f"coerced:{image_path}:{backend}",
     )
     updates: list[tuple[int, int]] = []
 
-    elapsed, tile_count, checksum = module.benchmark_wsd_mode(
-        result=result,
-        plans=plans,
-        read_step_px=8,
-        progress_callback=lambda regions, tiles: updates.append((regions, tiles)),
-    )
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setitem(
+            sys.modules,
+            "wholeslidedata",
+            SimpleNamespace(WholeSlideImage=_FakeWSI),
+        )
+        elapsed, tile_count, checksum = module.benchmark_wsd_mode(
+            result=result,
+            plans=plans,
+            read_step_px=8,
+            progress_callback=lambda regions, tiles: updates.append((regions, tiles)),
+        )
 
     assert elapsed >= 0.0
     assert tile_count == 2
     assert checksum > 0
     assert updates == [(1, 1), (1, 1)]
+    assert seen["args"] == ("coerced:/tmp/bench-slide.svs:openslide",)
+    assert seen["kwargs"] == {"backend": "openslide"}
 
 
 def test_benchmark_cucim_batch_mode_reports_region_and_tile_progress(monkeypatch):
