@@ -566,6 +566,7 @@ class TestExtractTilesToTar:
                 result,
                 output_dir=tmp_path,
                 num_workers=5,
+                gpu_decode=False,
             )
 
         assert tar_path.is_file()
@@ -634,6 +635,7 @@ class TestExtractTilesToTar:
             _iter_cucim_tile_arrays_for_tar_extraction(
                 result=result,
                 num_workers=7,
+                gpu_decode=False,
             )
         )
 
@@ -692,6 +694,7 @@ class TestExtractTilesToTar:
             _iter_cucim_tile_arrays_for_tar_extraction(
                 result=result,
                 num_workers=3,
+                gpu_decode=False,
             )
         )
 
@@ -768,6 +771,7 @@ class TestExtractTilesToTar:
             _iter_cucim_tile_arrays_for_tar_extraction(
                 result=result,
                 num_workers=2,
+                gpu_decode=False,
             )
         )
 
