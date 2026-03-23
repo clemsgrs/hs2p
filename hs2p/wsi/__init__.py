@@ -910,22 +910,18 @@ def overlay_mask_on_slide(
         mask_arr = mask_object.get_slide(spacing=mask_spacing)
         if mask_arr.ndim == 3:
             mask_arr = mask_arr[:, :, 0]
-        mask_arr = _extract_padded_crop(
+        mask_arr = cv2.resize(
             mask_arr.astype(np.uint8),
-            x=0,
-            y=0,
-            width=base_width,
-            height=base_height,
+            (base_width, base_height),
+            interpolation=cv2.INTER_NEAREST,
         )
     elif mask_arr is not None:
         if mask_arr.ndim == 3:
             mask_arr = mask_arr[:, :, 0]
-        mask_arr = _extract_padded_crop(
+        mask_arr = cv2.resize(
             mask_arr.astype(np.uint8),
-            x=0,
-            y=0,
-            width=base_width,
-            height=base_height,
+            (base_width, base_height),
+            interpolation=cv2.INTER_NEAREST,
         )
     else:
         raise ValueError(

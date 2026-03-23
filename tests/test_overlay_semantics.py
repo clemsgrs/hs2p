@@ -171,51 +171,6 @@ def test_overlay_mask_on_slide_defaults_to_tissue_overlay_style(monkeypatch):
     assert np.array_equal(overlay_arr[0, 0], slide_arr[0, 0])
     assert not np.array_equal(overlay_arr[0, 1], slide_arr[0, 1])
 
-
-def test_overlay_mask_on_slide_pads_mask_without_resizing_content(monkeypatch):
-    slide_arr = np.full((4, 4, 3), 120, dtype=np.uint8)
-    mask_arr = np.array([[0, 0], [0, 1]], dtype=np.uint8)
-
-    class FakeWSI:
-        def __init__(self, path, backend="asap"):
-            self.path = Path(path)
-            self.spacings = [0.5]
-            self.level_dimensions = [(4, 4)]
-            self.level_downsamples = [(1.0, 1.0)]
-
-        def get_best_level_for_downsample_custom(self, downsample):
-            return 0
-
-        def get_slide(self, spacing):
-            if "mask" in self.path.name:
-                return mask_arr
-            return slide_arr
-
-    monkeypatch.setattr(wsi_mod, "WholeSlideImage", FakeWSI)
-    monkeypatch.setattr(
-        wsi_mod.cv2,
-        "resize",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("cv2.resize should not be called")),
-    )
-
-    overlay = wsi_mod.overlay_mask_on_slide(
-        wsi_path=Path("fake-wsi.tif"),
-        annotation_mask_path=Path("fake-mask.tif"),
-        mask_arr=None,
-        downsample=1,
-        backend="openslide",
-        alpha=0.5,
-        tile_size_lv0=4,
-    )
-    overlay_arr = np.array(overlay.convert("RGB"))
-
-    assert overlay_arr.shape == (4, 4, 3)
-    assert np.array_equal(overlay_arr[3, 0], slide_arr[3, 0])
-    assert np.array_equal(overlay_arr[3, 3], slide_arr[3, 3])
-    assert np.array_equal(overlay_arr[0, 3], slide_arr[0, 3])
-    assert np.array_equal(overlay_arr[1, 1], slide_arr[1, 1]) is False
-
-
 def test_extract_coordinates_uses_overlay_mask_preview_instead_of_line_rendering(
     monkeypatch, tmp_path: Path
 ):
