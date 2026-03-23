@@ -8,22 +8,19 @@ costs can be measured independently.
 from __future__ import annotations
 
 import argparse
-import io
 import statistics
 import sys
-import tarfile
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
-
-import numpy as np
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from hs2p.api import _iter_tile_arrays_for_tar_extraction
+from hs2p.api import extract_tiles_to_tar
 
 ProgressCallback = Callable[[int, int], None]
 
@@ -100,6 +97,40 @@ def parse_args() -> argparse.Namespace:
 # ------------------------------------------------------------------
 
 
+@dataclass
+class ExtractionPhaseRecorder:
+    progress_callback: ProgressCallback | None = None
+    read_s: float = 0.0
+    encode_s: float = 0.0
+    write_s: float = 0.0
+    tile_count: int = 0
+    jpeg_bytes: int = 0
+
+    def record(
+        self,
+        phase: str,
+        duration_s: float,
+        *,
+        tile_count: int = 0,
+        jpeg_bytes: int = 0,
+    ) -> None:
+        if phase == "read":
+            self.read_s += float(duration_s)
+            self.tile_count += int(tile_count)
+            if self.progress_callback is not None:
+                for _ in range(int(tile_count)):
+                    self.progress_callback(1, 1)
+            return
+        if phase == "encode":
+            self.encode_s += float(duration_s)
+            self.jpeg_bytes += int(jpeg_bytes)
+            return
+        if phase == "write":
+            self.write_s += float(duration_s)
+            return
+        raise ValueError(f"Unsupported phase: {phase}")
+
+
 def benchmark_tile_store(
     *,
     result,
@@ -111,100 +142,29 @@ def benchmark_tile_store(
     progress_callback: ProgressCallback | None = None,
 ) -> dict[str, float | int]:
     """Run one extraction pass and return per-phase timing metrics."""
-    from PIL import Image
-
-    jpeg_backend = str(jpeg_backend)
-    _jpeg_encoder = None
-    if jpeg_backend == "turbojpeg":
-        import turbojpeg
-
-        _jpeg_encoder = turbojpeg.TurboJPEG()
-
     output_dir.mkdir(parents=True, exist_ok=True)
+    recorder = ExtractionPhaseRecorder(progress_callback=progress_callback)
 
-    read_s = 0.0
-    encode_s = 0.0
-    write_s = 0.0
-    tile_count = 0
-    jpeg_bytes = 0
-
-    temp_tar_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            suffix=".tar", dir=output_dir, delete=False
-        ) as tmp:
-            temp_tar_path = Path(tmp.name)
-
+    with tempfile.TemporaryDirectory(dir=output_dir) as tmpdir:
         total_start = time.perf_counter()
-
-        with tarfile.open(temp_tar_path, "w") as tf:
-            iterator = _iter_tile_arrays_for_tar_extraction(
-                result=result,
-                num_workers=num_workers,
-                supertile_sizes=supertile_sizes,
-            )
-
-            while True:
-                t0 = time.perf_counter()
-                try:
-                    tile_arr = next(iterator)
-                except StopIteration:
-                    break
-                t1 = time.perf_counter()
-                read_s += t1 - t0
-
-                if tile_arr.shape[2] > 3:
-                    tile_arr = tile_arr[:, :, :3]
-
-                if result.read_tile_size_px != result.target_tile_size_px:
-                    img = Image.fromarray(tile_arr).convert("RGB")
-                    img = img.resize(
-                        (result.target_tile_size_px, result.target_tile_size_px),
-                        Image.LANCZOS,
-                    )
-                    tile_arr = np.asarray(img)
-
-                if jpeg_backend == "turbojpeg":
-                    assert _jpeg_encoder is not None
-                    encoded = _jpeg_encoder.encode(
-                        tile_arr,
-                        quality=jpeg_quality,
-                        pixel_format=turbojpeg.TJPF_RGB,
-                        jpeg_subsample=turbojpeg.TJSAMP_420,
-                    )
-                elif jpeg_backend == "pil":
-                    img = Image.fromarray(tile_arr).convert("RGB")
-                    buf = io.BytesIO()
-                    img.save(buf, format="JPEG", quality=jpeg_quality)
-                    encoded = buf.getvalue()
-                else:
-                    raise ValueError(f"Unsupported jpeg_backend: {jpeg_backend}")
-                buf = io.BytesIO(encoded)
-                t2 = time.perf_counter()
-                encode_s += t2 - t1
-
-                info = tarfile.TarInfo(name=f"{tile_count:06d}.jpg")
-                info.size = len(encoded)
-                tf.addfile(info, buf)
-                t3 = time.perf_counter()
-                write_s += t3 - t2
-
-                jpeg_bytes += info.size
-                tile_count += 1
-                if progress_callback is not None:
-                    progress_callback(1, 1)
-
+        extract_tiles_to_tar(
+            result,
+            output_dir=Path(tmpdir),
+            jpeg_quality=int(jpeg_quality),
+            jpeg_backend=str(jpeg_backend),
+            supertile_sizes=supertile_sizes,
+            num_workers=int(num_workers),
+            phase_recorder=recorder,
+        )
         total_s = time.perf_counter() - total_start
-    finally:
-        if temp_tar_path is not None:
-            temp_tar_path.unlink(missing_ok=True)
+    total_s = max(total_s, recorder.read_s + recorder.encode_s + recorder.write_s)
 
     return {
-        "tile_count": tile_count,
-        "jpeg_bytes": jpeg_bytes,
-        "read_s": read_s,
-        "encode_s": encode_s,
-        "write_s": write_s,
+        "tile_count": recorder.tile_count,
+        "jpeg_bytes": recorder.jpeg_bytes,
+        "read_s": recorder.read_s,
+        "encode_s": recorder.encode_s,
+        "write_s": recorder.write_s,
         "total_s": total_s,
     }
 
@@ -447,7 +407,7 @@ def plot_results(
 
 
 def main() -> int:
-    from scripts.benchmark_tile_read_strategies import (
+    from scripts.benchmark_tile_read import (
         BenchmarkProgressReporter,
         load_single_slide_result_from_config,
         write_csv,

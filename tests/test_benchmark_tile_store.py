@@ -19,6 +19,7 @@ def _load_benchmark_module():
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -97,15 +98,26 @@ def test_summarize_results_computes_mean_and_std():
 
 def test_benchmark_tile_store_accumulates_per_phase_times(tmp_path, monkeypatch):
     mod = _load_benchmark_module()
-    tiles = [np.zeros((64, 64, 3), dtype=np.uint8) for _ in range(3)]
-
-    monkeypatch.setattr(
-        mod, "_iter_tile_arrays_for_tar_extraction", lambda **kwargs: iter(tiles)
-    )
 
     result_stub = MagicMock()
     result_stub.read_tile_size_px = 64
     result_stub.target_tile_size_px = 64
+    result_stub.sample_id = "slide-1"
+
+    def _fake_extract_tiles_to_tar(*args, **kwargs):
+        recorder = kwargs["phase_recorder"]
+        recorder.record("read", 0.1, tile_count=1)
+        recorder.record("encode", 0.2, tile_count=1, jpeg_bytes=100)
+        recorder.record("write", 0.05, tile_count=1)
+        recorder.record("read", 0.15, tile_count=1)
+        recorder.record("encode", 0.25, tile_count=1, jpeg_bytes=150)
+        recorder.record("write", 0.07, tile_count=1)
+        recorder.record("read", 0.12, tile_count=1)
+        recorder.record("encode", 0.22, tile_count=1, jpeg_bytes=125)
+        recorder.record("write", 0.06, tile_count=1)
+        return tmp_path / "tiles" / "slide-1.tiles.tar", args[0]
+
+    monkeypatch.setattr(mod, "extract_tiles_to_tar", _fake_extract_tiles_to_tar)
 
     metrics = mod.benchmark_tile_store(
         result=result_stub,
@@ -120,24 +132,26 @@ def test_benchmark_tile_store_accumulates_per_phase_times(tmp_path, monkeypatch)
     assert metrics["encode_s"] > 0
     assert metrics["write_s"] > 0
     assert metrics["total_s"] >= metrics["read_s"] + metrics["encode_s"] + metrics["write_s"]
-    # temp tar cleaned up
-    assert not list(tmp_path.glob("*.tar"))
 
 
 def test_benchmark_tile_store_forwards_supertile_sizes(tmp_path, monkeypatch):
     mod = _load_benchmark_module()
-    tiles = [np.zeros((64, 64, 3), dtype=np.uint8)]
     seen: dict[str, tuple[int, ...] | None] = {}
 
-    def _iter_tiles(**kwargs):
+    def _fake_extract_tiles_to_tar(*args, **kwargs):
         seen["supertile_sizes"] = kwargs.get("supertile_sizes")
-        return iter(tiles)
+        seen["num_workers"] = kwargs.get("num_workers")
+        seen["jpeg_backend"] = kwargs.get("jpeg_backend")
+        seen["jpeg_quality"] = kwargs.get("jpeg_quality")
+        seen["phase_recorder"] = kwargs.get("phase_recorder") is not None
+        return tmp_path / "tiles" / "slide-1.tiles.tar", args[0]
 
-    monkeypatch.setattr(mod, "_iter_tile_arrays_for_tar_extraction", _iter_tiles)
+    monkeypatch.setattr(mod, "extract_tiles_to_tar", _fake_extract_tiles_to_tar)
 
     result_stub = MagicMock()
     result_stub.read_tile_size_px = 64
     result_stub.target_tile_size_px = 64
+    result_stub.sample_id = "slide-1"
 
     mod.benchmark_tile_store(
         result=result_stub,
@@ -148,18 +162,25 @@ def test_benchmark_tile_store_forwards_supertile_sizes(tmp_path, monkeypatch):
     )
 
     assert seen["supertile_sizes"] == (16, 8, 4, 2)
+    assert seen["num_workers"] == 4
+    assert seen["jpeg_backend"] == "turbojpeg"
+    assert seen["jpeg_quality"] == 90
+    assert seen["phase_recorder"] is True
 
 
 def test_benchmark_tile_store_handles_empty_iterator(tmp_path, monkeypatch):
     mod = _load_benchmark_module()
 
     monkeypatch.setattr(
-        mod, "_iter_tile_arrays_for_tar_extraction", lambda **kwargs: iter([])
+        mod,
+        "extract_tiles_to_tar",
+        lambda *args, **kwargs: (tmp_path / "tiles" / "slide-1.tiles.tar", args[0]),
     )
 
     result_stub = MagicMock()
     result_stub.read_tile_size_px = 64
     result_stub.target_tile_size_px = 64
+    result_stub.sample_id = "slide-1"
 
     metrics = mod.benchmark_tile_store(
         result=result_stub,
@@ -178,15 +199,19 @@ def test_benchmark_tile_store_handles_empty_iterator(tmp_path, monkeypatch):
 
 def test_progress_callback_called_per_tile(tmp_path, monkeypatch):
     mod = _load_benchmark_module()
-    tiles = [np.zeros((64, 64, 3), dtype=np.uint8) for _ in range(5)]
-
-    monkeypatch.setattr(
-        mod, "_iter_tile_arrays_for_tar_extraction", lambda **kwargs: iter(tiles)
-    )
 
     result_stub = MagicMock()
     result_stub.read_tile_size_px = 64
     result_stub.target_tile_size_px = 64
+    result_stub.sample_id = "slide-1"
+
+    def _fake_extract_tiles_to_tar(*args, **kwargs):
+        recorder = kwargs["phase_recorder"]
+        for _ in range(5):
+            recorder.record("read", 0.01, tile_count=1)
+        return tmp_path / "tiles" / "slide-1.tiles.tar", args[0]
+
+    monkeypatch.setattr(mod, "extract_tiles_to_tar", _fake_extract_tiles_to_tar)
 
     callback = MagicMock()
     mod.benchmark_tile_store(
@@ -200,85 +225,6 @@ def test_progress_callback_called_per_tile(tmp_path, monkeypatch):
     assert callback.call_count == 5
     for call in callback.call_args_list:
         assert call == ((1, 1),)
-
-
-def test_benchmark_tile_store_uses_rgb_420_turbojpeg(monkeypatch, tmp_path):
-    mod = _load_benchmark_module()
-    tiles = [np.zeros((64, 64, 3), dtype=np.uint8)]
-    monkeypatch.setattr(
-        mod, "_iter_tile_arrays_for_tar_extraction", lambda **kwargs: iter(tiles)
-    )
-
-    captured: dict[str, int] = {}
-
-    class _FakeTurboJPEG:
-        def encode(
-            self,
-            img_array,
-            quality=85,
-            pixel_format=None,
-            jpeg_subsample=None,
-            flags=0,
-            dst=None,
-            lossless=False,
-            icc_profile=None,
-        ):
-            captured["quality"] = quality
-            captured["pixel_format"] = pixel_format
-            captured["jpeg_subsample"] = jpeg_subsample
-            return b"jpeg"
-
-    monkeypatch.setitem(
-        sys.modules,
-        "turbojpeg",
-        SimpleNamespace(
-            TurboJPEG=lambda: _FakeTurboJPEG(),
-            TJPF_RGB=0,
-            TJSAMP_420=2,
-        ),
-    )
-
-    result_stub = MagicMock()
-    result_stub.read_tile_size_px = 64
-    result_stub.target_tile_size_px = 64
-
-    metrics = mod.benchmark_tile_store(
-        result=result_stub,
-        jpeg_quality=90,
-        num_workers=4,
-        output_dir=tmp_path,
-    )
-
-    assert captured == {
-        "quality": 90,
-        "pixel_format": 0,
-        "jpeg_subsample": 2,
-    }
-    assert metrics["tile_count"] == 1
-
-
-def test_benchmark_tile_store_uses_pil_backend(monkeypatch, tmp_path):
-    mod = _load_benchmark_module()
-    tiles = [np.zeros((128, 128, 3), dtype=np.uint8)]
-    monkeypatch.setattr(
-        mod, "_iter_tile_arrays_for_tar_extraction", lambda **kwargs: iter(tiles)
-    )
-
-    result_stub = MagicMock()
-    result_stub.read_tile_size_px = 128
-    result_stub.target_tile_size_px = 64
-
-    metrics = mod.benchmark_tile_store(
-        result=result_stub,
-        jpeg_quality=90,
-        jpeg_backend="pil",
-        num_workers=4,
-        output_dir=tmp_path,
-    )
-
-    assert metrics["tile_count"] == 1
-    assert metrics["jpeg_bytes"] > 0
-    assert metrics["encode_s"] > 0
 
 
 def test_resolve_jpeg_backend_prefers_config(tmp_path):
