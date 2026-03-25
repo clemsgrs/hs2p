@@ -21,4 +21,4 @@ from hs2p.wsi import (
     write_coordinate_preview,
 )
 
-__version__ = "2.5.0"
+__version__ = "2.5.1"
