@@ -33,7 +33,7 @@ For GPU-accelerated tile reading via cuCIM:
 pip install "hs2p[cucim]"
 ```
 
-This pulls in `cucim-cu12`, `cupy-cuda12x`, and `nvidia-nvimgcodec-cu12` for batched GPU JPEG decoding during tar export. Use the cuCIM wheel that matches your CUDA runtime. The base `hs2p` install does not require cuCIM.
+This pulls in `cucim-cu12`, `cupy-cuda12x`, and `nvidia-nvimgcodec-cu12` for optional batched GPU JPEG decoding during tar export when you opt in with `gpu_decode=True`. Use the cuCIM wheel that matches your CUDA runtime. The base `hs2p` install does not require cuCIM.
 
 ## Workflows
 

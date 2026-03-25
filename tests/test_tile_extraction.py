@@ -146,6 +146,19 @@ def _make_grouped_region(
     return region
 
 
+def _monkeypatch_cucim_import(monkeypatch, fake_cucim):
+    import hs2p.api as api_mod
+
+    original_import_module = api_mod.importlib.import_module
+    monkeypatch.setattr(
+        api_mod.importlib,
+        "import_module",
+        lambda name: fake_cucim
+        if name == "cucim"
+        else original_import_module(name),
+    )
+
+
 class TestExtractTilesToTar:
     """Unit tests for extract_tiles_to_tar()."""
 
@@ -553,13 +566,7 @@ class TestExtractTilesToTar:
         mock_cu_image.read_region.return_value = iter(regions)
         fake_cucim = types.SimpleNamespace(CuImage=MagicMock(return_value=mock_cu_image))
 
-        import hs2p.api as api_mod
-
-        monkeypatch.setattr(
-            api_mod.importlib,
-            "import_module",
-            lambda name: fake_cucim if name == "cucim" else None,
-        )
+        _monkeypatch_cucim_import(monkeypatch, fake_cucim)
 
         with patch("wholeslidedata.WholeSlideImage") as mock_wsd:
             tar_path, out_result = extract_tiles_to_tar(
@@ -567,6 +574,7 @@ class TestExtractTilesToTar:
                 output_dir=tmp_path,
                 num_workers=5,
                 gpu_decode=False,
+                jpeg_backend="pil",
             )
 
         assert tar_path.is_file()
@@ -577,6 +585,37 @@ class TestExtractTilesToTar:
             (128, 128),
             level=3,
             num_workers=5,
+        )
+        mock_wsd.assert_not_called()
+
+    def test_cucim_backend_defaults_gpu_decode_to_disabled(
+        self, monkeypatch, tmp_path: Path
+    ):
+        result = _make_tiling_result(num_tiles=1)
+        result.backend = "cucim"
+
+        mock_cu_image = MagicMock()
+        mock_cu_image.read_region.return_value = iter([_solid_patch((10, 20, 30))])
+        fake_cucim = types.SimpleNamespace(CuImage=MagicMock(return_value=mock_cu_image))
+
+        _monkeypatch_cucim_import(monkeypatch, fake_cucim)
+
+        with patch("wholeslidedata.WholeSlideImage") as mock_wsd:
+            tar_path, out_result = extract_tiles_to_tar(
+                result,
+                output_dir=tmp_path,
+                num_workers=2,
+                jpeg_backend="pil",
+            )
+
+        assert tar_path.is_file()
+        assert out_result is result
+        fake_cucim.CuImage.assert_called_once_with(str(result.image_path))
+        mock_cu_image.read_region.assert_called_once_with(
+            [(0, 0)],
+            (256, 256),
+            level=0,
+            num_workers=2,
         )
         mock_wsd.assert_not_called()
 
@@ -623,13 +662,7 @@ class TestExtractTilesToTar:
         mock_cu_image.read_region.return_value = iter([grouped_region])
         fake_cucim = types.SimpleNamespace(CuImage=MagicMock(return_value=mock_cu_image))
 
-        import hs2p.api as api_mod
-
-        monkeypatch.setattr(
-            api_mod.importlib,
-            "import_module",
-            lambda name: fake_cucim if name == "cucim" else None,
-        )
+        _monkeypatch_cucim_import(monkeypatch, fake_cucim)
 
         tiles = list(
             _iter_cucim_tile_arrays_for_tar_extraction(
@@ -682,13 +715,7 @@ class TestExtractTilesToTar:
         ]
         fake_cucim = types.SimpleNamespace(CuImage=MagicMock(return_value=mock_cu_image))
 
-        import hs2p.api as api_mod
-
-        monkeypatch.setattr(
-            api_mod.importlib,
-            "import_module",
-            lambda name: fake_cucim if name == "cucim" else None,
-        )
+        _monkeypatch_cucim_import(monkeypatch, fake_cucim)
 
         tiles = list(
             _iter_cucim_tile_arrays_for_tar_extraction(
@@ -761,11 +788,7 @@ class TestExtractTilesToTar:
             "_iter_grouped_read_plans_for_tar_extraction",
             lambda **kwargs: iter(interleaved_plans),
         )
-        monkeypatch.setattr(
-            api_mod.importlib,
-            "import_module",
-            lambda name: fake_cucim if name == "cucim" else None,
-        )
+        _monkeypatch_cucim_import(monkeypatch, fake_cucim)
 
         tiles = list(
             _iter_cucim_tile_arrays_for_tar_extraction(

@@ -815,6 +815,71 @@ def test_compute_request_passes_inner_workers_to_tile_extraction(
     assert seen["jpeg_backend"] == "pil"
 
 
+def test_tile_slides_defaults_gpu_decode_to_disabled_for_saved_tiles(
+    monkeypatch,
+    tmp_path: Path,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    seen = {}
+
+    def _fake_compute_and_save(request):
+        seen["gpu_decode"] = request.gpu_decode
+        coordinates_npz_path = tmp_path / "coords.npz"
+        coordinates_meta_path = tmp_path / "coords.meta.json"
+        coordinates_npz_path.write_bytes(b"npz")
+        coordinates_meta_path.write_text("{}")
+        artifact = TilingArtifacts(
+            sample_id=request.whole_slide.sample_id,
+            coordinates_npz_path=coordinates_npz_path,
+            coordinates_meta_path=coordinates_meta_path,
+            num_tiles=1,
+            tiles_tar_path=tmp_path / "tiles" / "slide-1.tiles.tar",
+        )
+        return api_mod._SlideComputeResponse(
+            input_index=request.input_index,
+            whole_slide=request.whole_slide,
+            ok=True,
+            artifact=artifact,
+        )
+
+    monkeypatch.setattr(
+        api_mod,
+        "resolve_backend",
+        lambda *args, **kwargs: SimpleNamespace(
+            backend="cucim",
+            requested_backend="cucim",
+            reason=None,
+        ),
+    )
+    monkeypatch.setattr(
+        api_mod,
+        "_compute_and_save_tiling_artifacts_from_request",
+        _fake_compute_and_save,
+    )
+
+    artifacts = tile_slides(
+        [SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs"))],
+        tiling=TilingConfig(
+            backend="cucim",
+            target_spacing_um=0.5,
+            target_tile_size_px=224,
+            tolerance=0.07,
+            overlap=0.1,
+            tissue_threshold=0.2,
+            drop_holes=False,
+            use_padding=True,
+        ),
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        output_dir=tmp_path / "run",
+        save_tiles=True,
+    )
+
+    assert len(artifacts) == 1
+    assert seen["gpu_decode"] is False
+
+
 def test_save_tiling_result_rejects_invalid_tile_index(tmp_path: Path):
     invalid = TilingResult(
         sample_id="broken-slide",

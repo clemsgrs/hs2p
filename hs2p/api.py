@@ -513,7 +513,7 @@ def extract_tiles_to_tar(
     tiles_dir: Path | None = None,
     filter_params: FilterConfig | None = None,
     num_workers: int = 4,
-    gpu_decode: bool = True,
+    gpu_decode: bool = False,
     phase_recorder: Any | None = None,
 ) -> tuple[Path, TilingResult]:
     """Extract tile images from a WSI and save them as a JPEG tar archive.
@@ -697,7 +697,7 @@ def _iter_tile_arrays_for_tar_extraction(
     *,
     result: TilingResult,
     num_workers: int,
-    gpu_decode: bool = True,
+    gpu_decode: bool = False,
     supertile_sizes: Sequence[int] | None = None,
 ):
     tile_records = _iter_tile_records_for_tar_extraction(
@@ -714,7 +714,7 @@ def _iter_tile_records_for_tar_extraction(
     *,
     result: TilingResult,
     num_workers: int,
-    gpu_decode: bool = True,
+    gpu_decode: bool = False,
     supertile_sizes: Sequence[int] | None = None,
 ):
     tile_records = _iter_cucim_tile_records_for_tar_extraction(
@@ -736,7 +736,7 @@ def _iter_cucim_tile_records_for_tar_extraction(
     *,
     result: TilingResult,
     num_workers: int,
-    gpu_decode: bool = True,
+    gpu_decode: bool = False,
     supertile_sizes: Sequence[int] | None = None,
 ):
     if result.backend != "cucim":
@@ -797,7 +797,7 @@ def _iter_cucim_tile_arrays_for_tar_extraction(
     *,
     result: TilingResult,
     num_workers: int,
-    gpu_decode: bool = True,
+    gpu_decode: bool = False,
 ):
     tile_records = _iter_cucim_tile_records_for_tar_extraction(
         result=result,
@@ -1326,7 +1326,7 @@ class _SlideComputeRequest:
     output_dir: Path
     num_workers: int
     jpeg_backend: str = "turbojpeg"
-    gpu_decode: bool = True
+    gpu_decode: bool = False
     include_result: bool = False
     save_tiles: bool = False
 
@@ -1526,7 +1526,7 @@ def tile_slides(
     read_coordinates_from: Path | None = None,
     save_tiles: bool = False,
     jpeg_backend: str = "turbojpeg",
-    gpu_decode: bool = True,
+    gpu_decode: bool = False,
 ) -> list[TilingArtifacts]:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
