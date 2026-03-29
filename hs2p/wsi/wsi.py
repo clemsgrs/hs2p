@@ -23,7 +23,6 @@ from hs2p.wsi.segmentation import (
 )
 from hs2p.wsi.tiling import (
     filter_black_and_white_tiles as filter_black_and_white_tiles_impl,
-    is_in_holes,
     process_contour as process_contour_impl,
     process_contours as process_contours_impl,
 )
@@ -238,19 +237,6 @@ class WholeSlideImage(object):
             level_downsamples=self.level_downsamples,
             seg_level=self.seg_level,
         )
-
-    @staticmethod
-    def isInHoles(holes, pt, tile_size):
-        return is_in_holes(holes, pt, tile_size)
-
-    @staticmethod
-    def isInContours(cont_check_fn, pt, holes=None, drop_holes=True, tile_size=256):
-        keep_flag, tissue_pct = cont_check_fn(pt)
-        if keep_flag:
-            if holes is not None and drop_holes:
-                return not WholeSlideImage.isInHoles(holes, pt, tile_size), tissue_pct
-            return 1, tissue_pct
-        return 0, tissue_pct
 
     @staticmethod
     def scaleContourDim(contours, scale):

@@ -11,15 +11,6 @@ from hs2p.wsi.geometry import ResolvedTileGeometry
 from hs2p.wsi.utils import HasEnoughTissue
 
 
-def is_in_holes(holes, pt, tile_size):
-    import cv2
-
-    for hole in holes:
-        if cv2.pointPolygonTest(hole, (pt[0] + tile_size / 2, pt[1] + tile_size / 2), False) > 0:
-            return 1
-    return 0
-
-
 def filter_black_and_white_tiles(
     *,
     reader,
@@ -132,7 +123,6 @@ def process_contour(
 ):
     target_tile_size = tiling_params.target_tile_size_px
     overlap = tiling_params.overlap
-    drop_holes = tiling_params.drop_holes
     use_padding = tiling_params.use_padding
 
     from hs2p.wsi.geometry import select_level
@@ -217,12 +207,6 @@ def process_contour(
         tile_level=tile_level,
         filter_params=filter_params,
     )
-
-    if drop_holes:
-        keep_flags = [
-            flag and not is_in_holes(contour_holes, coord, tile_size_at_level_0[0])
-            for flag, coord in zip(keep_flags, coord_candidates)
-        ]
 
     filtered_coordinates = coord_candidates[np.array(keep_flags) == 1]
     filtered_tissue_percentages = np.array(tissue_pcts)[np.array(keep_flags) == 1]
@@ -327,4 +311,3 @@ def process_contours(
         tile_level if tile_level is not None else 0,
         resize_factor if resize_factor is not None else 1.0,
     )
-

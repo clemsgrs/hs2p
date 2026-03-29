@@ -27,7 +27,6 @@ def _tiling_config() -> TilingConfig:
         tolerance=0.01,
         overlap=0.0,
         tissue_threshold=0.0,
-        drop_holes=False,
         use_padding=False,
         backend="asap",
     )
@@ -148,7 +147,6 @@ def test_filter_coordinates_reuses_loaded_mask_and_avoids_per_tile_mask_reads(
             tolerance=0.01,
             overlap=0.0,
             tissue_threshold=0.0,
-            drop_holes=False,
             use_padding=False,
             backend="asap",
         ),
@@ -237,7 +235,6 @@ def test_filter_coordinates_vectorized_path_avoids_per_tile_crops_and_handles_bo
             tolerance=0.01,
             overlap=0.0,
             tissue_threshold=0.0,
-            drop_holes=False,
             use_padding=False,
             backend="asap",
         ),

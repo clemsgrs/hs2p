@@ -49,7 +49,6 @@ def _base_cfg(tmp_path: Path, csv_path: Path) -> SimpleNamespace:
                 tolerance=0.05,
                 overlap=0.0,
                 tissue_threshold=0.1,
-                drop_holes=False,
                 use_padding=True,
             ),
             seg_params={

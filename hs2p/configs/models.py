@@ -19,7 +19,6 @@ class TilingConfig:
     tolerance: float
     overlap: float
     tissue_threshold: float
-    drop_holes: bool = bool(_DEFAULT_TILING_PARAMS.drop_holes)
     use_padding: bool = bool(_DEFAULT_TILING_PARAMS.use_padding)
     backend: str = AUTO_BACKEND
 

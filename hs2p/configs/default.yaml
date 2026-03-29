@@ -18,7 +18,6 @@ tiling:
     target_tile_size_px: 256 # size of the tiles to extract, in pixels
     overlap: 0.0 # percentage of overlap between two consecutive tiles (float between 0 and 1)
     tissue_threshold: 0.01 # minimum fraction of pixels that must be tissue to keep a tile (float between 0 and 1)
-    drop_holes: false # whether or not to drop tiles whose center pixel falls withing an identified holes
     use_padding: true # whether to pad the border of the slide
   seg_params:
     # downsample: controls which pyramid level is read for tissue segmentation.
