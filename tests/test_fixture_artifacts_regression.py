@@ -9,6 +9,7 @@ from hs2p.api import (
     SegmentationConfig,
     SlideSpec,
     TilingConfig,
+    load_tiling_result,
     save_tiling_result,
     tile_slide,
 )
@@ -107,10 +108,24 @@ def test_generated_tiles_match_checked_in_artifacts(real_fixture_paths, tmp_path
 
     golden_tiles = np.load(gt_npz_path, allow_pickle=False)
     golden_meta = json.loads(gt_meta_path.read_text())
+    golden_result = load_tiling_result(gt_npz_path, gt_meta_path)
+    generated_result = load_tiling_result(
+        artifacts.coordinates_npz_path,
+        artifacts.coordinates_meta_path,
+    )
 
-    assert generated.files == golden_tiles.files
-    for key in generated.files:
-        np.testing.assert_array_equal(generated[key], golden_tiles[key])
+    assert set(generated.files) == {"tile_index", "coordinates", "tissue_fractions"}
+    assert set(golden_tiles.files) == {"tile_index", "x", "y", "tissue_fraction"}
+    np.testing.assert_array_equal(generated_result.x, golden_result.x)
+    np.testing.assert_array_equal(generated_result.y, golden_result.y)
+    np.testing.assert_array_equal(
+        generated_result.tile_index,
+        golden_result.tile_index,
+    )
+    np.testing.assert_array_equal(
+        generated_result.tissue_fraction,
+        golden_result.tissue_fraction,
+    )
 
     assert set(meta) >= set(golden_meta)
     assert meta["sample_id"] == golden_meta["sample_id"] == "test-wsi"
@@ -137,7 +152,6 @@ def test_generated_tiles_match_checked_in_artifacts(real_fixture_paths, tmp_path
     assert meta["tissue_threshold"] == pytest.approx(golden_meta["tissue_threshold"])
     assert meta["num_tiles"] == golden_meta["num_tiles"]
     assert meta["config_hash"] == golden_meta["config_hash"]
-    assert meta["config_hash"] == result.config_hash
     assert artifacts.num_tiles == golden_meta["num_tiles"]
 
 
@@ -163,7 +177,7 @@ def test_repeated_tiling_run_writes_identical_artifacts(
         output_dir=tmp_path / "run2",
     )
 
-    assert first_result.config_hash == second_result.config_hash
+    assert first_meta["config_hash"] == second_meta["config_hash"]
     assert first_tiles.files == second_tiles.files
     for key in first_tiles.files:
         np.testing.assert_array_equal(first_tiles[key], second_tiles[key])
