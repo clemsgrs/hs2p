@@ -207,6 +207,11 @@ def _optional_path(value: Any) -> Path | None:
     return Path(text)
 
 
+def _none_fallback(value, default):
+    """Return *default* only when *value* is ``None``, preserving valid falsy values."""
+    return default if value is None else value
+
+
 def _shared_from_api_result(result: TilingResult) -> SharedTilingResult:
     coordinates = np.stack([result.x, result.y], axis=1).astype(np.int64, copy=False)
     normalized_downsamples = (
@@ -230,9 +235,9 @@ def _shared_from_api_result(result: TilingResult) -> SharedTilingResult:
         tile_size_lv0=int(result.tile_size_lv0),
         is_within_tolerance=bool(result.is_within_tolerance),
         use_padding=bool(result.use_padding),
-        base_spacing_um=result.base_spacing_um or 0.0,
-        slide_dimensions=result.slide_dimensions or [0, 0],
-        level_downsamples=normalized_downsamples or [1.0],
+        base_spacing_um=_none_fallback(result.base_spacing_um, 0.0),
+        slide_dimensions=_none_fallback(result.slide_dimensions, [0, 0]),
+        level_downsamples=_none_fallback(normalized_downsamples, [1.0]),
         overlap=float(result.overlap),
         min_tissue_fraction=float(result.tissue_threshold),
     )
@@ -241,26 +246,26 @@ def _shared_from_api_result(result: TilingResult) -> SharedTilingResult:
         sample_id=result.sample_id,
         image_path=str(result.image_path),
         backend=result.backend,
-        requested_backend=result.requested_backend or result.backend,
-        tolerance=result.tolerance or 0.05,
-        step_px_lv0=result.step_px_lv0 or 0,
-        tissue_method=result.tissue_method or "unknown",
-        seg_downsample=result.seg_downsample or 64,
-        seg_level=result.seg_level or 0,
-        seg_spacing_um=result.seg_spacing_um or 0.0,
-        seg_sthresh=result.seg_sthresh or 8,
-        seg_sthresh_up=result.seg_sthresh_up or 255,
-        seg_mthresh=result.seg_mthresh or 7,
-        seg_close=result.seg_close or 4,
-        ref_tile_size_px=result.ref_tile_size_px or 16,
-        a_t=result.a_t or 4,
-        a_h=result.a_h or 0,
-        max_n_holes=result.max_n_holes or 0,
-        filter_white=result.filter_white or False,
-        filter_black=result.filter_black or False,
-        white_threshold=result.white_threshold or 220,
-        black_threshold=result.black_threshold or 25,
-        fraction_threshold=result.fraction_threshold or 0.9,
+        requested_backend=_none_fallback(result.requested_backend, result.backend),
+        tolerance=_none_fallback(result.tolerance, 0.05),
+        step_px_lv0=_none_fallback(result.step_px_lv0, 0),
+        tissue_method=_none_fallback(result.tissue_method, "unknown"),
+        seg_downsample=_none_fallback(result.seg_downsample, 64),
+        seg_level=_none_fallback(result.seg_level, 0),
+        seg_spacing_um=_none_fallback(result.seg_spacing_um, 0.0),
+        seg_sthresh=_none_fallback(result.seg_sthresh, 8),
+        seg_sthresh_up=_none_fallback(result.seg_sthresh_up, 255),
+        seg_mthresh=_none_fallback(result.seg_mthresh, 7),
+        seg_close=_none_fallback(result.seg_close, 4),
+        ref_tile_size_px=_none_fallback(result.ref_tile_size_px, 16),
+        a_t=_none_fallback(result.a_t, 4),
+        a_h=_none_fallback(result.a_h, 0),
+        max_n_holes=_none_fallback(result.max_n_holes, 0),
+        filter_white=_none_fallback(result.filter_white, False),
+        filter_black=_none_fallback(result.filter_black, False),
+        white_threshold=_none_fallback(result.white_threshold, 220),
+        black_threshold=_none_fallback(result.black_threshold, 25),
+        fraction_threshold=_none_fallback(result.fraction_threshold, 0.9),
         seg_use_otsu=result.seg_use_otsu,
         seg_use_hsv=result.seg_use_hsv,
         tissue_mask_path=(
@@ -1175,10 +1180,12 @@ def _validate_result_matches_request(
     expected_selection_strategy: str | None,
     expected_output_mode: str | None,
 ) -> None:
+    uses_precomputed_mask = (
+        whole_slide.mask_path is not None
+        and expected_selection_strategy != CoordinateSelectionStrategy.INDEPENDENT_SAMPLING
+    )
     expected_tissue_method = (
-        "precomputed_mask"
-        if whole_slide.mask_path is not None and expected_selection_strategy != CoordinateSelectionStrategy.INDEPENDENT_SAMPLING
-        else ("hsv" if segmentation.use_hsv else ("otsu" if segmentation.use_otsu else "threshold"))
+        "precomputed_mask" if uses_precomputed_mask else segmentation.tissue_method
     )
     _validate_expected_field(
         sample_id=whole_slide.sample_id,

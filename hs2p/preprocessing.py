@@ -28,6 +28,19 @@ def _normalize_level_downsamples(
     return normalized
 
 
+def resolve_tissue_method(*, use_hsv: bool, use_otsu: bool) -> str:
+    """Return the canonical tissue segmentation method name.
+
+    Centralises the ``use_hsv`` / ``use_otsu`` flag resolution so every call
+    site produces a consistent ``tissue_method`` string.
+    """
+    if use_hsv:
+        return "hsv"
+    if use_otsu:
+        return "otsu"
+    return "threshold"
+
+
 def segment_tissue(
     thumbnail: np.ndarray,
     *,
@@ -1233,10 +1246,8 @@ def preprocess_slide(
                 use_hsv = tissue_method == "hsv"
             if use_otsu is None:
                 use_otsu = tissue_method == "otsu"
-            resolved_tissue_method = (
-                "hsv"
-                if use_hsv
-                else ("otsu" if use_otsu else "threshold")
+            resolved_tissue_method = resolve_tissue_method(
+                use_hsv=use_hsv, use_otsu=use_otsu,
             )
             mask = segment_tissue(
                 seg_image,

@@ -215,7 +215,7 @@ def test_filter_coordinates_vectorized_path_avoids_per_tile_crops_and_handles_bo
 
     monkeypatch.setattr(wsi_runtime, "WholeSlideImage", FakeWholeSlideImage)
     monkeypatch.setattr(
-        wsi_api,
+        wsi_runtime,
         "_extract_padded_crop",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             AssertionError("vectorized mask scoring should not crop one tile at a time")

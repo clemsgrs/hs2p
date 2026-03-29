@@ -21,6 +21,7 @@ from hs2p.api import (
     load_tiling_result,
     save_tiling_result,
 )
+from hs2p.preprocessing import normalize_artifact_path
 from hs2p.configs.resolvers import (
     resolve_filter_config,
     resolve_sampling_spec,
@@ -184,11 +185,7 @@ def _save_sampling_coordinates(
         seg_close=segmentation_config.close,
         seg_use_otsu=segmentation_config.use_otsu,
         seg_use_hsv=segmentation_config.use_hsv,
-        tissue_method=(
-            "hsv"
-            if segmentation_config.use_hsv
-            else ("otsu" if segmentation_config.use_otsu else "threshold")
-        ),
+        tissue_method=segmentation_config.tissue_method,
         ref_tile_size_px=filter_config.ref_tile_size,
         a_t=filter_config.a_t,
         a_h=filter_config.a_h,
@@ -401,7 +398,6 @@ def _build_sampling_process_rows(
 def _normalize_artifact_path(path: Path | str | None) -> str | None:
     if path is not None and pd.isna(path):
         return None
-    from hs2p.preprocessing import normalize_artifact_path
     return normalize_artifact_path(path)
 
 
@@ -416,11 +412,7 @@ def _validate_sampling_result_matches_request(
     annotation: str,
     selection_strategy: str,
 ) -> None:
-    expected_tissue_method = (
-        "hsv"
-        if segmentation_config.use_hsv
-        else ("otsu" if segmentation_config.use_otsu else "threshold")
-    )
+    expected_tissue_method = segmentation_config.tissue_method
     expected_fields = {
         "sample_id": whole_slide.sample_id,
         "image_path": _normalize_artifact_path(whole_slide.image_path),

@@ -2,56 +2,41 @@ import numpy as np
 import pytest
 
 from hs2p.api import FilterConfig
-
-wsi_mod = pytest.importorskip("hs2p.wsi.wsi")
+from hs2p.wsi.tiling import filter_black_and_white_tiles
 
 
 def test_filter_black_white_tile_errors_warn_and_keep_tile():
-    wsi = object.__new__(wsi_mod.WholeSlideImage)
-    wsi.path = "fake-slide.tif"
-    wsi.level_dimensions = [(100, 100)]
-    wsi.level_downsamples = [(1.0, 1.0)]
-    wsi.get_level_spacing = lambda level: 1.0
-
-    def _raise(*args, **kwargs):
-        raise RuntimeError("read failure")
-
-    wsi.get_tile = _raise
-
-    filter_params = FilterConfig(
-        ref_tile_size=16,
-        a_t=1,
-        a_h=1,
-        max_n_holes=1,
-        filter_white=True,
-        filter_black=False,
-        white_threshold=220,
-        black_threshold=25,
-        fraction_threshold=0.9,
-    )
-
-    keep_flags = [1]
-    coord_candidates = np.array([[0, 0]])
+    class _Reader:
+        def read_region(self, location, level, size, pad_missing=True):
+            del location, level, size, pad_missing
+            raise RuntimeError("read failure")
 
     with pytest.warns(UserWarning, match="tile filtering"):
-        filtered = wsi.filter_black_and_white_tiles(
-            keep_flags=keep_flags,
-            coord_candidates=coord_candidates,
+        filtered = filter_black_and_white_tiles(
+            reader=_Reader(),
+            level_dimensions=[(100, 100)],
+            level_downsamples=[(1.0, 1.0)],
+            keep_flags=[1],
+            coord_candidates=np.array([[0, 0]]),
             tile_size=32,
             tile_level=0,
-            filter_params=filter_params,
+            filter_params=FilterConfig(
+                ref_tile_size=16,
+                a_t=1,
+                a_h=1,
+                max_n_holes=1,
+                filter_white=True,
+                filter_black=False,
+                white_threshold=220,
+                black_threshold=25,
+                fraction_threshold=0.9,
+            ),
         )
 
     assert filtered == [1]
 
 
 def test_filter_black_and_white_tiles_batches_reads_without_changing_decisions():
-    wsi = object.__new__(wsi_mod.WholeSlideImage)
-    wsi.path = "fake-slide.tif"
-    wsi.level_dimensions = [(4, 4)]
-    wsi.level_downsamples = [(1.0, 1.0)]
-    wsi.get_level_spacing = lambda level: 1.0
-
     canvas = np.array(
         [
             [[255, 255, 255], [255, 255, 255], [120, 120, 120], [120, 120, 120]],
@@ -63,31 +48,34 @@ def test_filter_black_and_white_tiles_batches_reads_without_changing_decisions()
     )
     calls = []
 
-    def _get_tile(x, y, width, height, level):
-        assert level == 0
-        calls.append((x, y, width, height))
-        return canvas[y : y + height, x : x + width, :]
+    class _Reader:
+        def read_region(self, location, level, size, pad_missing=True):
+            assert level == 0
+            assert pad_missing is True
+            x, y = location
+            width, height = size
+            calls.append((x, y, width, height))
+            return canvas[y : y + height, x : x + width, :]
 
-    wsi.get_tile = _get_tile
-
-    filter_params = FilterConfig(
-        ref_tile_size=16,
-        a_t=1,
-        a_h=1,
-        max_n_holes=1,
-        filter_white=True,
-        filter_black=True,
-        white_threshold=220,
-        black_threshold=25,
-        fraction_threshold=0.9,
-    )
-
-    filtered = wsi.filter_black_and_white_tiles(
+    filtered = filter_black_and_white_tiles(
+        reader=_Reader(),
+        level_dimensions=[(4, 4)],
+        level_downsamples=[(1.0, 1.0)],
         keep_flags=[1, 1, 1, 1],
         coord_candidates=np.array([[0, 0], [2, 0], [0, 2], [2, 2]]),
         tile_size=2,
         tile_level=0,
-        filter_params=filter_params,
+        filter_params=FilterConfig(
+            ref_tile_size=16,
+            a_t=1,
+            a_h=1,
+            max_n_holes=1,
+            filter_white=True,
+            filter_black=True,
+            white_threshold=220,
+            black_threshold=25,
+            fraction_threshold=0.9,
+        ),
     )
 
     assert filtered == [0, 1, 0, 1]

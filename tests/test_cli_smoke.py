@@ -1,4 +1,5 @@
 import importlib
+import json
 import sys
 import types
 from pathlib import Path
@@ -227,7 +228,6 @@ def test_sampling_main_smoke_uses_current_schema_and_manifest(
                     "num_tiles": 1,
                     "coordinates_npz_path": str(annotation_dir / f"{kwargs['sample_id']}.coordinates.npz"),
                     "coordinates_meta_path": str(meta_path),
-                    "config_hash": "hash",
                     "error": np.nan,
                     "traceback": np.nan,
                 }
@@ -250,7 +250,6 @@ def test_sampling_main_smoke_uses_current_schema_and_manifest(
         "num_tiles",
         "coordinates_npz_path",
         "coordinates_meta_path",
-        "config_hash",
         "error",
         "traceback",
     ]
@@ -263,9 +262,10 @@ def test_sampling_main_smoke_uses_current_schema_and_manifest(
     assert row["num_tiles"] == 1
     assert row["coordinates_npz_path"].endswith("tiles/tumor/slide-1.coordinates.npz")
     assert row["coordinates_meta_path"].endswith("tiles/tumor/slide-1.coordinates.meta.json")
-    assert row["config_hash"] == "hash"
     assert pd.isna(row["error"])
     assert pd.isna(row["traceback"])
     assert (
         Path(cfg.output_dir) / "tiles" / "tumor" / "slide-1.coordinates.npz"
     ).is_file()
+    meta = json.loads(Path(row["coordinates_meta_path"]).read_text())
+    assert meta["config_hash"] == "hash"

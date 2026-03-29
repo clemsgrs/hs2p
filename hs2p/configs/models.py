@@ -41,6 +41,15 @@ class SegmentationConfig:
     use_otsu: bool = bool(_DEFAULT_SEGMENTATION.use_otsu)
     use_hsv: bool = bool(_DEFAULT_SEGMENTATION.use_hsv)
 
+    @property
+    def tissue_method(self) -> str:
+        """Resolved tissue segmentation method name."""
+        if self.use_hsv:
+            return "hsv"
+        if self.use_otsu:
+            return "otsu"
+        return "threshold"
+
 
 @dataclass(frozen=True)
 class FilterConfig:
