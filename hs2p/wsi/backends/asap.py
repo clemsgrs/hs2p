@@ -5,13 +5,6 @@ from typing import Any
 
 import numpy as np
 
-
-def _coerce_wsd_path(path: Path | str, *, backend: str) -> Path | str:
-    if backend == "cucim":
-        return str(path)
-    return Path(path)
-
-
 class ASAPReader:
     def __init__(self, path: str | Path, *, spacing_override: float | None = None):
         try:
@@ -23,7 +16,7 @@ class ASAPReader:
             ) from exc
 
         self._path = Path(path)
-        self._wsi = wsd.WholeSlideImage(_coerce_wsd_path(self._path, backend="asap"), backend="asap")
+        self._wsi = wsd.WholeSlideImage(self._path, backend="asap")
         self.native_spacing = float(self._wsi.spacings[0])
         self._spacing = (
             float(spacing_override) if spacing_override is not None else self.native_spacing
@@ -75,7 +68,8 @@ class ASAPReader:
         *,
         pad_missing: bool = True,
     ) -> np.ndarray:
-        del pad_missing
+        # wholeslidedata already pads out-of-bounds ASAP reads; keep the
+        # shared reader signature for protocol compatibility.
         return np.asarray(
             self._wsi.get_patch(
                 int(location[0]),
@@ -110,4 +104,3 @@ class ASAPReader:
 
     def __exit__(self, *args: Any) -> None:
         self.close()
-
