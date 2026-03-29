@@ -4,6 +4,7 @@ import numpy as np
 
 from hs2p.api import SegmentationConfig, TilingConfig
 import hs2p.wsi as wsi_api
+import hs2p.wsi.api as wsi_runtime
 from hs2p.wsi import ResolvedSamplingSpec
 from hs2p.wsi.wsi import WholeSlideImage
 
@@ -131,7 +132,7 @@ def test_filter_coordinates_reuses_loaded_mask_and_avoids_per_tile_mask_reads(
             assert level == 0
             return 1.0
 
-    monkeypatch.setattr(wsi_api, "WholeSlideImage", FakeWholeSlideImage)
+    monkeypatch.setattr(wsi_runtime, "WholeSlideImage", FakeWholeSlideImage)
 
     filtered, filtered_indices = wsi_api.filter_coordinates(
         wsi_path=Path("synthetic-slide.tif"),
@@ -212,7 +213,7 @@ def test_filter_coordinates_vectorized_path_avoids_per_tile_crops_and_handles_bo
             assert level == 0
             return 1.0
 
-    monkeypatch.setattr(wsi_api, "WholeSlideImage", FakeWholeSlideImage)
+    monkeypatch.setattr(wsi_runtime, "WholeSlideImage", FakeWholeSlideImage)
     monkeypatch.setattr(
         wsi_api,
         "_extract_padded_crop",

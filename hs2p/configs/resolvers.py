@@ -15,6 +15,11 @@ def resolve_tiling_config(cfg: Any) -> TilingConfig:
         tolerance=cfg.tiling.params.tolerance,
         overlap=cfg.tiling.params.overlap,
         tissue_threshold=cfg.tiling.params.tissue_threshold,
+        tissue_mask_tissue_value=getattr(
+            cfg.tiling.params,
+            "tissue_mask_tissue_value",
+            1,
+        ),
         use_padding=cfg.tiling.params.use_padding,
         backend=(getattr(cfg.tiling, "backend", None) or "auto"),
     )

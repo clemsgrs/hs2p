@@ -4,7 +4,9 @@ from types import SimpleNamespace
 import numpy as np
 
 from hs2p.api import FilterConfig, SegmentationConfig, TilingConfig
+import hs2p.preprocessing as preprocessing_mod
 import hs2p.wsi as wsi_api
+import hs2p.wsi.api as wsi_runtime
 import hs2p.wsi.wsi as wsimod
 from hs2p.wsi import ResolvedSamplingSpec
 from tests.helpers.fake_wsi_backend import FakePyramidWSI, PyramidSpec
@@ -211,7 +213,7 @@ def test_extract_coordinate_result_preserves_stride_when_contours_have_offset_or
             assert level == 0
             return 0.5
 
-    result = wsi_api._extract_coordinate_result_from_wsi(
+    result = wsi_runtime._extract_coordinate_result_from_wsi(
         wsi=FakeWSI(),
         tiling_params=SimpleNamespace(
             target_tile_size_px=224,
@@ -224,6 +226,50 @@ def test_extract_coordinate_result_preserves_stride_when_contours_have_offset_or
 
     assert result.read_step_px == 224
     assert result.step_px_lv0 == 224
+
+
+def test_extract_coordinates_uses_shared_preprocessing_for_default_tissue_tiling(
+    monkeypatch,
+):
+    class GuardOnlyWSI:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError(
+                "default tissue tiling should not instantiate WholeSlideImage"
+            )
+
+    monkeypatch.setattr(wsi_runtime, "WholeSlideImage", GuardOnlyWSI)
+    monkeypatch.setattr(
+        wsi_runtime,
+        "preprocess_slide",
+        lambda **kwargs: SimpleNamespace(
+            coordinates=np.array([[8, 8], [16, 16]], dtype=np.int64),
+            tissue_fractions=np.array([1.0, 0.5], dtype=np.float32),
+            requested_tile_size_px=8,
+            requested_spacing_um=1.0,
+            read_level=0,
+            effective_tile_size_px=8,
+            effective_spacing_um=1.0,
+            tile_size_lv0=8,
+            step_px_lv0=8,
+            overlap=0.0,
+            tissue_mask=np.array([[0, 255], [255, 0]], dtype=np.uint8),
+        ),
+    )
+
+    result = wsi_api.extract_coordinates(
+        wsi_path=Path("synthetic-slide.tif"),
+        mask_path=None,
+        backend="asap",
+        segment_params=_segmentation_config(),
+        tiling_params=_tiling_config(tissue_threshold=0.0),
+        filter_params=_filter_config(),
+        disable_tqdm=True,
+        num_workers=1,
+    )
+
+    assert result.coordinates == [(8, 8), (16, 16)]
+    assert result.tissue_percentages == [1.0, 0.5]
+    assert result.read_level == 0
 
 
 def test_extract_coordinate_result_uses_actual_overlap_stride_in_level0_pixels():
@@ -256,7 +302,7 @@ def test_extract_coordinate_result_uses_actual_overlap_stride_in_level0_pixels()
         def get_level_spacing(self, level):
             return [0.5, 1.0][level]
 
-    result = wsi_api._extract_coordinate_result_from_wsi(
+    result = wsi_runtime._extract_coordinate_result_from_wsi(
         wsi=FakeWSI(),
         tiling_params=SimpleNamespace(
             target_tile_size_px=224,
@@ -279,19 +325,24 @@ def test_extract_coordinates_segments_maskless_slides_without_annotation_pct_cra
     tissue_mask = np.zeros((32, 32), dtype=np.uint8)
     tissue_mask[8:24, 8:24] = 255
 
-    def _fake_wholeslide(path: Path, backend: str = "asap"):
-        del path, backend
+    def _fake_wholeslide(
+        path: Path,
+        backend: str = "asap",
+        spacing_override: float | None = None,
+        gpu_decode: bool = False,
+    ):
+        del path, backend, spacing_override, gpu_decode
         return FakePyramidWSI(
             PyramidSpec(spacings=[1.0, 2.0], levels=[slide_l0, slide_l1])
         )
 
-    def _fake_segment_tissue(self, segment_params):
-        del segment_params
-        self.annotation_mask = {"tissue": tissue_mask}
-        return 0
-
     monkeypatch.setattr(wsimod, "open_slide", _fake_wholeslide)
-    monkeypatch.setattr(wsimod.WholeSlideImage, "segment_tissue", _fake_segment_tissue)
+    monkeypatch.setattr(preprocessing_mod, "open_slide", _fake_wholeslide)
+    monkeypatch.setattr(
+        preprocessing_mod,
+        "segment_tissue",
+        lambda *args, **kwargs: tissue_mask,
+    )
 
     result = wsi_api.extract_coordinates(
         wsi_path=Path("synthetic-slide.tif"),
@@ -322,13 +373,19 @@ def test_extract_coordinates_returns_zero_tile_result_for_tissue_free_maskless_s
     slide_l0 = np.full((32, 32, 3), 255, dtype=np.uint8)
     slide_l1 = slide_l0[::2, ::2, :]
 
-    def _fake_wholeslide(path: Path, backend: str = "asap"):
-        del path, backend
+    def _fake_wholeslide(
+        path: Path,
+        backend: str = "asap",
+        spacing_override: float | None = None,
+        gpu_decode: bool = False,
+    ):
+        del path, backend, spacing_override, gpu_decode
         return FakePyramidWSI(
             PyramidSpec(spacings=[1.0, 2.0], levels=[slide_l0, slide_l1])
         )
 
     monkeypatch.setattr(wsimod, "open_slide", _fake_wholeslide)
+    monkeypatch.setattr(preprocessing_mod, "open_slide", _fake_wholeslide)
 
     result = wsi_api.extract_coordinates(
         wsi_path=Path("empty-slide.tif"),

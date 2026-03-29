@@ -4,6 +4,7 @@ import pytest
 
 from hs2p.api import FilterConfig, SegmentationConfig, TilingConfig
 import hs2p.wsi as wsi_api
+import hs2p.wsi.api as wsi_runtime
 from hs2p.wsi import ResolvedSamplingSpec
 from hs2p.wsi.wsi import WholeSlideImage
 
@@ -87,11 +88,15 @@ def test_get_best_level_for_spacing_falls_back_to_finer_level_when_closest_is_to
 def test_extract_coordinates_raises_when_target_spacing_is_below_level0_beyond_tolerance(
     monkeypatch,
 ):
-    class GuardOnlyWSI:
-        def __init__(self, *args, **kwargs):
-            self.spacings = [1.0]
-
-    monkeypatch.setattr(wsi_api, "WholeSlideImage", GuardOnlyWSI)
+    monkeypatch.setattr(
+        wsi_runtime,
+        "preprocess_slide",
+        lambda **kwargs: (_ for _ in ()).throw(
+            ValueError(
+                "Desired spacing (0.5) is smaller than the whole-slide image starting spacing (1.0) and does not fall within tolerance (5%)"
+            )
+        ),
+    )
 
     with pytest.raises(ValueError, match="Desired spacing"):
         wsi_api.extract_coordinates(

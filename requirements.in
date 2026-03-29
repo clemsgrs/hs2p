@@ -9,3 +9,4 @@ rich
 wandb
 opencv-python
 matplotlib
+tifffile

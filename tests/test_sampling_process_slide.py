@@ -589,7 +589,6 @@ def test_sampling_main_defaults_inner_slide_workers_to_one(monkeypatch, tmp_path
                         "num_tiles": 0,
                         "coordinates_npz_path": np.nan,
                         "coordinates_meta_path": np.nan,
-                        "config_hash": "hash",
                         "error": np.nan,
                         "traceback": np.nan,
                     }
@@ -709,7 +708,6 @@ def test_sampling_main_rejects_explicit_inner_slide_workers_override(
                         "num_tiles": 0,
                         "coordinates_npz_path": np.nan,
                         "coordinates_meta_path": np.nan,
-                        "config_hash": "hash",
                         "error": np.nan,
                         "traceback": np.nan,
                     }
@@ -722,7 +720,7 @@ def test_sampling_main_rejects_explicit_inner_slide_workers_override(
         sampling_mod.main(SimpleNamespace())
 
 
-def test_save_sampling_coordinates_uses_annotation_threshold_and_sampling_mode_in_hash(
+def test_save_sampling_coordinates_uses_annotation_threshold_and_sampling_metadata(
     monkeypatch,
     tmp_path,
 ):
@@ -814,15 +812,11 @@ def test_save_sampling_coordinates_uses_annotation_threshold_and_sampling_mode_i
     assert result.tissue_threshold == 0.7
     assert result.read_step_px == 256
     assert result.step_px_lv0 == 256
-    assert result.config_hash == sampling_mod.compute_effective_config_hash(
-        tiling=tiling_config,
-        segmentation=segmentation_config,
-        filtering=filter_config,
-        sampling_spec=resolved_sampling_spec,
-        selection_strategy=sampling_mod.CoordinateSelectionStrategy.JOINT_SAMPLING,
-        output_mode=sampling_mod.CoordinateOutputMode.PER_ANNOTATION,
-        annotation="tumor",
-    )
+    assert result.selection_strategy == sampling_mod.CoordinateSelectionStrategy.JOINT_SAMPLING
+    assert result.output_mode == sampling_mod.CoordinateOutputMode.PER_ANNOTATION
+    assert result.annotation == "tumor"
+    assert result.tissue_method == "hsv"
+    assert result.requested_backend == "asap"
     assert captured["tiles_dir"] == tmp_path / "tiles" / "tumor"
 
 
@@ -896,11 +890,10 @@ def test_save_sampling_coordinates_writes_sampling_metadata_fields(tmp_path):
     )
 
     meta = json.loads(artifacts.coordinates_meta_path.read_text())
-    assert meta["annotation"] == "tumor"
-    assert meta["selection_strategy"] == "joint_sampling"
-    assert meta["output_mode"] == "per_annotation"
-    assert meta["read_step_px"] == 256
-    assert meta["step_px_lv0"] == 256
+    assert meta["artifact"]["annotation"] == "tumor"
+    assert meta["artifact"]["selection_strategy"] == "joint_sampling"
+    assert meta["artifact"]["output_mode"] == "per_annotation"
+    assert meta["tiling"]["step_px_lv0"] == 256
 
 
 def test_coordinate_extraction_result_requires_stride_metadata():

@@ -523,7 +523,6 @@ def test_sampling_main_emits_progress_and_run_summary(monkeypatch, tmp_path: Pat
                         / "tumor"
                         / f"{sample_id}.coordinates.meta.json"
                     ),
-                    "config_hash": "hash",
                     "error": np.nan,
                     "traceback": np.nan,
                 }
@@ -539,7 +538,6 @@ def test_sampling_main_emits_progress_and_run_summary(monkeypatch, tmp_path: Pat
                 "num_tiles": 0,
                 "coordinates_npz_path": np.nan,
                 "coordinates_meta_path": np.nan,
-                "config_hash": "hash",
                 "error": "boom",
                 "traceback": "traceback",
             }
@@ -613,7 +611,6 @@ def test_sampling_main_emits_finished_summary_when_resume_has_no_work(
                 "num_tiles": 0,
                 "coordinates_npz_path": np.nan,
                 "coordinates_meta_path": np.nan,
-                "config_hash": "expected-hash",
                 "error": np.nan,
                 "traceback": np.nan,
             }
@@ -636,11 +633,6 @@ def test_sampling_main_emits_finished_summary_when_resume_has_no_work(
         lambda cfg: sampling_mod.CoordinateSelectionStrategy.INDEPENDENT_SAMPLING,
     )
     monkeypatch.setattr(progress, "create_cli_progress_reporter", lambda **kwargs: reporter)
-    monkeypatch.setattr(
-        sampling_mod,
-        "compute_effective_config_hash",
-        lambda **kwargs: "expected-hash",
-    )
 
     class _NoPool:
         def __init__(self, *args, **kwargs):

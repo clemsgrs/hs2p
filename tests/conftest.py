@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+import hs2p.preprocessing as preprocessing_mod
 import hs2p.wsi.wsi as wsimod
 
 HELPERS_DIR = Path(__file__).resolve().parent / "helpers"
@@ -21,6 +22,7 @@ def fake_backend(monkeypatch):
             mask_spec=make_mask_spec(mask_l0),
         )
         monkeypatch.setattr(wsimod, "open_slide", factory)
+        monkeypatch.setattr(preprocessing_mod, "open_slide", factory)
         return factory
 
     return _apply

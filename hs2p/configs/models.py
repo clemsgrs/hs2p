@@ -19,6 +19,7 @@ class TilingConfig:
     tolerance: float
     overlap: float
     tissue_threshold: float
+    tissue_mask_tissue_value: int = int(_DEFAULT_TILING_PARAMS.tissue_mask_tissue_value)
     use_padding: bool = bool(_DEFAULT_TILING_PARAMS.use_padding)
     backend: str = AUTO_BACKEND
 

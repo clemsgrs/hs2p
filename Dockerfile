@@ -18,6 +18,7 @@ WORKDIR /opt/app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libtiff-dev \
+    libvips42 \
     zlib1g-dev \
     curl \
     cmake \
@@ -70,7 +71,7 @@ RUN python -m pip install \
       --no-cache-dir \
       --no-color \
       --no-build-isolation \
-      /opt/app \
+      "/opt/app[all]" \
     && rm -rf /root/.cache/pip
 
 COPY --chown=user:user . /opt/app/

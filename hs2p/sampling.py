@@ -18,7 +18,6 @@ from hs2p.api import (
     TilingResult,
     _write_process_list,
     _validate_required_columns,
-    compute_effective_config_hash,
     load_tiling_result,
     save_tiling_result,
 )
@@ -169,20 +168,36 @@ def _save_sampling_coordinates(
         read_spacing_um=extraction.read_spacing_um,
         read_tile_size_px=extraction.read_tile_size_px,
         tile_size_lv0=extraction.tile_size_lv0,
+        is_within_tolerance=bool(np.isclose(extraction.resize_factor, 1.0)),
+        use_padding=tiling_config.use_padding,
         overlap=tiling_config.overlap,
         tissue_threshold=annotation_threshold,
         num_tiles=len(coordinates),
-        config_hash=compute_effective_config_hash(
-            tiling=tiling_config,
-            segmentation=segmentation_config,
-            filtering=filter_config,
-            sampling_spec=resolved_sampling_spec,
-            selection_strategy=selection_strategy,
-            output_mode=output_mode,
-            annotation=annotation,
-        ),
+        tolerance=tiling_config.tolerance,
         read_step_px=extraction.read_step_px,
         step_px_lv0=extraction.step_px_lv0,
+        requested_backend=tiling_config.requested_backend,
+        seg_downsample=segmentation_config.downsample,
+        seg_sthresh=segmentation_config.sthresh,
+        seg_sthresh_up=segmentation_config.sthresh_up,
+        seg_mthresh=segmentation_config.mthresh,
+        seg_close=segmentation_config.close,
+        seg_use_otsu=segmentation_config.use_otsu,
+        seg_use_hsv=segmentation_config.use_hsv,
+        tissue_method=(
+            "hsv"
+            if segmentation_config.use_hsv
+            else ("otsu" if segmentation_config.use_otsu else "threshold")
+        ),
+        ref_tile_size_px=filter_config.ref_tile_size,
+        a_t=filter_config.a_t,
+        a_h=filter_config.a_h,
+        max_n_holes=filter_config.max_n_holes,
+        filter_white=filter_config.filter_white,
+        filter_black=filter_config.filter_black,
+        white_threshold=filter_config.white_threshold,
+        black_threshold=filter_config.black_threshold,
+        fraction_threshold=filter_config.fraction_threshold,
         annotation=annotation,
         selection_strategy=selection_strategy,
         output_mode=output_mode,
@@ -309,15 +324,6 @@ def process_slide(
                         pixel_mapping=resolved_sampling_spec.pixel_mapping,
                         color_mapping=color_mapping,
                     )
-            config_hash = compute_effective_config_hash(
-                tiling=effective_tiling_config,
-                segmentation=segmentation_config,
-                filtering=filter_config,
-                sampling_spec=resolved_sampling_spec,
-                selection_strategy=selection_strategy,
-                output_mode=CoordinateOutputMode.PER_ANNOTATION,
-                annotation=annotation,
-            )
             rows.append(
                 {
                     "sample_id": sample_id,
@@ -334,7 +340,6 @@ def process_slide(
                         if artifacts is not None
                         else np.nan
                     ),
-                    "config_hash": config_hash,
                     "error": np.nan,
                     "traceback": np.nan,
                 }
@@ -359,7 +364,6 @@ def process_slide(
                     "num_tiles": 0,
                     "coordinates_npz_path": np.nan,
                     "coordinates_meta_path": np.nan,
-                    "config_hash": np.nan,
                     "error": str(e),
                     "traceback": str(traceback.format_exc()),
                 }
@@ -387,7 +391,6 @@ def _build_sampling_process_rows(
                     "num_tiles": 0,
                     "coordinates_npz_path": np.nan,
                     "coordinates_meta_path": np.nan,
-                    "config_hash": np.nan,
                     "error": np.nan,
                     "traceback": np.nan,
                 }
@@ -395,17 +398,125 @@ def _build_sampling_process_rows(
     return rows
 
 
+def _normalize_artifact_path(path: Path | str | None) -> str | None:
+    if path is not None and pd.isna(path):
+        return None
+    from hs2p.preprocessing import normalize_artifact_path
+    return normalize_artifact_path(path)
+
+
+def _validate_sampling_result_matches_request(
+    *,
+    result: TilingResult,
+    whole_slide,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+    annotation_threshold: float,
+    annotation: str,
+    selection_strategy: str,
+) -> None:
+    expected_tissue_method = (
+        "hsv"
+        if segmentation_config.use_hsv
+        else ("otsu" if segmentation_config.use_otsu else "threshold")
+    )
+    expected_fields = {
+        "sample_id": whole_slide.sample_id,
+        "image_path": _normalize_artifact_path(whole_slide.image_path),
+        "mask_path": _normalize_artifact_path(whole_slide.mask_path),
+        "backend": tiling_config.backend,
+        "requested_backend": tiling_config.requested_backend,
+        "target_spacing_um": tiling_config.target_spacing_um,
+        "target_tile_size_px": tiling_config.target_tile_size_px,
+        "tolerance": tiling_config.tolerance,
+        "overlap": tiling_config.overlap,
+        "use_padding": tiling_config.use_padding,
+    }
+    actual_fields = {
+        "sample_id": result.sample_id,
+        "image_path": _normalize_artifact_path(result.image_path),
+        "mask_path": _normalize_artifact_path(result.mask_path),
+        "backend": result.backend,
+        "requested_backend": result.requested_backend,
+        "target_spacing_um": result.target_spacing_um,
+        "target_tile_size_px": result.target_tile_size_px,
+        "tolerance": result.tolerance,
+        "overlap": result.overlap,
+        "use_padding": result.use_padding,
+    }
+    for field_name, expected in expected_fields.items():
+        actual = actual_fields[field_name]
+        if actual != expected:
+            raise ValueError(
+                f"sampling {field_name} mismatch: expected {expected!r}, found {actual!r}"
+            )
+    float_fields = {
+        "tissue_threshold": result.tissue_threshold,
+        "seg_downsample": result.seg_downsample,
+        "seg_sthresh": result.seg_sthresh,
+        "seg_sthresh_up": result.seg_sthresh_up,
+        "seg_mthresh": result.seg_mthresh,
+        "seg_close": result.seg_close,
+        "ref_tile_size_px": result.ref_tile_size_px,
+        "a_t": result.a_t,
+        "a_h": result.a_h,
+        "max_n_holes": result.max_n_holes,
+        "white_threshold": result.white_threshold,
+        "black_threshold": result.black_threshold,
+        "fraction_threshold": result.fraction_threshold,
+    }
+    expected_float_fields = {
+        "tissue_threshold": float(annotation_threshold),
+        "seg_downsample": segmentation_config.downsample,
+        "seg_sthresh": segmentation_config.sthresh,
+        "seg_sthresh_up": segmentation_config.sthresh_up,
+        "seg_mthresh": segmentation_config.mthresh,
+        "seg_close": segmentation_config.close,
+        "ref_tile_size_px": filter_config.ref_tile_size,
+        "a_t": filter_config.a_t,
+        "a_h": filter_config.a_h,
+        "max_n_holes": filter_config.max_n_holes,
+        "white_threshold": filter_config.white_threshold,
+        "black_threshold": filter_config.black_threshold,
+        "fraction_threshold": filter_config.fraction_threshold,
+    }
+    for field_name, expected in expected_float_fields.items():
+        actual = float_fields[field_name]
+        if actual is None or not np.isclose(float(actual), float(expected)):
+            raise ValueError(
+                f"sampling {field_name} mismatch: expected {expected!r}, found {actual!r}"
+            )
+    other_fields = {
+        "seg_use_otsu": (result.seg_use_otsu, segmentation_config.use_otsu),
+        "seg_use_hsv": (result.seg_use_hsv, segmentation_config.use_hsv),
+        "tissue_method": (result.tissue_method, expected_tissue_method),
+        "filter_white": (result.filter_white, filter_config.filter_white),
+        "filter_black": (result.filter_black, filter_config.filter_black),
+        "annotation": (result.annotation, annotation),
+        "selection_strategy": (result.selection_strategy, selection_strategy),
+        "output_mode": (result.output_mode, CoordinateOutputMode.PER_ANNOTATION),
+        "tissue_mask_tissue_value": (result.tissue_mask_tissue_value, None),
+    }
+    for field_name, (actual, expected) in other_fields.items():
+        if actual != expected:
+            raise ValueError(
+                f"sampling {field_name} mismatch: expected {expected!r}, found {actual!r}"
+            )
+
+
 def _validate_sampling_artifact_row(
     *,
     row: dict[str, object],
     whole_slide,
-    expected_hash: str,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+    resolved_sampling_spec: ResolvedSamplingSpec,
     selection_strategy: str,
 ) -> None:
     if row.get("sampling_status") != "success":
         raise ValueError("sampling row is not successful")
-    if str(row.get("config_hash")) != expected_hash:
-        raise ValueError("sampling config_hash mismatch")
     num_tiles = int(row.get("num_tiles", 0))
     if num_tiles == 0:
         return
@@ -418,14 +529,16 @@ def _validate_sampling_artifact_row(
         raise ValueError("sampling image_path mismatch")
     if result.mask_path != whole_slide.mask_path:
         raise ValueError("sampling mask_path mismatch")
-    if result.config_hash != expected_hash:
-        raise ValueError("sampling config_hash mismatch")
-    if result.annotation != row["annotation"]:
-        raise ValueError("sampling annotation mismatch")
-    if result.selection_strategy != selection_strategy:
-        raise ValueError("sampling selection_strategy mismatch")
-    if result.output_mode != CoordinateOutputMode.PER_ANNOTATION:
-        raise ValueError("sampling output_mode mismatch")
+    _validate_sampling_result_matches_request(
+        result=result,
+        whole_slide=whole_slide,
+        tiling_config=tiling_config,
+        segmentation_config=segmentation_config,
+        filter_config=filter_config,
+        annotation_threshold=float(resolved_sampling_spec.tissue_percentage[str(row["annotation"])]),
+        annotation=str(row["annotation"]),
+        selection_strategy=selection_strategy,
+    )
 
 
 def main(args):
@@ -471,7 +584,6 @@ def main(args):
                         "num_tiles",
                         "coordinates_npz_path",
                         "coordinates_meta_path",
-                        "config_hash",
                         "error",
                         "traceback",
                     },
@@ -496,28 +608,24 @@ def main(args):
                         "num_tiles",
                         "coordinates_npz_path",
                         "coordinates_meta_path",
-                        "config_hash",
                         "error",
                         "traceback",
                     ],
                 )
-
-            expected_hash_by_annotation = {
-                annotation: compute_effective_config_hash(
-                    tiling=tiling_config,
-                    segmentation=segmentation_config,
-                    filtering=filter_config,
-                    sampling_spec=resolved_sampling_spec,
-                    selection_strategy=selection_strategy,
-                    output_mode=CoordinateOutputMode.PER_ANNOTATION,
-                    annotation=annotation,
-                )
-                for annotation in active_annotations
-            }
             slides_to_process = []
             for slide in whole_slides:
                 slide_rows = process_df[process_df["sample_id"] == slide.sample_id]
                 try:
+                    backend_selection = resolve_backend(
+                        tiling_config.backend,
+                        wsi_path=slide.image_path,
+                        mask_path=slide.mask_path,
+                    )
+                    effective_tiling_config = (
+                        tiling_config
+                        if backend_selection.backend == tiling_config.backend
+                        else replace(tiling_config, backend=backend_selection.backend)
+                    )
                     if slide_rows.empty or set(slide_rows["annotation"].tolist()) != set(
                         active_annotations
                     ):
@@ -529,7 +637,10 @@ def main(args):
                         _validate_sampling_artifact_row(
                             row=row.iloc[0].to_dict(),
                             whole_slide=slide,
-                            expected_hash=expected_hash_by_annotation[annotation],
+                            tiling_config=effective_tiling_config,
+                            segmentation_config=segmentation_config,
+                            filter_config=filter_config,
+                            resolved_sampling_spec=resolved_sampling_spec,
                             selection_strategy=selection_strategy,
                         )
                 except Exception:

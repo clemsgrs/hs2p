@@ -7,6 +7,7 @@ from PIL import Image
 
 cv2 = pytest.importorskip("cv2")
 wsi_mod = pytest.importorskip("hs2p.wsi")
+import hs2p.wsi.api as wsi_runtime
 
 
 def _build_palette(mapping: dict[int, tuple[int, int, int]]) -> np.ndarray:
@@ -69,7 +70,7 @@ def test_overlay_mask_on_slide_matches_tile_semantics(monkeypatch):
                 return mask_arr
             return slide_arr
 
-    monkeypatch.setattr(wsi_mod, "WholeSlideImage", FakeWSI)
+    monkeypatch.setattr(wsi_runtime, "WholeSlideImage", FakeWSI)
 
     pixel_mapping = {"background": 0, "gleason3": 3, "gleason4": 4}
     color_mapping = {
@@ -117,7 +118,7 @@ def test_overlay_mask_on_slide_accepts_in_memory_mask_array(monkeypatch):
         def get_slide(self, spacing):
             return slide_arr
 
-    monkeypatch.setattr(wsi_mod, "WholeSlideImage", FakeWSI)
+    monkeypatch.setattr(wsi_runtime, "WholeSlideImage", FakeWSI)
 
     pixel_mapping = {"background": 0, "tissue": 1}
     color_mapping = {"background": None, "tissue": [157, 219, 129]}
@@ -157,7 +158,7 @@ def test_overlay_mask_on_slide_defaults_to_tissue_overlay_style(monkeypatch):
         def get_slide(self, spacing):
             return slide_arr
 
-    monkeypatch.setattr(wsi_mod, "WholeSlideImage", FakeWSI)
+    monkeypatch.setattr(wsi_runtime, "WholeSlideImage", FakeWSI)
 
     overlay = wsi_mod.overlay_mask_on_slide(
         wsi_path=Path("fake-wsi.tif"),
@@ -232,8 +233,24 @@ def test_extract_coordinates_uses_overlay_mask_preview_instead_of_line_rendering
         preview_calls.append(kwargs)
         return Image.fromarray(np.full((2, 2, 3), 200, dtype=np.uint8))
 
-    monkeypatch.setattr(wsi_mod, "WholeSlideImage", FakeWSI)
-    monkeypatch.setattr(wsi_mod, "overlay_mask_on_slide", _fake_overlay_mask_on_slide)
+    monkeypatch.setattr(
+        wsi_runtime,
+        "preprocess_slide",
+        lambda **kwargs: SimpleNamespace(
+            coordinates=np.array([[0, 0]], dtype=np.int64),
+            tissue_fractions=np.array([1.0], dtype=np.float32),
+            requested_tile_size_px=224,
+            requested_spacing_um=0.5,
+            read_level=0,
+            effective_tile_size_px=224,
+            effective_spacing_um=0.5,
+            tile_size_lv0=224,
+            step_px_lv0=224,
+            overlap=0.0,
+            tissue_mask=np.array([[0, 255], [255, 0]], dtype=np.uint8),
+        ),
+    )
+    monkeypatch.setattr(wsi_runtime, "overlay_mask_on_slide", _fake_overlay_mask_on_slide)
 
     preview_path = tmp_path / "mask-preview.jpg"
     result = wsi_mod.extract_coordinates(
@@ -341,8 +358,8 @@ def test_extract_coordinates_preview_uses_in_memory_annotation_labels_when_style
         preview_calls.append(kwargs)
         return Image.fromarray(np.full((2, 2, 3), 200, dtype=np.uint8))
 
-    monkeypatch.setattr(wsi_mod, "WholeSlideImage", FakeWSI)
-    monkeypatch.setattr(wsi_mod, "overlay_mask_on_slide", _fake_overlay_mask_on_slide)
+    monkeypatch.setattr(wsi_runtime, "WholeSlideImage", FakeWSI)
+    monkeypatch.setattr(wsi_runtime, "overlay_mask_on_slide", _fake_overlay_mask_on_slide)
 
     preview_path = tmp_path / "mask-preview.jpg"
     palette = _build_palette({1: (255, 0, 0)})

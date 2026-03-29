@@ -14,6 +14,8 @@ The script relies on `tifffile` for pyramidal TIFF output:
 python -m pip install tifffile
 ```
 
+The project Docker image now includes `tifffile` out of the box.
+
 ## Single-slide example
 
 ```bash
