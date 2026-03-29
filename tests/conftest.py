@@ -20,7 +20,7 @@ def fake_backend(monkeypatch):
             slide_spec=make_slide_spec(),
             mask_spec=make_mask_spec(mask_l0),
         )
-        monkeypatch.setattr(wsimod.wsd, "WholeSlideImage", factory)
+        monkeypatch.setattr(wsimod, "open_slide", factory)
         return factory
 
     return _apply

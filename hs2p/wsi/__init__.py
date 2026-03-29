@@ -10,6 +10,29 @@ from collections import defaultdict
 
 from hs2p.configs import FilterConfig, SegmentationConfig, TilingConfig
 from hs2p.progress import emit_progress_log
+from .masks import (
+    compose_overlay_mask_from_annotations as _compose_overlay_mask_from_annotations_impl,
+    extract_padded_crop as _extract_padded_crop_impl,
+    normalize_tissue_mask as _normalize_tissue_mask_impl,
+    pad_array_to_shape as _pad_array_to_shape_impl,
+    read_aligned_mask as _read_aligned_mask_impl,
+)
+from .preview import (
+    build_overlay_alpha as _build_overlay_alpha_impl,
+    build_palette as _build_palette_impl,
+    draw_grid as _draw_grid_impl,
+    draw_grid_from_coordinates as _draw_grid_from_coordinates_impl,
+    overlay_mask_on_tile as _overlay_mask_on_tile_impl,
+    pad_to_patch_size as _pad_to_patch_size_impl,
+)
+from .reader import (
+    BatchRegionReader,
+    SlideReader,
+    open_slide,
+    resolve_backend,
+    select_level,
+    select_level_for_downsample,
+)
 from .wsi import (
     ResolvedSamplingSpec,
     WholeSlideImage,
@@ -217,16 +240,10 @@ def _build_palette(
     pixel_mapping: dict[str, int],
     color_mapping: dict[str, list[int] | None],
 ) -> np.ndarray:
-    palette = np.zeros(shape=768, dtype=np.uint8)
-    for annotation, label_value in pixel_mapping.items():
-        color = color_mapping.get(annotation)
-        if color is None:
-            continue
-        palette[label_value * 3 : label_value * 3 + 3] = np.asarray(
-            color,
-            dtype=np.uint8,
-        )
-    return palette
+    return _build_palette_impl(
+        pixel_mapping=pixel_mapping,
+        color_mapping=color_mapping,
+    )
 
 
 def _resolve_overlay_style(
@@ -251,17 +268,13 @@ def _resolve_overlay_style(
 
 
 def _normalize_tissue_mask(mask_arr: np.ndarray) -> np.ndarray:
-    if mask_arr.ndim == 3:
-        mask_arr = mask_arr[:, :, 0]
-    return (mask_arr > 0).astype(np.uint8)
+    return _normalize_tissue_mask_impl(mask_arr)
 
 
 def _mask_level_downsamples(mask_obj) -> list[tuple[float, float]]:
-    if hasattr(mask_obj, "level_downsamples"):
+    if isinstance(mask_obj, WholeSlideImage):
         return list(mask_obj.level_downsamples)
-    if hasattr(mask_obj, "downsamplings"):
-        return [(float(d), float(d)) for d in mask_obj.downsamplings]
-    raise AttributeError("Mask object must expose level_downsamples or downsamplings")
+    return list(mask_obj.level_downsamples)
 
 
 def _read_aligned_mask(
@@ -270,46 +283,22 @@ def _read_aligned_mask(
     slide_spacing: float,
     slide_dimensions: tuple[int, int],
 ) -> np.ndarray:
-    mask_spacings = list(mask_obj.spacings)
-    mask_level_downsamples = _mask_level_downsamples(mask_obj)
-    mask_spacing_at_level_0 = mask_spacings[0]
-    mask_downsample = slide_spacing / mask_spacing_at_level_0
-    mask_level = int(
-        np.argmin([abs(ds[0] - mask_downsample) for ds in mask_level_downsamples])
-    )
-    mask_spacing = mask_spacings[mask_level]
-    scale = slide_spacing / mask_spacing
-    while scale < 1 and mask_level > 0:
-        mask_level -= 1
-        mask_spacing = mask_spacings[mask_level]
-        scale = slide_spacing / mask_spacing
-
-    mask_arr = mask_obj.get_slide(spacing=mask_spacing)
-    target_width, target_height = slide_dimensions
-    return cv2.resize(
-        mask_arr.astype(np.uint8),
-        (int(target_width), int(target_height)),
-        interpolation=cv2.INTER_NEAREST,
+    reader = getattr(mask_obj, "wsi", mask_obj)
+    return _read_aligned_mask_impl(
+        mask_reader=reader,
+        slide_spacing=slide_spacing,
+        slide_dimensions=slide_dimensions,
     )
 
 
 def _pad_array_to_shape(
     arr: np.ndarray, *, target_width: int, target_height: int
 ) -> np.ndarray:
-    """Pad an array on the bottom and right without resampling its contents."""
-    if arr.shape[1] == target_width and arr.shape[0] == target_height:
-        return arr
-    if arr.shape[1] > target_width or arr.shape[0] > target_height:
-        raise ValueError(
-            "Cannot pad an array to a smaller shape; expected the target canvas to be at least as large as the source"
-        )
-    if arr.ndim == 2:
-        padded = np.zeros((target_height, target_width), dtype=arr.dtype)
-        padded[: arr.shape[0], : arr.shape[1]] = arr
-        return padded
-    padded = np.zeros((target_height, target_width, arr.shape[2]), dtype=arr.dtype)
-    padded[: arr.shape[0], : arr.shape[1], :] = arr
-    return padded
+    return _pad_array_to_shape_impl(
+        arr,
+        target_width=target_width,
+        target_height=target_height,
+    )
 
 
 def _extract_padded_crop(
@@ -320,15 +309,13 @@ def _extract_padded_crop(
     width: int,
     height: int,
 ) -> np.ndarray:
-    if arr.ndim == 2:
-        crop = np.zeros((height, width), dtype=arr.dtype)
-        src = arr[y : y + height, x : x + width]
-        crop[: src.shape[0], : src.shape[1]] = src
-        return crop
-    crop = np.zeros((height, width, arr.shape[2]), dtype=arr.dtype)
-    src = arr[y : y + height, x : x + width, :]
-    crop[: src.shape[0], : src.shape[1], :] = src
-    return crop
+    return _extract_padded_crop_impl(
+        arr,
+        x=x,
+        y=y,
+        width=width,
+        height=height,
+    )
 
 
 def _compose_overlay_mask_from_annotations(
@@ -336,18 +323,10 @@ def _compose_overlay_mask_from_annotations(
     annotation_mask: dict[str, np.ndarray],
     pixel_mapping: dict[str, int],
 ) -> np.ndarray:
-    mask = np.full_like(
-        _normalize_tissue_mask(annotation_mask["tissue"]),
-        fill_value=pixel_mapping.get("background", 0),
-        dtype=np.uint8,
+    return _compose_overlay_mask_from_annotations_impl(
+        annotation_mask=annotation_mask,
+        pixel_mapping=pixel_mapping,
     )
-    for annotation, label_value in pixel_mapping.items():
-        if annotation == "background":
-            continue
-        if annotation not in annotation_mask:
-            continue
-        mask[_normalize_tissue_mask(annotation_mask[annotation]) > 0] = label_value
-    return mask
 
 
 def _save_overlay_preview(
@@ -811,20 +790,14 @@ def overlay_mask_on_tile(
     color_mapping: dict[str, list[int] | None],
     alpha=0.5,
 ):
-
-    mask_arr = np.array(mask)
-    alpha_content = _build_overlay_alpha(
-        mask_arr=mask_arr,
+    return _overlay_mask_on_tile_impl(
+        tile,
+        mask,
+        palette,
+        pixel_mapping,
+        color_mapping,
         alpha=alpha,
-        pixel_mapping=pixel_mapping,
-        color_mapping=color_mapping,
     )
-
-    mask.putpalette(data=palette.tolist())
-    mask_rgb = mask.convert(mode="RGB")
-
-    overlayed_image = Image.composite(image1=tile, image2=mask_rgb, mask=alpha_content)
-    return overlayed_image
 
 
 def _build_overlay_alpha(
@@ -834,17 +807,12 @@ def _build_overlay_alpha(
     pixel_mapping: dict[str, int],
     color_mapping: dict[str, list[int] | None],
 ) -> Image.Image:
-    alpha_int = int(round(255 * alpha))
-    active_labels = set()
-    for annotation, label_value in pixel_mapping.items():
-        if color_mapping.get(annotation) is not None:
-            active_labels.add(label_value)
-
-    overlay_mask = np.isin(mask_arr, list(active_labels)).astype("uint8")
-    alpha_content = np.less(overlay_mask, 1).astype("uint8") * alpha_int + (
-        255 - alpha_int
+    return _build_overlay_alpha_impl(
+        mask_arr=mask_arr,
+        alpha=alpha,
+        pixel_mapping=pixel_mapping,
+        color_mapping=color_mapping,
     )
-    return Image.fromarray(alpha_content)
 
 
 def overlay_mask_on_slide(
@@ -890,30 +858,15 @@ def overlay_mask_on_slide(
         width, height = wsi.size
     if annotation_mask_path is not None:
         mask_object = WholeSlideImage(path=annotation_mask_path, backend=backend)
-        mask_width_at_level_0, _ = mask_object.level_dimensions[0]
-        mask_downsample = mask_width_at_level_0 / width
-        mask_level = int(
-            np.argmin(
-                [abs(x - mask_downsample) for x, _ in mask_object.level_downsamples]
-            )
+        vis_spacing = (
+            wsi_object.get_level_spacing(vis_level)
+            if hasattr(wsi_object, "get_level_spacing")
+            else wsi_object.spacings[vis_level]
         )
-        mask_spacing = mask_object.spacings[mask_level]
-        mask_width, _ = mask_object.level_dimensions[mask_level]
-
-        scale = mask_width / width
-        while scale < 1 and mask_level > 0:
-            mask_level -= 1
-            mask_spacing = mask_object.spacings[mask_level]
-            mask_width, _ = mask_object.level_dimensions[mask_level]
-            scale = mask_width / width
-
-        mask_arr = mask_object.get_slide(spacing=mask_spacing)
-        if mask_arr.ndim == 3:
-            mask_arr = mask_arr[:, :, 0]
-        mask_arr = cv2.resize(
-            mask_arr.astype(np.uint8),
-            (base_width, base_height),
-            interpolation=cv2.INTER_NEAREST,
+        mask_arr = _read_aligned_mask(
+            mask_obj=mask_object,
+            slide_spacing=vis_spacing,
+            slide_dimensions=(base_width, base_height),
         )
     elif mask_arr is not None:
         if mask_arr.ndim == 3:
@@ -927,6 +880,9 @@ def overlay_mask_on_slide(
         raise ValueError(
             "Provide annotation_mask_path or mask_arr to overlay_mask_on_slide()"
         )
+
+    if mask_arr.ndim == 3:
+        mask_arr = mask_arr[:, :, 0]
 
     if tile_size_lv0 is not None and (width != base_width or height != base_height):
         mask_arr = _pad_array_to_shape(
@@ -952,14 +908,7 @@ def overlay_mask_on_slide(
 
 
 def draw_grid(img, coord, shape, thickness=2, color=(0, 0, 0, 255)):
-    cv2.rectangle(
-        img,
-        tuple(np.maximum([0, 0], coord - thickness // 2)),
-        tuple(coord - thickness // 2 + np.array(shape)),
-        color,
-        thickness=thickness,
-    )
-    return img
+    return _draw_grid_impl(img, coord, shape, thickness=thickness, color=color)
 
 
 def draw_grid_from_coordinates(
@@ -975,137 +924,23 @@ def draw_grid_from_coordinates(
     pixel_mapping: dict[str, int] | None = None,
     color_mapping: dict[str, list[int] | None] | None = None,
 ):
-    downsamples = wsi.level_downsamples[vis_level]
-    source_canvas = canvas[:, :, :3].copy()
-    if indices is None:
-        indices = np.arange(len(coords))
-    total = len(indices)
-
-    tile_size = tuple(
-        np.ceil((np.array(tile_size_at_0) / np.array(downsamples))).astype(np.int32)
-    )  # defined w.r.t vis_level
-
-    wsi_width_at_0, wsi_height_at_0 = wsi.level_dimensions[
-        0
-    ]  # retrieve slide dimension at level 0
-
-    vis_spacing = wsi.get_level_spacing(vis_level)
-    aligned_mask = None
-    if mask is not None:
-        aligned_mask = _read_aligned_mask(
-            mask_obj=mask,
-            slide_spacing=vis_spacing,
-            slide_dimensions=wsi.level_dimensions[vis_level],
-        )
-        if aligned_mask.ndim == 3 and aligned_mask.shape[-1] == 1:
-            aligned_mask = np.squeeze(aligned_mask, axis=-1)
-
-    for idx in range(total):
-        tile_id = indices[idx]
-        coord = coords[tile_id]
-        x, y = coord
-
-        width, height = tile_size
-        tile = np.ones((height, width, 3), dtype=np.uint8) * 255  # White background
-
-        # compute valid tile area
-        if x + tile_size_at_0[0] > wsi_width_at_0:
-            valid_width_at_0 = max(
-                0, wsi_width_at_0 - x
-            )  # how much of the tile width is inside the wsi
-            valid_width = int(valid_width_at_0 / downsamples[0])
-        else:
-            valid_width = width
-
-        if y + tile_size_at_0[1] > wsi_height_at_0:
-            valid_height_at_0 = max(
-                0, wsi_height_at_0 - y
-            )  # how much of the tile height is inside the wsi
-            valid_height = int(valid_height_at_0 / downsamples[1])
-        else:
-            valid_height = height
-
-        coord = np.ceil(
-            tuple(coord[i] / downsamples[i] for i in range(len(coord)))
-        ).astype(np.int32)
-
-        # extract only the valid portion of the tile
-        if valid_width > 0 and valid_height > 0:
-            valid_tile = _extract_padded_crop(
-                source_canvas,
-                x=int(coord[0]),
-                y=int(coord[1]),
-                width=valid_width,
-                height=valid_height,
-            )
-            valid_tile = Image.fromarray(valid_tile).convert("RGB")
-
-            if aligned_mask is not None:
-                if palette is None or pixel_mapping is None or color_mapping is None:
-                    raise ValueError(
-                        "palette, pixel_mapping, and color_mapping are required when mask overlay is enabled"
-                    )
-                masked_tile = _extract_padded_crop(
-                    aligned_mask,
-                    x=int(coord[0]),
-                    y=int(coord[1]),
-                    width=valid_width,
-                    height=valid_height,
-                )
-                if masked_tile.ndim == 3 and masked_tile.shape[-1] == 1:
-                    masked_tile = np.squeeze(masked_tile, axis=-1)
-                masked_tile = Image.fromarray(masked_tile)
-                masked_tile = masked_tile.split()[0]
-                masked_tile = masked_tile.resize(
-                    (valid_width, valid_height),
-                    Image.NEAREST,
-                )
-                # masked_tile = cv2.resize(
-                #     masked_tile.astype(np.uint8),
-                #     (valid_width, valid_height),
-                #     interpolation=cv2.INTER_NEAREST,
-                # )
-                overlayed_tile = overlay_mask_on_tile(
-                    valid_tile,
-                    masked_tile,
-                    palette,
-                    pixel_mapping,
-                    color_mapping,
-                )
-
-                # paste the valid part into the white tile
-                tile[:valid_height, :valid_width, :] = overlayed_tile
-
-            else:
-                valid_tile = np.array(valid_tile)
-                # paste the valid part into the white tile
-                tile[:valid_height, :valid_width, :] = valid_tile
-
-        canvas_crop_shape = canvas[
-            coord[1] : coord[1] + tile_size[1],
-            coord[0] : coord[0] + tile_size[0],
-            :3,
-        ].shape[:2]
-        canvas[
-            coord[1] : coord[1] + tile_size[1],
-            coord[0] : coord[0] + tile_size[0],
-            :3,
-        ] = tile[: canvas_crop_shape[0], : canvas_crop_shape[1], :]
-        draw_grid(canvas, coord, tile_size, thickness=thickness)
-
-    return Image.fromarray(canvas)
+    return _draw_grid_from_coordinates_impl(
+        canvas=canvas,
+        slide_reader=wsi,
+        coords=coords,
+        tile_size_at_0=tile_size_at_0,
+        vis_level=vis_level,
+        thickness=thickness,
+        indices=indices,
+        mask_reader=(mask.wsi if isinstance(mask, WholeSlideImage) else mask),
+        palette=palette,
+        pixel_mapping=pixel_mapping,
+        color_mapping=color_mapping,
+    )
 
 
 def pad_to_patch_size(canvas: Image.Image, patch_size: tuple[int, int]) -> Image.Image:
-    width, height = canvas.size
-    # compute amount of padding required for width and height
-    pad_width = (patch_size[0] - (width % patch_size[0])) % patch_size[0]
-    pad_height = (patch_size[1] - (height % patch_size[1])) % patch_size[1]
-    # apply the padding to canvas
-    padded_canvas = ImageOps.expand(
-        canvas, (0, 0, pad_width, pad_height), fill=(255, 255, 255)
-    )  # white padding
-    return padded_canvas
+    return _pad_to_patch_size_impl(canvas, patch_size)
 
 
 def write_coordinate_preview(

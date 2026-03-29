@@ -27,13 +27,18 @@ You can also upload your own pyramidal WSI (up to 1 GB).
 pip install hs2p
 ```
 
-For GPU-accelerated tile reading via cuCIM:
+Backend-specific extras:
 
 ```bash
+pip install "hs2p[openslide]"
+pip install "hs2p[asap]"
+pip install "hs2p[vips]"
 pip install "hs2p[cucim]"
 ```
 
-This pulls in `cucim-cu12`, `cupy-cuda12x`, and `nvidia-nvimgcodec-cu12` for optional batched GPU JPEG decoding during tar export when you opt in with `gpu_decode=True`. Use the cuCIM wheel that matches your CUDA runtime. The base `hs2p` install does not require cuCIM.
+`hs2p[cucim]` pulls in `cucim-cu12`, `cupy-cuda12x`, and `nvidia-nvimgcodec-cu12` for optional batched GPU JPEG decoding during tar export when you opt in with `gpu_decode=True`. Use the cuCIM wheel that matches your CUDA runtime. The base install keeps slide-reading backends optional.
+
+Supported backend names are `auto`, `cucim`, `vips`, `openslide`, and `asap`. `auto` currently tries `cucim -> vips -> openslide -> asap`, and `asap` is the compatibility wrapper around `wholeslidedata`.
 
 ## Workflows
 
@@ -133,7 +138,7 @@ For a first run, start from [hs2p/configs/default.yaml](hs2p/configs/default.yam
 Optional:
 
 - `save_tiles`
-  - also write `tiles/{sample_id}.tiles.tar` archives; with `tiling.backend="cucim"` this uses batched CuCIM reads during tar extraction, and other backends coalesce dense `8x8` / `4x4` regions before slicing them back into tiles
+  - also write `tiles/{sample_id}.tiles.tar` archives; with `tiling.backend="cucim"` this uses batched CuCIM reads during tar extraction, and other backends use the generic reader path with dense `8x8` / `4x4` regions coalesced before slicing them back into tiles
 
 Run tiling:
 

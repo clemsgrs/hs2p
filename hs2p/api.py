@@ -34,7 +34,7 @@ from hs2p.wsi import (
     overlay_mask_on_slide as _overlay_mask_on_slide,
     write_coordinate_preview,
 )
-from hs2p.wsi.backend import coerce_wsd_path, resolve_backend
+from hs2p.wsi.reader import BatchRegionReader, open_slide, resolve_backend
 
 
 @dataclass(frozen=True)
@@ -717,17 +717,10 @@ def _iter_tile_records_for_tar_extraction(
     gpu_decode: bool = False,
     supertile_sizes: Sequence[int] | None = None,
 ):
-    tile_records = _iter_cucim_tile_records_for_tar_extraction(
+    yield from _iter_cucim_tile_records_for_tar_extraction(
         result=result,
         num_workers=num_workers,
         gpu_decode=gpu_decode,
-        supertile_sizes=supertile_sizes,
-    )
-    if tile_records is not None:
-        yield from tile_records
-        return
-    yield from _iter_wsd_tile_records_for_tar_extraction(
-        result=result,
         supertile_sizes=supertile_sizes,
     )
 
@@ -739,49 +732,56 @@ def _iter_cucim_tile_records_for_tar_extraction(
     gpu_decode: bool = False,
     supertile_sizes: Sequence[int] | None = None,
 ):
-    if result.backend != "cucim":
-        return None
-    from hs2p.wsi.cucim_reader import CuImageReader
-    try:
-        reader = CuImageReader(result.image_path, gpu_decode=gpu_decode)
-        reader._ensure_open()
-    except ModuleNotFoundError:
-        warnings.warn(
-            "CuCIM is unavailable for backend='cucim'; falling back to sequential wholeslidedata tile extraction.",
-            UserWarning,
-            stacklevel=2,
-        )
-        return None
-
-    read_step_px = _resolve_read_step_px(result)
-    step_px_lv0 = _resolve_step_px_lv0(result)
-    read_plans = list(
-        _iter_grouped_read_plans_for_tar_extraction(
-            result=result,
-            read_step_px=read_step_px,
-            step_px_lv0=step_px_lv0,
-            supertile_sizes=supertile_sizes,
-        )
+    reader = open_slide(
+        result.image_path,
+        backend=result.backend,
+        gpu_decode=gpu_decode,
     )
 
-    def _iter_tiles():
-        for read_size_px, size_plans in _group_read_plans_by_read_size(read_plans).items():
-            locations = [(int(plan.x), int(plan.y)) for plan in size_plans]
-            regions = reader.read_region(
-                locations,
-                (int(read_size_px), int(read_size_px)),
-                level=int(result.read_level),
-                num_workers=int(num_workers),
+    with reader:
+        read_step_px = _resolve_read_step_px(result)
+        step_px_lv0 = _resolve_step_px_lv0(result)
+        read_plans = list(
+            _iter_grouped_read_plans_for_tar_extraction(
+                result=result,
+                read_step_px=read_step_px,
+                step_px_lv0=step_px_lv0,
+                supertile_sizes=supertile_sizes,
             )
-            for read_plan, region in zip(size_plans, regions):
-                yield from _iter_tile_records_from_read_plan_region(
-                    np.asarray(region),
-                    read_plan=read_plan,
-                    tile_size_px=int(result.read_tile_size_px),
-                    read_step_px=read_step_px,
-                )
+        )
 
-    return _iter_tiles()
+        if isinstance(reader, BatchRegionReader):
+            for read_size_px, size_plans in _group_read_plans_by_read_size(read_plans).items():
+                locations = [(int(plan.x), int(plan.y)) for plan in size_plans]
+                regions = reader.read_regions(
+                    locations,
+                    int(result.read_level),
+                    (int(read_size_px), int(read_size_px)),
+                    num_workers=int(num_workers),
+                    pad_missing=False,
+                )
+                for read_plan, region in zip(size_plans, regions):
+                    yield from _iter_tile_records_from_read_plan_region(
+                        np.asarray(region),
+                        read_plan=read_plan,
+                        tile_size_px=int(result.read_tile_size_px),
+                        read_step_px=read_step_px,
+                    )
+            return
+
+        for read_plan in read_plans:
+            region = reader.read_region(
+                (int(read_plan.x), int(read_plan.y)),
+                int(result.read_level),
+                (int(read_plan.read_size_px), int(read_plan.read_size_px)),
+                pad_missing=True,
+            )
+            yield from _iter_tile_records_from_read_plan_region(
+                np.asarray(region),
+                read_plan=read_plan,
+                tile_size_px=int(result.read_tile_size_px),
+                read_step_px=read_step_px,
+            )
 
 
 def _group_read_plans_by_read_size(
@@ -799,16 +799,12 @@ def _iter_cucim_tile_arrays_for_tar_extraction(
     num_workers: int,
     gpu_decode: bool = False,
 ):
-    tile_records = _iter_cucim_tile_records_for_tar_extraction(
-        result=result,
-        num_workers=num_workers,
-        gpu_decode=gpu_decode,
-    )
-    if tile_records is None:
-        return None
-
     def _iter_tiles():
-        for record in tile_records:
+        for record in _iter_cucim_tile_records_for_tar_extraction(
+            result=result,
+            num_workers=num_workers,
+            gpu_decode=gpu_decode,
+        ):
             yield record.tile_arr
 
     return _iter_tiles()
@@ -819,35 +815,12 @@ def _iter_wsd_tile_records_for_tar_extraction(
     result: TilingResult,
     supertile_sizes: Sequence[int] | None = None,
 ):
-    import wholeslidedata as wsd
-
-    wsi = wsd.WholeSlideImage(
-        coerce_wsd_path(result.image_path, backend=result.backend),
-        backend=result.backend,
-    )
-    read_step_px = _resolve_read_step_px(result)
-    step_px_lv0 = _resolve_step_px_lv0(result)
-    for read_plan in _iter_grouped_read_plans_for_tar_extraction(
+    yield from _iter_cucim_tile_records_for_tar_extraction(
         result=result,
-        read_step_px=read_step_px,
-        step_px_lv0=step_px_lv0,
+        num_workers=1,
+        gpu_decode=False,
         supertile_sizes=supertile_sizes,
-    ):
-        region = wsi.get_patch(
-            int(read_plan.x),
-            int(read_plan.y),
-            int(read_plan.read_size_px),
-            int(read_plan.read_size_px),
-            spacing=float(result.read_spacing_um),
-            center=False,
-        )
-        region = np.asarray(region)
-        yield from _iter_tile_records_from_read_plan_region(
-            region,
-            read_plan=read_plan,
-            tile_size_px=int(result.read_tile_size_px),
-            read_step_px=read_step_px,
-        )
+    )
 
 
 def _iter_wsd_tile_arrays_for_tar_extraction(

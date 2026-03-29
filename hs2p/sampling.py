@@ -39,7 +39,7 @@ from hs2p.wsi import (
     execute_coordinate_request,
     write_coordinate_preview,
 )
-from hs2p.wsi.backend import resolve_backend
+from hs2p.wsi.reader import resolve_backend
 
 # Keep the tqdm module available for downstream monkeypatches and compatibility,
 # even though CLI progress is now reported through hs2p.progress.

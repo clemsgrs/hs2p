@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import numpy as np
 
 import hs2p.api as api_mod
-import hs2p.wsi.backend as backend_mod
+import hs2p.wsi.reader as reader_mod
 import hs2p.wsi.wsi as wsi_mod
 
 
@@ -16,13 +16,13 @@ def test_resolve_backend_prefers_cucim_when_supported(monkeypatch):
         calls.append(backend)
         return backend == "cucim"
 
-    monkeypatch.setattr(backend_mod, "_backend_can_open_slide", _fake_can_open_slide)
+    monkeypatch.setattr(reader_mod, "_backend_can_open_slide", _fake_can_open_slide)
 
-    selection = backend_mod.resolve_backend("auto", wsi_path=Path("slide.svs"))
+    selection = reader_mod.resolve_backend("auto", wsi_path=Path("slide.svs"))
 
     assert selection.backend == "cucim"
     assert selection.tried == ("cucim",)
-    assert "CuCIM" in (selection.reason or "")
+    assert "selected cucim" in (selection.reason or "")
     assert calls == ["cucim"]
 
 
@@ -32,15 +32,15 @@ def test_resolve_backend_skips_cucim_for_known_unsupported_suffix(monkeypatch):
     def _fake_can_open_slide(*, wsi_path: str, mask_path: str | None, backend: str):
         del wsi_path, mask_path
         calls.append(backend)
-        return backend == "asap"
+        return backend == "vips"
 
-    monkeypatch.setattr(backend_mod, "_backend_can_open_slide", _fake_can_open_slide)
+    monkeypatch.setattr(reader_mod, "_backend_can_open_slide", _fake_can_open_slide)
 
-    selection = backend_mod.resolve_backend("auto", wsi_path=Path("slide.mrxs"))
+    selection = reader_mod.resolve_backend("auto", wsi_path=Path("slide.mrxs"))
 
-    assert selection.backend == "asap"
-    assert selection.tried == ("asap",)
-    assert calls == ["asap"]
+    assert selection.backend == "vips"
+    assert selection.tried == ("vips",)
+    assert calls == ["vips"]
 
 
 def test_resolve_backend_respects_explicit_override(monkeypatch):
@@ -51,9 +51,9 @@ def test_resolve_backend_respects_explicit_override(monkeypatch):
         calls.append("called")
         return False
 
-    monkeypatch.setattr(backend_mod, "_backend_can_open_slide", _fake_can_open_slide)
+    monkeypatch.setattr(reader_mod, "_backend_can_open_slide", _fake_can_open_slide)
 
-    selection = backend_mod.resolve_backend("asap", wsi_path=Path("slide.svs"))
+    selection = reader_mod.resolve_backend("asap", wsi_path=Path("slide.svs"))
 
     assert selection.backend == "asap"
     assert selection.tried == ("asap",)
@@ -61,47 +61,71 @@ def test_resolve_backend_respects_explicit_override(monkeypatch):
     assert calls == []
 
 
-def test_backend_probe_coerces_cucim_paths_to_strings(monkeypatch):
-    seen_paths: list[tuple[object, str]] = []
+def test_backend_probe_uses_backend_openers(monkeypatch):
+    seen_paths: list[str] = []
 
-    def _fake_wholeslideimage(path, *, backend: str):
-        seen_paths.append((path, backend))
-        return SimpleNamespace()
+    def _fake_opener(path, *, spacing_override=None, gpu_decode=False):
+        del spacing_override, gpu_decode
+        seen_paths.append(str(path))
+        return SimpleNamespace(close=lambda: None)
 
-    backend_mod._backend_can_open_slide.cache_clear()
-    monkeypatch.setattr(backend_mod.wsd, "WholeSlideImage", _fake_wholeslideimage)
+    monkeypatch.setattr(
+        reader_mod,
+        "_BACKENDS",
+        {
+            **reader_mod._BACKENDS,
+            "cucim": reader_mod._BackendSpec(
+                name="cucim",
+                opener=_fake_opener,
+                supports_path=lambda path: True,
+            ),
+        },
+    )
+    reader_mod._backend_can_open_slide.cache_clear()
 
-    assert backend_mod._backend_can_open_slide(
+    assert reader_mod._backend_can_open_slide(
         wsi_path="/tmp/slide.tiff",
         mask_path="/tmp/mask.tiff",
         backend="cucim",
     )
-    assert seen_paths == [
-        ("/tmp/slide.tiff", "cucim"),
-        ("/tmp/mask.tiff", "cucim"),
-    ]
+    assert seen_paths == ["/tmp/slide.tiff", "/tmp/mask.tiff"]
 
 
-def test_wholeslideimage_coerces_cucim_paths_to_strings(monkeypatch):
-    seen_paths: list[tuple[object, str]] = []
+def test_wholeslideimage_uses_open_slide_for_resolved_backend(monkeypatch):
+    seen_paths: list[tuple[str, str]] = []
 
     class _FakeSlide:
+        backend_name = "cucim"
         spacings = [0.5]
-        shapes = [(100, 100)]
+        native_spacing = 0.5
+        level_dimensions = [(100, 100)]
+        level_downsamples = [(1.0, 1.0)]
 
-    def _fake_wholeslideimage(path, *, backend: str):
-        seen_paths.append((path, backend))
+        def read_level(self, level: int):
+            del level
+            return np.zeros((100, 100, 3), dtype=np.uint8)
+
+        def read_region(self, location, level, size, *, pad_missing=True):
+            del location, level, pad_missing
+            return np.zeros((size[1], size[0], 3), dtype=np.uint8)
+
+        def close(self):
+            return None
+
+    def _fake_open_slide(path, backend="auto", *, spacing_override=None, gpu_decode=False):
+        del spacing_override, gpu_decode
+        seen_paths.append((str(path), backend))
         return _FakeSlide()
 
     monkeypatch.setattr(
         wsi_mod,
         "resolve_backend",
-        lambda requested_backend, *, wsi_path, mask_path=None: backend_mod.BackendSelection(
+        lambda requested_backend, *, wsi_path, mask_path=None: reader_mod.BackendSelection(
             backend="cucim",
             tried=("cucim",),
         ),
     )
-    monkeypatch.setattr(wsi_mod.wsd, "WholeSlideImage", _fake_wholeslideimage)
+    monkeypatch.setattr(wsi_mod, "open_slide", _fake_open_slide)
     monkeypatch.setattr(wsi_mod.WholeSlideImage, "load_segmentation", lambda *args, **kwargs: 0)
 
     wsi_mod.WholeSlideImage(
@@ -128,9 +152,9 @@ def test_tile_slide_uses_resolved_backend_for_hash_and_result(monkeypatch):
 
     def _fake_resolve_backend(requested_backend: str, *, wsi_path: Path, mask_path):
         del requested_backend, wsi_path, mask_path
-        return backend_mod.BackendSelection(
+        return reader_mod.BackendSelection(
             backend="cucim",
-            reason="selected CuCIM for auto backend",
+            reason="selected cucim for auto backend",
             tried=("cucim",),
         )
 

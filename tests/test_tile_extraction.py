@@ -22,6 +22,102 @@ from hs2p.api import (
 from hs2p.configs.models import FilterConfig
 
 
+class FakeSlideReader:
+    def __init__(self, *, region_side_effect=None, backend_name: str = "fake") -> None:
+        self._backend_name = backend_name
+        self.read_region_mock = MagicMock(side_effect=region_side_effect)
+
+    @property
+    def backend_name(self) -> str:
+        return self._backend_name
+
+    @property
+    def dimensions(self) -> tuple[int, int]:
+        return (4096, 4096)
+
+    @property
+    def spacing(self) -> float:
+        return 0.5
+
+    @property
+    def spacings(self) -> list[float]:
+        return [0.5]
+
+    @property
+    def level_count(self) -> int:
+        return 1
+
+    @property
+    def level_dimensions(self) -> list[tuple[int, int]]:
+        return [(4096, 4096)]
+
+    @property
+    def level_downsamples(self) -> list[tuple[float, float]]:
+        return [(1.0, 1.0)]
+
+    def read_region(
+        self,
+        location: tuple[int, int],
+        level: int,
+        size: tuple[int, int],
+        *,
+        pad_missing: bool = True,
+    ) -> np.ndarray:
+        return self.read_region_mock(
+            location,
+            level,
+            size,
+            pad_missing=pad_missing,
+        )
+
+    def read_level(self, level: int) -> np.ndarray:
+        return self.read_region((0, 0), level, self.level_dimensions[level])
+
+    def get_thumbnail(self, size: tuple[int, int]) -> np.ndarray:
+        return np.zeros((int(size[1]), int(size[0]), 3), dtype=np.uint8)
+
+    def close(self) -> None:
+        return None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+
+class FakeBatchSlideReader(FakeSlideReader):
+    def __init__(
+        self,
+        *,
+        batch_side_effect=None,
+        region_side_effect=None,
+        backend_name: str = "cucim",
+    ) -> None:
+        super().__init__(
+            region_side_effect=region_side_effect,
+            backend_name=backend_name,
+        )
+        self.read_regions_mock = MagicMock(side_effect=batch_side_effect)
+
+    def read_regions(
+        self,
+        locations: list[tuple[int, int]],
+        level: int,
+        size: tuple[int, int],
+        *,
+        num_workers: int | None = None,
+        pad_missing: bool = False,
+    ):
+        return self.read_regions_mock(
+            locations,
+            level,
+            size,
+            num_workers=num_workers,
+            pad_missing=pad_missing,
+        )
+
+
 def _make_tiling_result(
     num_tiles: int = 3,
     tile_size: int = 256,
@@ -146,16 +242,16 @@ def _make_grouped_region(
     return region
 
 
-def _monkeypatch_cucim_import(monkeypatch, fake_cucim):
-    import hs2p.api as api_mod
-
-    original_import_module = api_mod.importlib.import_module
-    monkeypatch.setattr(
-        api_mod.importlib,
-        "import_module",
-        lambda name: fake_cucim
-        if name == "cucim"
-        else original_import_module(name),
+def _extract_tiles_to_tar_with_pil(
+    result: TilingResult,
+    output_dir: Path,
+    **kwargs,
+):
+    return extract_tiles_to_tar(
+        result,
+        output_dir=output_dir,
+        jpeg_backend="pil",
+        **kwargs,
     )
 
 
@@ -165,12 +261,13 @@ class TestExtractTilesToTar:
     def test_creates_tar_with_correct_number_of_jpegs(self, tmp_path: Path):
         result = _make_tiling_result(num_tiles=3)
         colors = [(128, 0, 0), (0, 128, 0), (0, 0, 128)]
+        reader = FakeSlideReader(region_side_effect=[_solid_patch(c) for c in colors])
 
-        mock_wsi = MagicMock()
-        mock_wsi.get_patch.side_effect = [_solid_patch(c) for c in colors]
-
-        with patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi):
-            tar_path, out_result = extract_tiles_to_tar(result, output_dir=tmp_path)
+        with patch("hs2p.api.open_slide", return_value=reader):
+            tar_path, out_result = _extract_tiles_to_tar_with_pil(
+                result,
+                output_dir=tmp_path,
+            )
 
         assert tar_path == tmp_path / "tiles" / "slide-1.tiles.tar"
         assert tar_path.is_file()
@@ -211,12 +308,13 @@ class TestExtractTilesToTar:
 
         grouped_region = _make_grouped_region(block_size=2, tile_size=16, step_px=16)
         single_patch = _solid_patch((9, 9, 9), size=16)
+        reader = FakeSlideReader(region_side_effect=[grouped_region, single_patch])
 
-        mock_wsi = MagicMock()
-        mock_wsi.get_patch.side_effect = [grouped_region, single_patch]
-
-        with patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi):
-            tar_path, out_result = extract_tiles_to_tar(result, output_dir=tmp_path)
+        with patch("hs2p.api.open_slide", return_value=reader):
+            tar_path, out_result = _extract_tiles_to_tar_with_pil(
+                result,
+                output_dir=tmp_path,
+            )
 
         assert out_result is result
 
@@ -274,8 +372,7 @@ class TestExtractTilesToTar:
 
     def test_uses_rgb_420_turbojpeg_encoding(self, tmp_path: Path, monkeypatch):
         result = _make_tiling_result(num_tiles=1)
-        mock_wsi = MagicMock()
-        mock_wsi.get_patch.return_value = _solid_patch((12, 34, 56))
+        reader = FakeSlideReader(region_side_effect=[_solid_patch((12, 34, 56))])
 
         captured: dict[str, int] = {}
 
@@ -306,7 +403,7 @@ class TestExtractTilesToTar:
             ),
         )
 
-        with patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi):
+        with patch("hs2p.api.open_slide", return_value=reader):
             tar_path, _ = extract_tiles_to_tar(result, output_dir=tmp_path)
 
         assert tar_path.is_file()
@@ -318,8 +415,7 @@ class TestExtractTilesToTar:
 
     def test_uses_pil_encoding_when_requested(self, tmp_path: Path, monkeypatch):
         result = _make_tiling_result(num_tiles=1)
-        mock_wsi = MagicMock()
-        mock_wsi.get_patch.return_value = _solid_patch((12, 34, 56))
+        reader = FakeSlideReader(region_side_effect=[_solid_patch((12, 34, 56))])
 
         turbojpeg_called = False
 
@@ -341,7 +437,7 @@ class TestExtractTilesToTar:
             ),
         )
 
-        with patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi):
+        with patch("hs2p.api.open_slide", return_value=reader):
             tar_path, _ = extract_tiles_to_tar(
                 result,
                 output_dir=tmp_path,
@@ -358,9 +454,7 @@ class TestExtractTilesToTar:
             _solid_patch((250, 250, 250)),  # all-white → drop
             _solid_patch((0, 0, 128)),   # keep
         ]
-
-        mock_wsi = MagicMock()
-        mock_wsi.get_patch.side_effect = patches
+        reader = FakeSlideReader(region_side_effect=patches)
 
         filter_cfg = FilterConfig(
             filter_white=True,
@@ -368,9 +462,11 @@ class TestExtractTilesToTar:
             fraction_threshold=0.9,
         )
 
-        with patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi):
-            tar_path, filtered = extract_tiles_to_tar(
-                result, output_dir=tmp_path, filter_params=filter_cfg
+        with patch("hs2p.api.open_slide", return_value=reader):
+            tar_path, filtered = _extract_tiles_to_tar_with_pil(
+                result,
+                output_dir=tmp_path,
+                filter_params=filter_cfg,
             )
 
         # Tar should have 2 tiles
@@ -390,9 +486,7 @@ class TestExtractTilesToTar:
             _solid_patch((5, 5, 5)),    # all-black → drop
             _solid_patch((128, 128, 0)),  # keep
         ]
-
-        mock_wsi = MagicMock()
-        mock_wsi.get_patch.side_effect = patches
+        reader = FakeSlideReader(region_side_effect=patches)
 
         filter_cfg = FilterConfig(
             filter_black=True,
@@ -400,9 +494,11 @@ class TestExtractTilesToTar:
             fraction_threshold=0.9,
         )
 
-        with patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi):
-            tar_path, filtered = extract_tiles_to_tar(
-                result, output_dir=tmp_path, filter_params=filter_cfg
+        with patch("hs2p.api.open_slide", return_value=reader):
+            tar_path, filtered = _extract_tiles_to_tar_with_pil(
+                result,
+                output_dir=tmp_path,
+                filter_params=filter_cfg,
             )
 
         with tarfile.open(tar_path, "r") as tf:
@@ -413,8 +509,7 @@ class TestExtractTilesToTar:
 
     def test_all_tiles_filtered_produces_empty_tar(self, tmp_path: Path):
         result = _make_tiling_result(num_tiles=1)
-        mock_wsi = MagicMock()
-        mock_wsi.get_patch.return_value = _solid_patch((250, 250, 250))
+        reader = FakeSlideReader(region_side_effect=[_solid_patch((250, 250, 250))])
 
         filter_cfg = FilterConfig(
             filter_white=True,
@@ -422,9 +517,11 @@ class TestExtractTilesToTar:
             fraction_threshold=0.9,
         )
 
-        with patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi):
-            tar_path, filtered = extract_tiles_to_tar(
-                result, output_dir=tmp_path, filter_params=filter_cfg
+        with patch("hs2p.api.open_slide", return_value=reader):
+            tar_path, filtered = _extract_tiles_to_tar_with_pil(
+                result,
+                output_dir=tmp_path,
+                filter_params=filter_cfg,
             )
 
         with tarfile.open(tar_path, "r") as tf:
@@ -444,11 +541,15 @@ class TestExtractTilesToTar:
             }
         )
 
-        mock_wsi = MagicMock()
-        mock_wsi.get_patch.return_value = _solid_patch((100, 100, 100), size=512)
+        reader = FakeSlideReader(
+            region_side_effect=[_solid_patch((100, 100, 100), size=512)]
+        )
 
-        with patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi):
-            tar_path, _ = extract_tiles_to_tar(result, output_dir=tmp_path)
+        with patch("hs2p.api.open_slide", return_value=reader):
+            tar_path, _ = _extract_tiles_to_tar_with_pil(
+                result,
+                output_dir=tmp_path,
+            )
 
         with tarfile.open(tar_path, "r") as tf:
             data = tf.extractfile(tf.getmembers()[0]).read()
@@ -465,8 +566,9 @@ class TestExtractTilesToTar:
             }
         )
 
-        mock_wsi = MagicMock()
-        mock_wsi.get_patch.return_value = _solid_patch((100, 100, 100), size=512)
+        reader = FakeSlideReader(
+            region_side_effect=[_solid_patch((100, 100, 100), size=512)]
+        )
 
         resize_calls: list[int] = []
         bilinear = Image.Resampling.BILINEAR
@@ -500,10 +602,10 @@ class TestExtractTilesToTar:
             return _ResizeSpy(original_fromarray(*args, **kwargs))
 
         with (
-            patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi),
+            patch("hs2p.api.open_slide", return_value=reader),
             patch("PIL.Image.fromarray", side_effect=_fromarray_spy),
         ):
-            extract_tiles_to_tar(result, output_dir=tmp_path)
+            _extract_tiles_to_tar_with_pil(result, output_dir=tmp_path)
 
         assert resize_calls == [bilinear]
 
@@ -512,12 +614,13 @@ class TestExtractTilesToTar:
         rgba = np.zeros((256, 256, 4), dtype=np.uint8)
         rgba[:, :, :3] = 100
         rgba[:, :, 3] = 255
+        reader = FakeSlideReader(region_side_effect=[rgba])
 
-        mock_wsi = MagicMock()
-        mock_wsi.get_patch.return_value = rgba
-
-        with patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi):
-            tar_path, _ = extract_tiles_to_tar(result, output_dir=tmp_path)
+        with patch("hs2p.api.open_slide", return_value=reader):
+            tar_path, _ = _extract_tiles_to_tar_with_pil(
+                result,
+                output_dir=tmp_path,
+            )
 
         with tarfile.open(tar_path, "r") as tf:
             data = tf.extractfile(tf.getmembers()[0]).read()
@@ -527,12 +630,10 @@ class TestExtractTilesToTar:
     def test_custom_tiles_dir(self, tmp_path: Path):
         result = _make_tiling_result(num_tiles=1)
         custom_dir = tmp_path / "custom_output"
+        reader = FakeSlideReader(region_side_effect=[_solid_patch((50, 50, 50))])
 
-        mock_wsi = MagicMock()
-        mock_wsi.get_patch.return_value = _solid_patch((50, 50, 50))
-
-        with patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi):
-            tar_path, _ = extract_tiles_to_tar(
+        with patch("hs2p.api.open_slide", return_value=reader):
+            tar_path, _ = _extract_tiles_to_tar_with_pil(
                 result, output_dir=tmp_path, tiles_dir=custom_dir
             )
 
@@ -541,15 +642,13 @@ class TestExtractTilesToTar:
 
     def test_no_filter_params_keeps_all_tiles(self, tmp_path: Path):
         result = _make_tiling_result(num_tiles=2)
-        mock_wsi = MagicMock()
-        # Even white tiles should be kept when no filter_params
-        mock_wsi.get_patch.side_effect = [
+        reader = FakeSlideReader(region_side_effect=[
             _solid_patch((255, 255, 255)),
             _solid_patch((0, 0, 0)),
-        ]
+        ])
 
-        with patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi):
-            _, out_result = extract_tiles_to_tar(
+        with patch("hs2p.api.open_slide", return_value=reader):
+            _, out_result = _extract_tiles_to_tar_with_pil(
                 result, output_dir=tmp_path, filter_params=None
             )
 
@@ -562,31 +661,30 @@ class TestExtractTilesToTar:
         result.read_tile_size_px = 128
 
         regions = [_solid_patch((10, 20, 30), size=128), _solid_patch((40, 50, 60), size=128)]
-        mock_cu_image = MagicMock()
-        mock_cu_image.read_region.return_value = iter(regions)
-        fake_cucim = types.SimpleNamespace(CuImage=MagicMock(return_value=mock_cu_image))
+        reader = FakeBatchSlideReader(batch_side_effect=[regions], backend_name="cucim")
 
-        _monkeypatch_cucim_import(monkeypatch, fake_cucim)
-
-        with patch("wholeslidedata.WholeSlideImage") as mock_wsd:
-            tar_path, out_result = extract_tiles_to_tar(
+        with patch("hs2p.api.open_slide", return_value=reader) as mock_open_slide:
+            tar_path, out_result = _extract_tiles_to_tar_with_pil(
                 result,
                 output_dir=tmp_path,
                 num_workers=5,
                 gpu_decode=False,
-                jpeg_backend="pil",
             )
 
         assert tar_path.is_file()
         assert out_result is result
-        fake_cucim.CuImage.assert_called_once_with(str(result.image_path))
-        mock_cu_image.read_region.assert_called_once_with(
-            [(0, 0), (256, 0)],
-            (128, 128),
-            level=3,
-            num_workers=5,
+        mock_open_slide.assert_called_once_with(
+            result.image_path,
+            backend="cucim",
+            gpu_decode=False,
         )
-        mock_wsd.assert_not_called()
+        reader.read_regions_mock.assert_called_once_with(
+            [(0, 0), (256, 0)],
+            3,
+            (128, 128),
+            num_workers=5,
+            pad_missing=False,
+        )
 
     def test_cucim_backend_defaults_gpu_decode_to_disabled(
         self, monkeypatch, tmp_path: Path
@@ -594,62 +692,55 @@ class TestExtractTilesToTar:
         result = _make_tiling_result(num_tiles=1)
         result.backend = "cucim"
 
-        mock_cu_image = MagicMock()
-        mock_cu_image.read_region.return_value = iter([_solid_patch((10, 20, 30))])
-        fake_cucim = types.SimpleNamespace(CuImage=MagicMock(return_value=mock_cu_image))
+        reader = FakeBatchSlideReader(
+            batch_side_effect=[[_solid_patch((10, 20, 30))]],
+            backend_name="cucim",
+        )
 
-        _monkeypatch_cucim_import(monkeypatch, fake_cucim)
-
-        with patch("wholeslidedata.WholeSlideImage") as mock_wsd:
-            tar_path, out_result = extract_tiles_to_tar(
+        with patch("hs2p.api.open_slide", return_value=reader) as mock_open_slide:
+            tar_path, out_result = _extract_tiles_to_tar_with_pil(
                 result,
                 output_dir=tmp_path,
                 num_workers=2,
-                jpeg_backend="pil",
             )
 
         assert tar_path.is_file()
         assert out_result is result
-        fake_cucim.CuImage.assert_called_once_with(str(result.image_path))
-        mock_cu_image.read_region.assert_called_once_with(
-            [(0, 0)],
-            (256, 256),
-            level=0,
-            num_workers=2,
+        mock_open_slide.assert_called_once_with(
+            result.image_path,
+            backend="cucim",
+            gpu_decode=False,
         )
-        mock_wsd.assert_not_called()
+        reader.read_regions_mock.assert_called_once_with(
+            [(0, 0)],
+            0,
+            (256, 256),
+            num_workers=2,
+            pad_missing=False,
+        )
 
-    def test_cucim_backend_falls_back_to_wsd_when_cucim_is_unavailable(
+    def test_cucim_backend_raises_when_cucim_is_unavailable(
         self, monkeypatch, tmp_path: Path
     ):
         result = _make_tiling_result(num_tiles=1)
         result.backend = "cucim"
 
-        mock_wsi = MagicMock()
-        mock_wsi.get_patch.return_value = _solid_patch((70, 80, 90))
-
-        import hs2p.api as api_mod
+        import hs2p.wsi.backends.cucim as cucim_backend
 
         def _import_module(name):
             if name == "cucim":
                 raise ModuleNotFoundError("No module named 'cucim'")
             raise AssertionError(f"unexpected module import: {name}")
 
-        monkeypatch.setattr(api_mod.importlib, "import_module", _import_module)
+        monkeypatch.setattr(cucim_backend.importlib, "import_module", _import_module)
 
-        with pytest.warns(UserWarning, match="CuCIM is unavailable"), patch(
-            "wholeslidedata.WholeSlideImage",
-            return_value=mock_wsi,
-        ) as mock_wsd:
-            tar_path, out_result = extract_tiles_to_tar(
+        with pytest.raises(ImportError, match="cucim"):
+            extract_tiles_to_tar(
                 result,
                 output_dir=tmp_path,
                 num_workers=4,
+                jpeg_backend="pil",
             )
-
-        assert tar_path.is_file()
-        assert out_result is result
-        mock_wsd.assert_called_once_with(str(result.image_path), backend="cucim")
 
     def test_cucim_iterator_groups_dense_4x4_grid_into_one_batched_read(
         self, monkeypatch
@@ -657,28 +748,32 @@ class TestExtractTilesToTar:
         result = _make_grid_tiling_result(columns=4, rows=4, tile_size=16, step_px=16)
         result.backend = "cucim"
         grouped_region = _make_grouped_region(block_size=4, tile_size=16, step_px=16)
-
-        mock_cu_image = MagicMock()
-        mock_cu_image.read_region.return_value = iter([grouped_region])
-        fake_cucim = types.SimpleNamespace(CuImage=MagicMock(return_value=mock_cu_image))
-
-        _monkeypatch_cucim_import(monkeypatch, fake_cucim)
-
-        tiles = list(
-            _iter_cucim_tile_arrays_for_tar_extraction(
-                result=result,
-                num_workers=7,
-                gpu_decode=False,
-            )
+        reader = FakeBatchSlideReader(
+            batch_side_effect=[[grouped_region]],
+            backend_name="cucim",
         )
 
+        with patch("hs2p.api.open_slide", return_value=reader) as mock_open_slide:
+            tiles = list(
+                _iter_cucim_tile_arrays_for_tar_extraction(
+                    result=result,
+                    num_workers=7,
+                    gpu_decode=False,
+                )
+            )
+
         assert len(tiles) == 16
-        fake_cucim.CuImage.assert_called_once_with(str(result.image_path))
-        mock_cu_image.read_region.assert_called_once_with(
+        mock_open_slide.assert_called_once_with(
+            result.image_path,
+            backend="cucim",
+            gpu_decode=False,
+        )
+        reader.read_regions_mock.assert_called_once_with(
             [(0, 0)],
+            0,
             (64, 64),
-            level=0,
             num_workers=7,
+            pad_missing=False,
         )
         assert int(tiles[0][0, 0, 0]) == 1
         assert int(tiles[1][0, 0, 0]) == 2
@@ -707,36 +802,37 @@ class TestExtractTilesToTar:
         grouped_region_a = _make_grouped_region(block_size=2, tile_size=16, step_px=16)
         grouped_region_b = _make_grouped_region(block_size=2, tile_size=16, step_px=16)
         single_region = _solid_patch((99, 99, 99), size=16)
-
-        mock_cu_image = MagicMock()
-        mock_cu_image.read_region.side_effect = [
-            iter([grouped_region_a, grouped_region_b]),
-            iter([single_region]),
-        ]
-        fake_cucim = types.SimpleNamespace(CuImage=MagicMock(return_value=mock_cu_image))
-
-        _monkeypatch_cucim_import(monkeypatch, fake_cucim)
-
-        tiles = list(
-            _iter_cucim_tile_arrays_for_tar_extraction(
-                result=result,
-                num_workers=3,
-                gpu_decode=False,
-            )
+        reader = FakeBatchSlideReader(
+            batch_side_effect=[
+                [grouped_region_a, grouped_region_b],
+                [single_region],
+            ],
+            backend_name="cucim",
         )
+
+        with patch("hs2p.api.open_slide", return_value=reader):
+            tiles = list(
+                _iter_cucim_tile_arrays_for_tar_extraction(
+                    result=result,
+                    num_workers=3,
+                    gpu_decode=False,
+                )
+            )
 
         assert len(tiles) == 9
-        assert mock_cu_image.read_region.call_count == 2
-        assert mock_cu_image.read_region.call_args_list[0].kwargs == {
-            "level": 0,
-            "num_workers": 3,
-        }
-        assert mock_cu_image.read_region.call_args_list[0].args == (
+        assert reader.read_regions_mock.call_count == 2
+        assert reader.read_regions_mock.call_args_list[0].args == (
             [(0, 0), (100, 0)],
+            0,
             (32, 32),
         )
-        assert mock_cu_image.read_region.call_args_list[1].args == (
+        assert reader.read_regions_mock.call_args_list[0].kwargs == {
+            "num_workers": 3,
+            "pad_missing": False,
+        }
+        assert reader.read_regions_mock.call_args_list[1].args == (
             [(300, 0)],
+            0,
             (16, 16),
         )
 
@@ -775,59 +871,56 @@ class TestExtractTilesToTar:
         grouped_region_a = _make_grouped_region(block_size=2, tile_size=16, step_px=16)
         grouped_region_b = _make_grouped_region(block_size=2, tile_size=16, step_px=16)
         single_region = _solid_patch((77, 77, 77), size=16)
-
-        mock_cu_image = MagicMock()
-        mock_cu_image.read_region.side_effect = [
-            iter([grouped_region_a, grouped_region_b]),
-            iter([single_region]),
-        ]
-        fake_cucim = types.SimpleNamespace(CuImage=MagicMock(return_value=mock_cu_image))
+        reader = FakeBatchSlideReader(
+            batch_side_effect=[
+                [grouped_region_a, grouped_region_b],
+                [single_region],
+            ],
+            backend_name="cucim",
+        )
 
         monkeypatch.setattr(
             api_mod,
             "_iter_grouped_read_plans_for_tar_extraction",
             lambda **kwargs: iter(interleaved_plans),
         )
-        _monkeypatch_cucim_import(monkeypatch, fake_cucim)
-
-        tiles = list(
-            _iter_cucim_tile_arrays_for_tar_extraction(
-                result=result,
-                num_workers=2,
-                gpu_decode=False,
+        with patch("hs2p.api.open_slide", return_value=reader):
+            tiles = list(
+                _iter_cucim_tile_arrays_for_tar_extraction(
+                    result=result,
+                    num_workers=2,
+                    gpu_decode=False,
+                )
             )
-        )
 
         assert len(tiles) == 9
-        assert mock_cu_image.read_region.call_count == 2
-        assert mock_cu_image.read_region.call_args_list[0].args == (
+        assert reader.read_regions_mock.call_count == 2
+        assert reader.read_regions_mock.call_args_list[0].args == (
             [(0, 0), (100, 0)],
+            0,
             (32, 32),
         )
-        assert mock_cu_image.read_region.call_args_list[1].args == (
+        assert reader.read_regions_mock.call_args_list[1].args == (
             [(200, 0)],
+            0,
             (16, 16),
         )
 
     def test_wsd_iterator_groups_dense_8x8_grid_into_one_read(self):
         result = _make_grid_tiling_result(columns=8, rows=8, tile_size=16, step_px=16)
         grouped_region = _make_grouped_region(block_size=8, tile_size=16, step_px=16)
+        reader = FakeSlideReader(region_side_effect=[grouped_region])
 
-        mock_wsi = MagicMock()
-        mock_wsi.get_patch.side_effect = [grouped_region]
-
-        with patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi):
+        with patch("hs2p.api.open_slide", return_value=reader):
             tiles = list(_iter_wsd_tile_arrays_for_tar_extraction(result=result))
 
         assert len(tiles) == 64
-        assert mock_wsi.get_patch.call_count == 1
-        mock_wsi.get_patch.assert_called_once_with(
+        assert reader.read_region_mock.call_count == 1
+        reader.read_region_mock.assert_called_once_with(
+            (0, 0),
             0,
-            0,
-            128,
-            128,
-            spacing=0.5,
-            center=False,
+            (128, 128),
+            pad_missing=True,
         )
         assert int(tiles[0][0, 0, 0]) == 1
         assert int(tiles[1][0, 0, 0]) == 2
@@ -837,21 +930,17 @@ class TestExtractTilesToTar:
     def test_wsd_iterator_groups_dense_4x4_grid_into_one_read(self):
         result = _make_grid_tiling_result(columns=4, rows=4, tile_size=16, step_px=16)
         grouped_region = _make_grouped_region(block_size=4, tile_size=16, step_px=16)
+        reader = FakeSlideReader(region_side_effect=[grouped_region])
 
-        mock_wsi = MagicMock()
-        mock_wsi.get_patch.side_effect = [grouped_region]
-
-        with patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi):
+        with patch("hs2p.api.open_slide", return_value=reader):
             tiles = list(_iter_wsd_tile_arrays_for_tar_extraction(result=result))
 
         assert len(tiles) == 16
-        mock_wsi.get_patch.assert_called_once_with(
+        reader.read_region_mock.assert_called_once_with(
+            (0, 0),
             0,
-            0,
-            64,
-            64,
-            spacing=0.5,
-            center=False,
+            (64, 64),
+            pad_missing=True,
         )
         assert int(tiles[0][0, 0, 0]) == 1
         assert int(tiles[-1][0, 0, 0]) == 16
@@ -859,21 +948,17 @@ class TestExtractTilesToTar:
     def test_wsd_iterator_uses_stride_based_group_size_when_tiles_overlap(self):
         result = _make_grid_tiling_result(columns=4, rows=4, tile_size=32, step_px=24)
         grouped_region = _make_grouped_region(block_size=4, tile_size=32, step_px=24)
+        reader = FakeSlideReader(region_side_effect=[grouped_region])
 
-        mock_wsi = MagicMock()
-        mock_wsi.get_patch.side_effect = [grouped_region]
-
-        with patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi):
+        with patch("hs2p.api.open_slide", return_value=reader):
             tiles = list(_iter_wsd_tile_arrays_for_tar_extraction(result=result))
 
         assert len(tiles) == 16
-        mock_wsi.get_patch.assert_called_once_with(
+        reader.read_region_mock.assert_called_once_with(
+            (0, 0),
             0,
-            0,
-            104,
-            104,
-            spacing=0.5,
-            center=False,
+            (104, 104),
+            pad_missing=True,
         )
 
     def test_wsd_iterator_uses_2x2_blocks_for_incomplete_4x4_grid(self):
@@ -893,24 +978,22 @@ class TestExtractTilesToTar:
             }
         )
 
-        mock_wsi = MagicMock()
-        # 3 reads at 32x32 (2x2 blocks) + 3 reads at 16x16 (single tiles)
-        mock_wsi.get_patch.side_effect = [
+        reader = FakeSlideReader(region_side_effect=[
             _solid_patch((1, 1, 1), size=32),
             _solid_patch((2, 2, 2), size=32),
             _solid_patch((3, 3, 3), size=32),
             _solid_patch((4, 4, 4), size=16),
             _solid_patch((5, 5, 5), size=16),
             _solid_patch((6, 6, 6), size=16),
-        ]
+        ])
 
-        with patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi):
+        with patch("hs2p.api.open_slide", return_value=reader):
             tiles = list(_iter_wsd_tile_arrays_for_tar_extraction(result=result))
 
         assert len(tiles) == 15
-        assert mock_wsi.get_patch.call_count == 6
-        read_sizes = [call.args[2] for call in mock_wsi.get_patch.call_args_list]
-        assert read_sizes == [32, 32, 32, 16, 16, 16]
+        assert reader.read_region_mock.call_count == 6
+        read_sizes = [call.args[2] for call in reader.read_region_mock.call_args_list]
+        assert read_sizes == [(32, 32), (32, 32), (32, 32), (16, 16), (16, 16), (16, 16)]
 
 
 class TestNeedsPixelFiltering:

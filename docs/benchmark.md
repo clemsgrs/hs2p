@@ -8,7 +8,7 @@ This note tells the story behind how I optimized the tile throughput when creati
 
 The starting point was the simplest possible path:
 
-- `wholeslidedata` reads
+- ASAP / `wholeslidedata` reads
 - one read per tile
 - PIL JPEG encoding
 

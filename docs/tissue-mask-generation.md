@@ -36,7 +36,7 @@ python scripts/generate_tissue_mask.py \
 
 ## What it does
 
-- reads the WSI through `wholeslidedata`
+- reads the WSI through the selected backend
 - computes a binary tissue mask with `0=background` and `1=tissue`
 - uses a coarse-to-fine ROI shortcut by default to reduce memory use
 - writes a pyramidal TIFF mask at the requested spacing
@@ -45,7 +45,7 @@ python scripts/generate_tissue_mask.py \
 ## Common options
 
 - `--backend`
-  - Whole-slide backend, default `asap`
+  - Whole-slide backend, default `asap` in this script; `asap` is the `wholeslidedata` compatibility adapter
 - `--output` / `--output-dir`
   - Output path for single-slide or multi-slide mode
 - `--num-workers`

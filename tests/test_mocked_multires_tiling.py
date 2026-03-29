@@ -291,7 +291,7 @@ def test_extract_coordinates_segments_maskless_slides_without_annotation_pct_cra
         self.annotation_mask = {"tissue": tissue_mask}
         return 0
 
-    monkeypatch.setattr(wsimod.wsd, "WholeSlideImage", _fake_wholeslide)
+    monkeypatch.setattr(wsimod, "open_slide", _fake_wholeslide)
     monkeypatch.setattr(wsimod.WholeSlideImage, "segment_tissue", _fake_segment_tissue)
 
     result = wsi_api.extract_coordinates(
@@ -329,7 +329,7 @@ def test_extract_coordinates_returns_zero_tile_result_for_tissue_free_maskless_s
             PyramidSpec(spacings=[1.0, 2.0], levels=[slide_l0, slide_l1])
         )
 
-    monkeypatch.setattr(wsimod.wsd, "WholeSlideImage", _fake_wholeslide)
+    monkeypatch.setattr(wsimod, "open_slide", _fake_wholeslide)
 
     result = wsi_api.extract_coordinates(
         wsi_path=Path("empty-slide.tif"),

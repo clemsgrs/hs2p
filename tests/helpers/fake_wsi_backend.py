@@ -11,16 +11,42 @@ class PyramidSpec:
 
 
 class FakePyramidWSI:
-    def __init__(self, spec: PyramidSpec):
+    def __init__(self, spec: PyramidSpec, backend_name: str = "synthetic"):
         self.spacings = spec.spacings
         self._levels = spec.levels
         self.shapes = tuple((arr.shape[1], arr.shape[0]) for arr in self._levels)
         self.downsamplings = tuple(
             self.shapes[0][0] / shape[0] for shape in self.shapes
         )
+        self.native_spacing = float(self.spacings[0])
+        self._backend_name = backend_name
 
     def _best_level(self, spacing: float) -> int:
         return int(np.argmin([abs(s - spacing) for s in self.spacings]))
+
+    @property
+    def backend_name(self) -> str:
+        return self._backend_name
+
+    @property
+    def dimensions(self) -> tuple[int, int]:
+        return self.shapes[0]
+
+    @property
+    def spacing(self) -> float:
+        return self.native_spacing
+
+    @property
+    def level_count(self) -> int:
+        return len(self._levels)
+
+    @property
+    def level_dimensions(self) -> list[tuple[int, int]]:
+        return list(self.shapes)
+
+    @property
+    def level_downsamples(self) -> list[tuple[float, float]]:
+        return [(float(ds), float(ds)) for ds in self.downsamplings]
 
     def get_slide(self, spacing: float) -> np.ndarray:
         return self._levels[self._best_level(spacing)]
@@ -47,18 +73,58 @@ class FakePyramidWSI:
         patch[: src.shape[0], : src.shape[1], :] = src
         return patch
 
+    def read_level(self, level: int) -> np.ndarray:
+        return self._levels[level]
+
+    def read_region(
+        self,
+        location: tuple[int, int],
+        level: int,
+        size: tuple[int, int],
+        *,
+        pad_missing: bool = True,
+    ) -> np.ndarray:
+        del pad_missing
+        return self.get_patch(
+            x=int(location[0]),
+            y=int(location[1]),
+            width=int(size[0]),
+            height=int(size[1]),
+            spacing=self.spacings[level],
+            center=False,
+        )
+
+    def get_thumbnail(self, size: tuple[int, int]) -> np.ndarray:
+        arr = self._levels[-1]
+        return arr[: int(size[1]), : int(size[0])]
+
+    def close(self) -> None:
+        return None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
 
 class FakeWSDFactory:
     def __init__(self, slide_spec: PyramidSpec, mask_spec: PyramidSpec):
         self.slide_spec = slide_spec
         self.mask_spec = mask_spec
 
-    def __call__(self, path: Path, backend: str = "asap") -> FakePyramidWSI:
-        del backend
+    def __call__(
+        self,
+        path: Path,
+        backend: str = "asap",
+        spacing_override: float | None = None,
+        gpu_decode: bool = False,
+    ) -> FakePyramidWSI:
+        del spacing_override, gpu_decode
         name = str(path).lower()
         if "mask" in name:
-            return FakePyramidWSI(self.mask_spec)
-        return FakePyramidWSI(self.slide_spec)
+            return FakePyramidWSI(self.mask_spec, backend_name=backend)
+        return FakePyramidWSI(self.slide_spec, backend_name=backend)
 
 
 def make_slide_spec() -> PyramidSpec:

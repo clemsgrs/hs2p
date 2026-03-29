@@ -19,6 +19,8 @@ The config dataclasses keep the main knobs explicit and fill secondary options f
   - `spacing_at_level_0` overrides the spacing embedded in the file metadata (µm/px at pyramid level 0); all other pyramid-level spacings are rescaled proportionally. Use this when the file reports a wrong or missing spacing.
 - `TilingConfig`
   - Defines the requested backend, spacing, tile size, overlap, and tissue threshold
+  - Supported backend names are `auto`, `cucim`, `vips`, `openslide`, and `asap`
+  - `auto` resolves one backend per slide/mask pair at runtime, currently preferring `cucim -> vips -> openslide -> asap`
 - `SegmentationConfig`
   - Controls tissue segmentation before coordinates are extracted
 - `FilterConfig`
@@ -32,6 +34,8 @@ The config dataclasses keep the main knobs explicit and fill secondary options f
   - Can also carry preview-image paths when batch QC is enabled in `tile_slides()`
 
 For field-by-field details, see the dataclass docstrings in [hs2p/api.py](../hs2p/api.py).
+
+For lower-level reader access, `hs2p.wsi` also exposes the backend-agnostic `open_slide()` factory plus the `SlideReader` protocol and backend-selection helpers.
 
 ## Single-slide flow
 

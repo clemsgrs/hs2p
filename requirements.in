@@ -8,7 +8,4 @@ tqdm
 rich
 wandb
 opencv-python
-wholeslidedata<0.0.16
-openslide-python
-openslide-bin
 matplotlib

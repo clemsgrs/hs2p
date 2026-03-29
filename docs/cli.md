@@ -60,7 +60,17 @@ pip install cucim-cu12
 ```
 
 Use the CuCIM wheel that matches your CUDA runtime. Non-CuCIM backends continue to
-use the default sequential tile export path.
+use the generic reader export path.
+
+Other optional reader extras:
+
+```bash
+pip install "hs2p[openslide]"
+pip install "hs2p[asap]"
+pip install "hs2p[vips]"
+```
+
+Supported `tiling.backend` values are `auto`, `cucim`, `vips`, `openslide`, and `asap`. `auto` currently prefers `cucim -> vips -> openslide -> asap`.
 
 ## Progress UX
 
@@ -160,9 +170,9 @@ This can give a significant speedup (measured ~3.8× for batch decoding) on `.sv
 
 When `save_tiles: true`, HS2P also writes a `tiles/{sample_id}.tiles.tar` archive with JPEG-encoded tile images.
 
-- For non-CuCIM backends, tar extraction still uses the `wholeslidedata` reader, but dense `8x8` and `4x4` tile blocks are coalesced into larger contiguous reads before slicing them back into tiles.
+- For non-CuCIM backends, tar extraction uses the generic reader path, and dense `8x8` and `4x4` tile blocks are coalesced into larger contiguous reads before slicing them back into tiles.
 - For `tiling.backend: cucim`, tar extraction uses a CuCIM batch-read fast path and reuses the per-slide worker count from `speed.num_workers`.
-- Installing CuCIM is optional. If `backend: cucim` is selected but CuCIM is not installed, HS2P falls back to the `wholeslidedata` export path and emits a warning.
+- Installing CuCIM is optional. If `backend: cucim` is selected but CuCIM is not installed at tile-export time, HS2P raises an import error rather than silently switching backends.
 
 ## Resume and precomputed artifacts
 
