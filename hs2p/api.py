@@ -35,6 +35,13 @@ from hs2p.wsi import (
     write_coordinate_preview,
 )
 from hs2p.wsi.backend import coerce_wsd_path, resolve_backend
+from hs2p.wsi.read_plans import (
+    GroupedReadPlan,
+    iter_grouped_read_plans,
+    resolve_read_step_px,
+    resolve_step_px_lv0,
+)
+from hs2p.wsi.region_tiles import iter_plan_region_tile_views
 
 
 @dataclass(frozen=True)
@@ -741,10 +748,37 @@ def _iter_cucim_tile_records_for_tar_extraction(
 ):
     if result.backend != "cucim":
         return None
-    from hs2p.wsi.cucim_reader import CuImageReader
+    from hs2p.wsi.batched_reads import (
+        BatchedReadRequest,
+        iter_cucim_batched_read_regions,
+    )
     try:
-        reader = CuImageReader(result.image_path, gpu_decode=gpu_decode)
-        reader._ensure_open()
+        requests = []
+        read_step_px = resolve_read_step_px(result)
+        step_px_lv0 = resolve_step_px_lv0(result)
+        read_plans = list(
+            iter_grouped_read_plans(
+                result=result,
+                read_step_px=read_step_px,
+                step_px_lv0=step_px_lv0,
+                supertile_sizes=supertile_sizes,
+            )
+        )
+        for read_plan in read_plans:
+            requests.append(
+                BatchedReadRequest(
+                    location=(int(read_plan.x), int(read_plan.y)),
+                    size=(int(read_plan.read_size_px), int(read_plan.read_size_px)),
+                    payload=read_plan,
+                )
+            )
+        batched_regions = iter_cucim_batched_read_regions(
+            image_path=result.image_path,
+            requests=requests,
+            level=int(result.read_level),
+            num_workers=int(num_workers),
+            gpu_decode=gpu_decode,
+        )
     except ModuleNotFoundError:
         warnings.warn(
             "CuCIM is unavailable for backend='cucim'; falling back to sequential wholeslidedata tile extraction.",
@@ -753,46 +787,17 @@ def _iter_cucim_tile_records_for_tar_extraction(
         )
         return None
 
-    read_step_px = _resolve_read_step_px(result)
-    step_px_lv0 = _resolve_step_px_lv0(result)
-    read_plans = list(
-        _iter_grouped_read_plans_for_tar_extraction(
-            result=result,
-            read_step_px=read_step_px,
-            step_px_lv0=step_px_lv0,
-            supertile_sizes=supertile_sizes,
-        )
-    )
-
     def _iter_tiles():
-        for read_size_px, size_plans in _group_read_plans_by_read_size(read_plans).items():
-            locations = [(int(plan.x), int(plan.y)) for plan in size_plans]
-            regions = reader.read_region(
-                locations,
-                (int(read_size_px), int(read_size_px)),
-                level=int(result.read_level),
-                num_workers=int(num_workers),
+        for request, region in batched_regions:
+            read_plan = request.payload
+            yield from _iter_planned_tile_views_from_read_plan_region(
+                np.asarray(region),
+                read_plan=read_plan,
+                tile_size_px=int(result.read_tile_size_px),
+                read_step_px=read_step_px,
             )
-            for read_plan, region in zip(size_plans, regions):
-                yield from _iter_tile_records_from_read_plan_region(
-                    np.asarray(region),
-                    read_plan=read_plan,
-                    tile_size_px=int(result.read_tile_size_px),
-                    read_step_px=read_step_px,
-                )
 
     return _iter_tiles()
-
-
-def _group_read_plans_by_read_size(
-    read_plans: Sequence["_WSDTarReadPlan"],
-) -> dict[int, list["_WSDTarReadPlan"]]:
-    grouped: dict[int, list["_WSDTarReadPlan"]] = {}
-    for plan in read_plans:
-        grouped.setdefault(int(plan.read_size_px), []).append(plan)
-    return grouped
-
-
 def _iter_cucim_tile_arrays_for_tar_extraction(
     *,
     result: TilingResult,
@@ -825,9 +830,9 @@ def _iter_wsd_tile_records_for_tar_extraction(
         coerce_wsd_path(result.image_path, backend=result.backend),
         backend=result.backend,
     )
-    read_step_px = _resolve_read_step_px(result)
-    step_px_lv0 = _resolve_step_px_lv0(result)
-    for read_plan in _iter_grouped_read_plans_for_tar_extraction(
+    read_step_px = resolve_read_step_px(result)
+    step_px_lv0 = resolve_step_px_lv0(result)
+    for read_plan in iter_grouped_read_plans(
         result=result,
         read_step_px=read_step_px,
         step_px_lv0=step_px_lv0,
@@ -842,7 +847,7 @@ def _iter_wsd_tile_records_for_tar_extraction(
             center=False,
         )
         region = np.asarray(region)
-        yield from _iter_tile_records_from_read_plan_region(
+        yield from _iter_planned_tile_views_from_read_plan_region(
             region,
             read_plan=read_plan,
             tile_size_px=int(result.read_tile_size_px),
@@ -862,182 +867,24 @@ def _iter_wsd_tile_arrays_for_tar_extraction(
 
     return _iter_tiles()
 
-
-@dataclass(frozen=True)
-class _WSDTarReadPlan:
-    x: int
-    y: int
-    read_size_px: int
-    block_size: int
-    tile_indices: tuple[int, ...]
-
-
-@dataclass(frozen=True)
-class _TarTileRecord:
-    tile_index: int
-    x: int
-    y: int
-    tile_arr: np.ndarray
-
-
-def _iter_tile_records_from_read_plan_region(
+def _iter_planned_tile_views_from_read_plan_region(
     region: np.ndarray,
     *,
-    read_plan: _WSDTarReadPlan,
+    read_plan: GroupedReadPlan,
     tile_size_px: int,
     read_step_px: int,
 ):
-    region = np.asarray(region)
-    if read_plan.block_size == 1:
-        yield _TarTileRecord(
-            tile_index=int(read_plan.tile_indices[0]),
-            x=int(read_plan.x),
-            y=int(read_plan.y),
-            tile_arr=region,
-        )
-        return
-    tile_index_iter = iter(int(idx) for idx in read_plan.tile_indices)
-    for x_idx in range(read_plan.block_size):
-        x0 = x_idx * read_step_px
-        for y_idx in range(read_plan.block_size):
-            y0 = y_idx * read_step_px
-            yield _TarTileRecord(
-                tile_index=next(tile_index_iter),
-                x=int(read_plan.x + x0),
-                y=int(read_plan.y + y0),
-                tile_arr=region[
-                    y0 : y0 + tile_size_px,
-                    x0 : x0 + tile_size_px,
-                ],
-            )
+    for tile_view in iter_plan_region_tile_views(
+        region,
+        read_plan=read_plan,
+        tile_size_px=int(tile_size_px),
+        read_step_px=int(read_step_px),
+    ):
+        yield tile_view
 
 
 def _format_tar_member_name(tile_index: int) -> str:
     return f"{int(tile_index):06d}.jpg"
-
-
-def _resolve_read_step_px(result: TilingResult) -> int:
-    if result.read_step_px is not None:
-        return int(result.read_step_px)
-    return max(
-        1,
-        int(round(int(result.read_tile_size_px) * (1.0 - float(result.overlap)), 0)),
-    )
-
-
-def _resolve_step_px_lv0(result: TilingResult) -> int:
-    if result.step_px_lv0 is not None:
-        return int(result.step_px_lv0)
-    if result.x.size > 1:
-        unique_x = np.unique(np.sort(result.x.astype(np.int64, copy=False)))
-        diffs = np.diff(unique_x)
-        diffs = diffs[diffs > 0]
-        if diffs.size > 0:
-            return int(diffs.min())
-    if result.y.size > 1:
-        unique_y = np.unique(np.sort(result.y.astype(np.int64, copy=False)))
-        diffs = np.diff(unique_y)
-        diffs = diffs[diffs > 0]
-        if diffs.size > 0:
-            return int(diffs.min())
-    return max(
-        1,
-        int(round(int(result.tile_size_lv0) * (1.0 - float(result.overlap)), 0)),
-    )
-
-
-def _iter_grouped_read_plans_for_tar_extraction(
-    *,
-    result: TilingResult,
-    read_step_px: int,
-    step_px_lv0: int,
-    supertile_sizes: Sequence[int] | None = None,
-):
-    if supertile_sizes is None:
-        supertile_sizes = (8, 4, 2)
-    grouped_sizes = tuple(
-        sorted(
-            {
-                int(size)
-                for size in supertile_sizes
-                if int(size) > 1
-            },
-            reverse=True,
-        )
-    )
-    if step_px_lv0 <= 0:
-        step_px_lv0 = int(result.tile_size_lv0)
-    coord_to_index = {
-        (int(x), int(y)): idx
-        for idx, (x, y) in enumerate(
-            zip(
-                result.x.astype(np.int64, copy=False).tolist(),
-                result.y.astype(np.int64, copy=False).tolist(),
-            )
-        )
-    }
-    consumed = np.zeros(result.num_tiles, dtype=bool)
-    tile_size_px = int(result.read_tile_size_px)
-    grouped_plans: dict[int, list[_WSDTarReadPlan]] = {
-        size: [] for size in grouped_sizes
-    }
-    grouped_plans[1] = []
-
-    def _build_grouped_plan(idx: int, block_size: int) -> _WSDTarReadPlan | None:
-        if consumed[idx]:
-            return None
-        x0 = int(result.x[idx])
-        y0 = int(result.y[idx])
-        indices: list[int] = []
-        for x_idx in range(block_size):
-            for y_idx in range(block_size):
-                coord = (
-                    x0 + x_idx * step_px_lv0,
-                    y0 + y_idx * step_px_lv0,
-                )
-                match_idx = coord_to_index.get(coord)
-                if match_idx is None or consumed[match_idx]:
-                    return None
-                indices.append(match_idx)
-            if len(indices) < (x_idx + 1) * block_size:
-                return None
-        return _WSDTarReadPlan(
-            x=x0,
-            y=y0,
-            read_size_px=tile_size_px + (block_size - 1) * read_step_px,
-            block_size=block_size,
-            tile_indices=tuple(indices),
-        )
-
-    for block_size in grouped_sizes:
-        if result.num_tiles < block_size * block_size:
-            continue
-        for idx in range(result.num_tiles):
-            plan = _build_grouped_plan(idx, block_size)
-            if plan is None:
-                continue
-            for match_idx in plan.tile_indices:
-                consumed[match_idx] = True
-            grouped_plans[block_size].append(plan)
-
-    for idx in range(result.num_tiles):
-        if consumed[idx]:
-            continue
-        consumed[idx] = True
-        grouped_plans[1].append(
-            _WSDTarReadPlan(
-                x=int(result.x[idx]),
-                y=int(result.y[idx]),
-                read_size_px=tile_size_px,
-                block_size=1,
-                tile_indices=(idx,),
-            )
-        )
-
-    for block_size in (*grouped_sizes, 1):
-        yield from grouped_plans[block_size]
-
-
 def _needs_pixel_filtering(filtering: FilterConfig) -> bool:
     return bool(filtering.filter_white or filtering.filter_black)
 

@@ -12,6 +12,7 @@ from PIL import Image
 
 from hs2p.configs import FilterConfig, SegmentationConfig, TilingConfig
 from hs2p.wsi.backend import coerce_wsd_path, resolve_backend
+from hs2p.wsi.batched_reads import BatchedReadRequest, group_batched_read_requests_by_size
 from hs2p.wsi.utils import HasEnoughTissue, ResolvedTileGeometry
 
 # ignore all warnings from wholeslidedata
@@ -472,6 +473,7 @@ class WholeSlideImage(object):
         tile_size,
         tile_level,
         filter_params,
+        num_workers: int = 1,
     ):
         if filter_params.filter_white or filter_params.filter_black:
             img_w, img_h = self.level_dimensions[tile_level]
@@ -501,6 +503,7 @@ class WholeSlideImage(object):
 
             error_count = 0
             error_samples = []
+            batch_requests: list[BatchedReadRequest] = []
             for (batch_x, batch_y), batch_member_indices in batched_indices.items():
                 x0_level = batch_x * supertile_span
                 y0_level = batch_y * supertile_span
@@ -510,19 +513,26 @@ class WholeSlideImage(object):
                 )
                 x0 = int(round(x0_level * downsample_x))
                 y0 = int(round(y0_level * downsample_y))
-                try:
-                    window = self.get_tile(
-                        x0,
-                        y0,
-                        read_width,
-                        read_height,
-                        tile_level,
+                batch_requests.append(
+                    BatchedReadRequest(
+                        location=(x0, y0),
+                        size=(read_width, read_height),
+                        payload=(
+                            tuple(batch_member_indices),
+                            int(x0_level),
+                            int(y0_level),
+                        ),
                     )
-                except Exception as e:
-                    error_count += len(batch_member_indices)
-                    if len(error_samples) < 3:
-                        error_samples.append(str(e))
-                    continue
+                )
+
+            def _consume_window(
+                window: np.ndarray,
+                *,
+                batch_member_indices: list[int],
+                x0_level: int,
+                y0_level: int,
+            ) -> None:
+                window = np.asarray(window)
 
                 tiles = np.zeros(
                     (len(batch_member_indices), tile_size, tile_size, 3),
@@ -572,6 +582,67 @@ class WholeSlideImage(object):
 
                 for coord_idx, keep in zip(batch_member_indices, keep_batch.tolist()):
                     keep_array[coord_idx] = keep
+
+            used_cucim_batch = False
+            if self.backend == "cucim":
+                try:
+                    from hs2p.wsi.cucim_reader import CuImageReader
+
+                    reader = CuImageReader(self.path, gpu_decode=False)
+                    reader._ensure_open()
+                    used_cucim_batch = True
+                    for size_requests in group_batched_read_requests_by_size(
+                        batch_requests
+                    ).values():
+                        try:
+                            regions = reader.read_region(
+                                [request.location for request in size_requests],
+                                size_requests[0].size,
+                                level=int(tile_level),
+                                num_workers=max(1, int(num_workers)),
+                            )
+                            for request, region in zip(size_requests, regions):
+                                batch_member_indices, x0_level, y0_level = request.payload
+                                _consume_window(
+                                    np.asarray(region),
+                                    batch_member_indices=list(batch_member_indices),
+                                    x0_level=int(x0_level),
+                                    y0_level=int(y0_level),
+                                )
+                        except Exception as e:
+                            error_count += sum(
+                                len(request.payload[0]) for request in size_requests
+                            )
+                            if len(error_samples) < 3:
+                                error_samples.append(str(e))
+                except ModuleNotFoundError:
+                    warnings.warn(
+                        "CuCIM is unavailable for backend='cucim'; falling back to sequential tile filtering reads.",
+                        UserWarning,
+                    )
+
+            if not used_cucim_batch:
+                for request in batch_requests:
+                    batch_member_indices, x0_level, y0_level = request.payload
+                    try:
+                        window = self.get_tile(
+                            request.location[0],
+                            request.location[1],
+                            request.size[0],
+                            request.size[1],
+                            tile_level,
+                        )
+                    except Exception as e:
+                        error_count += len(batch_member_indices)
+                        if len(error_samples) < 3:
+                            error_samples.append(str(e))
+                        continue
+                    _consume_window(
+                        window,
+                        batch_member_indices=list(batch_member_indices),
+                        x0_level=int(x0_level),
+                        y0_level=int(y0_level),
+                    )
             if error_count > 0:
                 slide_id = getattr(self, "path", "<unknown-slide>")
                 sample_msg = "; ".join(error_samples)
@@ -846,6 +917,7 @@ class WholeSlideImage(object):
                 tiling_params,
                 filter_params,
                 annotation,
+                num_workers=num_workers,
             )
 
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
@@ -925,6 +997,7 @@ class WholeSlideImage(object):
         tiling_params: TilingConfig,
         filter_params: FilterConfig,
         annotation: str | None = None,
+        num_workers: int = 1,
     ):
         """
         Processes a contour to generate tile coordinates and associated metadata.
@@ -1035,6 +1108,7 @@ class WholeSlideImage(object):
             tile_size_resized,
             tile_level,
             filter_params,
+            num_workers=num_workers,
         )
 
         if drop_holes:
