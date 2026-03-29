@@ -15,11 +15,11 @@ from PIL import Image
 from hs2p.api import (
     TilingResult,
     _iter_cucim_tile_arrays_for_tar_extraction,
-    _iter_grouped_read_plans_for_tar_extraction,
     _iter_wsd_tile_arrays_for_tar_extraction,
     extract_tiles_to_tar,
 )
 from hs2p.configs.models import FilterConfig
+from hs2p.wsi.read_plans import GroupedReadPlan, iter_grouped_read_plans
 
 
 def _make_tiling_result(
@@ -148,6 +148,7 @@ def _make_grouped_region(
 
 def _monkeypatch_cucim_import(monkeypatch, fake_cucim):
     import hs2p.api as api_mod
+    import hs2p.wsi.cucim_reader as cucim_reader_mod
 
     original_import_module = api_mod.importlib.import_module
     monkeypatch.setattr(
@@ -156,6 +157,14 @@ def _monkeypatch_cucim_import(monkeypatch, fake_cucim):
         lambda name: fake_cucim
         if name == "cucim"
         else original_import_module(name),
+    )
+    original_cucim_reader_import = cucim_reader_mod.importlib.import_module
+    monkeypatch.setattr(
+        cucim_reader_mod.importlib,
+        "import_module",
+        lambda name: fake_cucim
+        if name == "cucim"
+        else original_cucim_reader_import(name),
     )
 
 
@@ -249,7 +258,7 @@ class TestExtractTilesToTar:
         )
 
         plans = list(
-            _iter_grouped_read_plans_for_tar_extraction(
+            iter_grouped_read_plans(
                 result=result,
                 read_step_px=16,
                 step_px_lv0=16,
@@ -261,7 +270,7 @@ class TestExtractTilesToTar:
         assert all(plan.block_size == 2 for plan in plans)
 
         plans = list(
-            _iter_grouped_read_plans_for_tar_extraction(
+            iter_grouped_read_plans(
                 result=result,
                 read_step_px=16,
                 step_px_lv0=16,
@@ -629,6 +638,7 @@ class TestExtractTilesToTar:
         mock_wsi.get_patch.return_value = _solid_patch((70, 80, 90))
 
         import hs2p.api as api_mod
+        import hs2p.wsi.cucim_reader as cucim_reader_mod
 
         def _import_module(name):
             if name == "cucim":
@@ -636,6 +646,7 @@ class TestExtractTilesToTar:
             raise AssertionError(f"unexpected module import: {name}")
 
         monkeypatch.setattr(api_mod.importlib, "import_module", _import_module)
+        monkeypatch.setattr(cucim_reader_mod.importlib, "import_module", _import_module)
 
         with pytest.warns(UserWarning, match="CuCIM is unavailable"), patch(
             "wholeslidedata.WholeSlideImage",
@@ -749,21 +760,21 @@ class TestExtractTilesToTar:
         import hs2p.api as api_mod
 
         interleaved_plans = [
-            api_mod._WSDTarReadPlan(
+            GroupedReadPlan(
                 x=0,
                 y=0,
                 read_size_px=32,
                 block_size=2,
                 tile_indices=(0, 1, 2, 3),
             ),
-            api_mod._WSDTarReadPlan(
+            GroupedReadPlan(
                 x=200,
                 y=0,
                 read_size_px=16,
                 block_size=1,
                 tile_indices=(4,),
             ),
-            api_mod._WSDTarReadPlan(
+            GroupedReadPlan(
                 x=100,
                 y=0,
                 read_size_px=32,
@@ -785,7 +796,7 @@ class TestExtractTilesToTar:
 
         monkeypatch.setattr(
             api_mod,
-            "_iter_grouped_read_plans_for_tar_extraction",
+            "iter_grouped_read_plans",
             lambda **kwargs: iter(interleaved_plans),
         )
         _monkeypatch_cucim_import(monkeypatch, fake_cucim)

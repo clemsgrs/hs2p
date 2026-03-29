@@ -12,9 +12,15 @@ def test_process_contours_concatenates_numpy_outputs_without_list_roundtrip():
             return 1, 1.0, 2.0
 
         def process_contour(
-            self, contour, contour_holes, tiling_params, filter_params, annotation
+            self,
+            contour,
+            contour_holes,
+            tiling_params,
+            filter_params,
+            annotation,
+            num_workers=1,
         ):
-            del contour_holes, tiling_params, filter_params, annotation
+            del contour_holes, tiling_params, filter_params, annotation, num_workers
             if contour == "empty":
                 return (
                     np.array([], dtype=np.int64),
