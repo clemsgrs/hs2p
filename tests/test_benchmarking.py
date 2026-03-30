@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from hs2p.api import TilingResult
+import hs2p.preprocessing as preprocessing_mod
 
 pytestmark = pytest.mark.script
 
@@ -17,7 +17,7 @@ def _make_grid_result(
     rows: int,
     tile_size_px: int,
     step_px: int | None = None,
-) -> TilingResult:
+) -> preprocessing_mod.TilingResult:
     if step_px is None:
         step_px = tile_size_px
     x_coords: list[int] = []
@@ -26,26 +26,56 @@ def _make_grid_result(
         for y_idx in range(rows):
             x_coords.append(x_idx * step_px)
             y_coords.append(y_idx * step_px)
-    return TilingResult(
+    overlap = 0.0 if step_px == tile_size_px else 1.0 - (step_px / tile_size_px)
+    return preprocessing_mod.TilingResult(
+        tiles=preprocessing_mod.TileGeometry(
+            coordinates=np.column_stack(
+                [
+                    np.asarray(x_coords, dtype=np.int64),
+                    np.asarray(y_coords, dtype=np.int64),
+                ]
+            ),
+            tissue_fractions=np.zeros(columns * rows, dtype=np.float32),
+            tile_index=np.arange(columns * rows, dtype=np.int32),
+            requested_tile_size_px=tile_size_px,
+            requested_spacing_um=0.5,
+            read_level=0,
+            effective_tile_size_px=tile_size_px,
+            effective_spacing_um=0.5,
+            tile_size_lv0=tile_size_px,
+            is_within_tolerance=True,
+            base_spacing_um=0.5,
+            slide_dimensions=[columns * step_px + tile_size_px, rows * step_px + tile_size_px],
+            level_downsamples=[1.0],
+            overlap=overlap,
+            min_tissue_fraction=0.1,
+            use_padding=True,
+        ),
         sample_id="bench-slide",
         image_path=Path("/tmp/bench-slide.svs"),
-        mask_path=None,
+        tissue_mask_path=None,
         backend="openslide",
-        x=np.asarray(x_coords, dtype=np.int64),
-        y=np.asarray(y_coords, dtype=np.int64),
-        tile_index=np.arange(columns * rows, dtype=np.int32),
-        target_spacing_um=0.5,
-        target_tile_size_px=tile_size_px,
-        read_level=0,
-        read_spacing_um=0.5,
-        read_tile_size_px=tile_size_px,
-        tile_size_lv0=tile_size_px,
-        overlap=0.0 if step_px == tile_size_px else 1.0 - (step_px / tile_size_px),
-        tissue_threshold=0.1,
-        num_tiles=columns * rows,
+        requested_backend="openslide",
         config_hash="bench-hash",
-        read_step_px=step_px,
         step_px_lv0=step_px,
+        tolerance=0.05,
+        tissue_method="unknown",
+        seg_downsample=64,
+        seg_level=0,
+        seg_spacing_um=0.0,
+        seg_sthresh=8,
+        seg_sthresh_up=255,
+        seg_mthresh=7,
+        seg_close=4,
+        ref_tile_size_px=tile_size_px,
+        a_t=4,
+        a_h=0,
+        max_n_holes=0,
+        filter_white=False,
+        filter_black=False,
+        white_threshold=220,
+        black_threshold=25,
+        fraction_threshold=0.9,
     )
 
 
@@ -53,27 +83,51 @@ def _make_custom_result(
     *,
     coords: list[tuple[int, int]],
     tile_size_px: int,
-) -> TilingResult:
-    return TilingResult(
+) -> preprocessing_mod.TilingResult:
+    return preprocessing_mod.TilingResult(
+        tiles=preprocessing_mod.TileGeometry(
+            coordinates=np.asarray(coords, dtype=np.int64),
+            tissue_fractions=np.zeros(len(coords), dtype=np.float32),
+            tile_index=np.arange(len(coords), dtype=np.int32),
+            requested_tile_size_px=tile_size_px,
+            requested_spacing_um=0.5,
+            read_level=0,
+            effective_tile_size_px=tile_size_px,
+            effective_spacing_um=0.5,
+            tile_size_lv0=tile_size_px,
+            is_within_tolerance=True,
+            base_spacing_um=0.5,
+            slide_dimensions=[1000, 1000],
+            level_downsamples=[1.0],
+            overlap=0.0,
+            min_tissue_fraction=0.1,
+            use_padding=True,
+        ),
         sample_id="bench-slide",
         image_path=Path("/tmp/bench-slide.svs"),
-        mask_path=None,
+        tissue_mask_path=None,
         backend="openslide",
-        x=np.asarray([x for x, _ in coords], dtype=np.int64),
-        y=np.asarray([y for _, y in coords], dtype=np.int64),
-        tile_index=np.arange(len(coords), dtype=np.int32),
-        target_spacing_um=0.5,
-        target_tile_size_px=tile_size_px,
-        read_level=0,
-        read_spacing_um=0.5,
-        read_tile_size_px=tile_size_px,
-        tile_size_lv0=tile_size_px,
-        overlap=0.0,
-        tissue_threshold=0.1,
-        num_tiles=len(coords),
+        requested_backend="openslide",
         config_hash="bench-hash",
-        read_step_px=tile_size_px,
         step_px_lv0=tile_size_px,
+        tolerance=0.05,
+        tissue_method="unknown",
+        seg_downsample=64,
+        seg_level=0,
+        seg_spacing_um=0.0,
+        seg_sthresh=8,
+        seg_sthresh_up=255,
+        seg_mthresh=7,
+        seg_close=4,
+        ref_tile_size_px=tile_size_px,
+        a_t=4,
+        a_h=0,
+        max_n_holes=0,
+        filter_white=False,
+        filter_black=False,
+        white_threshold=220,
+        black_threshold=25,
+        fraction_threshold=0.9,
     )
 
 
@@ -222,6 +276,7 @@ def test_limit_tiling_result_trims_arrays_and_reindexes_tiles():
 
     limited = mod.limit_tiling_result(result, max_tiles=4)
 
+    assert isinstance(limited, preprocessing_mod.TilingResult)
     assert limited.num_tiles == 4
     np.testing.assert_array_equal(limited.x, np.array([0, 0, 16, 16], dtype=np.int64))
     np.testing.assert_array_equal(limited.y, np.array([0, 16, 0, 16], dtype=np.int64))

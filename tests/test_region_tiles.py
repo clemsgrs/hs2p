@@ -2,7 +2,7 @@ from pathlib import Path
 
 import numpy as np
 
-from hs2p.api import TilingResult
+import hs2p.preprocessing as preprocessing_mod
 from hs2p.wsi.read_plans import GroupedReadPlan
 from hs2p.wsi.region_tiles import iter_plan_region_tile_views, iter_region_tile_views
 
@@ -19,27 +19,59 @@ def _make_grouped_region(*, block_size: int, tile_size_px: int, step_px: int) ->
     return region
 
 
-def _make_result(*, tile_size_px: int, step_px: int) -> TilingResult:
-    return TilingResult(
+def _make_result(
+    *,
+    tile_size_px: int,
+    step_px: int,
+) -> preprocessing_mod.TilingResult:
+    overlap = 0.0 if step_px == tile_size_px else 1.0 - (step_px / tile_size_px)
+    return preprocessing_mod.TilingResult(
+        tiles=preprocessing_mod.TileGeometry(
+            coordinates=np.array(
+                [[0, 0], [0, step_px], [step_px, 0], [step_px, step_px]],
+                dtype=np.int64,
+            ),
+            tissue_fractions=np.zeros(4, dtype=np.float32),
+            tile_index=np.arange(4, dtype=np.int32),
+            requested_tile_size_px=tile_size_px,
+            requested_spacing_um=0.5,
+            read_level=0,
+            effective_tile_size_px=tile_size_px,
+            effective_spacing_um=0.5,
+            tile_size_lv0=tile_size_px,
+            is_within_tolerance=True,
+            base_spacing_um=0.5,
+            slide_dimensions=[(2 * step_px) + tile_size_px, (2 * step_px) + tile_size_px],
+            level_downsamples=[1.0],
+            overlap=overlap,
+            min_tissue_fraction=0.1,
+            use_padding=True,
+        ),
         sample_id="region-tiles-slide",
         image_path=Path("/tmp/region-tiles-slide.svs"),
-        mask_path=None,
+        tissue_mask_path=None,
         backend="openslide",
-        x=np.array([0, 0, step_px, step_px], dtype=np.int64),
-        y=np.array([0, step_px, 0, step_px], dtype=np.int64),
-        tile_index=np.arange(4, dtype=np.int32),
-        target_spacing_um=0.5,
-        target_tile_size_px=tile_size_px,
-        read_level=0,
-        read_spacing_um=0.5,
-        read_tile_size_px=tile_size_px,
-        tile_size_lv0=tile_size_px,
-        overlap=0.0 if step_px == tile_size_px else 1.0 - (step_px / tile_size_px),
-        tissue_threshold=0.1,
-        num_tiles=4,
+        requested_backend="openslide",
         config_hash="region-tiles-hash",
-        read_step_px=step_px,
         step_px_lv0=step_px,
+        tolerance=0.05,
+        tissue_method="unknown",
+        seg_downsample=64,
+        seg_level=0,
+        seg_spacing_um=0.0,
+        seg_sthresh=8,
+        seg_sthresh_up=255,
+        seg_mthresh=7,
+        seg_close=4,
+        ref_tile_size_px=tile_size_px,
+        a_t=4,
+        a_h=0,
+        max_n_holes=0,
+        filter_white=False,
+        filter_black=False,
+        white_threshold=220,
+        black_threshold=25,
+        fraction_threshold=0.9,
     )
 
 

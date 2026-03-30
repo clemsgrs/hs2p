@@ -18,7 +18,6 @@ from hs2p.api import (
     SlideSpec,
     TilingArtifacts,
     TilingConfig,
-    TilingResult,
     compute_config_hash,
     load_tiling_result,
     load_whole_slides_from_rows,
@@ -105,27 +104,20 @@ def _build_result(
     image_path: str,
     mask_path: str | None = None,
     config_hash: str = "actual-hash",
-) -> TilingResult:
-    return TilingResult(
+) -> preprocessing_mod.TilingResult:
+    return _build_preprocessing_result(
         sample_id=sample_id,
-        image_path=Path(image_path),
-        mask_path=Path(mask_path) if mask_path is not None else None,
-        backend="asap",
-        x=np.array([10], dtype=np.int64),
-        y=np.array([20], dtype=np.int64),
-        tile_index=np.array([0], dtype=np.int32),
-        tissue_fraction=None,
-        target_spacing_um=0.5,
-        target_tile_size_px=224,
+        image_path=image_path,
+        mask_path=mask_path,
+        config_hash=config_hash,
+        coords=np.array([[10, 20]], dtype=np.int64),
+        tissue_fractions=np.array([0.0], dtype=np.float32),
         read_level=0,
         read_spacing_um=0.5,
         read_tile_size_px=224,
         tile_size_lv0=224,
         overlap=0.0,
         tissue_threshold=0.1,
-        num_tiles=1,
-        config_hash=config_hash,
-        read_step_px=224,
         step_px_lv0=224,
     )
 
@@ -136,36 +128,56 @@ def _build_preprocessing_result(
     image_path: str = "slide-preprocess.svs",
     mask_path: str | None = None,
     config_hash: str | None = None,
+    annotation: str | None = None,
     selection_strategy: str | None = None,
     output_mode: str | None = None,
+    coords: np.ndarray | None = None,
+    tissue_fractions: np.ndarray | None = None,
+    backend: str = "asap",
+    requested_backend: str = "asap",
+    read_level: int = 1,
+    read_spacing_um: float = 1.0,
+    read_tile_size_px: int = 448,
+    tile_size_lv0: int = 448,
+    overlap: float = 0.1,
+    tissue_threshold: float = 0.2,
+    step_px_lv0: int = 403,
 ) -> preprocessing_mod.TilingResult:
+    if coords is None:
+        coords = np.array([[100, 200], [300, 400]], dtype=np.int64)
+    if tissue_fractions is None:
+        tissue_fractions = np.array([0.25, 0.75], dtype=np.float32)
+    coords = np.asarray(coords, dtype=np.int64)
+    tissue_fractions = np.asarray(tissue_fractions, dtype=np.float32)
+    if coords.shape[0] != tissue_fractions.shape[0]:
+        raise ValueError("coords and tissue_fractions must be aligned")
     return preprocessing_mod.TilingResult(
         tiles=preprocessing_mod.TileGeometry(
-            coordinates=np.array([[100, 200], [300, 400]], dtype=np.int64),
-            tissue_fractions=np.array([0.25, 0.75], dtype=np.float32),
-            tile_index=np.array([0, 1], dtype=np.int32),
+            coordinates=coords,
+            tissue_fractions=tissue_fractions,
+            tile_index=np.arange(coords.shape[0], dtype=np.int32),
             requested_tile_size_px=224,
             requested_spacing_um=0.5,
-            read_level=1,
-            effective_tile_size_px=448,
-            effective_spacing_um=1.0,
-            tile_size_lv0=448,
-            is_within_tolerance=False,
+            read_level=read_level,
+            effective_tile_size_px=read_tile_size_px,
+            effective_spacing_um=read_spacing_um,
+            tile_size_lv0=tile_size_lv0,
+            is_within_tolerance=read_spacing_um == 0.5,
             base_spacing_um=0.25,
             slide_dimensions=[1000, 1200],
             level_downsamples=[1.0, 4.0],
-            overlap=0.1,
-            min_tissue_fraction=0.2,
+            overlap=overlap,
+            min_tissue_fraction=tissue_threshold,
             use_padding=True,
             tissue_mask=np.full((8, 8), 255, dtype=np.uint8),
         ),
         sample_id=sample_id,
         image_path=image_path,
         config_hash=config_hash,
-        backend="asap",
-        requested_backend="asap",
+        backend=backend,
+        requested_backend=requested_backend,
         tolerance=0.07,
-        step_px_lv0=403,
+        step_px_lv0=step_px_lv0,
         tissue_method="precomputed_mask" if mask_path is not None else "hsv",
         seg_downsample=64,
         seg_level=2,
@@ -186,7 +198,7 @@ def _build_preprocessing_result(
         seg_use_otsu=False,
         seg_use_hsv=True,
         tissue_mask_path=mask_path,
-        annotation=None,
+        annotation=annotation,
         selection_strategy=selection_strategy,
         output_mode=output_mode,
     )
@@ -209,7 +221,7 @@ def _patch_preprocess_slide(
             return result(**kwargs)
         return result
 
-    monkeypatch.setattr(api_mod.preprocessing_mod, "preprocess_slide", _fake_preprocess_slide)
+    monkeypatch.setattr(api_mod, "preprocess_slide", _fake_preprocess_slide)
 
 
 def _save_valid_preprocessing_artifact(
@@ -504,26 +516,18 @@ def test_tile_slide_warns_when_preview_qc_is_requested(
 
 
 def test_save_tiling_result_writes_preprocessing_npz_and_json(tmp_path: Path):
-    result = TilingResult(
+    result = _build_preprocessing_result(
         sample_id="slide-2",
-        image_path=Path("slide-2.svs"),
-        mask_path=None,
-        backend="asap",
-        x=np.array([10, 30], dtype=np.int64),
-        y=np.array([20, 40], dtype=np.int64),
-        tile_index=np.array([0, 1], dtype=np.int32),
-        tissue_fraction=np.array([0.3, 0.7], dtype=np.float32),
-        target_spacing_um=0.5,
-        target_tile_size_px=224,
+        image_path="slide-2.svs",
+        config_hash="abc123",
+        coords=np.array([[10, 20], [30, 40]], dtype=np.int64),
+        tissue_fractions=np.array([0.3, 0.7], dtype=np.float32),
         read_level=0,
         read_spacing_um=0.5,
         read_tile_size_px=224,
         tile_size_lv0=224,
         overlap=0.0,
         tissue_threshold=0.1,
-        num_tiles=2,
-        config_hash="abc123",
-        read_step_px=224,
         step_px_lv0=224,
     )
 
@@ -582,26 +586,19 @@ def test_save_tiling_result_writes_preprocessing_npz_and_json(tmp_path: Path):
 
 
 def test_save_and_load_tiling_result_round_trip(tmp_path: Path):
-    result = TilingResult(
+    result = _build_preprocessing_result(
         sample_id="slide-roundtrip",
-        image_path=Path("slide-roundtrip.svs"),
-        mask_path=Path("slide-roundtrip-mask.png"),
-        backend="asap",
-        x=np.array([10, 30], dtype=np.int64),
-        y=np.array([20, 40], dtype=np.int64),
-        tile_index=np.array([0, 1], dtype=np.int32),
-        tissue_fraction=np.array([0.3, 0.7], dtype=np.float32),
-        target_spacing_um=0.5,
-        target_tile_size_px=224,
+        image_path="slide-roundtrip.svs",
+        mask_path="slide-roundtrip-mask.png",
+        config_hash="roundtrip-hash",
+        coords=np.array([[10, 20], [30, 40]], dtype=np.int64),
+        tissue_fractions=np.array([0.3, 0.7], dtype=np.float32),
         read_level=0,
         read_spacing_um=0.5,
         read_tile_size_px=224,
         tile_size_lv0=224,
         overlap=0.1,
         tissue_threshold=0.2,
-        num_tiles=2,
-        config_hash="roundtrip-hash",
-        read_step_px=202,
         step_px_lv0=202,
     )
 
@@ -629,61 +626,54 @@ def test_save_and_load_tiling_result_round_trip(tmp_path: Path):
     np.testing.assert_array_equal(loaded.tissue_fraction, result.tissue_fraction)
 
 
-def test_tiling_result_adapter_preserves_core_fields_on_preprocessing_result():
-    result = TilingResult(
+def test_preprocessing_result_builder_preserves_core_fields():
+    result = _build_preprocessing_result(
         sample_id="slide-adapter",
-        image_path=Path("slide-adapter.svs"),
-        mask_path=Path("slide-adapter-mask.png"),
+        image_path="slide-adapter.svs",
+        mask_path="slide-adapter-mask.png",
+        config_hash="adapter-hash",
+        coords=np.array([[10, 20], [30, 40]], dtype=np.int64),
+        tissue_fractions=np.array([0.3, 0.7], dtype=np.float32),
         backend="openslide",
-        x=np.array([10, 30], dtype=np.int64),
-        y=np.array([20, 40], dtype=np.int64),
-        tile_index=np.array([0, 1], dtype=np.int32),
-        tissue_fraction=np.array([0.3, 0.7], dtype=np.float32),
-        target_spacing_um=0.5,
-        target_tile_size_px=224,
+        requested_backend="openslide",
         read_level=1,
         read_spacing_um=1.0,
         read_tile_size_px=448,
         tile_size_lv0=448,
         overlap=0.1,
         tissue_threshold=0.2,
-        num_tiles=2,
-        config_hash="adapter-hash",
-        read_step_px=403,
         step_px_lv0=806,
         annotation="tumor",
         selection_strategy="per_annotation",
         output_mode="multi_output",
     )
 
-    preprocessing_result = api_mod._to_preprocessing_tiling_result(result)
-
-    assert isinstance(preprocessing_result, preprocessing_mod.TilingResult)
-    assert preprocessing_result.sample_id == result.sample_id
-    assert preprocessing_result.image_path == result.image_path
-    assert preprocessing_result.mask_path == result.mask_path
-    assert preprocessing_result.backend == result.backend
-    assert preprocessing_result.target_spacing_um == result.target_spacing_um
-    assert preprocessing_result.target_tile_size_px == result.target_tile_size_px
-    assert preprocessing_result.read_level == result.read_level
-    assert preprocessing_result.read_spacing_um == result.read_spacing_um
-    assert preprocessing_result.read_tile_size_px == result.read_tile_size_px
-    assert preprocessing_result.read_step_px == 403
-    assert preprocessing_result.step_px_lv0 == result.step_px_lv0
-    assert preprocessing_result.tile_size_lv0 == result.tile_size_lv0
-    assert preprocessing_result.overlap == result.overlap
-    assert preprocessing_result.tissue_threshold == result.tissue_threshold
-    assert preprocessing_result.num_tiles == result.num_tiles
-    assert preprocessing_result.config_hash == result.config_hash
-    assert preprocessing_result.annotation == result.annotation
-    assert preprocessing_result.selection_strategy == result.selection_strategy
-    assert preprocessing_result.output_mode == result.output_mode
-    np.testing.assert_array_equal(preprocessing_result.x, result.x)
-    np.testing.assert_array_equal(preprocessing_result.y, result.y)
-    np.testing.assert_array_equal(preprocessing_result.tile_index, result.tile_index)
+    assert isinstance(result, preprocessing_mod.TilingResult)
+    assert result.sample_id == "slide-adapter"
+    assert result.image_path == Path("slide-adapter.svs")
+    assert result.mask_path == Path("slide-adapter-mask.png")
+    assert result.backend == "openslide"
+    assert result.target_spacing_um == 0.5
+    assert result.target_tile_size_px == 224
+    assert result.read_level == 1
+    assert result.read_spacing_um == 1.0
+    assert result.read_tile_size_px == 448
+    assert result.read_step_px == 403
+    assert result.step_px_lv0 == 806
+    assert result.tile_size_lv0 == 448
+    assert result.overlap == 0.1
+    assert result.tissue_threshold == 0.2
+    assert result.num_tiles == 2
+    assert result.config_hash == "adapter-hash"
+    assert result.annotation == "tumor"
+    assert result.selection_strategy == "per_annotation"
+    assert result.output_mode == "multi_output"
+    np.testing.assert_array_equal(result.x, np.array([10, 30], dtype=np.int64))
+    np.testing.assert_array_equal(result.y, np.array([20, 40], dtype=np.int64))
+    np.testing.assert_array_equal(result.tile_index, np.array([0, 1], dtype=np.int32))
     np.testing.assert_array_equal(
-        preprocessing_result.tissue_fraction,
         result.tissue_fraction,
+        np.array([0.3, 0.7], dtype=np.float32),
     )
 
 
@@ -776,25 +766,19 @@ def test_load_tiling_result_accepts_preprocessing_artifact(tmp_path: Path):
 
 
 def test_write_tiling_preview_writes_expected_preview(monkeypatch, tmp_path: Path):
-    result = TilingResult(
+    result = _build_preprocessing_result(
         sample_id="slide-preview",
-        image_path=Path("slide-preview.svs"),
-        mask_path=None,
-        backend="asap",
-        x=np.array([10, 30], dtype=np.int64),
-        y=np.array([20, 40], dtype=np.int64),
-        tile_index=np.array([0, 1], dtype=np.int32),
-        tissue_fraction=None,
-        target_spacing_um=0.5,
-        target_tile_size_px=224,
+        image_path="slide-preview.svs",
+        config_hash="preview-hash",
+        coords=np.array([[10, 20], [30, 40]], dtype=np.int64),
+        tissue_fractions=np.array([0.0, 0.0], dtype=np.float32),
         read_level=0,
         read_spacing_um=0.5,
         read_tile_size_px=224,
         tile_size_lv0=224,
         overlap=0.0,
         tissue_threshold=0.1,
-        num_tiles=2,
-        config_hash="preview-hash",
+        step_px_lv0=224,
     )
 
     def _fake_write_coordinate_preview(**kwargs):
@@ -1069,24 +1053,21 @@ def test_compute_request_passes_inner_workers_to_tile_extraction(
 
     def _fake_compute_tiling_result(*args, **kwargs):
         del args, kwargs
-        return TilingResult(
+        return _build_preprocessing_result(
             sample_id="slide-1",
-            image_path=Path("slide-1.svs"),
-            mask_path=None,
+            image_path="slide-1.svs",
+            config_hash="hash",
+            coords=np.array([[10, 20]], dtype=np.int64),
+            tissue_fractions=np.array([0.0], dtype=np.float32),
             backend="cucim",
-            x=np.array([10], dtype=np.int64),
-            y=np.array([20], dtype=np.int64),
-            tile_index=np.array([0], dtype=np.int32),
-            target_spacing_um=0.5,
-            target_tile_size_px=224,
+            requested_backend="cucim",
             read_level=0,
             read_spacing_um=0.5,
             read_tile_size_px=224,
             tile_size_lv0=224,
             overlap=0.0,
             tissue_threshold=0.1,
-            num_tiles=1,
-            config_hash="hash",
+            step_px_lv0=224,
         )
 
     def _fake_extract_tiles_to_tar(
@@ -1215,55 +1196,45 @@ def test_tile_slides_defaults_gpu_decode_to_disabled_for_saved_tiles(
 
 
 def test_save_tiling_result_rejects_invalid_tile_index(tmp_path: Path):
-    invalid = TilingResult(
-        sample_id="broken-slide",
-        image_path=Path("broken.svs"),
-        mask_path=None,
-        backend="asap",
-        x=np.array([10], dtype=np.int64),
-        y=np.array([20], dtype=np.int64),
-        tile_index=np.array([3], dtype=np.int32),
-        tissue_fraction=None,
-        target_spacing_um=0.5,
-        target_tile_size_px=224,
-        read_level=0,
-        read_spacing_um=0.5,
-        read_tile_size_px=224,
-        tile_size_lv0=224,
-        overlap=0.0,
-        tissue_threshold=0.1,
-        num_tiles=1,
-        config_hash="hash",
-    )
-
-    with pytest.raises(ValueError, match="tile_index"):
-        save_tiling_result(invalid, output_dir=tmp_path)
+    with pytest.raises(ValueError, match="tile_index must be a 1D array aligned"):
+        preprocessing_mod.TileGeometry(
+            coordinates=np.array([[10, 20]], dtype=np.int64),
+            tissue_fractions=np.array([0.0], dtype=np.float32),
+            tile_index=np.array([3, 4], dtype=np.int32),
+            requested_tile_size_px=224,
+            requested_spacing_um=0.5,
+            read_level=0,
+            effective_tile_size_px=224,
+            effective_spacing_um=0.5,
+            tile_size_lv0=224,
+            is_within_tolerance=True,
+            base_spacing_um=0.5,
+            slide_dimensions=[224, 224],
+            level_downsamples=[1.0],
+            overlap=0.0,
+            min_tissue_fraction=0.1,
+        )
 
 
 def test_save_tiling_result_rejects_non_vector_arrays(tmp_path: Path):
-    invalid = TilingResult(
-        sample_id="broken-shape",
-        image_path=Path("broken-shape.svs"),
-        mask_path=None,
-        backend="asap",
-        x=np.array([[10, 11]], dtype=np.int64),
-        y=np.array([20], dtype=np.int64),
-        tile_index=np.array([0], dtype=np.int32),
-        tissue_fraction=None,
-        target_spacing_um=0.5,
-        target_tile_size_px=224,
-        read_level=0,
-        read_spacing_um=0.5,
-        read_tile_size_px=224,
-        tile_size_lv0=224,
-        overlap=0.0,
-        tissue_threshold=0.1,
-        num_tiles=1,
-        config_hash="hash",
-    )
-
-    with pytest.raises(ValueError, match="x must be a 1D array"):
-        save_tiling_result(invalid, output_dir=tmp_path)
+    with pytest.raises(ValueError, match="coordinates must have shape"):
+        preprocessing_mod.TileGeometry(
+            coordinates=np.array([10, 11], dtype=np.int64),
+            tissue_fractions=np.array([0.0], dtype=np.float32),
+            tile_index=np.array([0], dtype=np.int32),
+            requested_tile_size_px=224,
+            requested_spacing_um=0.5,
+            read_level=0,
+            effective_tile_size_px=224,
+            effective_spacing_um=0.5,
+            tile_size_lv0=224,
+            is_within_tolerance=True,
+            base_spacing_um=0.5,
+            slide_dimensions=[224, 224],
+            level_downsamples=[1.0],
+            overlap=0.0,
+            min_tissue_fraction=0.1,
+        )
 
 
 def test_save_tiling_result_cleans_up_partial_outputs_when_metadata_write_fails(
@@ -1383,7 +1354,7 @@ def test_tile_slides_writes_process_list_and_can_reuse_precomputed_tiles(
             "tile extraction should not run when precomputed tiles are reused"
         )
 
-    monkeypatch.setattr(api_mod.preprocessing_mod, "preprocess_slide", _unexpected_preprocess)
+    monkeypatch.setattr(api_mod, "preprocess_slide", _unexpected_preprocess)
 
     artifacts = tile_slides(
         [SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs"))],
@@ -1582,7 +1553,7 @@ def test_tile_slides_resume_marks_stale_artifact_as_failed(
     ).to_csv(tmp_path / "run" / "process_list.csv", index=False)
 
     monkeypatch.setattr(
-        api_mod.preprocessing_mod,
+        api_mod,
         "preprocess_slide",
         lambda **_: (_ for _ in ()).throw(
             AssertionError("should not recompute stale resumed tiles")
@@ -1688,7 +1659,7 @@ def test_tile_slides_computes_resume_hash_once_per_batch(
         "hs2p.api.validate_tiling_artifacts", _fake_validate_tiling_artifacts
     )
     monkeypatch.setattr(
-        api_mod.preprocessing_mod,
+        api_mod,
         "preprocess_slide",
         lambda **_: (_ for _ in ()).throw(
             AssertionError("resume path should not recompute tiles")

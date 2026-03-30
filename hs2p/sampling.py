@@ -9,7 +9,7 @@ import multiprocessing as mp
 from dataclasses import replace
 from pathlib import Path
 
-import hs2p.preprocessing as preprocessing_mod
+from hs2p.preprocessing import TileGeometry, TilingResult
 from hs2p.api import (
     CoordinateOutputMode,
     FilterConfig,
@@ -155,8 +155,8 @@ def _save_sampling_coordinates(
     coordinate_array = np.asarray(coordinates, dtype=np.int64)
     if coordinate_array.size == 0:
         coordinate_array = np.empty((0, 2), dtype=np.int64)
-    result = preprocessing_mod.TilingResult(
-        tiles=preprocessing_mod.TileGeometry(
+    result = TilingResult(
+        tiles=TileGeometry(
             coordinates=coordinate_array,
             tissue_fractions=np.zeros(len(coordinates), dtype=np.float32),
             tile_index=np.arange(len(coordinates), dtype=np.int32),
