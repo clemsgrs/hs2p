@@ -3,6 +3,7 @@ import json
 import numpy as np
 import pytest
 
+import hs2p
 from hs2p.preprocessing import (
     ContourResult,
     TileGeometry,
@@ -171,3 +172,11 @@ def test_tiling_artifact_roundtrip_uses_strict_rich_metadata(tmp_path):
     paths["meta"].write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n")
     with pytest.raises(ValueError, match="unexpected keys"):
         load_tiling_result(paths["npz"], paths["meta"])
+
+
+def test_top_level_package_reexports_preprocessing_core_surface():
+    assert hs2p.ContourResult is ContourResult
+    assert hs2p.TileGeometry is TileGeometry
+    assert hs2p.detect_contours is detect_contours
+    assert hs2p.generate_tiles is generate_tiles
+    assert hs2p.preprocess_slide is hs2p.preprocessing.preprocess_slide
