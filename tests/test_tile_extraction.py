@@ -5,6 +5,7 @@ import io
 import tarfile
 import types
 import sys
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -14,8 +15,6 @@ from PIL import Image
 
 import hs2p.preprocessing as preprocessing_mod
 from hs2p.api import (
-    TilingResult,
-    _to_preprocessing_tiling_result,
     _iter_cucim_tile_arrays_for_tar_extraction,
     _iter_wsd_tile_arrays_for_tar_extraction,
     extract_tiles_to_tar,
@@ -30,29 +29,56 @@ def _make_tiling_result(
     sample_id: str = "slide-1",
     *,
     step_px: int | None = None,
-) -> TilingResult:
+) -> preprocessing_mod.TilingResult:
     if step_px is None:
         step_px = tile_size
-    return TilingResult(
+    overlap = 0.0 if step_px == tile_size else 1.0 - (step_px / tile_size)
+    x = np.arange(num_tiles, dtype=np.int64) * tile_size
+    y = np.zeros(num_tiles, dtype=np.int64)
+    return preprocessing_mod.TilingResult(
+        tiles=preprocessing_mod.TileGeometry(
+            coordinates=np.column_stack([x, y]),
+            tissue_fractions=np.zeros(num_tiles, dtype=np.float32),
+            tile_index=np.arange(num_tiles, dtype=np.int32),
+            requested_tile_size_px=tile_size,
+            requested_spacing_um=0.5,
+            read_level=0,
+            effective_tile_size_px=tile_size,
+            effective_spacing_um=0.5,
+            tile_size_lv0=tile_size,
+            is_within_tolerance=True,
+            base_spacing_um=0.5,
+            slide_dimensions=[num_tiles * step_px + tile_size, tile_size],
+            level_downsamples=[1.0],
+            overlap=overlap,
+            min_tissue_fraction=0.1,
+            use_padding=True,
+        ),
         sample_id=sample_id,
         image_path=Path("/data/slide-1.svs"),
-        mask_path=None,
+        tissue_mask_path=None,
         backend="openslide",
-        x=np.arange(num_tiles, dtype=np.int64) * tile_size,
-        y=np.zeros(num_tiles, dtype=np.int64),
-        tile_index=np.arange(num_tiles, dtype=np.int32),
-        target_spacing_um=0.5,
-        target_tile_size_px=tile_size,
-        read_level=0,
-        read_spacing_um=0.5,
-        read_tile_size_px=tile_size,
-        tile_size_lv0=tile_size,
-        overlap=0.0,
-        tissue_threshold=0.1,
-        num_tiles=num_tiles,
+        requested_backend="openslide",
         config_hash="abc123",
-        read_step_px=step_px,
         step_px_lv0=step_px,
+        tolerance=0.05,
+        tissue_method="unknown",
+        seg_downsample=64,
+        seg_level=0,
+        seg_spacing_um=0.0,
+        seg_sthresh=8,
+        seg_sthresh_up=255,
+        seg_mthresh=7,
+        seg_close=4,
+        ref_tile_size_px=tile_size,
+        a_t=4,
+        a_h=0,
+        max_n_holes=0,
+        filter_white=False,
+        filter_black=False,
+        white_threshold=220,
+        black_threshold=25,
+        fraction_threshold=0.9,
     )
 
 
@@ -69,33 +95,63 @@ def _make_grid_tiling_result(
     rows: int,
     tile_size: int,
     step_px: int,
-) -> TilingResult:
+) -> preprocessing_mod.TilingResult:
     x_coords: list[int] = []
     y_coords: list[int] = []
     for x_idx in range(columns):
         for y_idx in range(rows):
             x_coords.append(x_idx * step_px)
             y_coords.append(y_idx * step_px)
-    return TilingResult(
+    overlap = 0.0 if step_px == tile_size else 1.0 - (step_px / tile_size)
+    return preprocessing_mod.TilingResult(
+        tiles=preprocessing_mod.TileGeometry(
+            coordinates=np.column_stack(
+                [
+                    np.asarray(x_coords, dtype=np.int64),
+                    np.asarray(y_coords, dtype=np.int64),
+                ]
+            ),
+            tissue_fractions=np.zeros(columns * rows, dtype=np.float32),
+            tile_index=np.arange(columns * rows, dtype=np.int32),
+            requested_tile_size_px=tile_size,
+            requested_spacing_um=0.5,
+            read_level=0,
+            effective_tile_size_px=tile_size,
+            effective_spacing_um=0.5,
+            tile_size_lv0=tile_size,
+            is_within_tolerance=True,
+            base_spacing_um=0.5,
+            slide_dimensions=[columns * step_px + tile_size, rows * step_px + tile_size],
+            level_downsamples=[1.0],
+            overlap=overlap,
+            min_tissue_fraction=0.1,
+            use_padding=True,
+        ),
         sample_id="grid-slide",
         image_path=Path("/data/grid-slide.svs"),
-        mask_path=None,
+        tissue_mask_path=None,
         backend="openslide",
-        x=np.asarray(x_coords, dtype=np.int64),
-        y=np.asarray(y_coords, dtype=np.int64),
-        tile_index=np.arange(columns * rows, dtype=np.int32),
-        target_spacing_um=0.5,
-        target_tile_size_px=tile_size,
-        read_level=0,
-        read_spacing_um=0.5,
-        read_tile_size_px=tile_size,
-        tile_size_lv0=tile_size,
-        overlap=0.0 if step_px == tile_size else 1.0 - (step_px / tile_size),
-        tissue_threshold=0.1,
-        num_tiles=columns * rows,
+        requested_backend="openslide",
         config_hash="grid-hash",
-        read_step_px=step_px,
         step_px_lv0=step_px,
+        tolerance=0.05,
+        tissue_method="unknown",
+        seg_downsample=64,
+        seg_level=0,
+        seg_spacing_um=0.0,
+        seg_sthresh=8,
+        seg_sthresh_up=255,
+        seg_mthresh=7,
+        seg_close=4,
+        ref_tile_size_px=tile_size,
+        a_t=4,
+        a_h=0,
+        max_n_holes=0,
+        filter_white=False,
+        filter_black=False,
+        white_threshold=220,
+        black_threshold=25,
+        fraction_threshold=0.9,
     )
 
 
@@ -104,29 +160,51 @@ def _make_custom_tiling_result(
     coords: list[tuple[int, int]],
     tile_size: int,
     sample_id: str = "custom-slide",
-) -> TilingResult:
-    x_coords = [x for x, _ in coords]
-    y_coords = [y for _, y in coords]
-    return TilingResult(
+) -> preprocessing_mod.TilingResult:
+    return preprocessing_mod.TilingResult(
+        tiles=preprocessing_mod.TileGeometry(
+            coordinates=np.asarray(coords, dtype=np.int64),
+            tissue_fractions=np.zeros(len(coords), dtype=np.float32),
+            tile_index=np.arange(len(coords), dtype=np.int32),
+            requested_tile_size_px=tile_size,
+            requested_spacing_um=0.5,
+            read_level=0,
+            effective_tile_size_px=tile_size,
+            effective_spacing_um=0.5,
+            tile_size_lv0=tile_size,
+            is_within_tolerance=True,
+            base_spacing_um=0.5,
+            slide_dimensions=[1000, 1000],
+            level_downsamples=[1.0],
+            overlap=0.0,
+            min_tissue_fraction=0.1,
+            use_padding=True,
+        ),
         sample_id=sample_id,
         image_path=Path("/data/custom-slide.svs"),
-        mask_path=None,
+        tissue_mask_path=None,
         backend="openslide",
-        x=np.asarray(x_coords, dtype=np.int64),
-        y=np.asarray(y_coords, dtype=np.int64),
-        tile_index=np.arange(len(coords), dtype=np.int32),
-        target_spacing_um=0.5,
-        target_tile_size_px=tile_size,
-        read_level=0,
-        read_spacing_um=0.5,
-        read_tile_size_px=tile_size,
-        tile_size_lv0=tile_size,
-        overlap=0.0,
-        tissue_threshold=0.1,
-        num_tiles=len(coords),
+        requested_backend="openslide",
         config_hash="custom-hash",
-        read_step_px=tile_size,
         step_px_lv0=tile_size,
+        tolerance=0.05,
+        tissue_method="unknown",
+        seg_downsample=64,
+        seg_level=0,
+        seg_spacing_um=0.0,
+        seg_sthresh=8,
+        seg_sthresh_up=255,
+        seg_mthresh=7,
+        seg_close=4,
+        ref_tile_size_px=tile_size,
+        a_t=4,
+        a_h=0,
+        max_n_holes=0,
+        filter_white=False,
+        filter_black=False,
+        white_threshold=220,
+        black_threshold=25,
+        fraction_threshold=0.9,
     )
 
 
@@ -429,7 +507,7 @@ class TestExtractTilesToTar:
         np.testing.assert_array_equal(filtered.x, [256])
 
     def test_filtered_preprocessing_results_keep_preprocessing_type(self, tmp_path: Path):
-        result = _to_preprocessing_tiling_result(_make_tiling_result(num_tiles=2))
+        result = _make_tiling_result(num_tiles=2)
         patches = [
             _solid_patch((5, 5, 5)),
             _solid_patch((128, 128, 0)),
@@ -481,13 +559,12 @@ class TestExtractTilesToTar:
 
     def test_resizes_when_read_and_target_sizes_differ(self, tmp_path: Path):
         result = _make_tiling_result(num_tiles=1, tile_size=224)
-        # Override read_tile_size_px to be different from target
-        result = TilingResult(
-            **{
-                **{f.name: getattr(result, f.name) for f in result.__dataclass_fields__.values()},
-                "read_tile_size_px": 512,
-                "target_tile_size_px": 224,
-            }
+        result = replace(
+            result,
+            tiles=replace(
+                result.tiles,
+                effective_tile_size_px=512,
+            ),
         )
 
         mock_wsi = MagicMock()
@@ -503,12 +580,12 @@ class TestExtractTilesToTar:
 
     def test_resizing_uses_bilinear_resampling(self, tmp_path: Path):
         result = _make_tiling_result(num_tiles=1, tile_size=224)
-        result = TilingResult(
-            **{
-                **{f.name: getattr(result, f.name) for f in result.__dataclass_fields__.values()},
-                "read_tile_size_px": 512,
-                "target_tile_size_px": 224,
-            }
+        result = replace(
+            result,
+            tiles=replace(
+                result.tiles,
+                effective_tile_size_px=512,
+            ),
         )
 
         mock_wsi = MagicMock()
@@ -603,9 +680,16 @@ class TestExtractTilesToTar:
 
     def test_cucim_backend_uses_batched_read_region(self, monkeypatch, tmp_path: Path):
         result = _make_tiling_result(num_tiles=2)
-        result.backend = "cucim"
-        result.read_level = 3
-        result.read_tile_size_px = 128
+        result = replace(
+            result,
+            backend="cucim",
+            requested_backend="cucim",
+            tiles=replace(
+                result.tiles,
+                read_level=3,
+                effective_tile_size_px=128,
+            ),
+        )
 
         regions = [_solid_patch((10, 20, 30), size=128), _solid_patch((40, 50, 60), size=128)]
         mock_cu_image = MagicMock()
@@ -638,7 +722,7 @@ class TestExtractTilesToTar:
         self, monkeypatch, tmp_path: Path
     ):
         result = _make_tiling_result(num_tiles=1)
-        result.backend = "cucim"
+        result = replace(result, backend="cucim", requested_backend="cucim")
 
         mock_cu_image = MagicMock()
         mock_cu_image.read_region.return_value = iter([_solid_patch((10, 20, 30))])
@@ -669,7 +753,7 @@ class TestExtractTilesToTar:
         self, monkeypatch, tmp_path: Path
     ):
         result = _make_tiling_result(num_tiles=1)
-        result.backend = "cucim"
+        result = replace(result, backend="cucim", requested_backend="cucim")
 
         mock_wsi = MagicMock()
         mock_wsi.get_patch.return_value = _solid_patch((70, 80, 90))
@@ -703,7 +787,7 @@ class TestExtractTilesToTar:
         self, monkeypatch
     ):
         result = _make_grid_tiling_result(columns=4, rows=4, tile_size=16, step_px=16)
-        result.backend = "cucim"
+        result = replace(result, backend="cucim", requested_backend="cucim")
         grouped_region = _make_grouped_region(block_size=4, tile_size=16, step_px=16)
 
         mock_cu_image = MagicMock()
@@ -750,7 +834,7 @@ class TestExtractTilesToTar:
             ],
             tile_size=16,
         )
-        result.backend = "cucim"
+        result = replace(result, backend="cucim", requested_backend="cucim")
 
         grouped_region_a = _make_grouped_region(block_size=2, tile_size=16, step_px=16)
         grouped_region_b = _make_grouped_region(block_size=2, tile_size=16, step_px=16)
@@ -792,7 +876,7 @@ class TestExtractTilesToTar:
         self, monkeypatch
     ):
         result = _make_tiling_result(num_tiles=1, tile_size=16)
-        result.backend = "cucim"
+        result = replace(result, backend="cucim", requested_backend="cucim")
 
         import hs2p.api as api_mod
 
@@ -928,17 +1012,14 @@ class TestExtractTilesToTar:
         result = _make_grid_tiling_result(columns=4, rows=4, tile_size=16, step_px=16)
         keep_mask = np.ones(result.num_tiles, dtype=bool)
         keep_mask[-1] = False
-        result = TilingResult(
-            **{
-                **{
-                    field.name: getattr(result, field.name)
-                    for field in result.__dataclass_fields__.values()
-                },
-                "x": result.x[keep_mask],
-                "y": result.y[keep_mask],
-                "tile_index": np.arange(15, dtype=np.int32),
-                "num_tiles": 15,
-            }
+        result = replace(
+            result,
+            tiles=replace(
+                result.tiles,
+                coordinates=result.coordinates[keep_mask],
+                tissue_fractions=result.tissue_fractions[keep_mask],
+                tile_index=np.arange(15, dtype=np.int32),
+            ),
         )
 
         mock_wsi = MagicMock()
