@@ -53,8 +53,8 @@ RUN set -eux; \
     apt-get clean; \
     rm -rf /var/lib/apt/lists/*
 
-# Python deps & app
-RUN python -m pip install --upgrade pip setuptools pip-tools \
+# Python deps & pyproject-based package install
+RUN python -m pip install --upgrade pip "setuptools>=61" wheel pip-tools \
     && rm -rf /root/.cache/pip
 
 COPY --chown=user:user requirements.in /opt/app/requirements.in
@@ -64,8 +64,16 @@ RUN python -m pip install \
       --requirement /opt/app/requirements.in \
     && rm -rf /root/.cache/pip
 
+COPY --chown=user:user pyproject.toml README.md LICENSE /opt/app/
+COPY --chown=user:user hs2p /opt/app/hs2p
+RUN python -m pip install \
+      --no-cache-dir \
+      --no-color \
+      --no-build-isolation \
+      /opt/app \
+    && rm -rf /root/.cache/pip
+
 COPY --chown=user:user . /opt/app/
-RUN python -m pip install /opt/app
 
 USER user
 WORKDIR /opt/app
