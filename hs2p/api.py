@@ -1,5 +1,4 @@
 import csv
-import hashlib
 import importlib
 import io
 import itertools
@@ -11,7 +10,7 @@ import time
 import traceback
 import warnings
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict, dataclass, is_dataclass, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -29,7 +28,6 @@ from hs2p.progress import emit_progress, emit_progress_log
 from hs2p.wsi import (
     CoordinateOutputMode,
     CoordinateSelectionStrategy,
-    ResolvedSamplingSpec,
     extract_coordinates,
     overlay_mask_on_slide as _overlay_mask_on_slide,
     write_coordinate_preview,
@@ -122,44 +120,6 @@ def _validate_result_consistency(result: TilingResult) -> None:
     ):
         raise ValueError("tile_index must be a contiguous range from 0 to num_tiles-1")
 
-
-def compute_effective_config_hash(
-    *,
-    tiling: TilingConfig,
-    segmentation: SegmentationConfig,
-    filtering: FilterConfig,
-    sampling_spec: ResolvedSamplingSpec | None = None,
-    selection_strategy: str | None = None,
-    output_mode: str | None = None,
-    annotation: str | None = None,
-) -> str:
-    if (
-        sampling_spec is None
-        or selection_strategy is None
-        or output_mode is None
-    ):
-        return compute_config_hash(
-            tiling=tiling,
-            segmentation=segmentation,
-            filtering=filtering,
-        )
-    payload: dict[str, Any] = {
-        "sampling": {
-            "selection_strategy": selection_strategy,
-            "output_mode": output_mode,
-            "resolved_sampling_spec": sampling_spec,
-        }
-    }
-    if annotation is not None:
-        payload["sampling"]["annotation"] = annotation
-    return compute_config_hash(
-        tiling=tiling,
-        segmentation=segmentation,
-        filtering=filtering,
-        extra=payload,
-    )
-
-
 def _optional_path(value: Any) -> Path | None:
     if value is None or pd.isna(value):
         return None
@@ -197,7 +157,6 @@ def _compute_tiling_result(
     filtering: FilterConfig,
     mask_preview_path: Path | None,
     num_workers: int,
-    config_hash: str | None = None,
 ) -> TilingResult:
     sampling_spec = None
     if whole_slide.mask_path is not None:
@@ -244,62 +203,7 @@ def _compute_tiling_result(
         mask_preview_path=mask_preview_path,
         tissue_mask=preprocessing_result.tissue_mask,
     )
-    return replace(
-        preprocessing_result,
-        config_hash=(
-            config_hash
-            if config_hash is not None
-            else compute_effective_config_hash(
-                tiling=tiling,
-                segmentation=segmentation,
-                filtering=filtering,
-                sampling_spec=sampling_spec,
-                selection_strategy=(
-                    CoordinateSelectionStrategy.MERGED_DEFAULT_TILING
-                    if sampling_spec is not None
-                    else None
-                ),
-                output_mode=(
-                    CoordinateOutputMode.SINGLE_OUTPUT
-                    if sampling_spec is not None
-                    else None
-                ),
-            )
-        ),
-    )
-
-
-def _normalize_for_hash(value: Any) -> Any:
-    if isinstance(value, Path):
-        return str(value)
-    if is_dataclass(value) and not isinstance(value, type):
-        return {
-            key: _normalize_for_hash(val)
-            for key, val in sorted(asdict(value).items())
-        }
-    if isinstance(value, dict):
-        return {k: _normalize_for_hash(v) for k, v in sorted(value.items())}
-    if isinstance(value, (list, tuple)):
-        return [_normalize_for_hash(v) for v in value]
-    return value
-
-
-def compute_config_hash(
-    *,
-    tiling: TilingConfig,
-    segmentation: SegmentationConfig,
-    filtering: FilterConfig,
-    extra: dict[str, Any] | None = None,
-) -> str:
-    payload = {
-        "tiling": _normalize_for_hash(asdict(tiling)),
-        "segmentation": _normalize_for_hash(asdict(segmentation)),
-        "filtering": _normalize_for_hash(asdict(filtering)),
-    }
-    if extra:
-        payload["extra"] = _normalize_for_hash(extra)
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    return preprocessing_result
 
 
 def _validate_required_columns(
@@ -361,20 +265,6 @@ def tile_slide(
         filtering=filtering,
         mask_preview_path=None,
         num_workers=num_workers,
-        config_hash=compute_effective_config_hash(
-            tiling=effective_tiling,
-            segmentation=segmentation,
-            filtering=filtering,
-            sampling_spec=sampling_spec,
-            selection_strategy=(
-                CoordinateSelectionStrategy.MERGED_DEFAULT_TILING
-                if sampling_spec is not None
-                else None
-            ),
-            output_mode=(
-                CoordinateOutputMode.SINGLE_OUTPUT if sampling_spec is not None else None
-            ),
-        ),
     )
 
 
@@ -1023,7 +913,6 @@ class _SlideComputeRequest:
     tiling: TilingConfig
     segmentation: SegmentationConfig
     filtering: FilterConfig
-    config_hash: str
     mask_preview_path: Path | None
     output_dir: Path
     num_workers: int
@@ -1144,7 +1033,6 @@ def _compute_and_save_tiling_artifacts_from_request(
             filtering=effective_filtering,
             mask_preview_path=request.mask_preview_path,
             num_workers=request.num_workers,
-            config_hash=request.config_hash,
         )
         tiles_tar_path: Path | None = None
         if request.save_tiles:
@@ -1258,7 +1146,6 @@ def tile_slides(
         for row in existing_df.to_dict(orient="records"):
             if row.get("tiling_status") == "success":
                 existing_successes[str(row["sample_id"])] = row
-    expected_hashes: dict[tuple[bool, str], str] = {}
     compatibility_specs: dict[tuple[bool, str], ArtifactCompatibilitySpec] = {}
 
     def _resolve_effective_tiling(whole_slide: SlideSpec) -> TilingConfig:
@@ -1283,27 +1170,11 @@ def tile_slides(
         try:
             effective_tiling = _resolve_effective_tiling(whole_slide)
             key = (whole_slide.mask_path is not None, effective_tiling.backend)
-            if key not in expected_hashes:
+            if key not in compatibility_specs:
                 sampling_spec = (
                     build_default_sampling_spec(effective_tiling)
                     if whole_slide.mask_path is not None
                     else None
-                )
-                expected_hashes[key] = compute_effective_config_hash(
-                    tiling=effective_tiling,
-                    segmentation=segmentation,
-                    filtering=filtering,
-                    sampling_spec=sampling_spec,
-                    selection_strategy=(
-                        CoordinateSelectionStrategy.MERGED_DEFAULT_TILING
-                        if sampling_spec is not None
-                        else None
-                    ),
-                    output_mode=(
-                        CoordinateOutputMode.SINGLE_OUTPUT
-                        if sampling_spec is not None
-                        else None
-                    ),
                 )
                 compatibility_specs[key] = ArtifactCompatibilitySpec(
                     tiling=effective_tiling,
@@ -1320,7 +1191,6 @@ def tile_slides(
                         else None
                     ),
                 )
-            expected_hash = expected_hashes[key]
             compatibility = compatibility_specs[key]
             artifact: TilingArtifacts | None = None
             if whole_slide.sample_id in existing_successes:
@@ -1357,7 +1227,6 @@ def tile_slides(
                 tiling=effective_tiling,
                 segmentation=segmentation,
                 filtering=filtering,
-                config_hash=expected_hash,
                 mask_preview_path=mask_preview_path,
                 output_dir=output_dir,
                 num_workers=1,
@@ -1562,7 +1431,6 @@ def tile_slides(
                     tiling=request.tiling,
                     segmentation=request.segmentation,
                     filtering=request.filtering,
-                    config_hash=request.config_hash,
                     mask_preview_path=request.mask_preview_path,
                     output_dir=request.output_dir,
                     num_workers=worker_inner_workers,
@@ -1590,7 +1458,6 @@ def tile_slides(
                     tiling=request.tiling,
                     segmentation=request.segmentation,
                     filtering=request.filtering,
-                    config_hash=request.config_hash,
                     mask_preview_path=request.mask_preview_path,
                     output_dir=request.output_dir,
                     num_workers=worker_inner_workers,

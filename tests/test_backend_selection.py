@@ -207,7 +207,6 @@ def test_tile_slide_uses_resolved_backend_for_hash_and_result(monkeypatch):
             ),
             sample_id="slide-1",
             image_path="slide.svs",
-            config_hash=None,
             backend="cucim",
             requested_backend="cucim",
             tolerance=0.05,
@@ -231,14 +230,8 @@ def test_tile_slide_uses_resolved_backend_for_hash_and_result(monkeypatch):
             fraction_threshold=0.9,
         )
 
-    def _fake_hash(*, tiling, segmentation, filtering, sampling_spec=None, selection_strategy=None, output_mode=None, annotation=None):
-        del segmentation, filtering, sampling_spec, selection_strategy, output_mode, annotation
-        captured["hash_backend"] = tiling.backend
-        return "hash"
-
     monkeypatch.setattr(api_mod, "resolve_backend", _fake_resolve_backend)
     monkeypatch.setattr(api_mod, "preprocess_slide", _fake_preprocess_slide)
-    monkeypatch.setattr(api_mod, "compute_effective_config_hash", _fake_hash)
 
     result = api_mod.tile_slide(
         api_mod.SlideSpec(sample_id="slide-1", image_path=Path("slide.svs")),
@@ -257,4 +250,3 @@ def test_tile_slide_uses_resolved_backend_for_hash_and_result(monkeypatch):
 
     assert result.backend == "cucim"
     assert captured["backend"] == "cucim"
-    assert captured["hash_backend"] == "cucim"

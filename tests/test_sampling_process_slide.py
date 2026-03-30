@@ -585,14 +585,13 @@ def test_sampling_main_defaults_inner_slide_workers_to_one(monkeypatch, tmp_path
                             if kwargs["mask_path"] is not None
                             else None
                         ),
-                        "sampling_status": "success",
-                        "num_tiles": 0,
-                        "coordinates_npz_path": np.nan,
-                        "coordinates_meta_path": np.nan,
-                        "config_hash": "hash",
-                        "error": np.nan,
-                        "traceback": np.nan,
-                    }
+                    "sampling_status": "success",
+                    "num_tiles": 0,
+                    "coordinates_npz_path": np.nan,
+                    "coordinates_meta_path": np.nan,
+                    "error": np.nan,
+                    "traceback": np.nan,
+                }
                 ],
             },
         ),
@@ -705,14 +704,13 @@ def test_sampling_main_rejects_explicit_inner_slide_workers_override(
                             if kwargs["mask_path"] is not None
                             else None
                         ),
-                        "sampling_status": "success",
-                        "num_tiles": 0,
-                        "coordinates_npz_path": np.nan,
-                        "coordinates_meta_path": np.nan,
-                        "config_hash": "hash",
-                        "error": np.nan,
-                        "traceback": np.nan,
-                    }
+                    "sampling_status": "success",
+                    "num_tiles": 0,
+                    "coordinates_npz_path": np.nan,
+                    "coordinates_meta_path": np.nan,
+                    "error": np.nan,
+                    "traceback": np.nan,
+                }
                 ],
             },
         ),
@@ -722,7 +720,7 @@ def test_sampling_main_rejects_explicit_inner_slide_workers_override(
         sampling_mod.main(SimpleNamespace())
 
 
-def test_save_sampling_coordinates_uses_annotation_threshold_and_sampling_mode_in_hash(
+def test_save_sampling_coordinates_uses_annotation_threshold_and_sampling_mode(
     monkeypatch,
     tmp_path,
 ):
@@ -814,15 +812,9 @@ def test_save_sampling_coordinates_uses_annotation_threshold_and_sampling_mode_i
     assert result.tissue_threshold == 0.7
     assert result.read_step_px == 256
     assert result.step_px_lv0 == 256
-    assert result.config_hash == sampling_mod.compute_effective_config_hash(
-        tiling=tiling_config,
-        segmentation=segmentation_config,
-        filtering=filter_config,
-        sampling_spec=resolved_sampling_spec,
-        selection_strategy=sampling_mod.CoordinateSelectionStrategy.JOINT_SAMPLING,
-        output_mode=sampling_mod.CoordinateOutputMode.PER_ANNOTATION,
-        annotation="tumor",
-    )
+    assert result.annotation == "tumor"
+    assert result.selection_strategy == sampling_mod.CoordinateSelectionStrategy.JOINT_SAMPLING
+    assert result.output_mode == sampling_mod.CoordinateOutputMode.PER_ANNOTATION
     assert captured["tiles_dir"] == tmp_path / "tiles" / "tumor"
 
 
@@ -902,7 +894,7 @@ def test_save_sampling_coordinates_writes_sampling_metadata_fields(tmp_path):
     assert meta["tiling"]["step_px_lv0"] == 256
 
 
-def test_validate_sampling_artifact_row_ignores_stale_config_hash(tmp_path):
+def test_validate_sampling_artifact_row_accepts_matching_metadata(tmp_path):
     cfg = SimpleNamespace(
         output_dir=str(tmp_path),
         tiling=SimpleNamespace(
@@ -981,7 +973,6 @@ def test_validate_sampling_artifact_row_ignores_stale_config_hash(tmp_path):
             "num_tiles": 1,
             "coordinates_npz_path": str(artifacts.coordinates_npz_path),
             "coordinates_meta_path": str(artifacts.coordinates_meta_path),
-            "config_hash": "stale-hash",
         },
         whole_slide=SimpleNamespace(
             sample_id="sample-1",
@@ -1085,7 +1076,6 @@ def test_validate_sampling_artifact_row_rejects_mismatched_tiling_config(tmp_pat
                 "num_tiles": 1,
                 "coordinates_npz_path": str(artifacts.coordinates_npz_path),
                 "coordinates_meta_path": str(artifacts.coordinates_meta_path),
-                "config_hash": "stale-hash",
             },
             whole_slide=SimpleNamespace(
                 sample_id="sample-1",

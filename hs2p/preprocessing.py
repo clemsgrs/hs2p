@@ -291,7 +291,6 @@ class TilingResult:
     # -- provenance --
     sample_id: str
     image_path: str | Path
-    config_hash: str | None
     backend: str
     requested_backend: str
     # -- tiling config --
@@ -625,7 +624,6 @@ _PROVENANCE_KEYS = {
     "sample_id",
     "image_path",
     "tissue_mask_path",
-    "config_hash",
     "backend",
     "requested_backend",
 }
@@ -693,7 +691,6 @@ def _build_tiling_metadata(result: TilingResult) -> dict[str, Any]:
         "tissue_mask_path": (
             str(result.tissue_mask_path) if result.tissue_mask_path is not None else None
         ),
-        "config_hash": result.config_hash,
         "backend": result.backend,
         "requested_backend": result.requested_backend,
     }
@@ -958,7 +955,6 @@ def _load_v2_tiling_result(*, npz_path: Path, meta: dict[str, Any]) -> TilingRes
         tiles=tiles,
         sample_id=provenance["sample_id"],
         image_path=provenance["image_path"],
-        config_hash=provenance.get("config_hash"),
         backend=provenance["backend"],
         requested_backend=provenance["requested_backend"],
         tolerance=tiling["tolerance"],
@@ -1205,7 +1201,6 @@ def preprocess_slide(
             tiles=tiles,
             sample_id=sample_id,
             image_path=str(image_path),
-            config_hash=None,
             backend=slide.backend_name,
             requested_backend=backend,
             tolerance=tolerance,

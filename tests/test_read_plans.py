@@ -57,7 +57,6 @@ def _make_grid_result(
         tissue_mask_path=None,
         backend="openslide",
         requested_backend="openslide",
-        config_hash="read-plan-hash",
         step_px_lv0=step_px,
         tolerance=0.05,
         tissue_method="unknown",

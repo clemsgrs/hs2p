@@ -99,7 +99,6 @@ def _make_tiling_result(n_tiles: int = 4) -> TilingResult:
         tiles=tiles,
         sample_id="slide-001",
         image_path="/tmp/slide-001.svs",
-        config_hash="preprocessing-hash",
         backend="openslide",
         requested_backend="auto",
         tolerance=0.05,
@@ -135,7 +134,6 @@ def test_tiling_artifact_roundtrip_uses_strict_rich_metadata(tmp_path):
     meta = json.loads(paths["meta"].read_text())
     assert meta["format_version"] == 2
     assert meta["provenance"]["requested_backend"] == "auto"
-    assert meta["provenance"]["config_hash"] == "preprocessing-hash"
     assert meta["slide"]["base_spacing_um"] == 0.25
     assert meta["segmentation"]["seg_level"] == 2
     assert meta["segmentation"]["seg_spacing_um"] == 1.0
@@ -156,7 +154,6 @@ def test_tiling_artifact_roundtrip_uses_strict_rich_metadata(tmp_path):
         result.coordinates[np.lexsort((result.coordinates[:, 1], result.coordinates[:, 0]))],
     )
     assert loaded.requested_backend == "auto"
-    assert loaded.config_hash == "preprocessing-hash"
     assert loaded.base_spacing_um == pytest.approx(0.25)
     assert loaded.seg_level == 2
     assert loaded.mask_level == 1

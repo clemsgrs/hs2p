@@ -13,12 +13,10 @@ from hs2p.preprocessing import TileGeometry, TilingResult
 from hs2p.api import (
     CoordinateOutputMode,
     FilterConfig,
-    ResolvedSamplingSpec,
     SegmentationConfig,
     TilingConfig,
     _write_process_list,
     _validate_required_columns,
-    compute_effective_config_hash,
     load_tiling_result,
     save_tiling_result,
 )
@@ -35,6 +33,7 @@ from hs2p.utils import setup, load_csv
 from hs2p.wsi import (
     CoordinateExtractionResult,
     CoordinateSelectionStrategy,
+    ResolvedSamplingSpec,
     UnifiedCoordinateRequest,
     execute_coordinate_request,
     write_coordinate_preview,
@@ -179,15 +178,6 @@ def _save_sampling_coordinates(
         tissue_mask_path=mask_path,
         backend=backend,
         requested_backend=backend,
-        config_hash=compute_effective_config_hash(
-            tiling=tiling_config,
-            segmentation=segmentation_config,
-            filtering=filter_config,
-            sampling_spec=resolved_sampling_spec,
-            selection_strategy=selection_strategy,
-            output_mode=output_mode,
-            annotation=annotation,
-        ),
         step_px_lv0=extraction.step_px_lv0,
         tolerance=tiling_config.tolerance,
         tissue_method="unknown",
@@ -335,15 +325,6 @@ def process_slide(
                         pixel_mapping=resolved_sampling_spec.pixel_mapping,
                         color_mapping=color_mapping,
                     )
-            config_hash = compute_effective_config_hash(
-                tiling=effective_tiling_config,
-                segmentation=segmentation_config,
-                filtering=filter_config,
-                sampling_spec=resolved_sampling_spec,
-                selection_strategy=selection_strategy,
-                output_mode=CoordinateOutputMode.PER_ANNOTATION,
-                annotation=annotation,
-            )
             rows.append(
                 {
                     "sample_id": sample_id,
@@ -360,7 +341,6 @@ def process_slide(
                         if artifacts is not None
                         else np.nan
                     ),
-                    "config_hash": config_hash,
                     "error": np.nan,
                     "traceback": np.nan,
                 }
@@ -385,7 +365,6 @@ def process_slide(
                     "num_tiles": 0,
                     "coordinates_npz_path": np.nan,
                     "coordinates_meta_path": np.nan,
-                    "config_hash": np.nan,
                     "error": str(e),
                     "traceback": str(traceback.format_exc()),
                 }
@@ -413,7 +392,6 @@ def _build_sampling_process_rows(
                     "num_tiles": 0,
                     "coordinates_npz_path": np.nan,
                     "coordinates_meta_path": np.nan,
-                    "config_hash": np.nan,
                     "error": np.nan,
                     "traceback": np.nan,
                 }
@@ -542,7 +520,6 @@ def main(args):
                         "num_tiles",
                         "coordinates_npz_path",
                         "coordinates_meta_path",
-                        "config_hash",
                         "error",
                         "traceback",
                     },
@@ -567,7 +544,6 @@ def main(args):
                         "num_tiles",
                         "coordinates_npz_path",
                         "coordinates_meta_path",
-                        "config_hash",
                         "error",
                         "traceback",
                     ],
