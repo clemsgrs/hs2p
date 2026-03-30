@@ -5,6 +5,7 @@ import numpy as np
 
 from hs2p.api import FilterConfig, SegmentationConfig, TilingConfig
 import hs2p.wsi as wsi_api
+from hs2p.wsi import api as wsi_api_mod
 import hs2p.wsi.wsi as wsimod
 from hs2p.wsi import ResolvedSamplingSpec
 from tests.helpers.fake_wsi_backend import FakePyramidWSI, PyramidSpec
@@ -212,7 +213,7 @@ def test_extract_coordinate_result_preserves_stride_when_contours_have_offset_or
             assert level == 0
             return 0.5
 
-    result = wsi_api._extract_coordinate_result_from_wsi(
+    result = wsi_api_mod._extract_coordinate_result_from_wsi(
         wsi=FakeWSI(),
         tiling_params=SimpleNamespace(
             target_tile_size_px=224,
@@ -257,7 +258,7 @@ def test_extract_coordinate_result_uses_actual_overlap_stride_in_level0_pixels()
         def get_level_spacing(self, level):
             return [0.5, 1.0][level]
 
-    result = wsi_api._extract_coordinate_result_from_wsi(
+    result = wsi_api_mod._extract_coordinate_result_from_wsi(
         wsi=FakeWSI(),
         tiling_params=SimpleNamespace(
             target_tile_size_px=224,

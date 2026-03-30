@@ -6,6 +6,8 @@ from pathlib import Path
 
 import wholeslidedata as wsd
 
+from hs2p.wsi.reader import open_slide, select_level, select_level_for_downsample
+
 AUTO_BACKEND = "auto"
 PREFERRED_BACKENDS = ("cucim", "asap", "openslide")
 CUCIM_SUPPORTED_SUFFIXES = {".svs", ".tif", ".tiff"}
@@ -114,3 +116,15 @@ def resolve_backend(
     raise RuntimeError(
         f"Unable to open {wsi_path} with any supported backend (tried: {', '.join(tried) or 'none'})"
     )
+
+
+__all__ = [
+    "AUTO_BACKEND",
+    "BackendSelection",
+    "coerce_wsd_path",
+    "open_slide",
+    "resolve_backend",
+    "select_level",
+    "select_level_for_downsample",
+    "_backend_can_open_slide",
+]

@@ -5,6 +5,7 @@ import numpy as np
 
 import hs2p.api as api_mod
 import hs2p.wsi.backend as backend_mod
+import hs2p.wsi.reader as reader_mod
 import hs2p.wsi.wsi as wsi_mod
 
 
@@ -59,6 +60,54 @@ def test_resolve_backend_respects_explicit_override(monkeypatch):
     assert selection.tried == ("asap",)
     assert selection.reason is None
     assert calls == []
+
+
+def test_reader_resolve_backend_prefers_cucim_when_supported(monkeypatch):
+    calls: list[str] = []
+
+    def _fake_can_open_slide(*, wsi_path: str, mask_path: str | None, backend: str):
+        del wsi_path, mask_path
+        calls.append(backend)
+        return backend == "cucim"
+
+    monkeypatch.setattr(reader_mod, "_backend_can_open_slide", _fake_can_open_slide)
+
+    selection = reader_mod.resolve_backend("auto", wsi_path=Path("slide.svs"))
+
+    assert selection.backend == "cucim"
+    assert selection.tried == ("cucim",)
+    assert "CuCIM" in (selection.reason or "")
+    assert calls == ["cucim"]
+
+
+def test_reader_backend_probe_uses_backend_openers(monkeypatch):
+    seen_paths: list[str] = []
+
+    def _fake_opener(path, *, spacing_override=None, gpu_decode=False):
+        del spacing_override, gpu_decode
+        seen_paths.append(str(path))
+        return SimpleNamespace(close=lambda: None)
+
+    monkeypatch.setattr(
+        reader_mod,
+        "_BACKENDS",
+        {
+            **reader_mod._BACKENDS,
+            "cucim": reader_mod._BackendSpec(
+                name="cucim",
+                opener=_fake_opener,
+                supports_path=lambda path: True,
+            ),
+        },
+    )
+    reader_mod._backend_can_open_slide.cache_clear()
+
+    assert reader_mod._backend_can_open_slide(
+        wsi_path="/tmp/slide.tiff",
+        mask_path="/tmp/mask.tiff",
+        backend="cucim",
+    )
+    assert seen_paths == ["/tmp/slide.tiff", "/tmp/mask.tiff"]
 
 
 def test_backend_probe_coerces_cucim_paths_to_strings(monkeypatch):
