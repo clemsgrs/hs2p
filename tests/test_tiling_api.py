@@ -9,6 +9,7 @@ import pytest
 
 import hs2p.preprocessing as preprocessing_mod
 from hs2p.api import (
+    ArtifactCompatibilitySpec,
     FilterConfig,
     PreviewConfig,
     CoordinateOutputMode,
@@ -201,6 +202,25 @@ def _build_preprocessing_result(
         annotation=annotation,
         selection_strategy=selection_strategy,
         output_mode=output_mode,
+    )
+
+
+def _artifact_compatibility(
+    *,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+    selection_strategy: str | None = None,
+    output_mode: str | None = None,
+    annotation: str | None = None,
+) -> ArtifactCompatibilitySpec:
+    return ArtifactCompatibilitySpec(
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        selection_strategy=selection_strategy,
+        output_mode=output_mode,
+        annotation=annotation,
     )
 
 
@@ -1273,16 +1293,35 @@ def test_tile_slide_surfaces_preprocessing_errors(
         )
 
 
-def test_validate_tiling_artifacts_rejects_mismatched_hash(tmp_path: Path):
+def test_validate_tiling_artifacts_rejects_mismatched_tiling_config(
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
     result = _build_result(sample_id="slide-3", image_path="slide-3.svs")
     artifacts = save_tiling_result(result, output_dir=tmp_path)
 
-    with pytest.raises(ValueError, match="config_hash"):
+    incompatible_tiling = TilingConfig(
+        target_spacing_um=0.75,
+        target_tile_size_px=tiling_config.target_tile_size_px,
+        tolerance=tiling_config.tolerance,
+        overlap=tiling_config.overlap,
+        tissue_threshold=tiling_config.tissue_threshold,
+        use_padding=tiling_config.use_padding,
+        backend=tiling_config.backend,
+    )
+
+    with pytest.raises(ValueError, match="target_spacing_um mismatch"):
         validate_tiling_artifacts(
             whole_slide=SlideSpec(sample_id="slide-3", image_path=Path("slide-3.svs")),
             coordinates_npz_path=artifacts.coordinates_npz_path,
             coordinates_meta_path=artifacts.coordinates_meta_path,
-            expected_config_hash="different-hash",
+            compatibility=_artifact_compatibility(
+                tiling_config=incompatible_tiling,
+                segmentation_config=segmentation_config,
+                filter_config=filter_config,
+            ),
         )
 
 
@@ -1297,7 +1336,11 @@ def test_validate_tiling_artifacts_rejects_mismatched_image_path(tmp_path: Path)
             ),
             coordinates_npz_path=artifacts.coordinates_npz_path,
             coordinates_meta_path=artifacts.coordinates_meta_path,
-            expected_config_hash="actual-hash",
+            compatibility=_artifact_compatibility(
+                tiling_config=TilingConfig(0.5, 224, 0.07, 0.0, 0.1, True, "asap"),
+                segmentation_config=SegmentationConfig(64, 8, 255, 7, 4, False, True),
+                filter_config=FilterConfig(224, 4, 2, 8, False, False, 220, 25, 0.9),
+            ),
         )
 
 
@@ -1318,7 +1361,11 @@ def test_validate_tiling_artifacts_rejects_mismatched_mask_path(tmp_path: Path):
             ),
             coordinates_npz_path=artifacts.coordinates_npz_path,
             coordinates_meta_path=artifacts.coordinates_meta_path,
-            expected_config_hash="actual-hash",
+            compatibility=_artifact_compatibility(
+                tiling_config=TilingConfig(0.5, 224, 0.07, 0.0, 0.1, True, "asap"),
+                segmentation_config=SegmentationConfig(64, 8, 255, 7, 4, False, True),
+                filter_config=FilterConfig(224, 4, 2, 8, False, False, 220, 25, 0.9),
+            ),
         )
 
 
