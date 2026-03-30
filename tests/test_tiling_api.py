@@ -221,7 +221,7 @@ def _patch_preprocess_slide(
             return result(**kwargs)
         return result
 
-    monkeypatch.setattr(api_mod.preprocessing_mod, "preprocess_slide", _fake_preprocess_slide)
+    monkeypatch.setattr(api_mod, "preprocess_slide", _fake_preprocess_slide)
 
 
 def _save_valid_preprocessing_artifact(
@@ -1354,7 +1354,7 @@ def test_tile_slides_writes_process_list_and_can_reuse_precomputed_tiles(
             "tile extraction should not run when precomputed tiles are reused"
         )
 
-    monkeypatch.setattr(api_mod.preprocessing_mod, "preprocess_slide", _unexpected_preprocess)
+    monkeypatch.setattr(api_mod, "preprocess_slide", _unexpected_preprocess)
 
     artifacts = tile_slides(
         [SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs"))],
@@ -1553,7 +1553,7 @@ def test_tile_slides_resume_marks_stale_artifact_as_failed(
     ).to_csv(tmp_path / "run" / "process_list.csv", index=False)
 
     monkeypatch.setattr(
-        api_mod.preprocessing_mod,
+        api_mod,
         "preprocess_slide",
         lambda **_: (_ for _ in ()).throw(
             AssertionError("should not recompute stale resumed tiles")
@@ -1659,7 +1659,7 @@ def test_tile_slides_computes_resume_hash_once_per_batch(
         "hs2p.api.validate_tiling_artifacts", _fake_validate_tiling_artifacts
     )
     monkeypatch.setattr(
-        api_mod.preprocessing_mod,
+        api_mod,
         "preprocess_slide",
         lambda **_: (_ for _ in ()).throw(
             AssertionError("resume path should not recompute tiles")

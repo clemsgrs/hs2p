@@ -18,7 +18,6 @@ from typing import Any, Sequence
 import numpy as np
 import pandas as pd
 
-import hs2p.preprocessing as preprocessing_mod
 from hs2p.configs import (
     FilterConfig,
     PreviewConfig,
@@ -43,6 +42,12 @@ from hs2p.wsi.read_plans import (
     resolve_step_px_lv0,
 )
 from hs2p.wsi.region_tiles import iter_plan_region_tile_views
+from hs2p.preprocessing import (
+    TilingResult,
+    load_tiling_result as load_preprocessing_tiling_result,
+    preprocess_slide,
+    save_tiling_result as save_preprocessing_tiling_result,
+)
 
 
 @dataclass(frozen=True)
@@ -63,10 +68,6 @@ class SlideSpec:
     image_path: Path
     mask_path: Path | None = None
     spacing_at_level_0: float | None = None
-
-
-TilingResult = preprocessing_mod.TilingResult
-
 
 @dataclass(frozen=True)
 class TilingArtifacts:
@@ -197,11 +198,11 @@ def _compute_tiling_result(
     mask_preview_path: Path | None,
     num_workers: int,
     config_hash: str | None = None,
-) -> preprocessing_mod.TilingResult:
+) -> TilingResult:
     sampling_spec = None
     if whole_slide.mask_path is not None:
         sampling_spec = build_default_sampling_spec(tiling)
-    preprocessing_result = preprocessing_mod.preprocess_slide(
+    preprocessing_result = preprocess_slide(
         image_path=whole_slide.image_path,
         sample_id=whole_slide.sample_id,
         tissue_mask_path=whole_slide.mask_path,
@@ -324,7 +325,7 @@ def tile_slide(
     filtering: FilterConfig,
     preview: PreviewConfig | None = None,
     num_workers: int = 1,
-) -> preprocessing_mod.TilingResult:
+) -> TilingResult:
     if preview is not None and (
         preview.save_mask_preview or preview.save_tiling_preview
     ):
@@ -390,7 +391,7 @@ def save_tiling_result(
         else Path(output_dir) / "tiles"
     )
     tiles_dir.mkdir(parents=True, exist_ok=True)
-    artifact_paths = preprocessing_mod.save_tiling_result(
+    artifact_paths = save_preprocessing_tiling_result(
         result,
         output_dir=tiles_dir,
         sample_id=result.sample_id,
@@ -767,9 +768,9 @@ def _needs_pixel_filtering(filtering: FilterConfig) -> bool:
 def load_tiling_result(
     coordinates_npz_path: Path,
     coordinates_meta_path: Path,
-) -> preprocessing_mod.TilingResult:
+) -> TilingResult:
     try:
-        preprocessing_result = preprocessing_mod.load_tiling_result(
+        preprocessing_result = load_preprocessing_tiling_result(
             coordinates_npz_path,
             coordinates_meta_path,
         )
