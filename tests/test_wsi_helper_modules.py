@@ -1,6 +1,9 @@
 import numpy as np
 from PIL import Image
 
+import hs2p.wsi as wsi_pkg
+from hs2p.wsi import masks as masks_mod
+from hs2p.wsi import preview as preview_mod
 from hs2p.wsi.masks import (
     compose_overlay_mask_from_annotations,
     extract_padded_crop,
@@ -8,6 +11,15 @@ from hs2p.wsi.masks import (
     pad_array_to_shape,
 )
 from hs2p.wsi.preview import build_overlay_alpha, build_palette
+
+
+def test_wsi_package_reexports_helper_functions_directly():
+    assert wsi_pkg._normalize_tissue_mask is masks_mod.normalize_tissue_mask
+    assert wsi_pkg._read_aligned_mask is masks_mod.read_aligned_mask
+    assert wsi_pkg._compose_overlay_mask_from_annotations is masks_mod.compose_overlay_mask_from_annotations
+    assert wsi_pkg.overlay_mask_on_tile is preview_mod.overlay_mask_on_tile
+    assert wsi_pkg.draw_grid_from_coordinates is preview_mod.draw_grid_from_coordinates
+    assert wsi_pkg.pad_to_patch_size is preview_mod.pad_to_patch_size
 
 
 def test_masks_normalize_and_compose_overlay_mask():

@@ -5,26 +5,26 @@ from typing import Any
 import cv2
 import tqdm
 import numpy as np
-from PIL import Image, ImageOps
+from PIL import Image
 from collections import defaultdict
 
 from hs2p.configs import FilterConfig, SegmentationConfig, TilingConfig
 from hs2p.progress import emit_progress_log
 from .masks import (
-    compose_overlay_mask_from_annotations as _compose_overlay_mask_from_annotations_impl,
-    extract_padded_crop as _extract_padded_crop_impl,
-    mask_level_downsamples as _mask_level_downsamples_impl,
-    normalize_tissue_mask as _normalize_tissue_mask_impl,
-    pad_array_to_shape as _pad_array_to_shape_impl,
-    read_aligned_mask as _read_aligned_mask_impl,
+    compose_overlay_mask_from_annotations as _compose_overlay_mask_from_annotations,
+    extract_padded_crop as _extract_padded_crop,
+    mask_level_downsamples as _mask_level_downsamples,
+    normalize_tissue_mask as _normalize_tissue_mask,
+    pad_array_to_shape as _pad_array_to_shape,
+    read_aligned_mask as _read_aligned_mask,
 )
 from .preview import (
-    build_overlay_alpha as _build_overlay_alpha_impl,
-    build_palette as _build_palette_impl,
-    draw_grid as _draw_grid_impl,
-    draw_grid_from_coordinates as _draw_grid_from_coordinates_impl,
-    overlay_mask_on_tile as _overlay_mask_on_tile_impl,
-    pad_to_patch_size as _pad_to_patch_size_impl,
+    build_overlay_alpha as _build_overlay_alpha,
+    build_palette as _build_palette,
+    draw_grid,
+    draw_grid_from_coordinates,
+    overlay_mask_on_tile,
+    pad_to_patch_size,
 )
 from .wsi import (
     ResolvedSamplingSpec,
@@ -228,17 +228,6 @@ def get_mask_coverage(mask: np.ndarray, val: int):
     return mask_percentage
 
 
-def _build_palette(
-    *,
-    pixel_mapping: dict[str, int],
-    color_mapping: dict[str, list[int] | None],
-) -> np.ndarray:
-    return _build_palette_impl(
-        pixel_mapping=pixel_mapping,
-        color_mapping=color_mapping,
-    )
-
-
 def _resolve_overlay_style(
     *,
     palette: np.ndarray | None,
@@ -258,65 +247,6 @@ def _resolve_overlay_style(
             "Provide either all of palette, pixel_mapping, and color_mapping, or none of them"
         )
     return palette, pixel_mapping, color_mapping
-
-
-def _normalize_tissue_mask(mask_arr: np.ndarray) -> np.ndarray:
-    return _normalize_tissue_mask_impl(mask_arr)
-
-
-def _mask_level_downsamples(mask_obj) -> list[tuple[float, float]]:
-    return _mask_level_downsamples_impl(mask_obj)
-
-
-def _read_aligned_mask(
-    *,
-    mask_obj,
-    slide_spacing: float,
-    slide_dimensions: tuple[int, int],
-) -> np.ndarray:
-    return _read_aligned_mask_impl(
-        mask_obj=mask_obj,
-        slide_spacing=slide_spacing,
-        slide_dimensions=slide_dimensions,
-    )
-
-
-def _pad_array_to_shape(
-    arr: np.ndarray, *, target_width: int, target_height: int
-) -> np.ndarray:
-    return _pad_array_to_shape_impl(
-        arr,
-        target_width=target_width,
-        target_height=target_height,
-    )
-
-
-def _extract_padded_crop(
-    arr: np.ndarray,
-    *,
-    x: int,
-    y: int,
-    width: int,
-    height: int,
-) -> np.ndarray:
-    return _extract_padded_crop_impl(
-        arr,
-        x=x,
-        y=y,
-        width=width,
-        height=height,
-    )
-
-
-def _compose_overlay_mask_from_annotations(
-    *,
-    annotation_mask: dict[str, np.ndarray],
-    pixel_mapping: dict[str, int],
-) -> np.ndarray:
-    return _compose_overlay_mask_from_annotations_impl(
-        annotation_mask=annotation_mask,
-        pixel_mapping=pixel_mapping,
-    )
 
 
 def _save_overlay_preview(
@@ -772,39 +702,6 @@ def filter_coordinates(
     return filtered_coordinates, filtered_contour_indices
 
 
-def overlay_mask_on_tile(
-    tile: Image.Image,
-    mask: Image.Image,
-    palette: dict[str, int],
-    pixel_mapping: dict[str, int],
-    color_mapping: dict[str, list[int] | None],
-    alpha=0.5,
-):
-    return _overlay_mask_on_tile_impl(
-        tile,
-        mask,
-        palette,
-        pixel_mapping,
-        color_mapping,
-        alpha=alpha,
-    )
-
-
-def _build_overlay_alpha(
-    *,
-    mask_arr: np.ndarray,
-    alpha: float,
-    pixel_mapping: dict[str, int],
-    color_mapping: dict[str, list[int] | None],
-) -> Image.Image:
-    return _build_overlay_alpha_impl(
-        mask_arr=mask_arr,
-        alpha=alpha,
-        pixel_mapping=pixel_mapping,
-        color_mapping=color_mapping,
-    )
-
-
 def overlay_mask_on_slide(
     wsi_path: Path,
     annotation_mask_path: Path | None,
@@ -907,48 +804,6 @@ def overlay_mask_on_slide(
 
     overlayed_image = Image.composite(image1=wsi, image2=mask_rgb, mask=alpha_content)
     return overlayed_image
-
-
-def draw_grid(img, coord, shape, thickness=2, color=(0, 0, 0, 255)):
-    return _draw_grid_impl(
-        img,
-        coord,
-        shape,
-        thickness=thickness,
-        color=color,
-    )
-
-
-def draw_grid_from_coordinates(
-    canvas,
-    wsi,
-    coords,
-    tile_size_at_0,
-    vis_level: int,
-    thickness: int = 2,
-    indices: list[int] | None = None,
-    mask=None,
-    palette: dict[str, int] | None = None,
-    pixel_mapping: dict[str, int] | None = None,
-    color_mapping: dict[str, list[int] | None] | None = None,
-):
-    return _draw_grid_from_coordinates_impl(
-        canvas,
-        wsi,
-        coords,
-        tile_size_at_0,
-        vis_level,
-        thickness=thickness,
-        indices=indices,
-        mask=mask,
-        palette=palette,
-        pixel_mapping=pixel_mapping,
-        color_mapping=color_mapping,
-    )
-
-
-def pad_to_patch_size(canvas: Image.Image, patch_size: tuple[int, int]) -> Image.Image:
-    return _pad_to_patch_size_impl(canvas, patch_size)
 
 
 def write_coordinate_preview(
