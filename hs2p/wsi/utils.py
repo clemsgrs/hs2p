@@ -3,6 +3,8 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
+from hs2p.wsi.geometry import project_discrete_grid_origins
+
 
 @dataclass(frozen=True)
 class ResolvedTileGeometry:
@@ -96,8 +98,11 @@ class HasEnoughTissue(object):
         """
         # downsample coordinates from level 0 to seg_level
         scale = self.geometry.level0_to_seg_scale
-        downsampled_coords = coords * 1 / scale
-        downsampled_coords = downsampled_coords.astype(int)
+        downsampled_coords = project_discrete_grid_origins(
+            coords,
+            scale_x=1.0 / scale,
+            scale_y=1.0 / scale,
+        )
 
         tile_area = float(self.downsampled_tile_size**2)
         height, width = self.precomputed_mask.shape
@@ -130,8 +135,13 @@ class HasEnoughTissue(object):
         """
         # downsample coordinates from level 0 to seg_level
         scale = self.geometry.level0_to_seg_scale
-        x_tile = int(x / scale)
-        y_tile = int(y / scale)
+        projected = project_discrete_grid_origins(
+            np.array([[x, y]], dtype=np.int64),
+            scale_x=1.0 / scale,
+            scale_y=1.0 / scale,
+        )
+        x_tile = int(projected[0, 0])
+        y_tile = int(projected[0, 1])
 
         # extract the sub-mask for the tile
         sub_mask = self._extract_sub_mask(x_tile, y_tile)

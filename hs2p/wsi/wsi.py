@@ -13,6 +13,7 @@ from PIL import Image
 from hs2p.configs import FilterConfig, SegmentationConfig, TilingConfig
 from hs2p.wsi.backend import coerce_wsd_path, resolve_backend
 from hs2p.wsi.batched_reads import BatchedReadRequest, group_batched_read_requests_by_size
+from hs2p.wsi.geometry import project_discrete_grid_origins
 from hs2p.wsi.utils import HasEnoughTissue, ResolvedTileGeometry
 
 # ignore all warnings from wholeslidedata
@@ -482,12 +483,10 @@ class WholeSlideImage(object):
             if active_indices.size == 0:
                 return keep_array.tolist()
 
-            level_coords = np.empty((coord_candidates.shape[0], 2), dtype=np.int64)
-            level_coords[:, 0] = np.floor(coord_candidates[:, 0] / downsample_x).astype(
-                np.int64
-            )
-            level_coords[:, 1] = np.floor(coord_candidates[:, 1] / downsample_y).astype(
-                np.int64
+            level_coords = project_discrete_grid_origins(
+                coord_candidates,
+                scale_x=1.0 / downsample_x,
+                scale_y=1.0 / downsample_y,
             )
 
             supertile_span = int(tile_size) * 8

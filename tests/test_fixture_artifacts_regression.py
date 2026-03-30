@@ -9,6 +9,7 @@ from hs2p.api import (
     SegmentationConfig,
     SlideSpec,
     TilingConfig,
+    load_tiling_result,
     save_tiling_result,
     tile_slide,
 )
@@ -87,7 +88,13 @@ def _run_and_save_tiles(
     return result, artifacts, generated, meta
 
 
-def test_generated_tiles_match_checked_in_artifacts(real_fixture_paths, tmp_path: Path):
+def _load_normalized_tiling_result(npz_path: Path, meta_path: Path):
+    return load_tiling_result(npz_path, meta_path)
+
+
+def test_generated_tiles_match_checked_in_ground_truth_outputs(
+    real_fixture_paths, tmp_path: Path
+):
     wsi_path, mask_path = real_fixture_paths
     gt_dir = wsi_path.parent.parent / "gt"
     gt_npz_path = gt_dir / "test-wsi.coordinates.npz"
@@ -105,40 +112,38 @@ def test_generated_tiles_match_checked_in_artifacts(real_fixture_paths, tmp_path
         output_dir=tmp_path,
     )
 
-    golden_tiles = np.load(gt_npz_path, allow_pickle=False)
-    golden_meta = json.loads(gt_meta_path.read_text())
-
-    assert generated.files == golden_tiles.files
-    for key in generated.files:
-        np.testing.assert_array_equal(generated[key], golden_tiles[key])
-
-    assert set(meta) >= set(golden_meta)
-    assert meta["sample_id"] == golden_meta["sample_id"] == "test-wsi"
-    assert (
-        Path(meta["image_path"]).name
-        == Path(golden_meta["image_path"]).name
-        == wsi_path.name
+    golden = _load_normalized_tiling_result(gt_npz_path, gt_meta_path)
+    generated_loaded = _load_normalized_tiling_result(
+        artifacts.coordinates_npz_path,
+        artifacts.coordinates_meta_path,
     )
-    assert (
-        Path(meta["mask_path"]).name
-        == Path(golden_meta["mask_path"]).name
-        == mask_path.name
-    )
-    assert meta["backend"] == golden_meta["backend"] == backend
-    assert meta["target_spacing_um"] == pytest.approx(golden_meta["target_spacing_um"])
-    assert meta["target_tile_size_px"] == golden_meta["target_tile_size_px"]
-    assert meta["read_level"] == golden_meta["read_level"]
-    assert meta["read_spacing_um"] == pytest.approx(golden_meta["read_spacing_um"])
-    assert meta["read_step_px"] == meta["read_tile_size_px"]
-    assert meta["read_tile_size_px"] == golden_meta["read_tile_size_px"]
-    assert meta["step_px_lv0"] == meta["tile_size_lv0"]
-    assert meta["tile_size_lv0"] == golden_meta["tile_size_lv0"]
-    assert meta["overlap"] == pytest.approx(golden_meta["overlap"])
-    assert meta["tissue_threshold"] == pytest.approx(golden_meta["tissue_threshold"])
-    assert meta["num_tiles"] == golden_meta["num_tiles"]
-    assert meta["config_hash"] == golden_meta["config_hash"]
-    assert meta["config_hash"] == result.config_hash
-    assert artifacts.num_tiles == golden_meta["num_tiles"]
+
+    assert generated_loaded.sample_id == golden.sample_id == "test-wsi"
+    assert generated_loaded.image_path.name == golden.image_path.name == wsi_path.name
+    assert generated_loaded.mask_path is not None
+    assert golden.mask_path is not None
+    assert generated_loaded.mask_path.name == golden.mask_path.name == mask_path.name
+    assert generated_loaded.backend == golden.backend == backend
+    assert generated_loaded.target_spacing_um == pytest.approx(golden.target_spacing_um)
+    assert generated_loaded.target_tile_size_px == golden.target_tile_size_px
+    assert generated_loaded.read_level == golden.read_level
+    assert generated_loaded.read_spacing_um == pytest.approx(golden.read_spacing_um)
+    assert generated_loaded.read_step_px == generated_loaded.read_tile_size_px
+    assert generated_loaded.read_tile_size_px == golden.read_tile_size_px
+    assert generated_loaded.step_px_lv0 == generated_loaded.tile_size_lv0
+    assert generated_loaded.tile_size_lv0 == golden.tile_size_lv0
+    assert generated_loaded.overlap == pytest.approx(golden.overlap)
+    assert generated_loaded.tissue_threshold == pytest.approx(golden.tissue_threshold)
+    assert generated_loaded.num_tiles == golden.num_tiles == 459
+    assert generated_loaded.config_hash == golden.config_hash == result.config_hash
+    assert artifacts.num_tiles == golden.num_tiles
+    np.testing.assert_array_equal(generated_loaded.tile_index, golden.tile_index)
+    np.testing.assert_array_equal(generated_loaded.x, golden.x)
+    np.testing.assert_array_equal(generated_loaded.y, golden.y)
+    assert generated_loaded.tissue_fraction.shape == golden.tissue_fraction.shape
+    assert np.all(generated_loaded.tissue_fraction >= 0.0)
+    assert np.all(generated_loaded.tissue_fraction <= 1.0)
+    assert np.all(generated_loaded.tissue_fraction >= generated_loaded.tissue_threshold)
 
 
 def test_repeated_tiling_run_writes_identical_artifacts(
