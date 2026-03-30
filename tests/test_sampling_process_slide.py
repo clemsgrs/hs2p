@@ -896,11 +896,10 @@ def test_save_sampling_coordinates_writes_sampling_metadata_fields(tmp_path):
     )
 
     meta = json.loads(artifacts.coordinates_meta_path.read_text())
-    assert meta["annotation"] == "tumor"
-    assert meta["selection_strategy"] == "joint_sampling"
-    assert meta["output_mode"] == "per_annotation"
-    assert meta["read_step_px"] == 256
-    assert meta["step_px_lv0"] == 256
+    assert meta["artifact"]["annotation"] == "tumor"
+    assert meta["artifact"]["selection_strategy"] == "joint_sampling"
+    assert meta["artifact"]["output_mode"] == "per_annotation"
+    assert meta["tiling"]["step_px_lv0"] == 256
 
 
 def test_coordinate_extraction_result_requires_stride_metadata():

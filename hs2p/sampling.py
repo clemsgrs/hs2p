@@ -9,13 +9,13 @@ import multiprocessing as mp
 from dataclasses import replace
 from pathlib import Path
 
+import hs2p.preprocessing as preprocessing_mod
 from hs2p.api import (
     CoordinateOutputMode,
     FilterConfig,
     ResolvedSamplingSpec,
     SegmentationConfig,
     TilingConfig,
-    TilingResult,
     _write_process_list,
     _validate_required_columns,
     compute_effective_config_hash,
@@ -152,26 +152,33 @@ def _save_sampling_coordinates(
     if selection_strategy is None:
         selection_strategy = _selection_strategy_from_cfg(cfg)
     annotation_threshold = resolved_sampling_spec.tissue_percentage[annotation]
-    x = np.array([x for x, _ in coordinates], dtype=np.int64)
-    y = np.array([y for _, y in coordinates], dtype=np.int64)
-    result = TilingResult(
+    coordinate_array = np.asarray(coordinates, dtype=np.int64)
+    if coordinate_array.size == 0:
+        coordinate_array = np.empty((0, 2), dtype=np.int64)
+    result = preprocessing_mod.TilingResult(
+        tiles=preprocessing_mod.TileGeometry(
+            coordinates=coordinate_array,
+            tissue_fractions=np.zeros(len(coordinates), dtype=np.float32),
+            tile_index=np.arange(len(coordinates), dtype=np.int32),
+            requested_tile_size_px=tiling_config.target_tile_size_px,
+            requested_spacing_um=tiling_config.target_spacing_um,
+            read_level=extraction.read_level,
+            effective_tile_size_px=extraction.read_tile_size_px,
+            effective_spacing_um=extraction.read_spacing_um,
+            tile_size_lv0=extraction.tile_size_lv0,
+            is_within_tolerance=True,
+            base_spacing_um=extraction.read_spacing_um,
+            slide_dimensions=[0, 0],
+            level_downsamples=[1.0],
+            overlap=tiling_config.overlap,
+            min_tissue_fraction=annotation_threshold,
+            use_padding=tiling_config.use_padding,
+        ),
         sample_id=sample_id,
         image_path=image_path,
-        mask_path=mask_path,
+        tissue_mask_path=mask_path,
         backend=backend,
-        x=x,
-        y=y,
-        tile_index=np.arange(len(coordinates), dtype=np.int32),
-        tissue_fraction=None,
-        target_spacing_um=tiling_config.target_spacing_um,
-        target_tile_size_px=tiling_config.target_tile_size_px,
-        read_level=extraction.read_level,
-        read_spacing_um=extraction.read_spacing_um,
-        read_tile_size_px=extraction.read_tile_size_px,
-        tile_size_lv0=extraction.tile_size_lv0,
-        overlap=tiling_config.overlap,
-        tissue_threshold=annotation_threshold,
-        num_tiles=len(coordinates),
+        requested_backend=backend,
         config_hash=compute_effective_config_hash(
             tiling=tiling_config,
             segmentation=segmentation_config,
@@ -181,8 +188,27 @@ def _save_sampling_coordinates(
             output_mode=output_mode,
             annotation=annotation,
         ),
-        read_step_px=extraction.read_step_px,
         step_px_lv0=extraction.step_px_lv0,
+        tolerance=tiling_config.tolerance,
+        tissue_method="unknown",
+        seg_downsample=segmentation_config.downsample,
+        seg_level=0,
+        seg_spacing_um=0.0,
+        seg_sthresh=segmentation_config.sthresh,
+        seg_sthresh_up=segmentation_config.sthresh_up,
+        seg_mthresh=segmentation_config.mthresh,
+        seg_close=segmentation_config.close,
+        ref_tile_size_px=filter_config.ref_tile_size,
+        a_t=filter_config.a_t,
+        a_h=filter_config.a_h,
+        max_n_holes=filter_config.max_n_holes,
+        filter_white=filter_config.filter_white,
+        filter_black=filter_config.filter_black,
+        white_threshold=filter_config.white_threshold,
+        black_threshold=filter_config.black_threshold,
+        fraction_threshold=filter_config.fraction_threshold,
+        seg_use_otsu=segmentation_config.use_otsu,
+        seg_use_hsv=segmentation_config.use_hsv,
         annotation=annotation,
         selection_strategy=selection_strategy,
         output_mode=output_mode,

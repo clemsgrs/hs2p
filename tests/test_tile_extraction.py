@@ -12,8 +12,10 @@ import numpy as np
 import pytest
 from PIL import Image
 
+import hs2p.preprocessing as preprocessing_mod
 from hs2p.api import (
     TilingResult,
+    _to_preprocessing_tiling_result,
     _iter_cucim_tile_arrays_for_tar_extraction,
     _iter_wsd_tile_arrays_for_tar_extraction,
     extract_tiles_to_tar,
@@ -379,7 +381,10 @@ class TestExtractTilesToTar:
 
         with patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi):
             tar_path, filtered = extract_tiles_to_tar(
-                result, output_dir=tmp_path, filter_params=filter_cfg
+                result,
+                output_dir=tmp_path,
+                filter_params=filter_cfg,
+                jpeg_backend="pil",
             )
 
         # Tar should have 2 tiles
@@ -411,7 +416,10 @@ class TestExtractTilesToTar:
 
         with patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi):
             tar_path, filtered = extract_tiles_to_tar(
-                result, output_dir=tmp_path, filter_params=filter_cfg
+                result,
+                output_dir=tmp_path,
+                filter_params=filter_cfg,
+                jpeg_backend="pil",
             )
 
         with tarfile.open(tar_path, "r") as tf:
@@ -419,6 +427,35 @@ class TestExtractTilesToTar:
 
         assert filtered.num_tiles == 1
         np.testing.assert_array_equal(filtered.x, [256])
+
+    def test_filtered_preprocessing_results_keep_preprocessing_type(self, tmp_path: Path):
+        result = _to_preprocessing_tiling_result(_make_tiling_result(num_tiles=2))
+        patches = [
+            _solid_patch((5, 5, 5)),
+            _solid_patch((128, 128, 0)),
+        ]
+
+        mock_wsi = MagicMock()
+        mock_wsi.get_patch.side_effect = patches
+
+        filter_cfg = FilterConfig(
+            filter_black=True,
+            black_threshold=25,
+            fraction_threshold=0.9,
+        )
+
+        with patch("wholeslidedata.WholeSlideImage", return_value=mock_wsi):
+            _, filtered = extract_tiles_to_tar(
+                result,
+                output_dir=tmp_path,
+                filter_params=filter_cfg,
+                jpeg_backend="pil",
+            )
+
+        assert isinstance(filtered, preprocessing_mod.TilingResult)
+        assert filtered.num_tiles == 1
+        np.testing.assert_array_equal(filtered.x, [256])
+        np.testing.assert_array_equal(filtered.tile_index, [0])
 
     def test_all_tiles_filtered_produces_empty_tar(self, tmp_path: Path):
         result = _make_tiling_result(num_tiles=1)

@@ -629,7 +629,7 @@ def test_save_and_load_tiling_result_round_trip(tmp_path: Path):
     np.testing.assert_array_equal(loaded.tissue_fraction, result.tissue_fraction)
 
 
-def test_tiling_result_adapter_round_trip_preserves_core_fields():
+def test_tiling_result_adapter_preserves_core_fields_on_preprocessing_result():
     result = TilingResult(
         sample_id="slide-adapter",
         image_path=Path("slide-adapter.svs"),
@@ -657,34 +657,34 @@ def test_tiling_result_adapter_round_trip_preserves_core_fields():
     )
 
     preprocessing_result = api_mod._to_preprocessing_tiling_result(result)
-    round_tripped = api_mod._from_preprocessing_tiling_result(
-        preprocessing_result,
-        config_hash=result.config_hash,
-    )
 
-    assert round_tripped.sample_id == result.sample_id
-    assert round_tripped.image_path == result.image_path
-    assert round_tripped.mask_path == result.mask_path
-    assert round_tripped.backend == result.backend
-    assert round_tripped.target_spacing_um == result.target_spacing_um
-    assert round_tripped.target_tile_size_px == result.target_tile_size_px
-    assert round_tripped.read_level == result.read_level
-    assert round_tripped.read_spacing_um == result.read_spacing_um
-    assert round_tripped.read_tile_size_px == result.read_tile_size_px
-    assert round_tripped.read_step_px == 403
-    assert round_tripped.step_px_lv0 == result.step_px_lv0
-    assert round_tripped.tile_size_lv0 == result.tile_size_lv0
-    assert round_tripped.overlap == result.overlap
-    assert round_tripped.tissue_threshold == result.tissue_threshold
-    assert round_tripped.num_tiles == result.num_tiles
-    assert round_tripped.config_hash == result.config_hash
-    assert round_tripped.annotation == result.annotation
-    assert round_tripped.selection_strategy == result.selection_strategy
-    assert round_tripped.output_mode == result.output_mode
-    np.testing.assert_array_equal(round_tripped.x, result.x)
-    np.testing.assert_array_equal(round_tripped.y, result.y)
-    np.testing.assert_array_equal(round_tripped.tile_index, result.tile_index)
-    np.testing.assert_array_equal(round_tripped.tissue_fraction, result.tissue_fraction)
+    assert isinstance(preprocessing_result, preprocessing_mod.TilingResult)
+    assert preprocessing_result.sample_id == result.sample_id
+    assert preprocessing_result.image_path == result.image_path
+    assert preprocessing_result.mask_path == result.mask_path
+    assert preprocessing_result.backend == result.backend
+    assert preprocessing_result.target_spacing_um == result.target_spacing_um
+    assert preprocessing_result.target_tile_size_px == result.target_tile_size_px
+    assert preprocessing_result.read_level == result.read_level
+    assert preprocessing_result.read_spacing_um == result.read_spacing_um
+    assert preprocessing_result.read_tile_size_px == result.read_tile_size_px
+    assert preprocessing_result.read_step_px == 403
+    assert preprocessing_result.step_px_lv0 == result.step_px_lv0
+    assert preprocessing_result.tile_size_lv0 == result.tile_size_lv0
+    assert preprocessing_result.overlap == result.overlap
+    assert preprocessing_result.tissue_threshold == result.tissue_threshold
+    assert preprocessing_result.num_tiles == result.num_tiles
+    assert preprocessing_result.config_hash == result.config_hash
+    assert preprocessing_result.annotation == result.annotation
+    assert preprocessing_result.selection_strategy == result.selection_strategy
+    assert preprocessing_result.output_mode == result.output_mode
+    np.testing.assert_array_equal(preprocessing_result.x, result.x)
+    np.testing.assert_array_equal(preprocessing_result.y, result.y)
+    np.testing.assert_array_equal(preprocessing_result.tile_index, result.tile_index)
+    np.testing.assert_array_equal(
+        preprocessing_result.tissue_fraction,
+        result.tissue_fraction,
+    )
 
 
 def test_load_tiling_result_accepts_preprocessing_artifact(tmp_path: Path):

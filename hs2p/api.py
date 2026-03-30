@@ -210,48 +210,6 @@ def _to_preprocessing_tiling_result(
     )
 
 
-def _from_preprocessing_tiling_result(
-    result: preprocessing_mod.TilingResult,
-    *,
-    config_hash: str,
-) -> TilingResult:
-    coordinates = np.asarray(result.coordinates, dtype=np.int64)
-    tissue_fraction = np.asarray(result.tissue_fractions, dtype=np.float32)
-    return TilingResult(
-        sample_id=result.sample_id,
-        image_path=Path(result.image_path),
-        mask_path=(
-            Path(result.tissue_mask_path)
-            if result.tissue_mask_path is not None
-            else None
-        ),
-        backend=result.backend,
-        x=coordinates[:, 0].astype(np.int64, copy=False),
-        y=coordinates[:, 1].astype(np.int64, copy=False),
-        tile_index=np.asarray(result.tile_index, dtype=np.int32),
-        tissue_fraction=tissue_fraction,
-        target_spacing_um=float(result.requested_spacing_um),
-        target_tile_size_px=int(result.requested_tile_size_px),
-        read_level=int(result.read_level),
-        read_spacing_um=float(result.effective_spacing_um),
-        read_tile_size_px=int(result.effective_tile_size_px),
-        tile_size_lv0=int(result.tile_size_lv0),
-        overlap=float(result.overlap),
-        tissue_threshold=float(result.min_tissue_fraction),
-        num_tiles=int(len(coordinates)),
-        config_hash=config_hash,
-        read_step_px=(
-            int(round(result.effective_tile_size_px * (1.0 - result.overlap)))
-            if result.effective_tile_size_px > 0
-            else None
-        ),
-        step_px_lv0=int(result.step_px_lv0),
-        annotation=result.annotation,
-        selection_strategy=result.selection_strategy,
-        output_mode=result.output_mode,
-    )
-
-
 def _validate_vector(name: str, value: np.ndarray | None) -> int | None:
     if value is None:
         return None
@@ -729,35 +687,46 @@ def extract_tiles_to_tar(
         return tar_path, result
 
     kept = np.asarray(sorted(kept_indices), dtype=np.int64)
-    filtered_result = TilingResult(
-        sample_id=result.sample_id,
-        image_path=result.image_path,
-        mask_path=result.mask_path,
-        backend=result.backend,
-        x=result.x[kept],
-        y=result.y[kept],
-        tile_index=np.arange(len(kept), dtype=np.int32),
-        target_spacing_um=result.target_spacing_um,
-        target_tile_size_px=result.target_tile_size_px,
-        read_level=result.read_level,
-        read_spacing_um=result.read_spacing_um,
-        read_tile_size_px=result.read_tile_size_px,
-        tile_size_lv0=result.tile_size_lv0,
-        overlap=result.overlap,
-        tissue_threshold=result.tissue_threshold,
-        num_tiles=len(kept),
-        config_hash=result.config_hash,
-        read_step_px=result.read_step_px,
-        step_px_lv0=result.step_px_lv0,
-        tissue_fraction=(
-            result.tissue_fraction[kept]
-            if result.tissue_fraction is not None
-            else None
-        ),
-        annotation=result.annotation,
-        selection_strategy=result.selection_strategy,
-        output_mode=result.output_mode,
-    )
+    if isinstance(result, preprocessing_mod.TilingResult):
+        filtered_result = replace(
+            result,
+            tiles=replace(
+                result.tiles,
+                coordinates=result.coordinates[kept],
+                tissue_fractions=result.tissue_fractions[kept],
+                tile_index=np.arange(len(kept), dtype=np.int32),
+            ),
+        )
+    else:
+        filtered_result = TilingResult(
+            sample_id=result.sample_id,
+            image_path=result.image_path,
+            mask_path=result.mask_path,
+            backend=result.backend,
+            x=result.x[kept],
+            y=result.y[kept],
+            tile_index=np.arange(len(kept), dtype=np.int32),
+            target_spacing_um=result.target_spacing_um,
+            target_tile_size_px=result.target_tile_size_px,
+            read_level=result.read_level,
+            read_spacing_um=result.read_spacing_um,
+            read_tile_size_px=result.read_tile_size_px,
+            tile_size_lv0=result.tile_size_lv0,
+            overlap=result.overlap,
+            tissue_threshold=result.tissue_threshold,
+            num_tiles=len(kept),
+            config_hash=result.config_hash,
+            read_step_px=result.read_step_px,
+            step_px_lv0=result.step_px_lv0,
+            tissue_fraction=(
+                result.tissue_fraction[kept]
+                if result.tissue_fraction is not None
+                else None
+            ),
+            annotation=result.annotation,
+            selection_strategy=result.selection_strategy,
+            output_mode=result.output_mode,
+        )
     return tar_path, filtered_result
 
 
