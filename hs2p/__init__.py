@@ -13,6 +13,13 @@ from hs2p.api import (
     tile_slides,
     write_tiling_preview,
 )
+from hs2p.preprocessing import (
+    ContourResult,
+    TileGeometry,
+    detect_contours,
+    generate_tiles,
+    preprocess_slide,
+)
 from hs2p.wsi.wsi import WholeSlideImage
 from hs2p.wsi import (
     CoordinateExtractionResult,
