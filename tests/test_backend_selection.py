@@ -237,7 +237,7 @@ def test_tile_slide_uses_resolved_backend_for_hash_and_result(monkeypatch):
         return "hash"
 
     monkeypatch.setattr(api_mod, "resolve_backend", _fake_resolve_backend)
-    monkeypatch.setattr(api_mod.preprocessing_mod, "preprocess_slide", _fake_preprocess_slide)
+    monkeypatch.setattr(api_mod, "preprocess_slide", _fake_preprocess_slide)
     monkeypatch.setattr(api_mod, "compute_effective_config_hash", _fake_hash)
 
     result = api_mod.tile_slide(
