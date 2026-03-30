@@ -11,15 +11,15 @@ from collections import defaultdict
 from hs2p.configs import FilterConfig, SegmentationConfig, TilingConfig
 from hs2p.progress import emit_progress_log
 from .masks import (
-    compose_overlay_mask_from_annotations as _compose_overlay_mask_from_annotations,
-    extract_padded_crop as _extract_padded_crop,
-    mask_level_downsamples as _mask_level_downsamples,
-    normalize_tissue_mask as _normalize_tissue_mask,
-    pad_array_to_shape as _pad_array_to_shape,
-    read_aligned_mask as _read_aligned_mask,
+    compose_overlay_mask_from_annotations,
+    extract_padded_crop,
+    mask_level_downsamples,
+    normalize_tissue_mask,
+    pad_array_to_shape,
+    read_aligned_mask,
 )
 from .preview import (
-    build_overlay_alpha as _build_overlay_alpha,
+    build_overlay_alpha,
     build_palette,
     draw_grid,
     draw_grid_from_coordinates,
@@ -375,9 +375,9 @@ def _save_request_preview(
     preview_color_mapping: dict[str, list[int] | None] | None,
     tile_size_lv0: int,
 ) -> None:
-    preview_mask_arr = _normalize_tissue_mask(wsi.annotation_mask["tissue"])
+    preview_mask_arr = normalize_tissue_mask(wsi.annotation_mask["tissue"])
     if preview_pixel_mapping is not None and preview_color_mapping is not None:
-        preview_mask_arr = _compose_overlay_mask_from_annotations(
+        preview_mask_arr = compose_overlay_mask_from_annotations(
             annotation_mask=wsi.annotation_mask,
             pixel_mapping=preview_pixel_mapping,
         )
@@ -404,7 +404,7 @@ def _filter_coordinates_for_sampling_with_wsi(
     tiling_params: TilingConfig,
     sampling_spec: ResolvedSamplingSpec,
 ):
-    mask = _read_aligned_mask(
+    mask = read_aligned_mask(
         mask_obj=wsi.mask,
         slide_spacing=wsi.get_level_spacing(tile_level),
         slide_dimensions=wsi.level_dimensions[tile_level],
@@ -792,7 +792,7 @@ def overlay_mask_on_slide(
 
     mask = Image.fromarray(mask_arr)
 
-    alpha_content = _build_overlay_alpha(
+    alpha_content = build_overlay_alpha(
         mask_arr=mask_arr,
         alpha=alpha,
         pixel_mapping=pixel_mapping,

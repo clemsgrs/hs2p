@@ -4,6 +4,7 @@ import numpy as np
 
 from hs2p.api import SegmentationConfig, TilingConfig
 import hs2p.wsi as wsi_api
+import hs2p.wsi.masks as wsi_masks
 from hs2p.wsi import ResolvedSamplingSpec
 from hs2p.wsi.wsi import WholeSlideImage
 
@@ -216,8 +217,8 @@ def test_filter_coordinates_vectorized_path_avoids_per_tile_crops_and_handles_bo
 
     monkeypatch.setattr(wsi_api, "WholeSlideImage", FakeWholeSlideImage)
     monkeypatch.setattr(
-        wsi_api,
-        "_extract_padded_crop",
+        wsi_masks,
+        "extract_padded_crop",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             AssertionError("vectorized mask scoring should not crop one tile at a time")
         ),

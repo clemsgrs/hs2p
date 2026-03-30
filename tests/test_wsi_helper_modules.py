@@ -14,9 +14,14 @@ from hs2p.wsi.preview import build_overlay_alpha, build_palette
 
 
 def test_wsi_package_reexports_helper_functions_directly():
-    assert wsi_pkg._normalize_tissue_mask is masks_mod.normalize_tissue_mask
-    assert wsi_pkg._read_aligned_mask is masks_mod.read_aligned_mask
-    assert wsi_pkg._compose_overlay_mask_from_annotations is masks_mod.compose_overlay_mask_from_annotations
+    assert wsi_pkg.normalize_tissue_mask is masks_mod.normalize_tissue_mask
+    assert wsi_pkg.read_aligned_mask is masks_mod.read_aligned_mask
+    assert (
+        wsi_pkg.compose_overlay_mask_from_annotations
+        is masks_mod.compose_overlay_mask_from_annotations
+    )
+    assert wsi_pkg.build_overlay_alpha is preview_mod.build_overlay_alpha
+    assert wsi_pkg.build_palette is preview_mod.build_palette
     assert wsi_pkg.overlay_mask_on_tile is preview_mod.overlay_mask_on_tile
     assert wsi_pkg.draw_grid_from_coordinates is preview_mod.draw_grid_from_coordinates
     assert wsi_pkg.pad_to_patch_size is preview_mod.pad_to_patch_size
