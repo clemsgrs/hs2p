@@ -20,7 +20,7 @@ from .masks import (
 )
 from .preview import (
     build_overlay_alpha as _build_overlay_alpha,
-    build_palette as _build_palette,
+    build_palette,
     draw_grid,
     draw_grid_from_coordinates,
     overlay_mask_on_tile,
@@ -237,7 +237,7 @@ def _resolve_overlay_style(
     if palette is None and pixel_mapping is None and color_mapping is None:
         pixel_mapping = DEFAULT_TISSUE_PIXEL_MAPPING
         color_mapping = DEFAULT_TISSUE_COLOR_MAPPING
-        palette = _build_palette(
+        palette = build_palette(
             pixel_mapping=pixel_mapping,
             color_mapping=color_mapping,
         )
