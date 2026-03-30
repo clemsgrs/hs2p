@@ -1,6 +1,6 @@
 {
   "backend": "asap",
-  "config_hash": "88e395aae48f79dc5f4b3d8ccf2dc31f9a1e8a738b421d3764ac11fb8942ff61",
+  "config_hash": "ff7f246585a8b288ccc2693d22b5fbe4ac4d551d098e0fd93fc2a963e4220de4",
   "image_path": "/data/pathology/projects/clement/code/hs2p/tests/fixtures/input/test-wsi.tif",
   "mask_path": "/data/pathology/projects/clement/code/hs2p/tests/fixtures/input/test-mask.tif",
   "num_tiles": 459,

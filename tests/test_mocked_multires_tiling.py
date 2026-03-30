@@ -50,7 +50,6 @@ def _tiling_config(
         tolerance=tolerance,
         overlap=0.0,
         tissue_threshold=tissue_threshold,
-        drop_holes=False,
         use_padding=False,
         backend="asap",
     )

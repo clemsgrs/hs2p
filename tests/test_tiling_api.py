@@ -48,7 +48,6 @@ def tiling_config() -> TilingConfig:
         tolerance=0.07,
         overlap=0.1,
         tissue_threshold=0.2,
-        drop_holes=False,
         use_padding=True,
         backend="asap",
     )
@@ -792,7 +791,6 @@ def test_compute_request_passes_inner_workers_to_tile_extraction(
             tolerance=0.07,
             overlap=0.0,
             tissue_threshold=0.1,
-            drop_holes=False,
             use_padding=True,
         ),
         segmentation=SegmentationConfig(64, 8, 255, 7, 4, False, True),
@@ -867,7 +865,6 @@ def test_tile_slides_defaults_gpu_decode_to_disabled_for_saved_tiles(
             tolerance=0.07,
             overlap=0.1,
             tissue_threshold=0.2,
-            drop_holes=False,
             use_padding=True,
         ),
         segmentation=segmentation_config,
@@ -1661,7 +1658,6 @@ def test_write_process_list_removes_temp_file_on_failure(monkeypatch, tmp_path: 
                 tolerance=0.07,
                 overlap=0.1,
                 tissue_threshold=0.2,
-                drop_holes=False,
                 use_padding=True,
             ),
             segmentation=SegmentationConfig(64, 8, 255, 7, 4, False, True),
@@ -1684,7 +1680,7 @@ def test_config_dataclasses_apply_package_defaults_for_secondary_parameters():
     segmentation = SegmentationConfig(downsample=64)
     filtering = FilterConfig(ref_tile_size=224, a_t=4, a_h=2)
 
-    assert tiling.drop_holes == default_config.tiling.params.drop_holes
+    assert not hasattr(tiling, "drop_holes")
     assert tiling.use_padding == default_config.tiling.params.use_padding
     assert tiling.backend == "auto"
     assert tiling.requested_backend == "auto"
