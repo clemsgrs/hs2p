@@ -1,9 +1,11 @@
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
 
 import hs2p
+import hs2p.preprocessing as preprocessing_mod
 from hs2p.preprocessing import (
     ContourResult,
     TileGeometry,
@@ -41,47 +43,35 @@ def test_detect_contours_keeps_all_child_holes():
     assert len(contours.holes[0]) == 3
 
 
-def test_generate_tiles_normalizes_padded_edge_tiles_over_valid_area_only():
-    mask = np.full((100, 100), 255, dtype=np.uint8)
-    contours = ContourResult(
-        contours=detect_contours(
-            mask,
-            slide_dimensions=(100, 100),
-            ref_tile_size_px=16,
-            requested_spacing_um=0.5,
-            a_t=0,
-            base_spacing_um=0.5,
-            level_downsamples=[1.0],
-        ).contours,
-        holes=[[]],
-        mask=mask,
-    )
+def test_compute_tissue_fractions_normalizes_padded_tiles_over_full_tile_area():
+    tissue_mask = np.ones((100, 100), dtype=np.uint8)
+    candidates = np.array([[80, 80]], dtype=np.int64)
 
-    padded = generate_tiles(
+    fractions = preprocessing_mod._compute_tissue_fractions(
+        candidates=candidates,
+        tissue_mask=tissue_mask,
+        tile_size_lv0=80,
         slide_dimensions=(100, 100),
-        contours=contours,
-        requested_tile_size_px=80,
-        requested_spacing_um=0.5,
-        base_spacing_um=0.5,
-        level_downsamples=[1.0],
-        overlap=0.0,
         use_padding=True,
-        min_tissue_fraction=1.0,
-    )
-    unpadded = generate_tiles(
-        slide_dimensions=(100, 100),
-        contours=contours,
-        requested_tile_size_px=80,
-        requested_spacing_um=0.5,
-        base_spacing_um=0.5,
-        level_downsamples=[1.0],
-        overlap=0.0,
-        use_padding=False,
-        min_tissue_fraction=1.0,
     )
 
-    assert len(padded.coordinates) > len(unpadded.coordinates)
-    assert any((coord == np.array([80, 80])).all() for coord in padded.coordinates)
+    np.testing.assert_array_equal(fractions, np.array([0.0625], dtype=np.float32))
+
+
+def test_compute_tissue_fractions_truncates_projected_tile_origins():
+    tissue_mask = np.zeros((3, 3), dtype=np.uint8)
+    tissue_mask[1, 1] = 1
+    candidates = np.array([[15, 15]], dtype=np.int64)
+
+    fractions = preprocessing_mod._compute_tissue_fractions(
+        candidates=candidates,
+        tissue_mask=tissue_mask,
+        tile_size_lv0=10,
+        slide_dimensions=(30, 30),
+        use_padding=True,
+    )
+
+    np.testing.assert_array_equal(fractions, np.array([1.0], dtype=np.float32))
 
 
 def _make_tiling_result(n_tiles: int = 4) -> TilingResult:
@@ -109,6 +99,7 @@ def _make_tiling_result(n_tiles: int = 4) -> TilingResult:
         tiles=tiles,
         sample_id="slide-001",
         image_path="/tmp/slide-001.svs",
+        config_hash="preprocessing-hash",
         backend="openslide",
         requested_backend="auto",
         tolerance=0.05,
@@ -144,6 +135,7 @@ def test_tiling_artifact_roundtrip_uses_strict_rich_metadata(tmp_path):
     meta = json.loads(paths["meta"].read_text())
     assert meta["format_version"] == 2
     assert meta["provenance"]["requested_backend"] == "auto"
+    assert meta["provenance"]["config_hash"] == "preprocessing-hash"
     assert meta["slide"]["base_spacing_um"] == 0.25
     assert meta["segmentation"]["seg_level"] == 2
     assert meta["segmentation"]["seg_spacing_um"] == 1.0
@@ -164,6 +156,7 @@ def test_tiling_artifact_roundtrip_uses_strict_rich_metadata(tmp_path):
         result.coordinates[np.lexsort((result.coordinates[:, 1], result.coordinates[:, 0]))],
     )
     assert loaded.requested_backend == "auto"
+    assert loaded.config_hash == "preprocessing-hash"
     assert loaded.base_spacing_um == pytest.approx(0.25)
     assert loaded.seg_level == 2
     assert loaded.mask_level == 1
@@ -180,3 +173,19 @@ def test_top_level_package_reexports_preprocessing_core_surface():
     assert hs2p.detect_contours is detect_contours
     assert hs2p.generate_tiles is generate_tiles
     assert hs2p.preprocess_slide is hs2p.preprocessing.preprocess_slide
+
+
+def test_preprocessing_result_exposes_api_compatibility_accessors():
+    result = _make_tiling_result()
+
+    np.testing.assert_array_equal(result.x, result.coordinates[:, 0])
+    np.testing.assert_array_equal(result.y, result.coordinates[:, 1])
+    np.testing.assert_array_equal(result.tissue_fraction, result.tissue_fractions)
+    assert result.num_tiles == len(result.coordinates)
+    assert result.target_spacing_um == pytest.approx(result.requested_spacing_um)
+    assert result.target_tile_size_px == result.requested_tile_size_px
+    assert result.read_spacing_um == pytest.approx(result.effective_spacing_um)
+    assert result.read_tile_size_px == result.effective_tile_size_px
+    assert result.read_step_px == 192
+    assert result.tissue_threshold == pytest.approx(result.min_tissue_fraction)
+    assert result.mask_path == Path("/tmp/slide-001-mask.tif")

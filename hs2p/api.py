@@ -18,6 +18,7 @@ from typing import Any, Sequence
 import numpy as np
 import pandas as pd
 
+import hs2p.preprocessing as preprocessing_mod
 from hs2p.configs import (
     FilterConfig,
     PreviewConfig,
@@ -139,6 +140,76 @@ class TilingArtifacts:
     tiling_preview_path: Path | None = None
 
 
+def _to_preprocessing_tiling_result(
+    result: TilingResult,
+) -> preprocessing_mod.TilingResult:
+    tissue_fractions = (
+        result.tissue_fraction.astype(np.float32, copy=False)
+        if result.tissue_fraction is not None
+        else np.zeros(result.num_tiles, dtype=np.float32)
+    )
+    coordinates = np.stack(
+        [
+            result.x.astype(np.int64, copy=False),
+            result.y.astype(np.int64, copy=False),
+        ],
+        axis=1,
+    )
+    tiles = preprocessing_mod.TileGeometry(
+        coordinates=coordinates,
+        tissue_fractions=tissue_fractions,
+        tile_index=result.tile_index.astype(np.int32, copy=False),
+        requested_tile_size_px=int(result.target_tile_size_px),
+        requested_spacing_um=float(result.target_spacing_um),
+        read_level=int(result.read_level),
+        effective_tile_size_px=int(result.read_tile_size_px),
+        effective_spacing_um=float(result.read_spacing_um),
+        tile_size_lv0=int(result.tile_size_lv0),
+        is_within_tolerance=True,
+        base_spacing_um=float(result.read_spacing_um),
+        slide_dimensions=[0, 0],
+        level_downsamples=[1.0],
+        overlap=float(result.overlap),
+        min_tissue_fraction=float(result.tissue_threshold),
+        use_padding=True,
+    )
+    return preprocessing_mod.TilingResult(
+        tiles=tiles,
+        sample_id=result.sample_id,
+        image_path=str(result.image_path),
+        config_hash=result.config_hash,
+        backend=result.backend,
+        requested_backend=result.backend,
+        tolerance=0.05,
+        step_px_lv0=(
+            int(result.step_px_lv0) if result.step_px_lv0 is not None else 0
+        ),
+        tissue_method="unknown",
+        seg_downsample=64,
+        seg_level=0,
+        seg_spacing_um=0.0,
+        seg_sthresh=8,
+        seg_sthresh_up=255,
+        seg_mthresh=7,
+        seg_close=4,
+        ref_tile_size_px=16,
+        a_t=4,
+        a_h=0,
+        max_n_holes=0,
+        filter_white=False,
+        filter_black=False,
+        white_threshold=220,
+        black_threshold=25,
+        fraction_threshold=0.9,
+        tissue_mask_path=(
+            str(result.mask_path) if result.mask_path is not None else None
+        ),
+        annotation=result.annotation,
+        selection_strategy=result.selection_strategy,
+        output_mode=result.output_mode,
+    )
+
+
 def _validate_vector(name: str, value: np.ndarray | None) -> int | None:
     if value is None:
         return None
@@ -218,6 +289,26 @@ def _optional_path(value: Any) -> Path | None:
     return Path(text)
 
 
+def _write_mask_preview(
+    *,
+    mask_preview_path: Path | None,
+    tissue_mask: np.ndarray | None,
+) -> None:
+    if mask_preview_path is None or tissue_mask is None:
+        return
+    mask_preview_path.parent.mkdir(parents=True, exist_ok=True)
+    mask = np.asarray(tissue_mask)
+    if mask.ndim == 3:
+        mask = mask[:, :, 0]
+    if mask.dtype != np.uint8:
+        mask = mask.astype(np.uint8, copy=False)
+    if mask.max(initial=0) <= 1:
+        mask = mask * 255
+    from PIL import Image
+
+    Image.fromarray(mask).save(mask_preview_path)
+
+
 def _compute_tiling_result(
     whole_slide: SlideSpec,
     *,
@@ -227,53 +318,54 @@ def _compute_tiling_result(
     mask_preview_path: Path | None,
     num_workers: int,
     config_hash: str | None = None,
-) -> TilingResult:
+) -> preprocessing_mod.TilingResult:
     sampling_spec = None
     if whole_slide.mask_path is not None:
         sampling_spec = build_default_sampling_spec(tiling)
-    extraction = extract_coordinates(
-        wsi_path=whole_slide.image_path,
-        mask_path=whole_slide.mask_path,
-        backend=tiling.backend,
-        segment_params=segmentation,
-        tiling_params=tiling,
-        filter_params=filtering,
-        sampling_spec=sampling_spec,
-        mask_preview_path=mask_preview_path,
-        spacing_at_level_0=whole_slide.spacing_at_level_0,
-        disable_tqdm=True,
-        num_workers=num_workers,
-    )
-    x = extraction.x.astype(np.int64, copy=False)
-    y = extraction.y.astype(np.int64, copy=False)
-    num_tiles = int(x.shape[0])
-    tissue_fraction = None
-    if extraction.tissue_percentages is not None:
-        tissue_fraction = np.asarray(extraction.tissue_percentages, dtype=np.float32)
-        if tissue_fraction.ndim != 1 or tissue_fraction.shape[0] != num_tiles:
-            raise ValueError(
-                "tissue_percentages length mismatch for "
-                f"{whole_slide.sample_id}: expected {num_tiles}, "
-                f"got shape {tissue_fraction.shape}"
-            )
-    return TilingResult(
-        sample_id=whole_slide.sample_id,
+    preprocessing_result = preprocessing_mod.preprocess_slide(
         image_path=whole_slide.image_path,
-        mask_path=whole_slide.mask_path,
+        sample_id=whole_slide.sample_id,
+        tissue_mask_path=whole_slide.mask_path,
         backend=tiling.backend,
-        x=x,
-        y=y,
-        tile_index=np.arange(num_tiles, dtype=np.int32),
-        tissue_fraction=tissue_fraction,
-        target_spacing_um=tiling.target_spacing_um,
-        target_tile_size_px=tiling.target_tile_size_px,
-        read_level=extraction.read_level,
-        read_spacing_um=extraction.read_spacing_um,
-        read_tile_size_px=extraction.read_tile_size_px,
-        tile_size_lv0=extraction.tile_size_lv0,
+        spacing_override=whole_slide.spacing_at_level_0,
+        requested_tile_size_px=tiling.target_tile_size_px,
+        requested_spacing_um=tiling.target_spacing_um,
+        use_hsv=segmentation.use_hsv,
+        use_otsu=segmentation.use_otsu,
+        sthresh=segmentation.sthresh,
+        sthresh_up=segmentation.sthresh_up,
+        mthresh=segmentation.mthresh,
+        close=segmentation.close,
+        min_tissue_fraction=tiling.tissue_threshold,
         overlap=tiling.overlap,
-        tissue_threshold=tiling.tissue_threshold,
-        num_tiles=num_tiles,
+        use_padding=tiling.use_padding,
+        seg_downsample=segmentation.downsample,
+        tolerance=tiling.tolerance,
+        ref_tile_size_px=filtering.ref_tile_size,
+        a_t=filtering.a_t,
+        a_h=filtering.a_h,
+        max_n_holes=filtering.max_n_holes,
+        filter_white=filtering.filter_white,
+        filter_black=filtering.filter_black,
+        white_threshold=filtering.white_threshold,
+        black_threshold=filtering.black_threshold,
+        fraction_threshold=filtering.fraction_threshold,
+        num_workers=num_workers,
+        selection_strategy=(
+            CoordinateSelectionStrategy.MERGED_DEFAULT_TILING
+            if sampling_spec is not None
+            else None
+        ),
+        output_mode=(
+            CoordinateOutputMode.SINGLE_OUTPUT if sampling_spec is not None else None
+        ),
+    )
+    _write_mask_preview(
+        mask_preview_path=mask_preview_path,
+        tissue_mask=preprocessing_result.tissue_mask,
+    )
+    return replace(
+        preprocessing_result,
         config_hash=(
             config_hash
             if config_hash is not None
@@ -293,16 +385,6 @@ def _compute_tiling_result(
                     else None
                 ),
             )
-        ),
-        read_step_px=extraction.read_step_px,
-        step_px_lv0=extraction.step_px_lv0,
-        selection_strategy=(
-            CoordinateSelectionStrategy.MERGED_DEFAULT_TILING
-            if sampling_spec is not None
-            else None
-        ),
-        output_mode=(
-            CoordinateOutputMode.SINGLE_OUTPUT if sampling_spec is not None else None
         ),
     )
 
@@ -363,7 +445,7 @@ def tile_slide(
     filtering: FilterConfig,
     preview: PreviewConfig | None = None,
     num_workers: int = 1,
-) -> TilingResult:
+) -> preprocessing_mod.TilingResult:
     if preview is not None and (
         preview.save_mask_preview or preview.save_tiling_preview
     ):
@@ -417,7 +499,7 @@ def tile_slide(
 
 
 def save_tiling_result(
-    result: TilingResult,
+    result: TilingResult | preprocessing_mod.TilingResult,
     output_dir: Path,
     *,
     tiles_dir: Path | None = None,
@@ -429,83 +511,20 @@ def save_tiling_result(
         else Path(output_dir) / "tiles"
     )
     tiles_dir.mkdir(parents=True, exist_ok=True)
-    npz_path = tiles_dir / f"{result.sample_id}.coordinates.npz"
-    meta_path = tiles_dir / f"{result.sample_id}.coordinates.meta.json"
-
-    payload = {
-        "tile_index": result.tile_index.astype(np.int32, copy=False),
-        "x": result.x.astype(np.int64, copy=False),
-        "y": result.y.astype(np.int64, copy=False),
-    }
-    if result.tissue_fraction is not None:
-        payload["tissue_fraction"] = result.tissue_fraction.astype(
-            np.float32, copy=False
-        )
-    meta = {
-        "sample_id": result.sample_id,
-        "image_path": str(result.image_path),
-        "mask_path": str(result.mask_path) if result.mask_path is not None else None,
-        "backend": result.backend,
-        "target_spacing_um": result.target_spacing_um,
-        "target_tile_size_px": result.target_tile_size_px,
-        "read_level": result.read_level,
-        "read_spacing_um": result.read_spacing_um,
-        "read_tile_size_px": result.read_tile_size_px,
-        "read_step_px": result.read_step_px,
-        "tile_size_lv0": result.tile_size_lv0,
-        "step_px_lv0": result.step_px_lv0,
-        "overlap": result.overlap,
-        "tissue_threshold": result.tissue_threshold,
-        "num_tiles": result.num_tiles,
-        "config_hash": result.config_hash,
-    }
-    if result.annotation is not None:
-        meta["annotation"] = result.annotation
-    if result.selection_strategy is not None:
-        meta["selection_strategy"] = result.selection_strategy
-    if result.output_mode is not None:
-        meta["output_mode"] = result.output_mode
-    temp_npz_path: Path | None = None
-    temp_meta_path: Path | None = None
-    write_complete = False
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="wb",
-            suffix=".npz",
-            dir=tiles_dir,
-            delete=False,
-        ) as handle:
-            temp_npz_path = Path(handle.name)
-            np.savez(handle, **payload)
-            handle.flush()
-
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            suffix=".json",
-            dir=tiles_dir,
-            delete=False,
-        ) as handle:
-            temp_meta_path = Path(handle.name)
-            handle.write(json.dumps(meta, indent=2, sort_keys=True) + "\n")
-            handle.flush()
-
-        temp_npz_path.replace(npz_path)
-        temp_npz_path = None
-        temp_meta_path.replace(meta_path)
-        temp_meta_path = None
-        write_complete = True
-    finally:
-        if not write_complete:
-            npz_path.unlink(missing_ok=True)
-            meta_path.unlink(missing_ok=True)
-        if temp_npz_path is not None:
-            temp_npz_path.unlink(missing_ok=True)
-        if temp_meta_path is not None:
-            temp_meta_path.unlink(missing_ok=True)
+    preprocessing_result = (
+        result
+        if isinstance(result, preprocessing_mod.TilingResult)
+        else _to_preprocessing_tiling_result(result)
+    )
+    artifact_paths = preprocessing_mod.save_tiling_result(
+        preprocessing_result,
+        output_dir=tiles_dir,
+        sample_id=result.sample_id,
+    )
     return TilingArtifacts(
         sample_id=result.sample_id,
-        coordinates_npz_path=npz_path,
-        coordinates_meta_path=meta_path,
+        coordinates_npz_path=artifact_paths["npz"],
+        coordinates_meta_path=artifact_paths["meta"],
         num_tiles=result.num_tiles,
     )
 
@@ -668,35 +687,46 @@ def extract_tiles_to_tar(
         return tar_path, result
 
     kept = np.asarray(sorted(kept_indices), dtype=np.int64)
-    filtered_result = TilingResult(
-        sample_id=result.sample_id,
-        image_path=result.image_path,
-        mask_path=result.mask_path,
-        backend=result.backend,
-        x=result.x[kept],
-        y=result.y[kept],
-        tile_index=np.arange(len(kept), dtype=np.int32),
-        target_spacing_um=result.target_spacing_um,
-        target_tile_size_px=result.target_tile_size_px,
-        read_level=result.read_level,
-        read_spacing_um=result.read_spacing_um,
-        read_tile_size_px=result.read_tile_size_px,
-        tile_size_lv0=result.tile_size_lv0,
-        overlap=result.overlap,
-        tissue_threshold=result.tissue_threshold,
-        num_tiles=len(kept),
-        config_hash=result.config_hash,
-        read_step_px=result.read_step_px,
-        step_px_lv0=result.step_px_lv0,
-        tissue_fraction=(
-            result.tissue_fraction[kept]
-            if result.tissue_fraction is not None
-            else None
-        ),
-        annotation=result.annotation,
-        selection_strategy=result.selection_strategy,
-        output_mode=result.output_mode,
-    )
+    if isinstance(result, preprocessing_mod.TilingResult):
+        filtered_result = replace(
+            result,
+            tiles=replace(
+                result.tiles,
+                coordinates=result.coordinates[kept],
+                tissue_fractions=result.tissue_fractions[kept],
+                tile_index=np.arange(len(kept), dtype=np.int32),
+            ),
+        )
+    else:
+        filtered_result = TilingResult(
+            sample_id=result.sample_id,
+            image_path=result.image_path,
+            mask_path=result.mask_path,
+            backend=result.backend,
+            x=result.x[kept],
+            y=result.y[kept],
+            tile_index=np.arange(len(kept), dtype=np.int32),
+            target_spacing_um=result.target_spacing_um,
+            target_tile_size_px=result.target_tile_size_px,
+            read_level=result.read_level,
+            read_spacing_um=result.read_spacing_um,
+            read_tile_size_px=result.read_tile_size_px,
+            tile_size_lv0=result.tile_size_lv0,
+            overlap=result.overlap,
+            tissue_threshold=result.tissue_threshold,
+            num_tiles=len(kept),
+            config_hash=result.config_hash,
+            read_step_px=result.read_step_px,
+            step_px_lv0=result.step_px_lv0,
+            tissue_fraction=(
+                result.tissue_fraction[kept]
+                if result.tissue_fraction is not None
+                else None
+            ),
+            annotation=result.annotation,
+            selection_strategy=result.selection_strategy,
+            output_mode=result.output_mode,
+        )
     return tar_path, filtered_result
 
 
@@ -885,6 +915,8 @@ def _iter_planned_tile_views_from_read_plan_region(
 
 def _format_tar_member_name(tile_index: int) -> str:
     return f"{int(tile_index):06d}.jpg"
+
+
 def _needs_pixel_filtering(filtering: FilterConfig) -> bool:
     return bool(filtering.filter_white or filtering.filter_black)
 
@@ -892,97 +924,19 @@ def _needs_pixel_filtering(filtering: FilterConfig) -> bool:
 def load_tiling_result(
     coordinates_npz_path: Path,
     coordinates_meta_path: Path,
-) -> TilingResult:
+) -> preprocessing_mod.TilingResult:
     try:
-        tiles = np.load(coordinates_npz_path, allow_pickle=False)
+        preprocessing_result = preprocessing_mod.load_tiling_result(
+            coordinates_npz_path,
+            coordinates_meta_path,
+        )
     except Exception as exc:
         raise ValueError(
-            f"Unable to load tiling npz artifact {coordinates_npz_path}: {exc}"
+            "Unable to load tiling artifacts "
+            f"{coordinates_npz_path} and {coordinates_meta_path}: {exc}"
         ) from exc
-    try:
-        meta = json.loads(Path(coordinates_meta_path).read_text())
-    except Exception as exc:
-        raise ValueError(
-            f"Unable to load tiling metadata artifact {coordinates_meta_path}: {exc}"
-        ) from exc
-    required_npz_keys = {"tile_index", "x", "y"}
-    missing_npz_keys = sorted(required_npz_keys - set(tiles.files))
-    if missing_npz_keys:
-        raise ValueError(
-            f"Invalid tiling npz artifact {coordinates_npz_path}; missing keys: "
-            + ", ".join(missing_npz_keys)
-        )
-    required_meta_keys = {
-        "sample_id",
-        "image_path",
-        "mask_path",
-        "backend",
-        "target_spacing_um",
-        "target_tile_size_px",
-        "read_level",
-        "read_spacing_um",
-        "read_tile_size_px",
-        "tile_size_lv0",
-        "overlap",
-        "tissue_threshold",
-        "num_tiles",
-        "config_hash",
-    }
-    missing_meta_keys = sorted(required_meta_keys - set(meta))
-    if missing_meta_keys:
-        raise ValueError(
-            f"Invalid tiling metadata artifact {coordinates_meta_path}; missing keys: "
-            + ", ".join(missing_meta_keys)
-        )
-    x = tiles["x"].astype(np.int64, copy=False)
-    y = tiles["y"].astype(np.int64, copy=False)
-    tile_index = tiles["tile_index"].astype(np.int32, copy=False)
-    tissue_fraction = None
-    if "tissue_fraction" in tiles:
-        tissue_fraction = tiles["tissue_fraction"].astype(np.float32, copy=False)
-    result = TilingResult(
-        sample_id=meta["sample_id"],
-        image_path=Path(meta["image_path"]),
-        mask_path=Path(meta["mask_path"]) if meta.get("mask_path") else None,
-        backend=meta["backend"],
-        x=x,
-        y=y,
-        tile_index=tile_index,
-        tissue_fraction=tissue_fraction,
-        target_spacing_um=float(meta["target_spacing_um"]),
-        target_tile_size_px=int(meta["target_tile_size_px"]),
-        read_level=int(meta["read_level"]),
-        read_spacing_um=float(meta["read_spacing_um"]),
-        read_tile_size_px=int(meta["read_tile_size_px"]),
-        tile_size_lv0=int(meta["tile_size_lv0"]),
-        overlap=float(meta["overlap"]),
-        tissue_threshold=float(meta["tissue_threshold"]),
-        num_tiles=int(meta["num_tiles"]),
-        config_hash=str(meta["config_hash"]),
-        read_step_px=(
-            int(meta["read_step_px"])
-            if meta.get("read_step_px") is not None
-            else None
-        ),
-        step_px_lv0=(
-            int(meta["step_px_lv0"])
-            if meta.get("step_px_lv0") is not None
-            else None
-        ),
-        annotation=(
-            str(meta["annotation"]) if meta.get("annotation") is not None else None
-        ),
-        selection_strategy=(
-            str(meta["selection_strategy"])
-            if meta.get("selection_strategy") is not None
-            else None
-        ),
-        output_mode=(
-            str(meta["output_mode"]) if meta.get("output_mode") is not None else None
-        ),
-    )
-    _validate_result_consistency(result)
-    return result
+    _validate_result_consistency(preprocessing_result)
+    return preprocessing_result
 
 
 def validate_tiling_artifacts(

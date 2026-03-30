@@ -12,6 +12,32 @@ class LevelSelection:
     is_within_tolerance: bool
 
 
+def project_discrete_grid_origins(
+    coordinates: np.ndarray,
+    *,
+    scale_x: float,
+    scale_y: float,
+) -> np.ndarray:
+    """Project level-0 origin coordinates into a discrete target grid.
+
+    Origin coordinates are truncated toward zero so a top-left anchor stays
+    within the same source pixel footprint after projection.
+    """
+    coordinates = np.asarray(coordinates)
+    if coordinates.ndim != 2 or coordinates.shape[1] != 2:
+        raise ValueError(
+            f"coordinates must have shape (N, 2), got {coordinates.shape}"
+        )
+    projected = np.empty_like(coordinates, dtype=np.int64)
+    projected[:, 0] = np.floor(
+        coordinates[:, 0].astype(np.float64, copy=False) * float(scale_x)
+    ).astype(np.int64)
+    projected[:, 1] = np.floor(
+        coordinates[:, 1].astype(np.float64, copy=False) * float(scale_y)
+    ).astype(np.int64)
+    return projected
+
+
 def normalize_level_downsamples(
     level_downsamples: list[float | tuple[float, float]],
 ) -> list[tuple[float, float]]:

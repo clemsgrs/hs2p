@@ -1,20 +1,70 @@
 {
-  "backend": "asap",
-  "config_hash": "ff7f246585a8b288ccc2693d22b5fbe4ac4d551d098e0fd93fc2a963e4220de4",
-  "image_path": "/data/pathology/projects/clement/code/hs2p/tests/fixtures/input/test-wsi.tif",
-  "mask_path": "/data/pathology/projects/clement/code/hs2p/tests/fixtures/input/test-mask.tif",
-  "num_tiles": 459,
-  "output_mode": "single_output",
-  "overlap": 0.0,
-  "read_level": 0,
-  "read_spacing_um": 0.25200000393750005,
-  "read_step_px": 444,
-  "read_tile_size_px": 444,
-  "sample_id": "test-wsi",
-  "selection_strategy": "merged_default_tiling",
-  "step_px_lv0": 444,
-  "target_spacing_um": 0.5,
-  "target_tile_size_px": 224,
-  "tile_size_lv0": 444,
-  "tissue_threshold": 0.1
+  "artifact": {
+    "annotation": null,
+    "coordinate_space": "level0_px",
+    "output_mode": "single_output",
+    "selection_strategy": "merged_default_tiling",
+    "tile_order": "x_then_y"
+  },
+  "filtering": {
+    "a_h": 0,
+    "a_t": 4,
+    "black_threshold": 25,
+    "filter_black": false,
+    "filter_white": false,
+    "fraction_threshold": 0.9,
+    "max_n_holes": 0,
+    "white_threshold": 220
+  },
+  "format_version": 2,
+  "provenance": {
+    "backend": "asap",
+    "config_hash": "ff7f246585a8b288ccc2693d22b5fbe4ac4d551d098e0fd93fc2a963e4220de4",
+    "image_path": "/workspace/tests/fixtures/input/test-wsi.tif",
+    "requested_backend": "asap",
+    "sample_id": "test-wsi",
+    "tissue_mask_path": "/workspace/tests/fixtures/input/test-mask.tif"
+  },
+  "segmentation": {
+    "close": 4,
+    "mask_level": null,
+    "mask_spacing_um": null,
+    "mthresh": 7,
+    "ref_tile_size_px": 16,
+    "seg_downsample": 64,
+    "seg_level": 0,
+    "seg_spacing_um": 0.0,
+    "sthresh": 8,
+    "sthresh_up": 255,
+    "tissue_mask_path": "/workspace/tests/fixtures/input/test-mask.tif",
+    "tissue_mask_tissue_value": null,
+    "tissue_method": "unknown",
+    "use_hsv": null,
+    "use_otsu": null
+  },
+  "slide": {
+    "base_spacing_um": 0.25200000393750005,
+    "dimensions": [
+      0,
+      0
+    ],
+    "level_downsamples": [
+      1.0
+    ]
+  },
+  "tiling": {
+    "effective_spacing_um": 0.25200000393750005,
+    "effective_tile_size_px": 444,
+    "is_within_tolerance": true,
+    "min_tissue_fraction": 0.1,
+    "n_tiles": 459,
+    "overlap": 0.0,
+    "read_level": 0,
+    "requested_spacing_um": 0.5,
+    "requested_tile_size_px": 224,
+    "step_px_lv0": 444,
+    "tile_size_lv0": 444,
+    "tolerance": 0.05,
+    "use_padding": true
+  }
 }

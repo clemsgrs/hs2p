@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import numpy as np
 
 import hs2p.api as api_mod
+import hs2p.preprocessing as preprocessing_mod
 import hs2p.wsi.backend as backend_mod
 import hs2p.wsi.reader as reader_mod
 import hs2p.wsi.wsi as wsi_mod
@@ -183,43 +184,51 @@ def test_tile_slide_uses_resolved_backend_for_hash_and_result(monkeypatch):
             tried=("cucim",),
         )
 
-    def _fake_extract_coordinates(
-        *,
-        wsi_path: Path,
-        mask_path: Path | None,
-        backend: str,
-        segment_params,
-        tiling_params,
-        filter_params,
-        sampling_spec,
-        mask_preview_path,
-        spacing_at_level_0,
-        disable_tqdm,
-        num_workers,
-    ):
-        del (
-            wsi_path,
-            mask_path,
-            segment_params,
-            tiling_params,
-            filter_params,
-            sampling_spec,
-            mask_preview_path,
-            spacing_at_level_0,
-            disable_tqdm,
-            num_workers,
-        )
-        captured["backend"] = backend
-        return SimpleNamespace(
-            x=np.array([0], dtype=np.int64),
-            y=np.array([0], dtype=np.int64),
-            tissue_percentages=None,
-            read_level=0,
-            read_spacing_um=0.5,
-            read_tile_size_px=256,
-            read_step_px=256,
-            tile_size_lv0=256,
+    def _fake_preprocess_slide(**kwargs):
+        captured["backend"] = kwargs["backend"]
+        return preprocessing_mod.TilingResult(
+            tiles=preprocessing_mod.TileGeometry(
+                coordinates=np.array([[0, 0]], dtype=np.int64),
+                tissue_fractions=np.array([0.0], dtype=np.float32),
+                tile_index=np.array([0], dtype=np.int32),
+                requested_tile_size_px=256,
+                requested_spacing_um=0.5,
+                read_level=0,
+                effective_tile_size_px=256,
+                effective_spacing_um=0.5,
+                tile_size_lv0=256,
+                is_within_tolerance=True,
+                base_spacing_um=0.5,
+                slide_dimensions=[1000, 1000],
+                level_downsamples=[1.0],
+                overlap=0.0,
+                min_tissue_fraction=0.1,
+                use_padding=True,
+            ),
+            sample_id="slide-1",
+            image_path="slide.svs",
+            config_hash=None,
+            backend="cucim",
+            requested_backend="cucim",
+            tolerance=0.05,
             step_px_lv0=256,
+            tissue_method="hsv",
+            seg_downsample=64,
+            seg_level=0,
+            seg_spacing_um=0.5,
+            seg_sthresh=8,
+            seg_sthresh_up=255,
+            seg_mthresh=7,
+            seg_close=4,
+            ref_tile_size_px=16,
+            a_t=4,
+            a_h=2,
+            max_n_holes=8,
+            filter_white=False,
+            filter_black=False,
+            white_threshold=220,
+            black_threshold=25,
+            fraction_threshold=0.9,
         )
 
     def _fake_hash(*, tiling, segmentation, filtering, sampling_spec=None, selection_strategy=None, output_mode=None, annotation=None):
@@ -228,7 +237,7 @@ def test_tile_slide_uses_resolved_backend_for_hash_and_result(monkeypatch):
         return "hash"
 
     monkeypatch.setattr(api_mod, "resolve_backend", _fake_resolve_backend)
-    monkeypatch.setattr(api_mod, "extract_coordinates", _fake_extract_coordinates)
+    monkeypatch.setattr(api_mod.preprocessing_mod, "preprocess_slide", _fake_preprocess_slide)
     monkeypatch.setattr(api_mod, "compute_effective_config_hash", _fake_hash)
 
     result = api_mod.tile_slide(

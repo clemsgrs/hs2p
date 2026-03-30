@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from hs2p.wsi.geometry import project_discrete_grid_origins
 from hs2p.wsi.reader import open_slide, select_level, select_level_for_downsample
 
 
@@ -232,6 +233,48 @@ class TileGeometry:
         )
         object.__setattr__(self, "tile_index", tile_index)
 
+    @property
+    def x(self) -> np.ndarray:
+        return self.coordinates[:, 0]
+
+    @property
+    def y(self) -> np.ndarray:
+        return self.coordinates[:, 1]
+
+    @property
+    def tissue_fraction(self) -> np.ndarray:
+        return self.tissue_fractions
+
+    @property
+    def num_tiles(self) -> int:
+        return int(self.coordinates.shape[0])
+
+    @property
+    def target_spacing_um(self) -> float:
+        return float(self.requested_spacing_um)
+
+    @property
+    def target_tile_size_px(self) -> int:
+        return int(self.requested_tile_size_px)
+
+    @property
+    def read_spacing_um(self) -> float:
+        return float(self.effective_spacing_um)
+
+    @property
+    def read_tile_size_px(self) -> int:
+        return int(self.effective_tile_size_px)
+
+    @property
+    def read_step_px(self) -> int | None:
+        if self.effective_tile_size_px <= 0:
+            return None
+        return int(round(self.effective_tile_size_px * (1.0 - self.overlap)))
+
+    @property
+    def tissue_threshold(self) -> float:
+        return float(self.min_tissue_fraction)
+
 
 @dataclass(frozen=True)
 class TilingResult:
@@ -247,7 +290,8 @@ class TilingResult:
     tiles: TileGeometry
     # -- provenance --
     sample_id: str
-    image_path: str
+    image_path: str | Path
+    config_hash: str | None
     backend: str
     requested_backend: str
     # -- tiling config --
@@ -275,13 +319,18 @@ class TilingResult:
     # -- optional (legitimately None in some paths) --
     seg_use_otsu: bool | None = None
     seg_use_hsv: bool | None = None
-    tissue_mask_path: str | None = None
+    tissue_mask_path: str | Path | None = None
     tissue_mask_tissue_value: int | None = None
     mask_level: int | None = None
     mask_spacing_um: float | None = None
     annotation: str | None = None
     selection_strategy: str | None = None
     output_mode: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "image_path", Path(self.image_path))
+        if self.tissue_mask_path is not None:
+            object.__setattr__(self, "tissue_mask_path", Path(self.tissue_mask_path))
 
     def __getattr__(self, name: str) -> Any:
         """Delegate attribute access to the underlying TileGeometry."""
@@ -291,6 +340,10 @@ class TilingResult:
             raise AttributeError(
                 f"'{type(self).__name__}' object has no attribute {name!r}"
             ) from None
+
+    @property
+    def mask_path(self) -> Path | None:
+        return self.tissue_mask_path
 
 
 def canonicalize_tiling_result(tiles: TileGeometry) -> TileGeometry:
@@ -539,21 +592,20 @@ def _compute_tissue_fractions(
     tile_h_mask = max(1, round(tile_size_lv0 * scale_y))
     tile_area = tile_w_mask * tile_h_mask
 
-    xs_mask = np.round(candidates[:, 0] * scale_x).astype(np.int64)
-    ys_mask = np.round(candidates[:, 1] * scale_y).astype(np.int64)
-    x1 = np.clip(xs_mask, 0, mask_w)
-    y1 = np.clip(ys_mask, 0, mask_h)
-    x2 = np.clip(xs_mask + tile_w_mask, 0, mask_w)
-    y2 = np.clip(ys_mask + tile_h_mask, 0, mask_h)
+    mask_origins = project_discrete_grid_origins(
+        candidates,
+        scale_x=scale_x,
+        scale_y=scale_y,
+    )
+    x1 = np.clip(mask_origins[:, 0], 0, mask_w)
+    y1 = np.clip(mask_origins[:, 1], 0, mask_h)
+    x2 = np.clip(mask_origins[:, 0] + tile_w_mask, 0, mask_w)
+    y2 = np.clip(mask_origins[:, 1] + tile_h_mask, 0, mask_h)
 
     tissue_sum = (
         integral[y2, x2] - integral[y1, x2] - integral[y2, x1] + integral[y1, x1]
     )
-    if use_padding:
-        valid_area = np.maximum(1, (x2 - x1) * (y2 - y1))
-        fractions = (tissue_sum / valid_area).astype(np.float32)
-    else:
-        fractions = (tissue_sum / tile_area).astype(np.float32)
+    fractions = (tissue_sum / tile_area).astype(np.float32)
     return np.clip(fractions, 0.0, 1.0)
 
 
@@ -573,6 +625,7 @@ _PROVENANCE_KEYS = {
     "sample_id",
     "image_path",
     "tissue_mask_path",
+    "config_hash",
     "backend",
     "requested_backend",
 }
@@ -636,8 +689,11 @@ def _build_tiling_metadata(result: TilingResult) -> dict[str, Any]:
     n_tiles = len(result.coordinates)
     provenance = {
         "sample_id": result.sample_id,
-        "image_path": result.image_path,
-        "tissue_mask_path": result.tissue_mask_path,
+        "image_path": str(result.image_path),
+        "tissue_mask_path": (
+            str(result.tissue_mask_path) if result.tissue_mask_path is not None else None
+        ),
+        "config_hash": result.config_hash,
         "backend": result.backend,
         "requested_backend": result.requested_backend,
     }
@@ -672,7 +728,9 @@ def _build_tiling_metadata(result: TilingResult) -> dict[str, Any]:
         "close": result.seg_close,
         "use_otsu": result.seg_use_otsu,
         "use_hsv": result.seg_use_hsv,
-        "tissue_mask_path": result.tissue_mask_path,
+        "tissue_mask_path": (
+            str(result.tissue_mask_path) if result.tissue_mask_path is not None else None
+        ),
         "ref_tile_size_px": result.ref_tile_size_px,
         "tissue_mask_tissue_value": result.tissue_mask_tissue_value,
         "mask_level": result.mask_level,
@@ -845,11 +903,12 @@ def save_tiling_result(
 
 def load_tiling_result(npz_path: Path, meta_path: Path) -> TilingResult:
     meta = json.loads(Path(meta_path).read_text())
-    if meta.get("format_version") == FORMAT_VERSION:
-        return _load_v2_tiling_result(npz_path=npz_path, meta=meta)
-    if "provenance" in meta and "tiling" in meta and "segmentation" in meta:
-        return _load_transitional_tiling_result(npz_path=npz_path, meta=meta)
-    return _load_legacy_tiling_result(npz_path=npz_path, meta=meta)
+    if meta.get("format_version") != FORMAT_VERSION:
+        raise ValueError(
+            "Unsupported tiling artifact format; "
+            f"expected format_version {FORMAT_VERSION}"
+        )
+    return _load_v2_tiling_result(npz_path=npz_path, meta=meta)
 
 
 def _load_v2_tiling_result(*, npz_path: Path, meta: dict[str, Any]) -> TilingResult:
@@ -899,6 +958,7 @@ def _load_v2_tiling_result(*, npz_path: Path, meta: dict[str, Any]) -> TilingRes
         tiles=tiles,
         sample_id=provenance["sample_id"],
         image_path=provenance["image_path"],
+        config_hash=provenance.get("config_hash"),
         backend=provenance["backend"],
         requested_backend=provenance["requested_backend"],
         tolerance=tiling["tolerance"],
@@ -929,140 +989,6 @@ def _load_v2_tiling_result(*, npz_path: Path, meta: dict[str, Any]) -> TilingRes
         annotation=artifact["annotation"],
         selection_strategy=artifact["selection_strategy"],
         output_mode=artifact["output_mode"],
-    )
-
-
-def _load_transitional_tiling_result(*, npz_path: Path, meta: dict[str, Any]) -> TilingResult:
-    data = np.load(npz_path, allow_pickle=False)
-    if "tile_index" not in data:
-        raise ValueError("Invalid tiling artifact: missing tile_index")
-    if "coordinates" not in data:
-        raise ValueError("Invalid tiling artifact: missing coordinates")
-    if "tissue_fractions" not in data:
-        raise ValueError("Invalid tiling artifact: missing tissue_fractions")
-    coordinates = np.asarray(data["coordinates"], dtype=np.int64)
-    tissue_fractions = np.asarray(data["tissue_fractions"], dtype=np.float32)
-    tile_index = _validate_tile_index(np.asarray(data["tile_index"]), len(coordinates))
-    tiles = TileGeometry(
-        coordinates=coordinates,
-        tissue_fractions=tissue_fractions,
-        tile_index=tile_index,
-        requested_tile_size_px=int(meta["requested_tile_size_px"]),
-        requested_spacing_um=float(meta["requested_spacing_um"]),
-        read_level=int(meta["read_level"]),
-        effective_tile_size_px=int(meta["effective_tile_size_px"]),
-        effective_spacing_um=float(meta["effective_spacing_um"]),
-        tile_size_lv0=int(meta["tile_size_lv0"]),
-        is_within_tolerance=bool(meta["is_within_tolerance"]),
-        use_padding=bool(meta["use_padding"]),
-        base_spacing_um=(
-            float(meta["base_spacing_um"])
-            if meta.get("base_spacing_um") is not None
-            else 0.0
-        ),
-        slide_dimensions=meta.get("slide_dimensions", [0, 0]),
-        level_downsamples=meta.get("level_downsamples", [1.0]),
-        overlap=meta.get("overlap", 0.0),
-        min_tissue_fraction=meta.get("min_tissue_fraction", 0.0),
-    )
-    return TilingResult(
-        tiles=tiles,
-        sample_id=meta["sample_id"],
-        image_path=meta["image_path"],
-        backend=meta["backend"],
-        requested_backend=meta.get("requested_backend", meta["backend"]),
-        tolerance=meta.get("tolerance", 0.05),
-        step_px_lv0=meta.get("step_px_lv0", 0),
-        tissue_method=meta.get("tissue_method", "unknown"),
-        seg_downsample=meta.get("seg_downsample", 64),
-        seg_level=meta.get("seg_level", 0),
-        seg_spacing_um=meta.get("seg_spacing_um", 0.0),
-        seg_sthresh=meta.get("seg_sthresh", meta.get("sthresh", 8)),
-        seg_sthresh_up=meta.get("seg_sthresh_up", meta.get("sthresh_up", 255)),
-        seg_mthresh=meta.get("seg_mthresh", meta.get("mthresh", 7)),
-        seg_close=meta.get("seg_close", meta.get("close", 4)),
-        ref_tile_size_px=meta.get("ref_tile_size_px", 16),
-        a_t=meta.get("a_t", 4),
-        a_h=meta.get("a_h", 0),
-        max_n_holes=meta.get("max_n_holes", 0),
-        filter_white=meta.get("filter_white", False),
-        filter_black=meta.get("filter_black", False),
-        white_threshold=meta.get("white_threshold", 220),
-        black_threshold=meta.get("black_threshold", 25),
-        fraction_threshold=meta.get("fraction_threshold", 0.9),
-        tissue_mask_path=meta.get("tissue_mask_path"),
-        tissue_mask_tissue_value=meta.get("tissue_mask_tissue_value"),
-        mask_level=meta.get("mask_level"),
-        mask_spacing_um=meta.get("mask_spacing_um"),
-    )
-
-
-def _load_legacy_tiling_result(*, npz_path: Path, meta: dict[str, Any]) -> TilingResult:
-    data = np.load(npz_path, allow_pickle=False)
-    required_npz_keys = {"tile_index", "x", "y"}
-    missing = sorted(required_npz_keys - set(data.files))
-    if missing:
-        raise ValueError(f"Invalid tiling artifact: missing keys {missing}")
-    coordinates = np.stack(
-        [
-            np.asarray(data["x"], dtype=np.int64),
-            np.asarray(data["y"], dtype=np.int64),
-        ],
-        axis=1,
-    )
-    tile_index = _validate_tile_index(np.asarray(data["tile_index"]), len(coordinates))
-    tissue_fractions = (
-        np.asarray(data["tissue_fraction"], dtype=np.float32)
-        if "tissue_fraction" in data
-        else np.zeros(len(coordinates), dtype=np.float32)
-    )
-    tiles = TileGeometry(
-        coordinates=coordinates,
-        tissue_fractions=tissue_fractions,
-        tile_index=tile_index,
-        requested_tile_size_px=int(meta["target_tile_size_px"]),
-        requested_spacing_um=float(meta["target_spacing_um"]),
-        read_level=int(meta["read_level"]),
-        effective_tile_size_px=int(meta["read_tile_size_px"]),
-        effective_spacing_um=float(meta["read_spacing_um"]),
-        tile_size_lv0=int(meta["tile_size_lv0"]),
-        is_within_tolerance=True,
-        use_padding=True,
-        base_spacing_um=0.0,
-        slide_dimensions=[0, 0],
-        level_downsamples=[1.0],
-        overlap=meta["overlap"],
-        min_tissue_fraction=meta["tissue_threshold"],
-    )
-    # Legacy artifacts predate tolerance tracking; assume within tolerance.
-    return TilingResult(
-        tiles=tiles,
-        sample_id=meta["sample_id"],
-        image_path=meta["image_path"],
-        backend=meta["backend"],
-        requested_backend=meta.get("backend", ""),
-        tolerance=0.05,
-        step_px_lv0=meta.get("step_px_lv0", 0),
-        tissue_method="unknown",
-        seg_downsample=64,
-        seg_level=0,
-        seg_spacing_um=0.0,
-        seg_sthresh=8,
-        seg_sthresh_up=255,
-        seg_mthresh=7,
-        seg_close=4,
-        ref_tile_size_px=16,
-        a_t=4,
-        a_h=0,
-        max_n_holes=0,
-        filter_white=False,
-        filter_black=False,
-        white_threshold=220,
-        black_threshold=25,
-        fraction_threshold=0.9,
-        annotation=meta.get("annotation"),
-        selection_strategy=meta.get("selection_strategy"),
-        output_mode=meta.get("output_mode"),
     )
 
 
@@ -1279,6 +1205,7 @@ def preprocess_slide(
             tiles=tiles,
             sample_id=sample_id,
             image_path=str(image_path),
+            config_hash=None,
             backend=slide.backend_name,
             requested_backend=backend,
             tolerance=tolerance,
