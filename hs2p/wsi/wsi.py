@@ -405,13 +405,12 @@ class WholeSlideImage(object):
 
         Args:
             tiling_params: Tiling configuration with spacing, tile size, overlap,
-                tissue threshold, and padding/hole controls.
+                tissue threshold, and padding controls.
                 - target_spacing (float): Desired spacing of the tiles.
                 - tolerance (float): Tolerance for matching the target_spacing, deciding how much
                     target_spacing can deviate from those specified in the slide metadata.
                 - target_tile_size (int): Desired size of the tiles at the target spacing.
                 - overlap (float, optional): Overlap between adjacent tiles. Defaults to 0.0.
-                - "drop_holes" (bool): If True, tiles falling within a hole will be excluded. Defaults to False.
                 - "tissue_percentage" (dict[str, float]): Minimum amount pixels covered with tissue required for a tile for a given annotation.
                 - "use_padding" (bool): Whether to use padding for tiles at the edges. Defaults to True.
             filter_params (NamedTuple): Parameters for filtering contours, including:
@@ -781,64 +780,6 @@ class WholeSlideImage(object):
         return contours, holes
 
     @staticmethod
-    def isInHoles(holes, pt, tile_size):
-        """
-        Check if a given tile is inside any of the specified polygonal holes.
-
-        Args:
-            holes (list): A list of polygonal contours, where each contour is represented
-                        as a list of points (e.g., from OpenCV's findContours function).
-            pt (tuple): The (x, y) coordinates of the top-left corner of the tile to check.
-            tile_size (int or float): The size of the tile, used to calculate the center
-                                    of the point being tested.
-
-        Returns:
-            int: Returns 1 if the point is inside any of the holes, otherwise returns 0.
-        """
-        for hole in holes:
-            if (
-                cv2.pointPolygonTest(
-                    hole, (pt[0] + tile_size / 2, pt[1] + tile_size / 2), False
-                )
-                > 0
-            ):
-                return 1
-
-        return 0
-
-    @staticmethod
-    def isInContours(cont_check_fn, pt, holes=None, drop_holes=True, tile_size=256):
-        """
-        Determines whether a given tile is within contours (and optionally outside of holes).
-
-        Args:
-            cont_check_fn (callable): A function that checks if a tile is within contours.
-                It should accept a (x,y) coordinates as input and return a tuple (keep_flag, tissue_pct),
-                where `keep_flag` is a boolean indicating if the tile is within contours,
-                and `tissue_pct` is the percentage of tissue coverage of the tile.
-            pt (tuple): The (x, y) coordinates of the top-left corner of the tile to check.
-            holes (list, optional): A list of holes (e.g., regions to exclude) to check against.
-                Defaults to None.
-            drop_holes (bool, optional): If True, tiles falling within a hole will be excluded.
-                Defaults to True.
-            tile_size (int, optional): The size of the tile to consider.
-                Defaults to 256.
-
-        Returns:
-            tuple: A tuple (keep_flag, tissue_pct), where:
-                - `keep_flag` is 1 if the tile is within contours and not in holes (if applicable),
-                  otherwise 0.
-                - `tissue_pct` is the percentage of tissue coverage of the tile.
-        """
-        keep_flag, tissue_pct = cont_check_fn(pt)
-        if keep_flag:
-            if holes is not None and drop_holes:
-                return not WholeSlideImage.isInHoles(holes, pt, tile_size), tissue_pct
-            else:
-                return 1, tissue_pct
-        return 0, tissue_pct
-
-    @staticmethod
     def scaleContourDim(contours, scale):
         """
         Scales the dimensions of a list of contours by a given factor.
@@ -1019,7 +960,6 @@ class WholeSlideImage(object):
         """
         target_tile_size = tiling_params.target_tile_size_px
         overlap = tiling_params.overlap
-        drop_holes = tiling_params.drop_holes
         use_padding = tiling_params.use_padding
 
         tile_level, tile_spacing, resize_factor = self._resolve_tile_read_metadata(
@@ -1046,7 +986,6 @@ class WholeSlideImage(object):
             tile_size_resized * tile_downsample[0],
             tile_size_resized * tile_downsample[1],
         )
-
         img_w, img_h = self.level_dimensions[0]
         if use_padding:
             stop_y = int(start_y + h)
@@ -1110,13 +1049,6 @@ class WholeSlideImage(object):
             filter_params,
             num_workers=num_workers,
         )
-
-        if drop_holes:
-            keep_flags = [
-                flag
-                and not self.isInHoles(contour_holes, coord, tile_size_at_level_0[0])
-                for flag, coord in zip(keep_flags, coord_candidates)
-            ]
 
         filtered_coordinates = coord_candidates[np.array(keep_flags) == 1]
         filtered_tissue_percentages = np.array(tissue_pcts)[np.array(keep_flags) == 1]

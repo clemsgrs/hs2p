@@ -41,7 +41,6 @@ def _run_extract(wsi_path: Path, mask_path: Path, backend: str, tissue_pct: floa
             tolerance=0.07,
             overlap=0.0,
             tissue_threshold=tissue_pct,
-            drop_holes=False,
             use_padding=True,
             backend=backend,
         ),
