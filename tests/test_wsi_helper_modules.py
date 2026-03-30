@@ -5,6 +5,7 @@ import hs2p.wsi as wsi_pkg
 from hs2p.wsi import api as wsi_api_mod
 from hs2p.wsi import masks as masks_mod
 from hs2p.wsi import preview as preview_mod
+from hs2p.wsi import visualization as visualization_mod
 from hs2p.wsi.masks import (
     compose_overlay_mask_from_annotations,
     extract_padded_crop,
@@ -26,6 +27,8 @@ def test_wsi_package_reexports_helper_functions_directly():
     assert wsi_pkg.overlay_mask_on_tile is preview_mod.overlay_mask_on_tile
     assert wsi_pkg.draw_grid_from_coordinates is preview_mod.draw_grid_from_coordinates
     assert wsi_pkg.pad_to_patch_size is preview_mod.pad_to_patch_size
+    assert wsi_pkg.overlay_mask_on_slide is visualization_mod.overlay_mask_on_slide
+    assert wsi_pkg.write_coordinate_preview is visualization_mod.write_coordinate_preview
 
 
 def test_wsi_package_reexports_coordinate_api_from_owner_module():

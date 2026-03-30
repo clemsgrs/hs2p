@@ -9,19 +9,17 @@ import cv2
 import numpy as np
 
 from hs2p.configs import FilterConfig, SegmentationConfig, TilingConfig
+from hs2p.wsi.visualization import (
+    DEFAULT_TISSUE_COLOR_MAPPING,
+    DEFAULT_TISSUE_PIXEL_MAPPING,
+    save_overlay_preview,
+)
 from hs2p.wsi.masks import (
     compose_overlay_mask_from_annotations,
     normalize_tissue_mask,
     read_aligned_mask,
 )
 from hs2p.wsi.wsi import ResolvedSamplingSpec
-
-DEFAULT_TISSUE_PIXEL_MAPPING = {"background": 0, "tissue": 1}
-DEFAULT_TISSUE_COLOR_MAPPING = {
-    "background": None,
-    "tissue": [157, 219, 129],
-}
-
 
 class CoordinateSelectionStrategy:
     MERGED_DEFAULT_TILING = "merged_default_tiling"
@@ -182,35 +180,6 @@ def _backend_name(wsi, fallback: str) -> str:
     return str(getattr(wsi, "backend", fallback))
 
 
-def _save_overlay_preview(
-    *,
-    wsi_path: Path,
-    backend: str,
-    mask_arr: np.ndarray,
-    mask_preview_path: Path,
-    downsample: int = 32,
-    palette: np.ndarray | None = None,
-    pixel_mapping: dict[str, int] | None = None,
-    color_mapping: dict[str, list[int] | None] | None = None,
-    tile_size_lv0: int | None = None,
-) -> None:
-    from hs2p.wsi import overlay_mask_on_slide
-
-    mask_preview_path.parent.mkdir(parents=True, exist_ok=True)
-    overlay = overlay_mask_on_slide(
-        wsi_path=wsi_path,
-        annotation_mask_path=None,
-        mask_arr=mask_arr,
-        downsample=downsample,
-        backend=backend,
-        palette=palette,
-        pixel_mapping=pixel_mapping,
-        color_mapping=color_mapping,
-        tile_size_lv0=tile_size_lv0,
-    )
-    overlay.save(mask_preview_path)
-
-
 def _wsi_package():
     import hs2p.wsi as wsi_pkg
 
@@ -318,7 +287,7 @@ def _save_request_preview(
             annotation_mask=wsi.annotation_mask,
             pixel_mapping=preview_pixel_mapping,
         )
-    _save_overlay_preview(
+    save_overlay_preview(
         wsi_path=wsi_path,
         backend=backend,
         mask_arr=preview_mask_arr,
