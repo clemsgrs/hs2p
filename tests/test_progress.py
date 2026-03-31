@@ -270,7 +270,9 @@ def test_tiling_main_installs_progress_reporter_only_during_pipeline_run(
     monkeypatch.setattr(
         tiling_mod,
         "load_csv",
-        lambda cfg: [SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs"))],
+        lambda cfg, **kwargs: [
+            SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs"))
+        ],
     )
     monkeypatch.setattr(tiling_mod, "resolve_tiling_config", lambda cfg: _tiling_config())
     monkeypatch.setattr(
@@ -290,7 +292,7 @@ def test_tiling_main_installs_progress_reporter_only_during_pipeline_run(
                 {
                     "sample_id": "slide-1",
                     "image_path": "slide-1.svs",
-                    "mask_path": np.nan,
+                    "tissue_mask_path": np.nan,
                     "tiling_status": "success",
                     "num_tiles": 2,
                     "coordinates_npz_path": str(output_dir / "tiles" / "slide-1.coordinates.npz"),
@@ -337,7 +339,7 @@ def test_tile_slides_emits_progress_for_reused_success_and_failure(
             {
                 "sample_id": "slide-a",
                 "image_path": "slide-a.svs",
-                "mask_path": np.nan,
+                "tissue_mask_path": np.nan,
                 "tiling_status": "success",
                 "num_tiles": 2,
                 "coordinates_npz_path": str(run_dir / "tiles" / "slide-a.coordinates.npz"),
@@ -467,7 +469,7 @@ def test_sampling_main_emits_progress_and_run_summary(monkeypatch, tmp_path: Pat
     )
 
     monkeypatch.setattr(sampling_mod, "setup", lambda args: cfg)
-    monkeypatch.setattr(sampling_mod, "load_csv", lambda cfg: slides)
+    monkeypatch.setattr(sampling_mod, "load_csv", lambda cfg, **kwargs: slides)
     monkeypatch.setattr(sampling_mod, "resolve_tiling_config", lambda cfg: _tiling_config())
     monkeypatch.setattr(
         sampling_mod, "resolve_segmentation_config", lambda cfg: _segmentation_config()
@@ -508,7 +510,7 @@ def test_sampling_main_emits_progress_and_run_summary(monkeypatch, tmp_path: Pat
                     "sample_id": sample_id,
                     "annotation": "tumor",
                     "image_path": f"{sample_id}.svs",
-                    "mask_path": None,
+                    "annotation_mask_path": None,
                     "sampling_status": "success",
                     "num_tiles": 3,
                     "coordinates_npz_path": str(
@@ -533,7 +535,7 @@ def test_sampling_main_emits_progress_and_run_summary(monkeypatch, tmp_path: Pat
                 "sample_id": sample_id,
                 "annotation": "tumor",
                 "image_path": f"{sample_id}.svs",
-                "mask_path": None,
+                "annotation_mask_path": None,
                 "sampling_status": "failed",
                 "num_tiles": 0,
                 "coordinates_npz_path": np.nan,
@@ -606,7 +608,7 @@ def test_sampling_main_emits_finished_summary_when_resume_has_no_work(
                 "sample_id": "slide-1",
                 "annotation": "tumor",
                 "image_path": "slide-1.svs",
-                "mask_path": np.nan,
+                "annotation_mask_path": np.nan,
                 "sampling_status": "success",
                 "num_tiles": 0,
                 "coordinates_npz_path": np.nan,
@@ -618,7 +620,7 @@ def test_sampling_main_emits_finished_summary_when_resume_has_no_work(
     ).to_csv(output_dir / "process_list.csv", index=False)
 
     monkeypatch.setattr(sampling_mod, "setup", lambda args: cfg)
-    monkeypatch.setattr(sampling_mod, "load_csv", lambda cfg: slides)
+    monkeypatch.setattr(sampling_mod, "load_csv", lambda cfg, **kwargs: slides)
     monkeypatch.setattr(sampling_mod, "resolve_tiling_config", lambda cfg: _tiling_config())
     monkeypatch.setattr(
         sampling_mod, "resolve_segmentation_config", lambda cfg: _segmentation_config()

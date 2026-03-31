@@ -233,48 +233,6 @@ class TileGeometry:
         )
         object.__setattr__(self, "tile_index", tile_index)
 
-    @property
-    def x(self) -> np.ndarray:
-        return self.coordinates[:, 0]
-
-    @property
-    def y(self) -> np.ndarray:
-        return self.coordinates[:, 1]
-
-    @property
-    def tissue_fraction(self) -> np.ndarray:
-        return self.tissue_fractions
-
-    @property
-    def num_tiles(self) -> int:
-        return int(self.coordinates.shape[0])
-
-    @property
-    def target_spacing_um(self) -> float:
-        return float(self.requested_spacing_um)
-
-    @property
-    def target_tile_size_px(self) -> int:
-        return int(self.requested_tile_size_px)
-
-    @property
-    def read_spacing_um(self) -> float:
-        return float(self.effective_spacing_um)
-
-    @property
-    def read_tile_size_px(self) -> int:
-        return int(self.effective_tile_size_px)
-
-    @property
-    def read_step_px(self) -> int | None:
-        if self.effective_tile_size_px <= 0:
-            return None
-        return int(round(self.effective_tile_size_px * (1.0 - self.overlap)))
-
-    @property
-    def tissue_threshold(self) -> float:
-        return float(self.min_tissue_fraction)
-
 
 @dataclass(frozen=True)
 class TilingResult:
@@ -318,7 +276,7 @@ class TilingResult:
     # -- optional (legitimately None in some paths) --
     seg_use_otsu: bool | None = None
     seg_use_hsv: bool | None = None
-    tissue_mask_path: str | Path | None = None
+    mask_path: str | Path | None = None
     tissue_mask_tissue_value: int | None = None
     mask_level: int | None = None
     mask_spacing_um: float | None = None
@@ -328,8 +286,8 @@ class TilingResult:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "image_path", Path(self.image_path))
-        if self.tissue_mask_path is not None:
-            object.__setattr__(self, "tissue_mask_path", Path(self.tissue_mask_path))
+        if self.mask_path is not None:
+            object.__setattr__(self, "mask_path", Path(self.mask_path))
 
     def __getattr__(self, name: str) -> Any:
         """Delegate attribute access to the underlying TileGeometry."""
@@ -339,11 +297,6 @@ class TilingResult:
             raise AttributeError(
                 f"'{type(self).__name__}' object has no attribute {name!r}"
             ) from None
-
-    @property
-    def mask_path(self) -> Path | None:
-        return self.tissue_mask_path
-
 
 def canonicalize_tiling_result(tiles: TileGeometry) -> TileGeometry:
     """Deduplicate and sort tile coordinates in column-major order."""
@@ -623,7 +576,7 @@ _TOP_LEVEL_META_KEYS = {
 _PROVENANCE_KEYS = {
     "sample_id",
     "image_path",
-    "tissue_mask_path",
+    "mask_path",
     "backend",
     "requested_backend",
 }
@@ -658,7 +611,7 @@ _SEGMENTATION_KEYS = {
     "close",
     "use_otsu",
     "use_hsv",
-    "tissue_mask_path",
+    "mask_path",
     "ref_tile_size_px",
     "tissue_mask_tissue_value",
     "mask_level",
@@ -688,9 +641,7 @@ def _build_tiling_metadata(result: TilingResult) -> dict[str, Any]:
     provenance = {
         "sample_id": result.sample_id,
         "image_path": str(result.image_path),
-        "tissue_mask_path": (
-            str(result.tissue_mask_path) if result.tissue_mask_path is not None else None
-        ),
+        "mask_path": str(result.mask_path) if result.mask_path is not None else None,
         "backend": result.backend,
         "requested_backend": result.requested_backend,
     }
@@ -725,9 +676,7 @@ def _build_tiling_metadata(result: TilingResult) -> dict[str, Any]:
         "close": result.seg_close,
         "use_otsu": result.seg_use_otsu,
         "use_hsv": result.seg_use_hsv,
-        "tissue_mask_path": (
-            str(result.tissue_mask_path) if result.tissue_mask_path is not None else None
-        ),
+        "mask_path": str(result.mask_path) if result.mask_path is not None else None,
         "ref_tile_size_px": result.ref_tile_size_px,
         "tissue_mask_tissue_value": result.tissue_mask_tissue_value,
         "mask_level": result.mask_level,
@@ -816,7 +765,7 @@ def validate_tiling_result_provenance(
     *,
     sample_id: str,
     image_path: str | Path,
-    tissue_mask_path: str | Path | None,
+    mask_path: str | Path | None,
     tissue_mask_tissue_value: int | None,
 ) -> None:
     if result.sample_id != sample_id:
@@ -830,11 +779,11 @@ def validate_tiling_result_provenance(
             "Precomputed tiles image_path mismatch: "
             f"expected {expected_image!r}, found {actual_image!r}"
         )
-    expected_mask = normalize_artifact_path(tissue_mask_path)
-    actual_mask = normalize_artifact_path(result.tissue_mask_path)
+    expected_mask = normalize_artifact_path(mask_path)
+    actual_mask = normalize_artifact_path(result.mask_path)
     if actual_mask != expected_mask:
         raise ValueError(
-            "Precomputed tiles tissue_mask_path mismatch: "
+            "Precomputed tiles mask_path mismatch: "
             f"expected {expected_mask!r}, found {actual_mask!r}"
         )
     if result.tissue_mask_tissue_value != tissue_mask_tissue_value:
@@ -978,7 +927,7 @@ def _load_v2_tiling_result(*, npz_path: Path, meta: dict[str, Any]) -> TilingRes
         fraction_threshold=filtering["fraction_threshold"],
         seg_use_otsu=segmentation["use_otsu"],
         seg_use_hsv=segmentation["use_hsv"],
-        tissue_mask_path=segmentation["tissue_mask_path"],
+        mask_path=segmentation["mask_path"],
         tissue_mask_tissue_value=segmentation["tissue_mask_tissue_value"],
         mask_level=segmentation["mask_level"],
         mask_spacing_um=segmentation["mask_spacing_um"],
@@ -1224,9 +1173,7 @@ def preprocess_slide(
             fraction_threshold=fraction_threshold,
             seg_use_otsu=use_otsu,
             seg_use_hsv=use_hsv,
-            tissue_mask_path=(
-                str(tissue_mask_path) if tissue_mask_path is not None else None
-            ),
+            mask_path=str(tissue_mask_path) if tissue_mask_path is not None else None,
             tissue_mask_tissue_value=(
                 int(tissue_mask_tissue_value)
                 if tissue_mask_path is not None

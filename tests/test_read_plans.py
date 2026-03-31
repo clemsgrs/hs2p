@@ -54,7 +54,7 @@ def _make_grid_result(
         ),
         sample_id="read-plan-slide",
         image_path=Path("/tmp/read-plan-slide.svs"),
-        tissue_mask_path=None,
+        mask_path=None,
         backend="openslide",
         requested_backend="openslide",
         step_px_lv0=step_px,

@@ -1,7 +1,7 @@
 import sys
 import warnings
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from pathlib import Path
 
 import cv2
@@ -14,20 +14,13 @@ from hs2p.configs import FilterConfig, SegmentationConfig, TilingConfig
 from hs2p.wsi.backend import coerce_wsd_path, resolve_backend
 from hs2p.wsi.batched_reads import BatchedReadRequest, group_batched_read_requests_by_size
 from hs2p.wsi.geometry import project_discrete_grid_origins
+from hs2p.wsi.types import ResolvedSamplingSpec
 from hs2p.wsi.utils import HasEnoughTissue, ResolvedTileGeometry
 
 # ignore all warnings from wholeslidedata
 warnings.filterwarnings("ignore", module="wholeslidedata")
 
 Image.MAX_IMAGE_PIXELS = 933120000
-
-
-@dataclass(frozen=True)
-class ResolvedSamplingSpec:
-    pixel_mapping: dict[str, int]
-    color_mapping: dict[str, list[int] | None] | None
-    tissue_percentage: dict[str, float | None]
-    active_annotations: tuple[str, ...]
 
 
 class WholeSlideImage(object):

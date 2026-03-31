@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from hs2p.wsi.read_plans import resolve_read_step_px
 
 
 def _import_sampling_module():
@@ -22,6 +23,7 @@ def _import_sampling_module():
 
 
 sampling_mod = _import_sampling_module()
+sampling_support_mod = importlib.import_module("hs2p.sampling_support")
 
 
 def _resolved_sampling_spec(
@@ -83,9 +85,7 @@ def test_independent_sampling_without_previews_does_not_crash(monkeypatch, tmp_p
     monkeypatch.setattr(
         sampling_mod, "execute_coordinate_request", _fake_execute_coordinate_request
     )
-    monkeypatch.setattr(
-        sampling_mod, "_save_sampling_coordinates", lambda **kwargs: None
-    )
+    monkeypatch.setattr(sampling_mod, "save_sampling_coordinates", lambda **kwargs: None)
     monkeypatch.setattr(sampling_mod, "write_coordinate_preview", lambda **kwargs: None)
 
     _, status_info = sampling_mod.process_slide(
@@ -172,9 +172,7 @@ def test_process_slide_accepts_resolved_sampling_spec(monkeypatch, tmp_path):
     monkeypatch.setattr(
         sampling_mod, "execute_coordinate_request", _fake_execute_coordinate_request
     )
-    monkeypatch.setattr(
-        sampling_mod, "_save_sampling_coordinates", lambda **kwargs: None
-    )
+    monkeypatch.setattr(sampling_mod, "save_sampling_coordinates", lambda **kwargs: None)
     monkeypatch.setattr(sampling_mod, "write_coordinate_preview", lambda **kwargs: None)
 
     _, status_info = sampling_mod.process_slide(
@@ -250,7 +248,7 @@ def test_sampling_main_uses_shared_config_resolvers(monkeypatch, tmp_path):
     called = {}
 
     monkeypatch.setattr(sampling_mod, "setup", lambda args: cfg)
-    monkeypatch.setattr(sampling_mod, "load_csv", lambda cfg: [])
+    monkeypatch.setattr(sampling_mod, "load_csv", lambda cfg, **kwargs: [])
     monkeypatch.setattr(sampling_mod.mp, "cpu_count", lambda: 1)
 
     def _fake_resolve_tiling_config(seen_cfg):
@@ -335,7 +333,13 @@ def test_sampling_main_rejects_partial_sampling_config(monkeypatch, tmp_path):
     monkeypatch.setattr(
         sampling_mod,
         "load_csv",
-        lambda cfg: [SimpleNamespace(sample_id="slide-1", image_path=Path("slide.svs"), mask_path=Path("mask.tif"))],
+        lambda cfg, **kwargs: [
+            SimpleNamespace(
+                sample_id="slide-1",
+                image_path=Path("slide.svs"),
+                mask_path=Path("mask.tif"),
+            )
+        ],
     )
 
     with pytest.raises(ValueError, match="tissue_percentage"):
@@ -375,7 +379,13 @@ def test_sampling_main_rejects_missing_background_label(monkeypatch, tmp_path):
     monkeypatch.setattr(
         sampling_mod,
         "load_csv",
-        lambda cfg: [SimpleNamespace(sample_id="slide-1", image_path=Path("slide.svs"), mask_path=Path("mask.tif"))],
+        lambda cfg, **kwargs: [
+            SimpleNamespace(
+                sample_id="slide-1",
+                image_path=Path("slide.svs"),
+                mask_path=Path("mask.tif"),
+            )
+        ],
     )
 
     with pytest.raises(ValueError, match="background"):
@@ -434,9 +444,7 @@ def test_process_slide_uses_extraction_preview_instead_of_reopening_overlay(
     monkeypatch.setattr(
         sampling_mod, "execute_coordinate_request", _fake_execute_coordinate_request
     )
-    monkeypatch.setattr(
-        sampling_mod, "_save_sampling_coordinates", lambda **kwargs: None
-    )
+    monkeypatch.setattr(sampling_mod, "save_sampling_coordinates", lambda **kwargs: None)
     monkeypatch.setattr(sampling_mod, "write_coordinate_preview", lambda **kwargs: None)
 
     _, status_info = sampling_mod.process_slide(
@@ -520,7 +528,7 @@ def test_sampling_main_defaults_inner_slide_workers_to_one(monkeypatch, tmp_path
     monkeypatch.setattr(
         sampling_mod,
         "load_csv",
-        lambda cfg: [
+        lambda cfg, **kwargs: [
             SimpleNamespace(
                 sample_id="slide-1", image_path=Path("slide-1.svs"), mask_path=None
             ),
@@ -550,7 +558,6 @@ def test_sampling_main_defaults_inner_slide_workers_to_one(monkeypatch, tmp_path
         lambda cfg: sampling_mod.FilterConfig(16, 4, 2, 8, False, False, 220, 25, 0.9),
     )
     monkeypatch.setattr(sampling_mod.mp, "cpu_count", lambda: 8)
-    monkeypatch.setattr(sampling_mod.tqdm, "tqdm", lambda iterable, **kwargs: iterable)
 
     class _FakePool:
         def __init__(self, processes):
@@ -580,9 +587,9 @@ def test_sampling_main_defaults_inner_slide_workers_to_one(monkeypatch, tmp_path
                         "sample_id": kwargs["sample_id"],
                         "annotation": "tumor",
                         "image_path": str(kwargs["wsi_path"]),
-                        "mask_path": (
-                            str(kwargs["mask_path"])
-                            if kwargs["mask_path"] is not None
+                        "annotation_mask_path": (
+                            str(kwargs["annotation_mask_path"])
+                            if kwargs["annotation_mask_path"] is not None
                             else None
                         ),
                     "sampling_status": "success",
@@ -639,7 +646,7 @@ def test_sampling_main_rejects_explicit_inner_slide_workers_override(
     monkeypatch.setattr(
         sampling_mod,
         "load_csv",
-        lambda cfg: [
+        lambda cfg, **kwargs: [
             SimpleNamespace(
                 sample_id="slide-1", image_path=Path("slide-1.svs"), mask_path=None
             ),
@@ -669,7 +676,6 @@ def test_sampling_main_rejects_explicit_inner_slide_workers_override(
         lambda cfg: sampling_mod.FilterConfig(16, 4, 2, 8, False, False, 220, 25, 0.9),
     )
     monkeypatch.setattr(sampling_mod.mp, "cpu_count", lambda: 8)
-    monkeypatch.setattr(sampling_mod.tqdm, "tqdm", lambda iterable, **kwargs: iterable)
 
     class _FakePool:
         def __init__(self, processes):
@@ -699,9 +705,9 @@ def test_sampling_main_rejects_explicit_inner_slide_workers_override(
                         "sample_id": kwargs["sample_id"],
                         "annotation": "tumor",
                         "image_path": str(kwargs["wsi_path"]),
-                        "mask_path": (
-                            str(kwargs["mask_path"])
-                            if kwargs["mask_path"] is not None
+                        "annotation_mask_path": (
+                            str(kwargs["annotation_mask_path"])
+                            if kwargs["annotation_mask_path"] is not None
                             else None
                         ),
                     "sampling_status": "success",
@@ -741,7 +747,7 @@ def test_save_sampling_coordinates_uses_annotation_threshold_and_sampling_mode(
             coordinates_npz_path=Path(tiles_dir) / f"{result.sample_id}.coordinates.npz",
             coordinates_meta_path=Path(tiles_dir)
             / f"{result.sample_id}.coordinates.meta.json",
-            num_tiles=result.num_tiles,
+            num_tiles=len(result.coordinates),
         )
 
     monkeypatch.setattr(sampling_mod, "save_tiling_result", _fake_save_tiling_result)
@@ -793,7 +799,7 @@ def test_save_sampling_coordinates_uses_annotation_threshold_and_sampling_mode(
         tile_size_lv0=256,
         step_px_lv0=256,
     )
-    sampling_mod._save_sampling_coordinates(
+    sampling_support_mod.save_sampling_coordinates(
         sample_id="sample-1",
         image_path=Path("slide.svs"),
         mask_path=Path("mask.tif"),
@@ -806,11 +812,12 @@ def test_save_sampling_coordinates_uses_annotation_threshold_and_sampling_mode(
         coordinates=[(0, 0), (256, 0)],
         extraction=extraction,
         resolved_sampling_spec=resolved_sampling_spec,
+        save_tiling_result=sampling_mod.save_tiling_result,
     )
 
     result = captured["result"]
-    assert result.tissue_threshold == 0.7
-    assert result.read_step_px == 256
+    assert result.min_tissue_fraction == 0.7
+    assert resolve_read_step_px(result) == 256
     assert result.step_px_lv0 == 256
     assert result.annotation == "tumor"
     assert result.selection_strategy == sampling_mod.CoordinateSelectionStrategy.JOINT_SAMPLING
@@ -872,7 +879,7 @@ def test_save_sampling_coordinates_writes_sampling_metadata_fields(tmp_path):
         tile_size_lv0=256,
         step_px_lv0=256,
     )
-    artifacts = sampling_mod._save_sampling_coordinates(
+    artifacts = sampling_support_mod.save_sampling_coordinates(
         sample_id="sample-1",
         image_path=Path("slide.svs"),
         mask_path=Path("mask.tif"),
@@ -885,6 +892,7 @@ def test_save_sampling_coordinates_writes_sampling_metadata_fields(tmp_path):
         coordinates=[(0, 0)],
         extraction=extraction,
         resolved_sampling_spec=resolved_sampling_spec,
+        save_tiling_result=sampling_mod.save_tiling_result,
     )
 
     meta = json.loads(artifacts.coordinates_meta_path.read_text())
@@ -948,7 +956,7 @@ def test_validate_sampling_artifact_row_accepts_matching_metadata(tmp_path):
         tile_size_lv0=256,
         step_px_lv0=256,
     )
-    artifacts = sampling_mod._save_sampling_coordinates(
+    artifacts = sampling_support_mod.save_sampling_coordinates(
         sample_id="sample-1",
         image_path=Path("slide.svs"),
         mask_path=Path("mask.tif"),
@@ -961,14 +969,15 @@ def test_validate_sampling_artifact_row_accepts_matching_metadata(tmp_path):
         coordinates=[(0, 0)],
         extraction=extraction,
         resolved_sampling_spec=resolved_sampling_spec,
+        save_tiling_result=sampling_mod.save_tiling_result,
     )
 
-    sampling_mod._validate_sampling_artifact_row(
+    sampling_support_mod.validate_sampling_artifact_row(
         row={
             "sample_id": "sample-1",
             "annotation": "tumor",
             "image_path": "slide.svs",
-            "mask_path": "mask.tif",
+            "annotation_mask_path": "mask.tif",
             "sampling_status": "success",
             "num_tiles": 1,
             "coordinates_npz_path": str(artifacts.coordinates_npz_path),
@@ -1041,7 +1050,7 @@ def test_validate_sampling_artifact_row_rejects_mismatched_tiling_config(tmp_pat
         tile_size_lv0=256,
         step_px_lv0=256,
     )
-    artifacts = sampling_mod._save_sampling_coordinates(
+    artifacts = sampling_support_mod.save_sampling_coordinates(
         sample_id="sample-1",
         image_path=Path("slide.svs"),
         mask_path=Path("mask.tif"),
@@ -1054,6 +1063,7 @@ def test_validate_sampling_artifact_row_rejects_mismatched_tiling_config(tmp_pat
         coordinates=[(0, 0)],
         extraction=extraction,
         resolved_sampling_spec=resolved_sampling_spec,
+        save_tiling_result=sampling_mod.save_tiling_result,
     )
     incompatible_tiling = sampling_mod.TilingConfig(
         target_spacing_um=0.75,
@@ -1066,12 +1076,12 @@ def test_validate_sampling_artifact_row_rejects_mismatched_tiling_config(tmp_pat
     )
 
     with pytest.raises(ValueError, match="target_spacing_um mismatch"):
-        sampling_mod._validate_sampling_artifact_row(
+        sampling_support_mod.validate_sampling_artifact_row(
             row={
                 "sample_id": "sample-1",
                 "annotation": "tumor",
                 "image_path": "slide.svs",
-                "mask_path": "mask.tif",
+                "annotation_mask_path": "mask.tif",
                 "sampling_status": "success",
                 "num_tiles": 1,
                 "coordinates_npz_path": str(artifacts.coordinates_npz_path),

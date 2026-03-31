@@ -1,6 +1,6 @@
 import numpy as np
 
-from hs2p.wsi import get_mask_coverage, sort_coordinates_with_tissue
+from hs2p.wsi.api import get_mask_coverage, sort_coordinates_with_tissue
 
 
 def test_sort_coordinates_with_tissue_deduplicates_and_orders_deterministically():

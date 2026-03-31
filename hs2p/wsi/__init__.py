@@ -1,9 +1,3 @@
-from pathlib import Path
-from typing import Any
-
-import tqdm
-
-from hs2p.progress import emit_progress_log
 from .api import (
     CoordinateExtractionResult,
     CoordinateOutputMode,
@@ -12,10 +6,7 @@ from .api import (
     UnifiedCoordinateResponse,
     execute_coordinate_request,
     extract_coordinates,
-    filter_coordinates,
-    get_mask_coverage,
     sample_coordinates,
-    sort_coordinates_with_tissue,
 )
 from .masks import (
     compose_overlay_mask_from_annotations,
@@ -40,7 +31,4 @@ from .visualization import (
     save_overlay_preview,
     write_coordinate_preview,
 )
-from .wsi import (
-    ResolvedSamplingSpec,
-    WholeSlideImage,
-)
+from .types import ResolvedSamplingSpec

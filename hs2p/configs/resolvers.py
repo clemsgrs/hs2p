@@ -3,7 +3,7 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from hs2p.wsi import CoordinateSelectionStrategy, ResolvedSamplingSpec
+from hs2p.wsi.types import CoordinateSelectionStrategy, ResolvedSamplingSpec
 
 from .models import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig
 

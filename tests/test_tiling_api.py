@@ -35,6 +35,7 @@ from hs2p.configs import (
 )
 from hs2p.utils import load_csv
 from hs2p.wsi import CoordinateExtractionResult
+from hs2p.wsi.read_plans import resolve_read_step_px
 import hs2p.wsi.wsi as wsi_mod
 import hs2p.api as api_mod
 
@@ -192,7 +193,7 @@ def _build_preprocessing_result(
         fraction_threshold=0.9,
         seg_use_otsu=False,
         seg_use_hsv=True,
-        tissue_mask_path=mask_path,
+        mask_path=mask_path,
         annotation=annotation,
         selection_strategy=selection_strategy,
         output_mode=output_mode,
@@ -315,25 +316,26 @@ def test_tile_slide_returns_named_arrays(
     )
 
     assert isinstance(result, preprocessing_mod.TilingResult)
-    np.testing.assert_array_equal(result.x, np.array([100, 300], dtype=np.int64))
-    np.testing.assert_array_equal(result.y, np.array([200, 400], dtype=np.int64))
+    np.testing.assert_array_equal(
+        result.coordinates, np.array([[100, 200], [300, 400]], dtype=np.int64)
+    )
     np.testing.assert_array_equal(result.tile_index, np.array([0, 1], dtype=np.int32))
     np.testing.assert_array_equal(
-        result.tissue_fraction,
+        result.tissue_fractions,
         np.array([0.25, 0.75], dtype=np.float32),
     )
     assert result.sample_id == "slide-1"
     assert result.image_path == Path("slide-1.svs")
     assert result.mask_path == Path("slide-1-mask.png")
     assert result.read_level == 1
-    assert result.read_spacing_um == pytest.approx(1.0)
-    assert result.read_tile_size_px == 448
+    assert result.effective_spacing_um == pytest.approx(1.0)
+    assert result.effective_tile_size_px == 448
     assert result.tile_size_lv0 == 448
-    assert result.target_spacing_um == tiling_config.target_spacing_um
-    assert result.target_tile_size_px == tiling_config.target_tile_size_px
+    assert result.requested_spacing_um == tiling_config.target_spacing_um
+    assert result.requested_tile_size_px == tiling_config.target_tile_size_px
     assert result.overlap == tiling_config.overlap
-    assert result.tissue_threshold == tiling_config.tissue_threshold
-    assert result.num_tiles == 2
+    assert result.min_tissue_fraction == tiling_config.tissue_threshold
+    assert len(result.coordinates) == 2
 
 
 def test_compute_tiling_result_uses_preprocessing_core(
@@ -394,13 +396,14 @@ def test_compute_tiling_result_uses_preprocessing_core(
     assert result.image_path == Path("slide-1.svs")
     assert result.mask_path == Path("slide-1-mask.png")
     assert result.backend == "asap"
-    assert result.num_tiles == 2
+    assert len(result.coordinates) == 2
     assert result.selection_strategy == CoordinateSelectionStrategy.MERGED_DEFAULT_TILING
     assert result.output_mode == CoordinateOutputMode.SINGLE_OUTPUT
-    np.testing.assert_array_equal(result.x, np.array([100, 300], dtype=np.int64))
-    np.testing.assert_array_equal(result.y, np.array([200, 400], dtype=np.int64))
     np.testing.assert_array_equal(
-        result.tissue_fraction,
+        result.coordinates, np.array([[100, 200], [300, 400]], dtype=np.int64)
+    )
+    np.testing.assert_array_equal(
+        result.tissue_fractions,
         np.array([0.25, 0.75], dtype=np.float32),
     )
 
@@ -481,7 +484,7 @@ def test_save_tiling_result_writes_preprocessing_npz_and_json(tmp_path: Path):
     assert meta["provenance"] == {
         "sample_id": "slide-2",
         "image_path": "slide-2.svs",
-        "tissue_mask_path": None,
+        "mask_path": None,
         "backend": "asap",
         "requested_backend": "asap",
     }
@@ -522,18 +525,17 @@ def test_save_and_load_tiling_result_round_trip(tmp_path: Path):
     assert loaded.mask_path == result.mask_path
     assert loaded.backend == result.backend
     assert loaded.read_level == result.read_level
-    assert loaded.read_spacing_um == result.read_spacing_um
-    assert loaded.read_step_px == result.read_step_px
-    assert loaded.read_tile_size_px == result.read_tile_size_px
+    assert loaded.effective_spacing_um == result.effective_spacing_um
+    assert resolve_read_step_px(loaded) == resolve_read_step_px(result)
+    assert loaded.effective_tile_size_px == result.effective_tile_size_px
     assert loaded.step_px_lv0 == result.step_px_lv0
     assert loaded.tile_size_lv0 == result.tile_size_lv0
     assert loaded.overlap == result.overlap
-    assert loaded.tissue_threshold == result.tissue_threshold
-    assert loaded.num_tiles == result.num_tiles
-    np.testing.assert_array_equal(loaded.x, result.x)
-    np.testing.assert_array_equal(loaded.y, result.y)
+    assert loaded.min_tissue_fraction == result.min_tissue_fraction
+    assert len(loaded.coordinates) == len(result.coordinates)
+    np.testing.assert_array_equal(loaded.coordinates, result.coordinates)
     np.testing.assert_array_equal(loaded.tile_index, result.tile_index)
-    np.testing.assert_array_equal(loaded.tissue_fraction, result.tissue_fraction)
+    np.testing.assert_array_equal(loaded.tissue_fractions, result.tissue_fractions)
 
 
 def test_preprocessing_result_builder_preserves_core_fields():
@@ -562,25 +564,26 @@ def test_preprocessing_result_builder_preserves_core_fields():
     assert result.image_path == Path("slide-adapter.svs")
     assert result.mask_path == Path("slide-adapter-mask.png")
     assert result.backend == "openslide"
-    assert result.target_spacing_um == 0.5
-    assert result.target_tile_size_px == 224
+    assert result.requested_spacing_um == 0.5
+    assert result.requested_tile_size_px == 224
     assert result.read_level == 1
-    assert result.read_spacing_um == 1.0
-    assert result.read_tile_size_px == 448
-    assert result.read_step_px == 403
+    assert result.effective_spacing_um == 1.0
+    assert result.effective_tile_size_px == 448
+    assert resolve_read_step_px(result) == 403
     assert result.step_px_lv0 == 806
     assert result.tile_size_lv0 == 448
     assert result.overlap == 0.1
-    assert result.tissue_threshold == 0.2
-    assert result.num_tiles == 2
+    assert result.min_tissue_fraction == 0.2
+    assert len(result.coordinates) == 2
     assert result.annotation == "tumor"
     assert result.selection_strategy == "per_annotation"
     assert result.output_mode == "multi_output"
-    np.testing.assert_array_equal(result.x, np.array([10, 30], dtype=np.int64))
-    np.testing.assert_array_equal(result.y, np.array([20, 40], dtype=np.int64))
+    np.testing.assert_array_equal(
+        result.coordinates, np.array([[10, 20], [30, 40]], dtype=np.int64)
+    )
     np.testing.assert_array_equal(result.tile_index, np.array([0, 1], dtype=np.int32))
     np.testing.assert_array_equal(
-        result.tissue_fraction,
+        result.tissue_fractions,
         np.array([0.3, 0.7], dtype=np.float32),
     )
 
@@ -630,7 +633,7 @@ def test_load_tiling_result_accepts_preprocessing_artifact(tmp_path: Path):
         fraction_threshold=0.9,
         seg_use_otsu=False,
         seg_use_hsv=True,
-        tissue_mask_path="slide-preprocessing-mask.png",
+        mask_path="slide-preprocessing-mask.png",
         annotation="tumor",
         selection_strategy="per_annotation",
         output_mode="multi_output",
@@ -648,25 +651,26 @@ def test_load_tiling_result_accepts_preprocessing_artifact(tmp_path: Path):
     assert loaded.image_path == Path("slide-preprocessing.svs")
     assert loaded.mask_path == Path("slide-preprocessing-mask.png")
     assert loaded.backend == "openslide"
-    assert loaded.target_spacing_um == pytest.approx(0.5)
-    assert loaded.target_tile_size_px == 224
+    assert loaded.requested_spacing_um == pytest.approx(0.5)
+    assert loaded.requested_tile_size_px == 224
     assert loaded.read_level == 1
-    assert loaded.read_spacing_um == pytest.approx(1.0)
-    assert loaded.read_tile_size_px == 448
-    assert loaded.read_step_px == 403
+    assert loaded.effective_spacing_um == pytest.approx(1.0)
+    assert loaded.effective_tile_size_px == 448
+    assert resolve_read_step_px(loaded) == 403
     assert loaded.step_px_lv0 == 806
     assert loaded.tile_size_lv0 == 448
     assert loaded.overlap == pytest.approx(0.1)
-    assert loaded.tissue_threshold == pytest.approx(0.2)
-    assert loaded.num_tiles == 2
+    assert loaded.min_tissue_fraction == pytest.approx(0.2)
+    assert len(loaded.coordinates) == 2
     assert loaded.annotation == "tumor"
     assert loaded.selection_strategy == "per_annotation"
     assert loaded.output_mode == "multi_output"
-    np.testing.assert_array_equal(loaded.x, np.array([10, 30], dtype=np.int64))
-    np.testing.assert_array_equal(loaded.y, np.array([20, 40], dtype=np.int64))
+    np.testing.assert_array_equal(
+        loaded.coordinates, np.array([[10, 20], [30, 40]], dtype=np.int64)
+    )
     np.testing.assert_array_equal(loaded.tile_index, np.array([0, 1], dtype=np.int32))
     np.testing.assert_array_equal(
-        loaded.tissue_fraction,
+        loaded.tissue_fractions,
         np.array([0.25, 0.75], dtype=np.float32),
     )
 
@@ -740,7 +744,7 @@ def test_tile_slides_defers_preview_writes_until_after_next_slide_compute(
             sample_id=result.sample_id,
             coordinates_npz_path=npz_path,
             coordinates_meta_path=meta_path,
-            num_tiles=result.num_tiles,
+            num_tiles=len(result.coordinates),
         )
 
     def _fake_write_tiling_preview(*, result, output_dir, downsample):
@@ -998,7 +1002,7 @@ def test_compute_request_passes_inner_workers_to_tile_extraction(
             sample_id=result.sample_id,
             coordinates_npz_path=npz_path,
             coordinates_meta_path=meta_path,
-            num_tiles=result.num_tiles,
+            num_tiles=len(result.coordinates),
         )
 
     request = api_mod._SlideComputeRequest(
@@ -1147,7 +1151,7 @@ def test_save_tiling_result_cleans_up_partial_outputs_when_metadata_write_fails(
     def _raise_json(*args, **kwargs):
         raise RuntimeError("json failure")
 
-    monkeypatch.setattr("hs2p.api.json.dumps", _raise_json)
+    monkeypatch.setattr("hs2p.preprocessing.json.dumps", _raise_json)
 
     with pytest.raises(RuntimeError, match="json failure"):
         save_tiling_result(result, output_dir=tmp_path)
@@ -1305,7 +1309,7 @@ def test_tile_slides_writes_process_list_and_can_reuse_precomputed_tiles(
     assert list(process_df.columns) == [
         "sample_id",
         "image_path",
-        "mask_path",
+        "tissue_mask_path",
         "tiling_status",
         "num_tiles",
         "coordinates_npz_path",
@@ -1317,7 +1321,7 @@ def test_tile_slides_writes_process_list_and_can_reuse_precomputed_tiles(
     row = process_df.to_dict(orient="records")[0]
     assert row["sample_id"] == "slide-1"
     assert row["image_path"] == "slide-1.svs"
-    assert pd.isna(row["mask_path"])
+    assert pd.isna(row["tissue_mask_path"])
     assert row["tiling_status"] == "success"
     assert row["num_tiles"] == 2
     assert row["coordinates_npz_path"] == str(precomputed_artifacts.coordinates_npz_path)
@@ -1463,7 +1467,7 @@ def test_tile_slides_resume_marks_stale_artifact_as_failed(
             {
                 "sample_id": "slide-6",
                 "image_path": "stored-slide.svs",
-                "mask_path": np.nan,
+                "tissue_mask_path": np.nan,
                 "tiling_status": "success",
                 "num_tiles": 1,
                 "coordinates_npz_path": str(artifacts.coordinates_npz_path),
@@ -1556,14 +1560,14 @@ def test_tile_slides_resume_rejects_unsupported_process_list_schema(
 def test_load_csv_rejects_duplicate_sample_id(tmp_path: Path):
     csv_path = tmp_path / "slides.csv"
     csv_path.write_text(
-        "sample_id,image_path,mask_path\n"
+        "sample_id,image_path,tissue_mask_path\n"
         "slide-1,slide-1.svs,slide-1-mask.png\n"
         "slide-1,slide-2.svs,slide-2-mask.png\n"
     )
     cfg = SimpleNamespace(csv=str(csv_path))
 
     with pytest.raises(ValueError, match="Duplicate sample_id"):
-        load_csv(cfg)
+        load_csv(cfg, mask_column="tissue_mask_path")
 
 
 def test_load_tiling_result_rejects_missing_npz_keys(tmp_path: Path):
@@ -1643,15 +1647,15 @@ def test_load_tiling_result_rejects_legacy_artifacts(tmp_path: Path):
 
 def test_load_whole_slides_from_rows_parses_current_schema_rows():
     rows = [
-        {
-            "sample_id": "slide-1",
-            "image_path": "slide-1.svs",
-            "mask_path": "slide-1-mask.png",
-        },
+            {
+                "sample_id": "slide-1",
+                "image_path": "slide-1.svs",
+                "tissue_mask_path": "slide-1-mask.png",
+            },
         {
             "sample_id": "slide-2",
             "image_path": "slide-2.svs",
-            "mask_path": None,
+            "tissue_mask_path": None,
         },
     ]
 
@@ -1676,17 +1680,17 @@ def test_load_whole_slides_from_rows_treats_nan_like_mask_values_as_missing():
         {
             "sample_id": "slide-nan",
             "image_path": "slide-nan.svs",
-            "mask_path": np.nan,
+            "tissue_mask_path": np.nan,
         },
         {
             "sample_id": "slide-none-string",
             "image_path": "slide-none-string.svs",
-            "mask_path": "None",
+            "tissue_mask_path": "None",
         },
         {
             "sample_id": "slide-nan-string",
             "image_path": "slide-nan-string.svs",
-            "mask_path": "nan",
+            "tissue_mask_path": "nan",
         },
     ]
 
@@ -1762,9 +1766,10 @@ def test_write_process_list_removes_temp_file_on_failure(monkeypatch, tmp_path: 
         raise OSError("disk full")
 
     monkeypatch.setattr(
-        "hs2p.api.tempfile.NamedTemporaryFile", _tracking_named_temporary_file
+        "hs2p.tiling_artifacts.tempfile.NamedTemporaryFile",
+        _tracking_named_temporary_file,
     )
-    monkeypatch.setattr("hs2p.api.pd.DataFrame.to_csv", _raise_to_csv)
+    monkeypatch.setattr("hs2p.tiling_artifacts.pd.DataFrame.to_csv", _raise_to_csv)
 
     with pytest.raises(OSError, match="disk full"):
         tile_slides(

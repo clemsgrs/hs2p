@@ -26,7 +26,8 @@ def _import_sampling_module():
 def _write_csv(tmp_path: Path) -> Path:
     csv_path = tmp_path / "slides.csv"
     csv_path.write_text(
-        "sample_id,image_path,mask_path\n" "slide-1,slide-1.svs,slide-1-mask.png\n"
+        "sample_id,image_path,tissue_mask_path,annotation_mask_path\n"
+        "slide-1,slide-1.svs,slide-1-mask.png,slide-1-mask.png\n"
     )
     return csv_path
 
@@ -116,7 +117,7 @@ def test_tiling_main_smoke_uses_current_schema_and_manifest(
                 {
                     "sample_id": "slide-1",
                     "image_path": "slide-1.svs",
-                    "mask_path": "slide-1-mask.png",
+                    "tissue_mask_path": "slide-1-mask.png",
                     "tiling_status": "success",
                     "num_tiles": 2,
                     "coordinates_npz_path": str(
@@ -158,7 +159,7 @@ def test_tiling_main_smoke_uses_current_schema_and_manifest(
     assert list(process_df.columns) == [
         "sample_id",
         "image_path",
-        "mask_path",
+        "tissue_mask_path",
         "tiling_status",
         "num_tiles",
         "coordinates_npz_path",
@@ -170,7 +171,7 @@ def test_tiling_main_smoke_uses_current_schema_and_manifest(
     row = process_df.to_dict(orient="records")[0]
     assert row["sample_id"] == "slide-1"
     assert row["image_path"] == "slide-1.svs"
-    assert row["mask_path"] == "slide-1-mask.png"
+    assert row["tissue_mask_path"] == "slide-1-mask.png"
     assert row["tiling_status"] == "success"
     assert row["num_tiles"] == 2
 
@@ -184,7 +185,6 @@ def test_sampling_main_smoke_uses_current_schema_and_manifest(
 
     monkeypatch.setattr(sampling_mod, "setup", lambda args: cfg)
     monkeypatch.setattr(sampling_mod.mp, "cpu_count", lambda: 1)
-    monkeypatch.setattr(sampling_mod.tqdm, "tqdm", lambda iterable, **kwargs: iterable)
 
     class _FakePool:
         def __init__(self, processes):
@@ -213,7 +213,7 @@ def test_sampling_main_smoke_uses_current_schema_and_manifest(
         )
         meta_path = annotation_dir / f"{kwargs['sample_id']}.coordinates.meta.json"
         meta_path.write_text(
-            '{"format_version":2,"provenance":{"sample_id":"slide-1","image_path":"slide-1.svs","tissue_mask_path":"slide-1-mask.png","backend":"asap","requested_backend":"asap"},"slide":{"dimensions":[256,256],"base_spacing_um":0.5,"level_downsamples":[1.0]},"tiling":{"requested_tile_size_px":256,"requested_spacing_um":0.5,"read_level":0,"effective_tile_size_px":256,"effective_spacing_um":0.5,"tile_size_lv0":256,"use_padding":true,"tolerance":0.05,"step_px_lv0":256,"overlap":0.0,"min_tissue_fraction":0.1,"is_within_tolerance":true,"n_tiles":1},"segmentation":{"tissue_method":"unknown","seg_downsample":64,"seg_level":0,"seg_spacing_um":0.5,"sthresh":8,"sthresh_up":255,"mthresh":7,"close":4,"use_otsu":false,"use_hsv":true,"tissue_mask_path":"slide-1-mask.png","ref_tile_size_px":16,"tissue_mask_tissue_value":null,"mask_level":null,"mask_spacing_um":null},"filtering":{"a_t":4,"a_h":2,"max_n_holes":8,"filter_white":false,"filter_black":false,"white_threshold":220,"black_threshold":25,"fraction_threshold":0.9},"artifact":{"coordinate_space":"level0_px","tile_order":"x_then_y","annotation":"tumor","selection_strategy":"independent_sampling","output_mode":"per_annotation"}}\n'
+            '{"format_version":2,"provenance":{"sample_id":"slide-1","image_path":"slide-1.svs","mask_path":"slide-1-mask.png","backend":"asap","requested_backend":"asap"},"slide":{"dimensions":[256,256],"base_spacing_um":0.5,"level_downsamples":[1.0]},"tiling":{"requested_tile_size_px":256,"requested_spacing_um":0.5,"read_level":0,"effective_tile_size_px":256,"effective_spacing_um":0.5,"tile_size_lv0":256,"use_padding":true,"tolerance":0.05,"step_px_lv0":256,"overlap":0.0,"min_tissue_fraction":0.1,"is_within_tolerance":true,"n_tiles":1},"segmentation":{"tissue_method":"unknown","seg_downsample":64,"seg_level":0,"seg_spacing_um":0.5,"sthresh":8,"sthresh_up":255,"mthresh":7,"close":4,"use_otsu":false,"use_hsv":true,"mask_path":"slide-1-mask.png","ref_tile_size_px":16,"tissue_mask_tissue_value":null,"mask_level":null,"mask_spacing_um":null},"filtering":{"a_t":4,"a_h":2,"max_n_holes":8,"filter_white":false,"filter_black":false,"white_threshold":220,"black_threshold":25,"fraction_threshold":0.9},"artifact":{"coordinate_space":"level0_px","tile_order":"x_then_y","annotation":"tumor","selection_strategy":"independent_sampling","output_mode":"per_annotation"}}\n'
         )
         return kwargs["sample_id"], {
             "status": "success",
@@ -222,7 +222,7 @@ def test_sampling_main_smoke_uses_current_schema_and_manifest(
                     "sample_id": kwargs["sample_id"],
                     "annotation": "tumor",
                     "image_path": "slide-1.svs",
-                    "mask_path": "slide-1-mask.png",
+                    "annotation_mask_path": "slide-1-mask.png",
                     "sampling_status": "success",
                     "num_tiles": 1,
                     "coordinates_npz_path": str(annotation_dir / f"{kwargs['sample_id']}.coordinates.npz"),
@@ -244,7 +244,7 @@ def test_sampling_main_smoke_uses_current_schema_and_manifest(
         "sample_id",
         "annotation",
         "image_path",
-        "mask_path",
+        "annotation_mask_path",
         "sampling_status",
         "num_tiles",
         "coordinates_npz_path",
@@ -256,7 +256,7 @@ def test_sampling_main_smoke_uses_current_schema_and_manifest(
     assert row["sample_id"] == "slide-1"
     assert row["annotation"] == "tumor"
     assert row["image_path"] == "slide-1.svs"
-    assert row["mask_path"] == "slide-1-mask.png"
+    assert row["annotation_mask_path"] == "slide-1-mask.png"
     assert row["sampling_status"] == "success"
     assert row["num_tiles"] == 1
     assert row["coordinates_npz_path"].endswith("tiles/tumor/slide-1.coordinates.npz")

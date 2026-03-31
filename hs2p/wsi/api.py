@@ -14,22 +14,17 @@ from hs2p.wsi.visualization import (
     DEFAULT_TISSUE_PIXEL_MAPPING,
     save_overlay_preview,
 )
+from hs2p.wsi.types import (
+    CoordinateOutputMode,
+    CoordinateSelectionStrategy,
+    ResolvedSamplingSpec,
+)
 from hs2p.wsi.masks import (
     compose_overlay_mask_from_annotations,
     normalize_tissue_mask,
     read_aligned_mask,
 )
-from hs2p.wsi.wsi import ResolvedSamplingSpec
-
-class CoordinateSelectionStrategy:
-    MERGED_DEFAULT_TILING = "merged_default_tiling"
-    JOINT_SAMPLING = "joint_sampling"
-    INDEPENDENT_SAMPLING = "independent_sampling"
-
-
-class CoordinateOutputMode:
-    SINGLE_OUTPUT = "single_output"
-    PER_ANNOTATION = "per_annotation"
+from hs2p.wsi.wsi import WholeSlideImage
 
 
 @dataclass(frozen=True)
@@ -178,12 +173,6 @@ def _compute_stride_metadata_from_geometry(
 
 def _backend_name(wsi, fallback: str) -> str:
     return str(getattr(wsi, "backend", fallback))
-
-
-def _wsi_package():
-    import hs2p.wsi as wsi_pkg
-
-    return wsi_pkg
 
 
 def _build_default_tissue_sampling_spec(
@@ -369,7 +358,7 @@ def _filter_coordinates_for_sampling_with_wsi(
 def execute_coordinate_request(
     request: UnifiedCoordinateRequest,
 ) -> UnifiedCoordinateResponse:
-    wsi = _wsi_package().WholeSlideImage(
+    wsi = WholeSlideImage(
         path=request.wsi_path,
         mask_path=request.mask_path,
         backend=request.backend,
@@ -476,7 +465,7 @@ def execute_coordinate_request(
 def extract_coordinates(
     *,
     wsi_path: Path,
-    mask_path: Path | None,
+    tissue_mask_path: Path | None,
     backend: str,
     segment_params: SegmentationConfig,
     tiling_params: TilingConfig,
@@ -492,12 +481,12 @@ def extract_coordinates(
     num_workers: int = 1,
 ):
     resolved_sampling_spec = sampling_spec
-    if resolved_sampling_spec is None and mask_path is not None:
+    if resolved_sampling_spec is None and tissue_mask_path is not None:
         resolved_sampling_spec = _build_default_tissue_sampling_spec(tiling_params)
     response = execute_coordinate_request(
         UnifiedCoordinateRequest(
             wsi_path=wsi_path,
-            mask_path=mask_path,
+            mask_path=tissue_mask_path,
             backend=backend,
             segment_params=segment_params,
             tiling_params=tiling_params,
@@ -523,7 +512,7 @@ def extract_coordinates(
 def sample_coordinates(
     *,
     wsi_path: Path,
-    mask_path: Path | None,
+    annotation_mask_path: Path | None,
     backend: str,
     segment_params: SegmentationConfig,
     tiling_params: TilingConfig,
@@ -540,7 +529,7 @@ def sample_coordinates(
     response = execute_coordinate_request(
         UnifiedCoordinateRequest(
             wsi_path=wsi_path,
-            mask_path=mask_path,
+            mask_path=annotation_mask_path,
             backend=backend,
             segment_params=segment_params,
             tiling_params=tiling_params,
@@ -573,7 +562,7 @@ def sample_coordinates(
 def filter_coordinates(
     *,
     wsi_path: Path,
-    mask_path: Path | None,
+    annotation_mask_path: Path | None,
     backend: str,
     coordinates: list[tuple[int, int]],
     contour_indices: list[int],
@@ -582,13 +571,13 @@ def filter_coordinates(
     tiling_params: TilingConfig,
     sampling_spec: ResolvedSamplingSpec | None = None,
 ):
-    if mask_path is None:
-        raise ValueError("mask_path is required for filter_coordinates()")
+    if annotation_mask_path is None:
+        raise ValueError("annotation_mask_path is required for filter_coordinates()")
     if sampling_spec is None:
         raise ValueError("sampling_spec is required for filter_coordinates()")
-    wsi = _wsi_package().WholeSlideImage(
+    wsi = WholeSlideImage(
         path=wsi_path,
-        mask_path=mask_path,
+        mask_path=annotation_mask_path,
         backend=backend,
         segment=True,
         segment_params=segment_params,

@@ -2,7 +2,6 @@ import csv
 import importlib
 import io
 import itertools
-import json
 import multiprocessing as mp
 import tarfile
 import tempfile
@@ -42,91 +41,21 @@ from hs2p.wsi.read_plans import (
 from hs2p.wsi.region_tiles import iter_plan_region_tile_views
 from hs2p.preprocessing import (
     TilingResult,
-    load_tiling_result as load_preprocessing_tiling_result,
     preprocess_slide,
     save_tiling_result as save_preprocessing_tiling_result,
 )
-
-
-@dataclass(frozen=True)
-class SlideSpec:
-    """Identify one slide and its optional mask.
-
-    Attributes:
-        sample_id: Stable sample identifier used to name outputs.
-        image_path: Path to the whole-slide image.
-        mask_path: Optional path to a tissue or annotation mask.
-        spacing_at_level_0: Optional override for the slide's native spacing at
-            pyramid level 0 (µm/px).  Use this when the embedded metadata is
-            missing or incorrect.  All other pyramid-level spacings are rescaled
-            proportionally from this value.
-    """
-
-    sample_id: str
-    image_path: Path
-    mask_path: Path | None = None
-    spacing_at_level_0: float | None = None
-
-@dataclass(frozen=True)
-class TilingArtifacts:
-    """Named on-disk artifacts produced by a tiling run.
-
-    Attributes:
-        sample_id: Sample identifier that names the artifact files.
-        coordinates_npz_path: Path to the saved ``.coordinates.npz`` coordinate artifact.
-        coordinates_meta_path: Path to the saved ``.coordinates.meta.json`` metadata artifact.
-        num_tiles: Number of tiles stored in the artifact pair.
-        mask_preview_path: Optional path to the saved mask preview image.
-        tiling_preview_path: Optional path to the saved tiling preview image.
-    """
-
-    sample_id: str
-    coordinates_npz_path: Path
-    coordinates_meta_path: Path
-    num_tiles: int
-    tiles_tar_path: Path | None = None
-    mask_preview_path: Path | None = None
-    tiling_preview_path: Path | None = None
-
-def _validate_vector(name: str, value: np.ndarray | None) -> int | None:
-    if value is None:
-        return None
-    if value.ndim != 1:
-        raise ValueError(f"{name} must be a 1D array, got shape {value.shape}")
-    return int(value.shape[0])
-
-
-def _validate_result_consistency(result: TilingResult) -> None:
-    lengths = {
-        "x": _validate_vector("x", result.x),
-        "y": _validate_vector("y", result.y),
-        "tile_index": _validate_vector("tile_index", result.tile_index),
-    }
-    if result.tissue_fraction is not None:
-        lengths["tissue_fraction"] = _validate_vector(
-            "tissue_fraction", result.tissue_fraction
-        )
-    expected = int(result.num_tiles)
-    mismatched = [name for name, length in lengths.items() if length != expected]
-    if mismatched:
-        raise ValueError(
-            "TilingResult arrays do not match num_tiles for fields: "
-            + ", ".join(mismatched)
-        )
-    expected_index = np.arange(expected, dtype=np.int32)
-    actual_index = result.tile_index.astype(np.int32, copy=False)
-    if actual_index.shape != expected_index.shape or not np.array_equal(
-        actual_index, expected_index
-    ):
-        raise ValueError("tile_index must be a contiguous range from 0 to num_tiles-1")
-
-def _optional_path(value: Any) -> Path | None:
-    if value is None or pd.isna(value):
-        return None
-    text = str(value).strip()
-    if text == "" or text.lower() in {"none", "nan"}:
-        return None
-    return Path(text)
+from hs2p.tiling_artifacts import (
+    ArtifactCompatibilitySpec,
+    SlideSpec,
+    TilingArtifacts,
+    load_tiling_result,
+    load_whole_slides_from_rows,
+    maybe_load_existing_artifacts,
+    validate_required_columns,
+    validate_result_consistency,
+    validate_tiling_artifacts,
+    write_process_list,
+)
 
 
 def _write_mask_preview(
@@ -206,21 +135,6 @@ def _compute_tiling_result(
     return preprocessing_result
 
 
-def _validate_required_columns(
-    df: pd.DataFrame,
-    *,
-    required_columns: set[str],
-    file_path: Path,
-    file_label: str,
-) -> None:
-    missing = sorted(required_columns - set(df.columns))
-    if missing:
-        raise ValueError(
-            f"Unsupported {file_label} schema in {file_path}; missing required columns: "
-            + ", ".join(missing)
-        )
-
-
 def tile_slide(
     whole_slide: SlideSpec,
     *,
@@ -274,7 +188,7 @@ def save_tiling_result(
     *,
     tiles_dir: Path | None = None,
 ) -> TilingArtifacts:
-    _validate_result_consistency(result)
+    validate_result_consistency(result)
     tiles_dir = (
         Path(tiles_dir)
         if tiles_dir is not None
@@ -290,7 +204,7 @@ def save_tiling_result(
         sample_id=result.sample_id,
         coordinates_npz_path=artifact_paths["npz"],
         coordinates_meta_path=artifact_paths["meta"],
-        num_tiles=result.num_tiles,
+        num_tiles=len(result.coordinates),
     )
 
 
@@ -387,10 +301,13 @@ def extract_tiles_to_tar(
                             continue
 
                 encode_start = time.perf_counter()
-                if result.read_tile_size_px != result.target_tile_size_px:
+                if result.effective_tile_size_px != result.requested_tile_size_px:
                     img = Image.fromarray(tile_arr).convert("RGB")
                     img = img.resize(
-                        (result.target_tile_size_px, result.target_tile_size_px),
+                        (
+                            result.requested_tile_size_px,
+                            result.requested_tile_size_px,
+                        ),
                         resample=Image.Resampling.BILINEAR,
                     )
                     tile_arr = np.asarray(img)
@@ -448,7 +365,7 @@ def extract_tiles_to_tar(
         if temp_manifest_path is not None:
             temp_manifest_path.unlink(missing_ok=True)
 
-    if len(kept_indices) == result.num_tiles:
+    if len(kept_indices) == len(result.coordinates):
         return tar_path, result
 
     kept = np.asarray(sorted(kept_indices), dtype=np.int64)
@@ -557,7 +474,7 @@ def _iter_cucim_tile_records_for_tar_extraction(
             yield from _iter_planned_tile_views_from_read_plan_region(
                 np.asarray(region),
                 read_plan=read_plan,
-                tile_size_px=int(result.read_tile_size_px),
+                tile_size_px=int(result.effective_tile_size_px),
                 read_step_px=read_step_px,
             )
 
@@ -607,14 +524,14 @@ def _iter_wsd_tile_records_for_tar_extraction(
             int(read_plan.y),
             int(read_plan.read_size_px),
             int(read_plan.read_size_px),
-            spacing=float(result.read_spacing_um),
+            spacing=float(result.effective_spacing_um),
             center=False,
         )
         region = np.asarray(region)
         yield from _iter_planned_tile_views_from_read_plan_region(
             region,
             read_plan=read_plan,
-            tile_size_px=int(result.read_tile_size_px),
+            tile_size_px=int(result.effective_tile_size_px),
             read_step_px=read_step_px,
         )
 
@@ -655,119 +572,6 @@ def _needs_pixel_filtering(filtering: FilterConfig) -> bool:
     return bool(filtering.filter_white or filtering.filter_black)
 
 
-def load_tiling_result(
-    coordinates_npz_path: Path,
-    coordinates_meta_path: Path,
-) -> TilingResult:
-    try:
-        preprocessing_result = load_preprocessing_tiling_result(
-            coordinates_npz_path,
-            coordinates_meta_path,
-        )
-    except Exception as exc:
-        raise ValueError(
-            "Unable to load tiling artifacts "
-            f"{coordinates_npz_path} and {coordinates_meta_path}: {exc}"
-        ) from exc
-    _validate_result_consistency(preprocessing_result)
-    return preprocessing_result
-
-
-@dataclass(frozen=True)
-class ArtifactCompatibilitySpec:
-    tiling: TilingConfig
-    segmentation: SegmentationConfig
-    filtering: FilterConfig
-    selection_strategy: str | None = None
-    output_mode: str | None = None
-    annotation: str | None = None
-
-
-def validate_tiling_artifacts(
-    *,
-    whole_slide: SlideSpec,
-    coordinates_npz_path: Path,
-    coordinates_meta_path: Path,
-    compatibility: ArtifactCompatibilitySpec,
-) -> TilingArtifacts:
-    result = load_tiling_result(
-        coordinates_npz_path=coordinates_npz_path, coordinates_meta_path=coordinates_meta_path
-    )
-    if result.sample_id != whole_slide.sample_id:
-        raise ValueError(
-            f"Precomputed tiles sample_id mismatch for {whole_slide.sample_id}: "
-            f"found {result.sample_id}"
-        )
-    if result.image_path != whole_slide.image_path:
-        raise ValueError(
-            f"Precomputed tiles image_path mismatch for {whole_slide.sample_id}: "
-            f"expected {whole_slide.image_path}, found {result.image_path}"
-        )
-    if result.mask_path != whole_slide.mask_path:
-        raise ValueError(
-            f"Precomputed tiles mask_path mismatch for {whole_slide.sample_id}: "
-            f"expected {whole_slide.mask_path}, found {result.mask_path}"
-        )
-    if result.backend != compatibility.tiling.backend:
-        raise ValueError("precomputed tiles backend mismatch")
-    if result.target_spacing_um != compatibility.tiling.target_spacing_um:
-        raise ValueError("precomputed tiles target_spacing_um mismatch")
-    if result.target_tile_size_px != compatibility.tiling.target_tile_size_px:
-        raise ValueError("precomputed tiles target_tile_size_px mismatch")
-    if result.overlap != compatibility.tiling.overlap:
-        raise ValueError("precomputed tiles overlap mismatch")
-    if result.tissue_threshold != compatibility.tiling.tissue_threshold:
-        raise ValueError("precomputed tiles tissue_threshold mismatch")
-    if result.use_padding != compatibility.tiling.use_padding:
-        raise ValueError("precomputed tiles use_padding mismatch")
-    if result.tolerance != compatibility.tiling.tolerance:
-        raise ValueError("precomputed tiles tolerance mismatch")
-    if result.seg_downsample != compatibility.segmentation.downsample:
-        raise ValueError("precomputed tiles seg_downsample mismatch")
-    if result.seg_sthresh != compatibility.segmentation.sthresh:
-        raise ValueError("precomputed tiles sthresh mismatch")
-    if result.seg_sthresh_up != compatibility.segmentation.sthresh_up:
-        raise ValueError("precomputed tiles sthresh_up mismatch")
-    if result.seg_mthresh != compatibility.segmentation.mthresh:
-        raise ValueError("precomputed tiles mthresh mismatch")
-    if result.seg_close != compatibility.segmentation.close:
-        raise ValueError("precomputed tiles close mismatch")
-    if result.seg_use_otsu != compatibility.segmentation.use_otsu:
-        raise ValueError("precomputed tiles use_otsu mismatch")
-    if result.seg_use_hsv != compatibility.segmentation.use_hsv:
-        raise ValueError("precomputed tiles use_hsv mismatch")
-    if result.ref_tile_size_px != compatibility.filtering.ref_tile_size:
-        raise ValueError("precomputed tiles ref_tile_size mismatch")
-    if result.a_t != compatibility.filtering.a_t:
-        raise ValueError("precomputed tiles a_t mismatch")
-    if result.a_h != compatibility.filtering.a_h:
-        raise ValueError("precomputed tiles a_h mismatch")
-    if result.max_n_holes != compatibility.filtering.max_n_holes:
-        raise ValueError("precomputed tiles max_n_holes mismatch")
-    if result.filter_white != compatibility.filtering.filter_white:
-        raise ValueError("precomputed tiles filter_white mismatch")
-    if result.filter_black != compatibility.filtering.filter_black:
-        raise ValueError("precomputed tiles filter_black mismatch")
-    if result.white_threshold != compatibility.filtering.white_threshold:
-        raise ValueError("precomputed tiles white_threshold mismatch")
-    if result.black_threshold != compatibility.filtering.black_threshold:
-        raise ValueError("precomputed tiles black_threshold mismatch")
-    if result.fraction_threshold != compatibility.filtering.fraction_threshold:
-        raise ValueError("precomputed tiles fraction_threshold mismatch")
-    if result.selection_strategy != compatibility.selection_strategy:
-        raise ValueError("precomputed tiles selection_strategy mismatch")
-    if result.output_mode != compatibility.output_mode:
-        raise ValueError("precomputed tiles output_mode mismatch")
-    if result.annotation != compatibility.annotation:
-        raise ValueError("precomputed tiles annotation mismatch")
-    return TilingArtifacts(
-        sample_id=result.sample_id,
-        coordinates_npz_path=coordinates_npz_path,
-        coordinates_meta_path=coordinates_meta_path,
-        num_tiles=result.num_tiles,
-    )
-
-
 def _validate_whole_slides(whole_slides: Sequence[SlideSpec]) -> None:
     seen: set[str] = set()
     duplicates: list[str] = []
@@ -780,28 +584,6 @@ def _validate_whole_slides(whole_slides: Sequence[SlideSpec]) -> None:
         raise ValueError(
             f"Duplicate sample_id values are not allowed: {duplicate_text}"
         )
-
-
-def _maybe_load_existing_artifacts(
-    *,
-    whole_slide: SlideSpec,
-    read_coordinates_from: Path,
-    compatibility: ArtifactCompatibilitySpec,
-) -> TilingArtifacts | None:
-    npz_path = read_coordinates_from / f"{whole_slide.sample_id}.coordinates.npz"
-    meta_path = read_coordinates_from / f"{whole_slide.sample_id}.coordinates.meta.json"
-    if not npz_path.is_file() and not meta_path.is_file():
-        return None
-    if not npz_path.is_file() or not meta_path.is_file():
-        raise ValueError(
-            f"Missing tiling sidecar for sample_id={whole_slide.sample_id} in {read_coordinates_from}"
-        )
-    return validate_tiling_artifacts(
-        whole_slide=whole_slide,
-        coordinates_npz_path=npz_path,
-        coordinates_meta_path=meta_path,
-        compatibility=compatibility,
-    )
 
 
 def write_tiling_preview(
@@ -820,11 +602,11 @@ def write_tiling_preview(
     Returns:
         Path to the rendered preview image, or ``None`` when there are no tiles.
     """
-    if result.num_tiles == 0:
+    if len(result.coordinates) == 0:
         return None
     save_dir = output_dir / "preview" / "tiling"
     save_dir.mkdir(parents=True, exist_ok=True)
-    coordinates = list(zip(result.x.tolist(), result.y.tolist()))
+    coordinates = [tuple(coord) for coord in result.coordinates.tolist()]
     write_coordinate_preview(
         wsi_path=result.image_path,
         coordinates=coordinates,
@@ -866,27 +648,6 @@ def overlay_mask_on_slide(
         alpha=alpha,
         mask_arr=mask_arr,
     )
-
-
-def _write_process_list(
-    process_rows: list[dict[str, Any]], process_list_path: Path
-) -> None:
-    process_list_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            suffix=".csv",
-            dir=process_list_path.parent,
-            delete=False,
-        ) as handle:
-            temp_path = Path(handle.name)
-            pd.DataFrame(process_rows).to_csv(handle, index=False)
-        temp_path.replace(process_list_path)
-        temp_path = None
-    finally:
-        if temp_path is not None:
-            temp_path.unlink(missing_ok=True)
 
 
 @dataclass
@@ -959,7 +720,7 @@ def _build_success_process_row(
     return {
         "sample_id": whole_slide.sample_id,
         "image_path": str(whole_slide.image_path),
-        "mask_path": (
+        "tissue_mask_path": (
             str(whole_slide.mask_path) if whole_slide.mask_path is not None else None
         ),
         "tiling_status": "success",
@@ -981,7 +742,7 @@ def _build_failure_process_row(
     return {
         "sample_id": whole_slide.sample_id,
         "image_path": str(whole_slide.image_path),
-        "mask_path": (
+        "tissue_mask_path": (
             str(whole_slide.mask_path) if whole_slide.mask_path is not None else None
         ),
         "tiling_status": "failed",
@@ -1127,12 +888,12 @@ def tile_slides(
     existing_successes: dict[str, dict[str, Any]] = {}
     if resume and process_list_path.is_file():
         existing_df = pd.read_csv(process_list_path)
-        _validate_required_columns(
+        validate_required_columns(
             existing_df,
             required_columns={
                 "sample_id",
                 "image_path",
-                "mask_path",
+                "tissue_mask_path",
                 "tiling_status",
                 "num_tiles",
                 "coordinates_npz_path",
@@ -1204,7 +965,7 @@ def tile_slides(
                     compatibility=compatibility,
                 )
             if read_coordinates_from is not None and artifact is None:
-                artifact = _maybe_load_existing_artifacts(
+                artifact = maybe_load_existing_artifacts(
                     whole_slide=whole_slide,
                     read_coordinates_from=Path(read_coordinates_from),
                     compatibility=compatibility,
@@ -1478,7 +1239,7 @@ def tile_slides(
     finally:
         if preview_executor is not None:
             preview_executor.shutdown(wait=True)
-    _write_process_list(process_rows, process_list_path)
+    write_process_list(process_rows, process_list_path)
     snapshot = _progress_snapshot()
     emit_progress(
         "tiling.finished",
@@ -1492,16 +1253,3 @@ def tile_slides(
         zero_tile_successes=snapshot["zero_tile_successes"],
     )
     return artifacts
-
-
-def load_whole_slides_from_rows(rows: Sequence[dict[str, Any]]) -> list[SlideSpec]:
-    whole_slides: list[SlideSpec] = []
-    for row in rows:
-        whole_slides.append(
-            SlideSpec(
-                sample_id=str(row["sample_id"]),
-                image_path=Path(row["image_path"]),
-                mask_path=_optional_path(row.get("mask_path")),
-            )
-        )
-    return whole_slides
