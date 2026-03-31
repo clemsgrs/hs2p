@@ -94,7 +94,6 @@ The metadata file is structured into:
 
 - `a_t`
 - `a_h`
-- `max_n_holes`
 - `filter_white`
 - `filter_black`
 - `white_threshold`
@@ -139,7 +138,7 @@ The metadata file is structured into:
 
 ## Resume and validation
 
-Artifact reuse no longer relies on `config_hash`. Existing artifacts are validated against their structured metadata instead:
+Existing artifacts are validated against their structured metadata:
 
 - slide identity
 - mask path

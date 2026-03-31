@@ -266,7 +266,6 @@ class TilingResult:
     ref_tile_size_px: int
     a_t: float
     a_h: float
-    max_n_holes: int
     filter_white: bool
     filter_black: bool
     white_threshold: int
@@ -617,7 +616,6 @@ _SEGMENTATION_KEYS = {
 _FILTERING_KEYS = {
     "a_t",
     "a_h",
-    "max_n_holes",
     "filter_white",
     "filter_black",
     "white_threshold",
@@ -682,7 +680,6 @@ def _build_tiling_metadata(result: TilingResult) -> dict[str, Any]:
     filtering = {
         "a_t": result.a_t,
         "a_h": result.a_h,
-        "max_n_holes": result.max_n_holes,
         "filter_white": result.filter_white,
         "filter_black": result.filter_black,
         "white_threshold": result.white_threshold,
@@ -910,7 +907,6 @@ def _load_tiling_result(*, npz_path: Path, meta: dict[str, Any]) -> TilingResult
         ref_tile_size_px=segmentation["ref_tile_size_px"],
         a_t=filtering["a_t"],
         a_h=filtering["a_h"],
-        max_n_holes=filtering["max_n_holes"],
         filter_white=filtering["filter_white"],
         filter_black=filtering["filter_black"],
         white_threshold=filtering["white_threshold"],
@@ -1058,7 +1054,6 @@ def preprocess_slide(
     ref_tile_size_px: int = 16,
     a_t: int = 4,
     a_h: int = 0,
-    max_n_holes: int = 0,
     filter_white: bool = False,
     filter_black: bool = False,
     white_threshold: int = 220,
@@ -1156,7 +1151,6 @@ def preprocess_slide(
             ref_tile_size_px=ref_tile_size_px,
             a_t=a_t,
             a_h=a_h,
-            max_n_holes=max_n_holes,
             filter_white=filter_white,
             filter_black=filter_black,
             white_threshold=white_threshold,

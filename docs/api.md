@@ -4,7 +4,6 @@ The Python API is the best entrypoint when you want to integrate `hs2p` into you
 
 - high-level orchestration in `hs2p.api`
 - the canonical in-memory result model in `hs2p.preprocessing`
-- lower-level WSI helpers in `hs2p.wsi`
 
 ## Main public types
 
@@ -82,13 +81,8 @@ Use `tile_slide()` when you want an in-memory result for one slide.
 
 ## Batch tiling
 
-Use `tile_slides()` when you want:
-
-- `process_list.csv`
-- resume support
-- preview rendering
-- reuse from `read_coordinates_from`
-- optional tile tar export
+Use `tile_slides()` when you want to process multiple slides.   
+Results will be automatically written do disk.
 
 ```python
 from pathlib import Path
@@ -169,15 +163,3 @@ Internally, the shared coordinate engine still uses a generic `mask_path`.
 - `asap`
 
 `auto` prefers `cucim -> vips -> openslide -> asap`.
-
-## Low-level preprocessing
-
-`hs2p.preprocessing` exposes reusable lower-level compute primitives:
-
-- `preprocess_slide()`
-- `segment_tissue()`
-- `detect_contours()`
-- `generate_tiles()`
-- structured artifact IO helpers
-
-Use these when you want the lower-level building blocks directly. Use `hs2p.api` when you want the higher-level orchestration workflow.

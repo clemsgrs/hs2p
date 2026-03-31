@@ -15,6 +15,7 @@ They share the same base tiling/segmentation/filtering config model, but they do
 sample_id,image_path,tissue_mask_path
 slide-1,/data/slide-1.tif,/data/slide-1-tissue-mask.tif
 slide-2,/data/slide-2.tif,
+...
 ```
 
 ### Sampling
@@ -22,15 +23,19 @@ slide-2,/data/slide-2.tif,
 ```csv
 sample_id,image_path,annotation_mask_path
 slide-1,/data/slide-1.tif,/data/slide-1-annotations.tif
-slide-2,/data/slide-2.tif,
+slide-2,/data/slide-2.tif,/data/slide-2-annotations.tif
+...
 ```
 
-Optional spacing override works in either mode:
+### Optional spacing override
+
+Works in either mode:
 
 ```csv
 sample_id,image_path,tissue_mask_path,spacing_at_level_0
 slide-1,/data/slide-1.tif,,0.25
 slide-2,/data/slide-2.tif,/data/slide-2-tissue-mask.tif,
+...
 ```
 
 ## Quick start

@@ -115,7 +115,6 @@ def _make_tiling_result(n_tiles: int = 4) -> TilingResult:
         ref_tile_size_px=256,
         a_t=4,
         a_h=0,
-        max_n_holes=0,
         filter_white=False,
         filter_black=False,
         white_threshold=220,

@@ -202,7 +202,6 @@ def test_tile_slide_uses_resolved_backend_for_hash_and_result(monkeypatch):
             ref_tile_size_px=16,
             a_t=4,
             a_h=2,
-            max_n_holes=8,
             filter_white=False,
             filter_black=False,
             white_threshold=220,
@@ -224,7 +223,7 @@ def test_tile_slide_uses_resolved_backend_for_hash_and_result(monkeypatch):
             backend="auto",
         ),
         segmentation=api_mod.SegmentationConfig(64, 8, 255, 7, 4, False, True),
-        filtering=api_mod.FilterConfig(16, 4, 2, 8, False, False, 220, 25, 0.9),
+        filtering=api_mod.FilterConfig(16, 4, 2, False, False, 220, 25, 0.9),
         num_workers=1,
     )
 
