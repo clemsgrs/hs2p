@@ -46,7 +46,7 @@ def main(args):
         try:
             cfg = setup(args)
             output_dir = Path(cfg.output_dir)
-            whole_slides = load_csv(cfg)
+            whole_slides = load_csv(cfg, mask_column="tissue_mask_path")
             tiling = resolve_tiling_config(cfg)
             segmentation = resolve_segmentation_config(cfg)
             filtering = resolve_filter_config(cfg)

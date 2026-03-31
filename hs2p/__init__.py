@@ -5,7 +5,6 @@ from hs2p.api import (
     SlideSpec,
     TilingArtifacts,
     TilingConfig,
-    TilingResult,
     load_tiling_result,
     overlay_mask_on_slide,
     save_tiling_result,
@@ -16,16 +15,10 @@ from hs2p.api import (
 from hs2p.preprocessing import (
     ContourResult,
     TileGeometry,
+    TilingResult,
     detect_contours,
     generate_tiles,
     preprocess_slide,
-)
-from hs2p.wsi.wsi import WholeSlideImage
-from hs2p.wsi import (
-    CoordinateExtractionResult,
-    extract_coordinates,
-    sample_coordinates,
-    write_coordinate_preview,
 )
 
 __version__ = "2.5.1"

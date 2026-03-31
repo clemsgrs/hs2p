@@ -56,7 +56,7 @@ def _make_tiling_result(
         ),
         sample_id=sample_id,
         image_path=Path("/data/slide-1.svs"),
-        tissue_mask_path=None,
+        mask_path=None,
         backend="openslide",
         requested_backend="openslide",
         step_px_lv0=step_px,
@@ -128,7 +128,7 @@ def _make_grid_tiling_result(
         ),
         sample_id="grid-slide",
         image_path=Path("/data/grid-slide.svs"),
-        tissue_mask_path=None,
+        mask_path=None,
         backend="openslide",
         requested_backend="openslide",
         step_px_lv0=step_px,
@@ -180,7 +180,7 @@ def _make_custom_tiling_result(
         ),
         sample_id=sample_id,
         image_path=Path("/data/custom-slide.svs"),
-        tissue_mask_path=None,
+        mask_path=None,
         backend="openslide",
         requested_backend="openslide",
         step_px_lv0=tile_size,
@@ -467,9 +467,8 @@ class TestExtractTilesToTar:
             assert len(tf.getmembers()) == 2
 
         # Result should reflect filtering
-        assert filtered.num_tiles == 2
-        np.testing.assert_array_equal(filtered.x, [0, 512])
-        np.testing.assert_array_equal(filtered.y, [0, 0])
+        assert len(filtered.coordinates) == 2
+        np.testing.assert_array_equal(filtered.coordinates, [[0, 0], [512, 0]])
         assert len(filtered.tile_index) == 2
         np.testing.assert_array_equal(filtered.tile_index, [0, 1])
 
@@ -500,8 +499,8 @@ class TestExtractTilesToTar:
         with tarfile.open(tar_path, "r") as tf:
             assert len(tf.getmembers()) == 1
 
-        assert filtered.num_tiles == 1
-        np.testing.assert_array_equal(filtered.x, [256])
+        assert len(filtered.coordinates) == 1
+        np.testing.assert_array_equal(filtered.coordinates, [[256, 0]])
 
     def test_filtered_preprocessing_results_keep_preprocessing_type(self, tmp_path: Path):
         result = _make_tiling_result(num_tiles=2)
@@ -528,8 +527,8 @@ class TestExtractTilesToTar:
             )
 
         assert isinstance(filtered, preprocessing_mod.TilingResult)
-        assert filtered.num_tiles == 1
-        np.testing.assert_array_equal(filtered.x, [256])
+        assert len(filtered.coordinates) == 1
+        np.testing.assert_array_equal(filtered.coordinates, [[256, 0]])
         np.testing.assert_array_equal(filtered.tile_index, [0])
 
     def test_all_tiles_filtered_produces_empty_tar(self, tmp_path: Path):
@@ -551,8 +550,7 @@ class TestExtractTilesToTar:
         with tarfile.open(tar_path, "r") as tf:
             assert len(tf.getmembers()) == 0
 
-        assert filtered.num_tiles == 0
-        assert len(filtered.x) == 0
+        assert len(filtered.coordinates) == 0
 
     def test_resizes_when_read_and_target_sizes_differ(self, tmp_path: Path):
         result = _make_tiling_result(num_tiles=1, tile_size=224)
@@ -1007,7 +1005,7 @@ class TestExtractTilesToTar:
 
     def test_wsd_iterator_uses_2x2_blocks_for_incomplete_4x4_grid(self):
         result = _make_grid_tiling_result(columns=4, rows=4, tile_size=16, step_px=16)
-        keep_mask = np.ones(result.num_tiles, dtype=bool)
+        keep_mask = np.ones(len(result.coordinates), dtype=bool)
         keep_mask[-1] = False
         result = replace(
             result,

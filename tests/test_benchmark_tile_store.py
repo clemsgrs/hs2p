@@ -100,8 +100,9 @@ def test_benchmark_tile_store_accumulates_per_phase_times(tmp_path, monkeypatch)
     mod = _load_benchmark_module()
 
     result_stub = MagicMock()
-    result_stub.read_tile_size_px = 64
-    result_stub.target_tile_size_px = 64
+    result_stub.effective_tile_size_px = 64
+    result_stub.requested_tile_size_px = 64
+    result_stub.coordinates = np.empty((0, 2), dtype=np.int64)
     result_stub.sample_id = "slide-1"
 
     def _fake_extract_tiles_to_tar(*args, **kwargs):
@@ -149,8 +150,9 @@ def test_benchmark_tile_store_forwards_supertile_sizes(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "extract_tiles_to_tar", _fake_extract_tiles_to_tar)
 
     result_stub = MagicMock()
-    result_stub.read_tile_size_px = 64
-    result_stub.target_tile_size_px = 64
+    result_stub.effective_tile_size_px = 64
+    result_stub.requested_tile_size_px = 64
+    result_stub.coordinates = np.empty((0, 2), dtype=np.int64)
     result_stub.sample_id = "slide-1"
 
     mod.benchmark_tile_store(
@@ -178,8 +180,9 @@ def test_benchmark_tile_store_handles_empty_iterator(tmp_path, monkeypatch):
     )
 
     result_stub = MagicMock()
-    result_stub.read_tile_size_px = 64
-    result_stub.target_tile_size_px = 64
+    result_stub.effective_tile_size_px = 64
+    result_stub.requested_tile_size_px = 64
+    result_stub.coordinates = np.empty((0, 2), dtype=np.int64)
     result_stub.sample_id = "slide-1"
 
     metrics = mod.benchmark_tile_store(
@@ -201,8 +204,9 @@ def test_progress_callback_called_per_tile(tmp_path, monkeypatch):
     mod = _load_benchmark_module()
 
     result_stub = MagicMock()
-    result_stub.read_tile_size_px = 64
-    result_stub.target_tile_size_px = 64
+    result_stub.effective_tile_size_px = 64
+    result_stub.requested_tile_size_px = 64
+    result_stub.coordinates = np.empty((0, 2), dtype=np.int64)
     result_stub.sample_id = "slide-1"
 
     def _fake_extract_tiles_to_tar(*args, **kwargs):
@@ -240,9 +244,15 @@ def test_resolve_jpeg_backend_prefers_config(tmp_path):
     assert mod.resolve_jpeg_backend(config_file=config_path) == "pil"
 
 
-def test_benchmark_fixture_requests_turbojpeg_backend():
+def test_resolve_jpeg_backend_defaults_to_turbojpeg_when_unspecified(tmp_path):
     mod = _load_benchmark_module()
-    config_path = Path(__file__).resolve().parents[1] / "benchmarks" / "bench-fixture.yaml"
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "csv: slides.csv\n"
+        "output_dir: out\n"
+        "speed:\n"
+        "  num_workers: 4\n"
+    )
 
     assert mod.resolve_jpeg_backend(config_file=config_path) == "turbojpeg"
 

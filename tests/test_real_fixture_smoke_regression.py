@@ -24,7 +24,7 @@ def _choose_backend(wsi_path: Path) -> str:
 def _run_extract(wsi_path: Path, mask_path: Path, backend: str, tissue_pct: float):
     return wsi_api.extract_coordinates(
         wsi_path=wsi_path,
-        mask_path=mask_path,
+        tissue_mask_path=mask_path,
         backend=backend,
         segment_params=SegmentationConfig(
             downsample=64,

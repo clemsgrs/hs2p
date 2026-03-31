@@ -28,7 +28,7 @@ def build_read_plans(
     use_supertiles: bool,
 ) -> list[TileReadPlan]:
     if not use_supertiles:
-        tile_size_px = int(result.read_tile_size_px)
+        tile_size_px = int(result.effective_tile_size_px)
         return [
             TileReadPlan(
                 x=int(x),
@@ -36,10 +36,7 @@ def build_read_plans(
                 read_size_px=tile_size_px,
                 block_size=1,
             )
-            for x, y in zip(
-                result.x.astype(np.int64, copy=False).tolist(),
-                result.y.astype(np.int64, copy=False).tolist(),
-            )
+            for x, y in np.asarray(result.coordinates, dtype=np.int64).tolist()
         ]
 
     read_step_px = resolve_read_step_px(result)
@@ -91,7 +88,7 @@ def limit_tiling_result(
     *,
     max_tiles: int,
 ) -> preprocessing_mod.TilingResult:
-    if max_tiles <= 0 or max_tiles >= result.num_tiles:
+    if max_tiles <= 0 or max_tiles >= len(result.coordinates):
         return result
     kept = slice(0, int(max_tiles))
     return replace(

@@ -16,25 +16,26 @@ class GroupedReadPlan:
 
 
 def resolve_read_step_px(result: Any) -> int:
-    if result.read_step_px is not None:
-        return int(result.read_step_px)
+    effective_tile_size_px = int(result.effective_tile_size_px)
+    if effective_tile_size_px <= 0:
+        raise ValueError("effective_tile_size_px must be > 0")
     return max(
         1,
-        int(round(int(result.read_tile_size_px) * (1.0 - float(result.overlap)), 0)),
+        int(round(effective_tile_size_px * (1.0 - float(result.overlap)), 0)),
     )
 
 
 def resolve_step_px_lv0(result: Any) -> int:
     if result.step_px_lv0 is not None:
         return int(result.step_px_lv0)
-    if result.x.size > 1:
-        unique_x = np.unique(np.sort(result.x.astype(np.int64, copy=False)))
+    coordinates = np.asarray(result.coordinates, dtype=np.int64)
+    if coordinates.shape[0] > 1:
+        unique_x = np.unique(np.sort(coordinates[:, 0]))
         diffs = np.diff(unique_x)
         diffs = diffs[diffs > 0]
         if diffs.size > 0:
             return int(diffs.min())
-    if result.y.size > 1:
-        unique_y = np.unique(np.sort(result.y.astype(np.int64, copy=False)))
+        unique_y = np.unique(np.sort(coordinates[:, 1]))
         diffs = np.diff(unique_y)
         diffs = diffs[diffs > 0]
         if diffs.size > 0:
@@ -59,25 +60,21 @@ def iter_grouped_read_plans(
     )
     if step_px_lv0 <= 0:
         step_px_lv0 = int(result.tile_size_lv0)
+    coordinates = np.asarray(result.coordinates, dtype=np.int64)
     coord_to_index = {
         (int(x), int(y)): idx
-        for idx, (x, y) in enumerate(
-            zip(
-                result.x.astype(np.int64, copy=False).tolist(),
-                result.y.astype(np.int64, copy=False).tolist(),
-            )
-        )
+        for idx, (x, y) in enumerate(coordinates.tolist())
     }
-    consumed = np.zeros(result.num_tiles, dtype=bool)
-    tile_size_px = int(result.read_tile_size_px)
+    consumed = np.zeros(len(coordinates), dtype=bool)
+    tile_size_px = int(result.effective_tile_size_px)
     grouped_plans: dict[int, list[GroupedReadPlan]] = {size: [] for size in grouped_sizes}
     grouped_plans[1] = []
 
     def _build_grouped_plan(idx: int, block_size: int) -> GroupedReadPlan | None:
         if consumed[idx]:
             return None
-        x0 = int(result.x[idx])
-        y0 = int(result.y[idx])
+        x0 = int(coordinates[idx, 0])
+        y0 = int(coordinates[idx, 1])
         indices: list[int] = []
         for x_idx in range(block_size):
             for y_idx in range(block_size):
@@ -100,9 +97,9 @@ def iter_grouped_read_plans(
         )
 
     for block_size in grouped_sizes:
-        if result.num_tiles < block_size * block_size:
+        if len(coordinates) < block_size * block_size:
             continue
-        for idx in range(result.num_tiles):
+        for idx in range(len(coordinates)):
             plan = _build_grouped_plan(idx, block_size)
             if plan is None:
                 continue
@@ -110,14 +107,14 @@ def iter_grouped_read_plans(
                 consumed[match_idx] = True
             grouped_plans[block_size].append(plan)
 
-    for idx in range(result.num_tiles):
+    for idx in range(len(coordinates)):
         if consumed[idx]:
             continue
         consumed[idx] = True
         grouped_plans[1].append(
             GroupedReadPlan(
-                x=int(result.x[idx]),
-                y=int(result.y[idx]),
+                x=int(coordinates[idx, 0]),
+                y=int(coordinates[idx, 1]),
                 read_size_px=tile_size_px,
                 block_size=1,
                 tile_indices=(idx,),

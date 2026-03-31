@@ -13,6 +13,7 @@ from hs2p.api import (
     save_tiling_result,
     tile_slide,
 )
+from hs2p.wsi.read_plans import resolve_read_step_px
 
 pytestmark = pytest.mark.integration
 
@@ -122,27 +123,30 @@ def test_generated_tiles_match_checked_in_ground_truth_outputs(
     assert generated_loaded.image_path.name == golden.image_path.name == wsi_path.name
     assert generated_loaded.mask_path is not None
     assert golden.mask_path is not None
-    assert generated_loaded.mask_path.name == golden.mask_path.name == mask_path.name
+    assert (
+        generated_loaded.mask_path.name
+        == golden.mask_path.name
+        == mask_path.name
+    )
     assert generated_loaded.backend == golden.backend == backend
-    assert generated_loaded.target_spacing_um == pytest.approx(golden.target_spacing_um)
-    assert generated_loaded.target_tile_size_px == golden.target_tile_size_px
+    assert generated_loaded.requested_spacing_um == pytest.approx(golden.requested_spacing_um)
+    assert generated_loaded.requested_tile_size_px == golden.requested_tile_size_px
     assert generated_loaded.read_level == golden.read_level
-    assert generated_loaded.read_spacing_um == pytest.approx(golden.read_spacing_um)
-    assert generated_loaded.read_step_px == generated_loaded.read_tile_size_px
-    assert generated_loaded.read_tile_size_px == golden.read_tile_size_px
+    assert generated_loaded.effective_spacing_um == pytest.approx(golden.effective_spacing_um)
+    assert resolve_read_step_px(generated_loaded) == generated_loaded.effective_tile_size_px
+    assert generated_loaded.effective_tile_size_px == golden.effective_tile_size_px
     assert generated_loaded.step_px_lv0 == generated_loaded.tile_size_lv0
     assert generated_loaded.tile_size_lv0 == golden.tile_size_lv0
     assert generated_loaded.overlap == pytest.approx(golden.overlap)
-    assert generated_loaded.tissue_threshold == pytest.approx(golden.tissue_threshold)
-    assert generated_loaded.num_tiles == golden.num_tiles == 459
-    assert artifacts.num_tiles == golden.num_tiles
+    assert generated_loaded.min_tissue_fraction == pytest.approx(golden.min_tissue_fraction)
+    assert len(generated_loaded.coordinates) == len(golden.coordinates) == 459
+    assert artifacts.num_tiles == len(golden.coordinates)
     np.testing.assert_array_equal(generated_loaded.tile_index, golden.tile_index)
-    np.testing.assert_array_equal(generated_loaded.x, golden.x)
-    np.testing.assert_array_equal(generated_loaded.y, golden.y)
-    assert generated_loaded.tissue_fraction.shape == golden.tissue_fraction.shape
-    assert np.all(generated_loaded.tissue_fraction >= 0.0)
-    assert np.all(generated_loaded.tissue_fraction <= 1.0)
-    assert np.all(generated_loaded.tissue_fraction >= generated_loaded.tissue_threshold)
+    np.testing.assert_array_equal(generated_loaded.coordinates, golden.coordinates)
+    assert generated_loaded.tissue_fractions.shape == golden.tissue_fractions.shape
+    assert np.all(generated_loaded.tissue_fractions >= 0.0)
+    assert np.all(generated_loaded.tissue_fractions <= 1.0)
+    assert np.all(generated_loaded.tissue_fractions >= generated_loaded.min_tissue_fraction)
 
 
 def test_repeated_tiling_run_writes_identical_artifacts(

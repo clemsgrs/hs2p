@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 
 import hs2p.preprocessing as preprocessing_mod
-from hs2p.wsi.read_plans import GroupedReadPlan
+from hs2p.wsi.read_plans import GroupedReadPlan, resolve_read_step_px
 from hs2p.wsi.region_tiles import iter_plan_region_tile_views, iter_region_tile_views
 
 
@@ -49,7 +49,7 @@ def _make_result(
         ),
         sample_id="region-tiles-slide",
         image_path=Path("/tmp/region-tiles-slide.svs"),
-        tissue_mask_path=None,
+        mask_path=None,
         backend="openslide",
         requested_backend="openslide",
         step_px_lv0=step_px,
@@ -133,8 +133,8 @@ def test_iter_plan_region_tile_views_attaches_tile_indices_in_slice_order():
         iter_plan_region_tile_views(
             region,
             read_plan=plan,
-            tile_size_px=int(result.read_tile_size_px),
-            read_step_px=int(result.read_step_px),
+            tile_size_px=int(result.effective_tile_size_px),
+            read_step_px=resolve_read_step_px(result),
         )
     )
 

@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 import hs2p.preprocessing as preprocessing_mod
+from hs2p.wsi.read_plans import resolve_read_step_px
 
 pytestmark = pytest.mark.script
 
@@ -53,7 +54,7 @@ def _make_grid_result(
         ),
         sample_id="bench-slide",
         image_path=Path("/tmp/bench-slide.svs"),
-        tissue_mask_path=None,
+        mask_path=None,
         backend="openslide",
         requested_backend="openslide",
         step_px_lv0=step_px,
@@ -104,7 +105,7 @@ def _make_custom_result(
         ),
         sample_id="bench-slide",
         image_path=Path("/tmp/bench-slide.svs"),
-        tissue_mask_path=None,
+        mask_path=None,
         backend="openslide",
         requested_backend="openslide",
         step_px_lv0=tile_size_px,
@@ -275,9 +276,11 @@ def test_limit_tiling_result_trims_arrays_and_reindexes_tiles():
     limited = mod.limit_tiling_result(result, max_tiles=4)
 
     assert isinstance(limited, preprocessing_mod.TilingResult)
-    assert limited.num_tiles == 4
-    np.testing.assert_array_equal(limited.x, np.array([0, 0, 16, 16], dtype=np.int64))
-    np.testing.assert_array_equal(limited.y, np.array([0, 16, 0, 16], dtype=np.int64))
+    assert len(limited.coordinates) == 4
+    np.testing.assert_array_equal(
+        limited.coordinates,
+        np.array([[0, 0], [0, 16], [16, 0], [16, 16]], dtype=np.int64),
+    )
     np.testing.assert_array_equal(limited.tile_index, np.array([0, 1, 2, 3], dtype=np.int32))
 
 
@@ -313,9 +316,9 @@ def test_load_single_slide_result_from_config_builds_fresh_tiling_result(tmp_pat
     )
 
     assert result.sample_id == "test-wsi"
-    assert result.read_step_px > 0
+    assert resolve_read_step_px(result) > 0
     assert result.step_px_lv0 > 0
-    assert result.num_tiles > 0
+    assert len(result.coordinates) > 0
 
 
 def test_benchmark_wsd_mode_reports_region_and_tile_progress(monkeypatch):

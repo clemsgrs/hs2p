@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 
 from hs2p.api import SegmentationConfig, TilingConfig
-import hs2p.wsi as wsi_api
+import hs2p.wsi.api as wsi_api
 import hs2p.wsi.masks as wsi_masks
 from hs2p.wsi import ResolvedSamplingSpec
 from hs2p.wsi.wsi import WholeSlideImage
@@ -55,7 +55,7 @@ def test_filter_coordinates_returns_expected_per_class_subsets(fake_backend):
 
     filtered, filtered_indices = wsi_api.filter_coordinates(
         wsi_path=Path("synthetic-slide.tif"),
-        mask_path=Path("synthetic-mask.tif"),
+        annotation_mask_path=Path("synthetic-mask.tif"),
         backend="asap",
         coordinates=coordinates,
         contour_indices=contour_indices,
@@ -136,7 +136,7 @@ def test_filter_coordinates_reuses_loaded_mask_and_avoids_per_tile_mask_reads(
 
     filtered, filtered_indices = wsi_api.filter_coordinates(
         wsi_path=Path("synthetic-slide.tif"),
-        mask_path=Path("synthetic-mask.tif"),
+        annotation_mask_path=Path("synthetic-mask.tif"),
         backend="asap",
         coordinates=[(0, 0), (2, 0), (0, 2)],
         contour_indices=[0, 1, 2],
@@ -224,7 +224,7 @@ def test_filter_coordinates_vectorized_path_avoids_per_tile_crops_and_handles_bo
 
     filtered, filtered_indices = wsi_api.filter_coordinates(
         wsi_path=Path("synthetic-slide.tif"),
-        mask_path=Path("synthetic-mask.tif"),
+        annotation_mask_path=Path("synthetic-mask.tif"),
         backend="asap",
         coordinates=[(0, 0), (1, 0), (2, 2)],
         contour_indices=[0, 1, 2],

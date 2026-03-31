@@ -15,6 +15,7 @@ from hs2p.preprocessing import (
     load_tiling_result,
     save_tiling_result,
 )
+from hs2p.wsi.read_plans import resolve_read_step_px
 
 
 BASE_SPACING = 0.25
@@ -120,7 +121,7 @@ def _make_tiling_result(n_tiles: int = 4) -> TilingResult:
         white_threshold=220,
         black_threshold=25,
         fraction_threshold=0.9,
-        tissue_mask_path="/tmp/slide-001-mask.tif",
+        mask_path="/tmp/slide-001-mask.tif",
         tissue_mask_tissue_value=1,
         mask_level=1,
         mask_spacing_um=0.5,
@@ -137,7 +138,7 @@ def test_tiling_artifact_roundtrip_uses_strict_rich_metadata(tmp_path):
     assert meta["slide"]["base_spacing_um"] == 0.25
     assert meta["segmentation"]["seg_level"] == 2
     assert meta["segmentation"]["seg_spacing_um"] == 1.0
-    assert meta["segmentation"]["tissue_mask_path"] == "/tmp/slide-001-mask.tif"
+    assert meta["segmentation"]["mask_path"] == "/tmp/slide-001-mask.tif"
     assert meta["segmentation"]["mask_level"] == 1
     assert meta["segmentation"]["mask_spacing_um"] == 0.5
     assert "requested_backend" not in meta
@@ -172,17 +173,21 @@ def test_top_level_package_reexports_preprocessing_core_surface():
     assert hs2p.preprocess_slide is hs2p.preprocessing.preprocess_slide
 
 
-def test_preprocessing_result_exposes_api_compatibility_accessors():
+def test_preprocessing_result_uses_canonical_geometry_fields():
     result = _make_tiling_result()
 
-    np.testing.assert_array_equal(result.x, result.coordinates[:, 0])
-    np.testing.assert_array_equal(result.y, result.coordinates[:, 1])
-    np.testing.assert_array_equal(result.tissue_fraction, result.tissue_fractions)
-    assert result.num_tiles == len(result.coordinates)
-    assert result.target_spacing_um == pytest.approx(result.requested_spacing_um)
-    assert result.target_tile_size_px == result.requested_tile_size_px
-    assert result.read_spacing_um == pytest.approx(result.effective_spacing_um)
-    assert result.read_tile_size_px == result.effective_tile_size_px
-    assert result.read_step_px == 192
-    assert result.tissue_threshold == pytest.approx(result.min_tissue_fraction)
+    np.testing.assert_array_equal(
+        result.coordinates[:, 0], result.tiles.coordinates[:, 0]
+    )
+    np.testing.assert_array_equal(
+        result.coordinates[:, 1], result.tiles.coordinates[:, 1]
+    )
+    np.testing.assert_array_equal(result.tissue_fractions, result.tiles.tissue_fractions)
+    assert len(result.coordinates) == len(result.tiles.coordinates)
+    assert result.requested_spacing_um == pytest.approx(result.tiles.requested_spacing_um)
+    assert result.requested_tile_size_px == result.tiles.requested_tile_size_px
+    assert result.effective_spacing_um == pytest.approx(result.tiles.effective_spacing_um)
+    assert result.effective_tile_size_px == result.tiles.effective_tile_size_px
+    assert resolve_read_step_px(result) == 192
+    assert result.min_tissue_fraction == pytest.approx(result.tiles.min_tissue_fraction)
     assert result.mask_path == Path("/tmp/slide-001-mask.tif")

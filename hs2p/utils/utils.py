@@ -77,7 +77,7 @@ def initialize_wandb(
     return run
 
 
-def load_csv(cfg):
+def load_csv(cfg, *, mask_column: str | None = None):
     csv_path = Path(cfg.csv).resolve()
     df = pd.read_csv(csv_path)
     required = {"sample_id", "image_path"}
@@ -91,8 +91,14 @@ def load_csv(cfg):
         raise ValueError(
             "Duplicate sample_id values are not allowed: " + ", ".join(duplicates)
         )
+    if mask_column is not None and mask_column not in df.columns and "mask_path" in df.columns:
+        raise ValueError(
+            f"Input CSV uses deprecated 'mask_path'; use '{mask_column}' instead"
+        )
     mask_series = (
-        df["mask_path"] if "mask_path" in df.columns else pd.Series([None] * len(df))
+        df[mask_column]
+        if mask_column is not None and mask_column in df.columns
+        else pd.Series([None] * len(df))
     )
     spacing_series = (
         df["spacing_at_level_0"]
