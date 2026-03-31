@@ -18,7 +18,7 @@ def test_resolve_backend_prefers_cucim_when_supported(monkeypatch):
         calls.append(backend)
         return backend == "cucim"
 
-    monkeypatch.setattr(backend_mod, "_backend_can_open_slide", _fake_can_open_slide)
+    monkeypatch.setattr(reader_mod, "_backend_can_open_slide", _fake_can_open_slide)
 
     selection = backend_mod.resolve_backend("auto", wsi_path=Path("slide.svs"))
 
@@ -36,7 +36,7 @@ def test_resolve_backend_skips_cucim_for_known_unsupported_suffix(monkeypatch):
         calls.append(backend)
         return backend == "asap"
 
-    monkeypatch.setattr(backend_mod, "_backend_can_open_slide", _fake_can_open_slide)
+    monkeypatch.setattr(reader_mod, "_backend_can_open_slide", _fake_can_open_slide)
 
     selection = backend_mod.resolve_backend("auto", wsi_path=Path("slide.mrxs"))
 
@@ -53,7 +53,7 @@ def test_resolve_backend_respects_explicit_override(monkeypatch):
         calls.append("called")
         return False
 
-    monkeypatch.setattr(backend_mod, "_backend_can_open_slide", _fake_can_open_slide)
+    monkeypatch.setattr(reader_mod, "_backend_can_open_slide", _fake_can_open_slide)
 
     selection = backend_mod.resolve_backend("asap", wsi_path=Path("slide.svs"))
 
@@ -110,26 +110,6 @@ def test_reader_backend_probe_uses_backend_openers(monkeypatch):
     )
     assert seen_paths == ["/tmp/slide.tiff", "/tmp/mask.tiff"]
 
-
-def test_backend_probe_coerces_cucim_paths_to_strings(monkeypatch):
-    seen_paths: list[tuple[object, str]] = []
-
-    def _fake_wholeslideimage(path, *, backend: str):
-        seen_paths.append((path, backend))
-        return SimpleNamespace()
-
-    backend_mod._backend_can_open_slide.cache_clear()
-    monkeypatch.setattr(backend_mod.wsd, "WholeSlideImage", _fake_wholeslideimage)
-
-    assert backend_mod._backend_can_open_slide(
-        wsi_path="/tmp/slide.tiff",
-        mask_path="/tmp/mask.tiff",
-        backend="cucim",
-    )
-    assert seen_paths == [
-        ("/tmp/slide.tiff", "cucim"),
-        ("/tmp/mask.tiff", "cucim"),
-    ]
 
 
 def test_wholeslideimage_coerces_cucim_paths_to_strings(monkeypatch):
@@ -206,7 +186,7 @@ def test_tile_slide_uses_resolved_backend_for_hash_and_result(monkeypatch):
                 use_padding=True,
             ),
             sample_id="slide-1",
-            image_path="slide.svs",
+            image_path=Path("slide.svs"),
             backend="cucim",
             requested_backend="cucim",
             tolerance=0.05,

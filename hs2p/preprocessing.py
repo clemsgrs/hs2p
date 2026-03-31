@@ -201,7 +201,7 @@ def _validate_geometry_arrays(
     return tile_index
 
 
-@dataclass(frozen=True)
+@dataclass
 class TileGeometry:
     """Core tile geometry returned by :func:`generate_tiles`.
 
@@ -228,13 +228,12 @@ class TileGeometry:
     tissue_mask: np.ndarray | None = None
 
     def __post_init__(self) -> None:
-        tile_index = _validate_geometry_arrays(
+        self.tile_index = _validate_geometry_arrays(
             self.coordinates, self.tissue_fractions, self.tile_index,
         )
-        object.__setattr__(self, "tile_index", tile_index)
 
 
-@dataclass(frozen=True)
+@dataclass
 class TilingResult:
     """Full provenance-enriched tiling result returned by :func:`preprocess_slide`.
 
@@ -285,9 +284,9 @@ class TilingResult:
     output_mode: str | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "image_path", Path(self.image_path))
+        self.image_path = Path(self.image_path)
         if self.mask_path is not None:
-            object.__setattr__(self, "mask_path", Path(self.mask_path))
+            self.mask_path = Path(self.mask_path)
 
     def __getattr__(self, name: str) -> Any:
         """Delegate attribute access to the underlying TileGeometry."""
@@ -1149,7 +1148,7 @@ def preprocess_slide(
         return TilingResult(
             tiles=tiles,
             sample_id=sample_id,
-            image_path=str(image_path),
+            image_path=Path(image_path),
             backend=slide.backend_name,
             requested_backend=backend,
             tolerance=tolerance,
@@ -1173,7 +1172,7 @@ def preprocess_slide(
             fraction_threshold=fraction_threshold,
             seg_use_otsu=use_otsu,
             seg_use_hsv=use_hsv,
-            mask_path=str(tissue_mask_path) if tissue_mask_path is not None else None,
+            mask_path=tissue_mask_path,
             tissue_mask_tissue_value=(
                 int(tissue_mask_tissue_value)
                 if tissue_mask_path is not None
