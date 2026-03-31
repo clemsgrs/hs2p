@@ -1,6 +1,6 @@
 import os
 
-from hs2p.stderr_utils import run_with_filtered_stderr
+from hs2p.utils.stderr import run_with_filtered_stderr
 
 
 def test_run_with_filtered_stderr_suppresses_known_cucim_noise(capfd):

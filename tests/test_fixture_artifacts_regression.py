@@ -13,7 +13,7 @@ from hs2p.api import (
     save_tiling_result,
     tile_slide,
 )
-from hs2p.wsi.read_plans import resolve_read_step_px
+from hs2p.wsi.streaming.plans import resolve_read_step_px
 
 pytestmark = pytest.mark.integration
 

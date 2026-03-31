@@ -491,7 +491,7 @@ class WSI(object):
         batch_read_windows = None
         if self.backend == "cucim":
             try:
-                from hs2p.wsi.cucim_reader import CuImageReader
+                from hs2p.wsi.backends.cucim import CuImageReader
 
                 reader = CuImageReader(self.path, gpu_decode=False)
                 reader._ensure_open()

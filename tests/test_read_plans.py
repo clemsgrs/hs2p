@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 
 import hs2p.preprocessing as preprocessing_mod
-from hs2p.wsi.read_plans import (
+from hs2p.wsi.streaming.plans import (
     GroupedReadPlan,
     iter_grouped_read_plans,
     resolve_read_step_px,

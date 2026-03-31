@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 
 import hs2p.preprocessing as preprocessing_mod
-from hs2p.wsi.tile_stream import (
+from hs2p.wsi.streaming.stream import (
     iter_tile_records_from_reader,
     iter_tile_records_from_result,
 )
@@ -99,7 +99,7 @@ def test_iter_tile_records_from_result_uses_open_slide_for_generic_backends():
         np.full((16, 16, 3), 20, dtype=np.uint8),
     )
 
-    with patch("hs2p.wsi.tile_stream.open_slide", return_value=reader) as mock_open:
+    with patch("hs2p.wsi.streaming.stream.open_slide", return_value=reader) as mock_open:
         records = list(iter_tile_records_from_result(result=result))
 
     assert [int(record.tile_arr[0, 0, 0]) for record in records] == [10, 20]

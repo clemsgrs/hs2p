@@ -47,7 +47,7 @@ def resolve_jpeg_backend(
     config_file: Path,
     cli_jpeg_backend: str | None = None,
 ) -> str:
-    from hs2p.utils.config import get_cfg_from_file
+    from hs2p.utils.setup import get_cfg_from_file
 
     if cli_jpeg_backend is not None:
         return str(cli_jpeg_backend)

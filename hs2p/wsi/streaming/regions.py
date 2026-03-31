@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from hs2p.wsi.read_plans import GroupedReadPlan
+from hs2p.wsi.streaming.plans import GroupedReadPlan
 
 
 @dataclass(frozen=True)

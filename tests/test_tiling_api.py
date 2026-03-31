@@ -35,7 +35,7 @@ from hs2p.configs import (
 )
 from hs2p.utils import load_csv
 from hs2p.wsi import CoordinateExtractionResult
-from hs2p.wsi.read_plans import resolve_read_step_px
+from hs2p.wsi.streaming.plans import resolve_read_step_px
 import hs2p.wsi.wsi as wsi_mod
 import hs2p.api as api_mod
 
@@ -1786,10 +1786,10 @@ def test_write_process_list_removes_temp_file_on_failure(monkeypatch, tmp_path: 
         raise OSError("disk full")
 
     monkeypatch.setattr(
-        "hs2p.tiling_artifacts.tempfile.NamedTemporaryFile",
+        "hs2p.artifacts.tempfile.NamedTemporaryFile",
         _tracking_named_temporary_file,
     )
-    monkeypatch.setattr("hs2p.tiling_artifacts.pd.DataFrame.to_csv", _raise_to_csv)
+    monkeypatch.setattr("hs2p.artifacts.pd.DataFrame.to_csv", _raise_to_csv)
 
     with pytest.raises(OSError, match="disk full"):
         tile_slides(

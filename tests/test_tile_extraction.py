@@ -17,7 +17,7 @@ import hs2p.preprocessing as preprocessing_mod
 from hs2p.api import extract_tiles_to_tar
 from hs2p.configs.models import FilterConfig
 from hs2p.wsi import iter_tile_arrays_from_result
-from hs2p.wsi.read_plans import GroupedReadPlan, iter_grouped_read_plans
+from hs2p.wsi.streaming.plans import GroupedReadPlan, iter_grouped_read_plans
 
 
 def _make_tiling_result(
@@ -232,7 +232,7 @@ def _make_mock_reader(
 
 
 def _monkeypatch_cucim_import(monkeypatch, fake_cucim):
-    import hs2p.wsi.cucim_reader as cucim_reader_mod
+    import hs2p.wsi.backends.cucim as cucim_reader_mod
     original_cucim_reader_import = cucim_reader_mod.importlib.import_module
     monkeypatch.setattr(
         cucim_reader_mod.importlib,
@@ -252,7 +252,7 @@ class TestExtractTilesToTar:
 
         mock_reader = _make_mock_reader(*[_solid_patch(c) for c in colors])
 
-        with patch("hs2p.wsi.tile_stream.open_slide", return_value=mock_reader):
+        with patch("hs2p.wsi.streaming.stream.open_slide", return_value=mock_reader):
             tar_path, out_result = extract_tiles_to_tar(result, output_dir=tmp_path)
 
         assert tar_path == tmp_path / "tiles" / "slide-1.tiles.tar"
@@ -297,7 +297,7 @@ class TestExtractTilesToTar:
 
         mock_reader = _make_mock_reader(grouped_region, single_patch)
 
-        with patch("hs2p.wsi.tile_stream.open_slide", return_value=mock_reader):
+        with patch("hs2p.wsi.streaming.stream.open_slide", return_value=mock_reader):
             tar_path, out_result = extract_tiles_to_tar(result, output_dir=tmp_path)
 
         assert out_result is result
@@ -387,7 +387,7 @@ class TestExtractTilesToTar:
             ),
         )
 
-        with patch("hs2p.wsi.tile_stream.open_slide", return_value=mock_reader):
+        with patch("hs2p.wsi.streaming.stream.open_slide", return_value=mock_reader):
             tar_path, _ = extract_tiles_to_tar(result, output_dir=tmp_path)
 
         assert tar_path.is_file()
@@ -421,7 +421,7 @@ class TestExtractTilesToTar:
             ),
         )
 
-        with patch("hs2p.wsi.tile_stream.open_slide", return_value=mock_reader):
+        with patch("hs2p.wsi.streaming.stream.open_slide", return_value=mock_reader):
             tar_path, _ = extract_tiles_to_tar(
                 result,
                 output_dir=tmp_path,
@@ -460,7 +460,7 @@ class TestExtractTilesToTar:
         )
 
         with patch(
-            "hs2p.wsi.tile_stream.open_slide",
+            "hs2p.wsi.streaming.stream.open_slide",
             side_effect=[qc_reader, export_reader],
         ):
             tar_path, filtered = extract_tiles_to_tar(
@@ -506,7 +506,7 @@ class TestExtractTilesToTar:
         )
 
         with patch(
-            "hs2p.wsi.tile_stream.open_slide",
+            "hs2p.wsi.streaming.stream.open_slide",
             side_effect=[qc_reader, export_reader],
         ):
             tar_path, filtered = extract_tiles_to_tar(
@@ -548,7 +548,7 @@ class TestExtractTilesToTar:
         )
 
         with patch(
-            "hs2p.wsi.tile_stream.open_slide",
+            "hs2p.wsi.streaming.stream.open_slide",
             side_effect=[qc_reader, export_reader],
         ):
             _, filtered = extract_tiles_to_tar(
@@ -579,7 +579,7 @@ class TestExtractTilesToTar:
         )
 
         with patch(
-            "hs2p.wsi.tile_stream.open_slide",
+            "hs2p.wsi.streaming.stream.open_slide",
             side_effect=[qc_reader, export_reader],
         ):
             tar_path, filtered = extract_tiles_to_tar(
@@ -603,7 +603,7 @@ class TestExtractTilesToTar:
 
         mock_reader = _make_mock_reader(_solid_patch((100, 100, 100), size=512))
 
-        with patch("hs2p.wsi.tile_stream.open_slide", return_value=mock_reader):
+        with patch("hs2p.wsi.streaming.stream.open_slide", return_value=mock_reader):
             tar_path, _ = extract_tiles_to_tar(result, output_dir=tmp_path)
 
         with tarfile.open(tar_path, "r") as tf:
@@ -655,7 +655,7 @@ class TestExtractTilesToTar:
             return _ResizeSpy(original_fromarray(*args, **kwargs))
 
         with (
-            patch("hs2p.wsi.tile_stream.open_slide", return_value=mock_reader),
+            patch("hs2p.wsi.streaming.stream.open_slide", return_value=mock_reader),
             patch("PIL.Image.fromarray", side_effect=_fromarray_spy),
         ):
             extract_tiles_to_tar(result, output_dir=tmp_path)
@@ -670,7 +670,7 @@ class TestExtractTilesToTar:
 
         mock_reader = _make_mock_reader(rgba)
 
-        with patch("hs2p.wsi.tile_stream.open_slide", return_value=mock_reader):
+        with patch("hs2p.wsi.streaming.stream.open_slide", return_value=mock_reader):
             tar_path, _ = extract_tiles_to_tar(result, output_dir=tmp_path)
 
         with tarfile.open(tar_path, "r") as tf:
@@ -684,7 +684,7 @@ class TestExtractTilesToTar:
 
         mock_reader = _make_mock_reader(_solid_patch((50, 50, 50)))
 
-        with patch("hs2p.wsi.tile_stream.open_slide", return_value=mock_reader):
+        with patch("hs2p.wsi.streaming.stream.open_slide", return_value=mock_reader):
             tar_path, _ = extract_tiles_to_tar(
                 result, output_dir=tmp_path, tiles_dir=custom_dir
             )
@@ -700,7 +700,7 @@ class TestExtractTilesToTar:
             _solid_patch((0, 0, 0)),
         )
 
-        with patch("hs2p.wsi.tile_stream.open_slide", return_value=mock_reader):
+        with patch("hs2p.wsi.streaming.stream.open_slide", return_value=mock_reader):
             _, out_result = extract_tiles_to_tar(
                 result, output_dir=tmp_path, filter_params=None
             )
@@ -727,7 +727,7 @@ class TestExtractTilesToTar:
 
         _monkeypatch_cucim_import(monkeypatch, fake_cucim)
 
-        with patch("hs2p.wsi.tile_stream.open_slide") as mock_open_slide:
+        with patch("hs2p.wsi.streaming.stream.open_slide") as mock_open_slide:
             tar_path, out_result = extract_tiles_to_tar(
                 result,
                 output_dir=tmp_path,
@@ -759,7 +759,7 @@ class TestExtractTilesToTar:
 
         _monkeypatch_cucim_import(monkeypatch, fake_cucim)
 
-        with patch("hs2p.wsi.tile_stream.open_slide") as mock_open_slide:
+        with patch("hs2p.wsi.streaming.stream.open_slide") as mock_open_slide:
             tar_path, out_result = extract_tiles_to_tar(
                 result,
                 output_dir=tmp_path,
@@ -784,7 +784,7 @@ class TestExtractTilesToTar:
         result = _make_tiling_result(num_tiles=1)
         result = replace(result, backend="cucim", requested_backend="cucim")
 
-        import hs2p.wsi.cucim_reader as cucim_reader_mod
+        import hs2p.wsi.backends.cucim as cucim_reader_mod
 
         def _import_module(name):
             if name == "cucim":
@@ -793,7 +793,7 @@ class TestExtractTilesToTar:
 
         monkeypatch.setattr(cucim_reader_mod.importlib, "import_module", _import_module)
         with patch(
-            "hs2p.wsi.tile_stream.open_slide",
+            "hs2p.wsi.streaming.stream.open_slide",
         ) as mock_open_slide:
             with pytest.raises(ModuleNotFoundError, match="cucim"):
                 extract_tiles_to_tar(
@@ -899,7 +899,7 @@ class TestExtractTilesToTar:
         result = _make_tiling_result(num_tiles=1, tile_size=16)
         result = replace(result, backend="cucim", requested_backend="cucim")
 
-        import hs2p.wsi.tile_stream as tile_stream_mod
+        import hs2p.wsi.streaming.stream as tile_stream_mod
 
         interleaved_plans = [
             GroupedReadPlan(
@@ -968,7 +968,7 @@ class TestExtractTilesToTar:
 
         mock_reader = _make_mock_reader(grouped_region)
 
-        with patch("hs2p.wsi.tile_stream.open_slide", return_value=mock_reader):
+        with patch("hs2p.wsi.streaming.stream.open_slide", return_value=mock_reader):
             tiles = list(iter_tile_arrays_from_result(result=result))
 
         assert len(tiles) == 64
@@ -990,7 +990,7 @@ class TestExtractTilesToTar:
 
         mock_reader = _make_mock_reader(grouped_region)
 
-        with patch("hs2p.wsi.tile_stream.open_slide", return_value=mock_reader):
+        with patch("hs2p.wsi.streaming.stream.open_slide", return_value=mock_reader):
             tiles = list(iter_tile_arrays_from_result(result=result))
 
         assert len(tiles) == 16
@@ -1009,7 +1009,7 @@ class TestExtractTilesToTar:
 
         mock_reader = _make_mock_reader(grouped_region)
 
-        with patch("hs2p.wsi.tile_stream.open_slide", return_value=mock_reader):
+        with patch("hs2p.wsi.streaming.stream.open_slide", return_value=mock_reader):
             tiles = list(iter_tile_arrays_from_result(result=result))
 
         assert len(tiles) == 16
@@ -1044,7 +1044,7 @@ class TestExtractTilesToTar:
             _solid_patch((6, 6, 6), size=16),
         )
 
-        with patch("hs2p.wsi.tile_stream.open_slide", return_value=mock_reader):
+        with patch("hs2p.wsi.streaming.stream.open_slide", return_value=mock_reader):
             tiles = list(iter_tile_arrays_from_result(result=result))
 
         assert len(tiles) == 15

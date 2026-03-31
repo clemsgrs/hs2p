@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from ._loader import default_config
+from .loader import default_config
 
 AUTO_BACKEND = "auto"
 

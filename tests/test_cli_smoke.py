@@ -8,19 +8,19 @@ import numpy as np
 import pandas as pd
 
 from hs2p.api import SlideSpec, TilingArtifacts
-import hs2p.tiling as tiling_mod
+import hs2p.cli.tiling as tiling_mod
 
 
 def _import_sampling_module():
     try:
-        return importlib.import_module("hs2p.sampling")
+        return importlib.import_module("hs2p.cli.sampling")
     except ModuleNotFoundError as exc:
         if exc.name != "seaborn":
             raise
         sys.modules["seaborn"] = types.SimpleNamespace(
             color_palette=lambda name: [(1.0, 0.0, 0.0)] * 20
         )
-        return importlib.import_module("hs2p.sampling")
+        return importlib.import_module("hs2p.cli.sampling")
 
 
 def _write_csv(tmp_path: Path) -> Path:
