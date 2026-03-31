@@ -4,15 +4,15 @@ from typing import Any
 
 import numpy as np
 
-from hs2p.wsi.batched_reads import BatchedReadRequest, iter_cucim_batched_read_regions
-from hs2p.wsi.read_plans import (
+from hs2p.wsi.streaming.batched import BatchedReadRequest, iter_cucim_batched_read_regions
+from hs2p.wsi.streaming.plans import (
     GroupedReadPlan,
     iter_grouped_read_plans,
     resolve_read_step_px,
     resolve_step_px_lv0,
 )
 from hs2p.wsi.reader import SlideReader, open_slide
-from hs2p.wsi.region_tiles import PlannedTileView, iter_plan_region_tile_views
+from hs2p.wsi.streaming.regions import PlannedTileView, iter_plan_region_tile_views
 
 
 def open_reader_for_result(

@@ -30,7 +30,7 @@ def iter_cucim_batched_read_regions(
     num_workers: int,
     gpu_decode: bool = False,
 ):
-    from hs2p.wsi.cucim_reader import CuImageReader
+    from hs2p.wsi.backends.cucim import CuImageReader
 
     reader = CuImageReader(image_path, gpu_decode=gpu_decode)
     reader._ensure_open()

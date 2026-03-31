@@ -11,7 +11,7 @@ def test_validation_accepts_omegaconf_listconfig_rgb_values():
     sys.modules.setdefault(
         "seaborn", types.SimpleNamespace(color_palette=lambda *a, **k: [])
     )
-    sampling_mod = importlib.import_module("hs2p.sampling")
+    sampling_mod = importlib.import_module("hs2p.cli.sampling")
 
     pixel_mapping = {"background": 0, "gleason-3": 3}
     color_mapping = {"background": None, "gleason-3": list_config}

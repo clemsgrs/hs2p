@@ -6,12 +6,12 @@ from typing import Iterable
 import numpy as np
 
 import hs2p.preprocessing as preprocessing_mod
-from hs2p.wsi.read_plans import (
+from hs2p.wsi.streaming.plans import (
     iter_grouped_read_plans,
     resolve_read_step_px,
     resolve_step_px_lv0,
 )
-from hs2p.wsi.region_tiles import iter_region_tile_views
+from hs2p.wsi.streaming.regions import iter_region_tile_views
 
 
 @dataclass(frozen=True)

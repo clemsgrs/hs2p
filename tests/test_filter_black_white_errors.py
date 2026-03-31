@@ -119,7 +119,7 @@ def test_filter_black_and_white_tiles_uses_cucim_batched_read_region(monkeypatch
     mock_cu_image.read_region.return_value = iter([canvas])
     fake_cucim = types.SimpleNamespace(CuImage=MagicMock(return_value=mock_cu_image))
 
-    import hs2p.wsi.cucim_reader as cucim_reader_mod
+    import hs2p.wsi.backends.cucim as cucim_reader_mod
 
     original_import_module = cucim_reader_mod.importlib.import_module
     monkeypatch.setattr(

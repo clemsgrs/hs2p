@@ -37,7 +37,7 @@ from hs2p.preprocessing import (
     TilingResult,
     preprocess_slide,
 )
-from hs2p.tiling_artifacts import (
+from hs2p.artifacts import (
     CompatibilitySpec,
     SlideSpec,
     TilingArtifacts,

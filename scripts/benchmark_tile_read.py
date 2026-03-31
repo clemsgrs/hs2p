@@ -138,7 +138,7 @@ def benchmark_cucim_batch_mode(
     gpu_decode: bool = False,
     progress_callback: ProgressCallback | None = None,
 ) -> tuple[float, int, int]:
-    from hs2p.wsi.cucim_reader import CuImageReader
+    from hs2p.wsi.backends.cucim import CuImageReader
     from scripts.benchmark_tile_utils import group_read_plans_by_read_size
 
     _require_cucim()
@@ -241,7 +241,7 @@ def load_single_slide_result_from_config(
         resolve_tiling_config,
     )
     from hs2p.utils import load_csv
-    from hs2p.utils.config import get_cfg_from_file
+    from hs2p.utils.setup import get_cfg_from_file
 
     cfg = get_cfg_from_file(config_file)
     whole_slides = load_csv(cfg)
@@ -298,7 +298,7 @@ def main() -> int:
         num_workers=int(args.num_workers),
     )
     result = limit_tiling_result(result, max_tiles=int(args.max_tiles))
-    from hs2p.wsi.read_plans import resolve_read_step_px
+    from hs2p.wsi.streaming.plans import resolve_read_step_px
 
     read_step_px = resolve_read_step_px(result)
 

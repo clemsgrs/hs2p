@@ -10,19 +10,19 @@ import pandas as pd
 
 from hs2p.api import SlideSpec, TilingArtifacts, tile_slides
 from hs2p.configs import FilterConfig, SegmentationConfig, TilingConfig
-import hs2p.tiling as tiling_mod
+import hs2p.cli.tiling as tiling_mod
 
 
 def _import_sampling_module():
     try:
-        return importlib.import_module("hs2p.sampling")
+        return importlib.import_module("hs2p.cli.sampling")
     except ModuleNotFoundError as exc:
         if exc.name != "seaborn":
             raise
         sys.modules["seaborn"] = types.SimpleNamespace(
             color_palette=lambda name: [(1.0, 0.0, 0.0)] * 20
         )
-        return importlib.import_module("hs2p.sampling")
+        return importlib.import_module("hs2p.cli.sampling")
 
 
 sampling_mod = _import_sampling_module()
@@ -661,7 +661,7 @@ def test_sampling_main_emits_finished_summary_when_resume_has_no_work(
 
 def test_progress_aware_logging_routes_stdout_through_active_reporter():
     import hs2p.progress as progress
-    from hs2p.utils import log_utils
+    import hs2p.utils.logging as log_utils
 
     reporter = RecordingReporter()
     logger_name = "hs2p.test.progress.logging"

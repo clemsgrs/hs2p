@@ -7,23 +7,23 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from hs2p.wsi.read_plans import resolve_read_step_px
+from hs2p.wsi.streaming.plans import resolve_read_step_px
 
 
 def _import_sampling_module():
     try:
-        return importlib.import_module("hs2p.sampling")
+        return importlib.import_module("hs2p.cli.sampling")
     except ModuleNotFoundError as exc:
         if exc.name != "seaborn":
             raise
         sys.modules["seaborn"] = types.SimpleNamespace(
             color_palette=lambda name: [(1.0, 0.0, 0.0)] * 20
         )
-        return importlib.import_module("hs2p.sampling")
+        return importlib.import_module("hs2p.cli.sampling")
 
 
 sampling_mod = _import_sampling_module()
-sampling_support_mod = importlib.import_module("hs2p.sampling_support")
+sampling_support_mod = importlib.import_module("hs2p.cli.sampling")
 
 
 def _resolved_sampling_spec(

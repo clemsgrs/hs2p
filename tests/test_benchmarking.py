@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 import hs2p.preprocessing as preprocessing_mod
-from hs2p.wsi.read_plans import resolve_read_step_px
+from hs2p.wsi.streaming.plans import resolve_read_step_px
 
 pytestmark = pytest.mark.script
 
