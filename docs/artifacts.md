@@ -99,6 +99,12 @@ The metadata file is structured into:
 - `white_threshold`
 - `black_threshold`
 - `fraction_threshold`
+- `filter_grayspace`
+- `grayspace_saturation_threshold`
+- `grayspace_fraction_threshold`
+- `filter_blur`
+- `blur_threshold`
+- `qc_spacing_um`
 
 ### `artifact`
 

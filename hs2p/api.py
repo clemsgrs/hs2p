@@ -24,6 +24,7 @@ from hs2p.configs import (
 )
 from hs2p.configs.resolvers import build_default_sampling_spec
 from hs2p.progress import emit_progress, emit_progress_log
+from hs2p.tile_qc import filter_coordinate_tiles, needs_pixel_qc
 from hs2p.wsi import (
     CoordinateOutputMode,
     CoordinateSelectionStrategy,
@@ -112,11 +113,17 @@ def _compute_tiling_result(
         ref_tile_size_px=filtering.ref_tile_size,
         a_t=filtering.a_t,
         a_h=filtering.a_h,
-filter_white=filtering.filter_white,
+        filter_white=filtering.filter_white,
         filter_black=filtering.filter_black,
         white_threshold=filtering.white_threshold,
         black_threshold=filtering.black_threshold,
         fraction_threshold=filtering.fraction_threshold,
+        filter_grayspace=filtering.filter_grayspace,
+        grayspace_saturation_threshold=filtering.grayspace_saturation_threshold,
+        grayspace_fraction_threshold=filtering.grayspace_fraction_threshold,
+        filter_blur=filtering.filter_blur,
+        blur_threshold=filtering.blur_threshold,
+        qc_spacing_um=filtering.qc_spacing_um,
         num_workers=num_workers,
         selection_strategy=(
             CoordinateSelectionStrategy.MERGED_DEFAULT_TILING
@@ -222,9 +229,10 @@ def extract_tiles_to_tar(
 ) -> tuple[Path, TilingResult]:
     """Extract tile images from a WSI and save them as a JPEG tar archive.
 
-    When *filter_params* requests white/black filtering the tiles are checked
-    during extraction so that pixel data is read only once.  The returned
-    ``TilingResult`` has its coordinate arrays trimmed to the surviving tiles.
+    When *filter_params* requests pixel QC, candidate coordinates are filtered
+    first at the configured QC spacing so rejected tiles are never read at the
+    final extraction spacing. The returned ``TilingResult`` has its coordinate
+    arrays trimmed to the surviving tiles.
     """
     from PIL import Image
 
@@ -240,11 +248,13 @@ def extract_tiles_to_tar(
     tar_path = tiles_dir / f"{result.sample_id}.tiles.tar"
     manifest_path = tiles_dir / f"{result.sample_id}.tiles.manifest.csv"
 
-    do_filter_white = filter_params is not None and filter_params.filter_white
-    do_filter_black = filter_params is not None and filter_params.filter_black
-    white_thresh = getattr(filter_params, "white_threshold", 220) if filter_params else 220
-    black_thresh = getattr(filter_params, "black_threshold", 25) if filter_params else 25
-    frac_thresh = getattr(filter_params, "fraction_threshold", 0.9) if filter_params else 0.9
+    if filter_params is not None and needs_pixel_qc(filter_params):
+        result = _apply_qc_filtering_to_result(
+            result=result,
+            filter_params=filter_params,
+            num_workers=num_workers,
+            gpu_decode=gpu_decode,
+        )
 
     kept_indices: list[int] = []
 
@@ -287,17 +297,6 @@ def extract_tiles_to_tar(
                 tile_arr = record.tile_arr
                 if tile_arr.shape[2] > 3:
                     tile_arr = tile_arr[:, :, :3]
-
-                if do_filter_white or do_filter_black:
-                    total_pixels = tile_arr.shape[0] * tile_arr.shape[1]
-                    if do_filter_white:
-                        white_frac = np.all(tile_arr > white_thresh, axis=-1).sum() / total_pixels
-                        if white_frac > frac_thresh:
-                            continue
-                    if do_filter_black:
-                        black_frac = np.all(tile_arr < black_thresh, axis=-1).sum() / total_pixels
-                        if black_frac > frac_thresh:
-                            continue
 
                 encode_start = time.perf_counter()
                 if result.effective_tile_size_px != result.requested_tile_size_px:
@@ -568,7 +567,92 @@ def _format_tar_member_name(tile_index: int) -> str:
 
 
 def _needs_pixel_filtering(filtering: FilterConfig) -> bool:
-    return bool(filtering.filter_white or filtering.filter_black)
+    return needs_pixel_qc(filtering)
+
+
+def _apply_qc_filtering_to_result(
+    *,
+    result: TilingResult,
+    filter_params: FilterConfig,
+    num_workers: int,
+    gpu_decode: bool = False,
+) -> TilingResult:
+    from hs2p.wsi.reader import BatchRegionReader, open_slide
+
+    with open_slide(
+        result.image_path,
+        backend=result.backend,
+        spacing_override=result.base_spacing_um,
+        gpu_decode=gpu_decode,
+    ) as slide:
+        batch_read_windows = None
+        if isinstance(slide, BatchRegionReader):
+            batch_read_windows = (
+                lambda locations, size, level, workers: slide.read_regions(
+                    locations,
+                    level,
+                    size,
+                    num_workers=workers,
+                    pad_missing=False,
+                )
+            )
+        keep_flags = filter_coordinate_tiles(
+            coord_candidates=result.coordinates,
+            keep_flags=np.ones(len(result.coordinates), dtype=np.uint8),
+            level_dimensions=slide.level_dimensions,
+            level_downsamples=slide.level_downsamples,
+            target_tile_size_px=result.requested_tile_size_px,
+            target_spacing_um=result.requested_spacing_um,
+            base_spacing_um=result.base_spacing_um,
+            tolerance=result.tolerance,
+            filter_params=filter_params,
+            read_window=lambda x, y, width, height, level: slide.read_region(
+                (x, y),
+                level,
+                (width, height),
+                pad_missing=False,
+            ),
+            batch_read_windows=batch_read_windows,
+            num_workers=num_workers,
+            source_label=str(result.image_path),
+        )
+    keep = np.asarray(keep_flags, dtype=bool)
+    if int(keep.sum()) == len(result.coordinates):
+        return replace(
+            result,
+            filter_white=filter_params.filter_white,
+            filter_black=filter_params.filter_black,
+            white_threshold=filter_params.white_threshold,
+            black_threshold=filter_params.black_threshold,
+            fraction_threshold=filter_params.fraction_threshold,
+            filter_grayspace=filter_params.filter_grayspace,
+            grayspace_saturation_threshold=filter_params.grayspace_saturation_threshold,
+            grayspace_fraction_threshold=filter_params.grayspace_fraction_threshold,
+            filter_blur=filter_params.filter_blur,
+            blur_threshold=filter_params.blur_threshold,
+            qc_spacing_um=filter_params.qc_spacing_um,
+        )
+
+    return replace(
+        result,
+        tiles=replace(
+            result.tiles,
+            coordinates=result.coordinates[keep],
+            tissue_fractions=result.tissue_fractions[keep],
+            tile_index=np.arange(int(keep.sum()), dtype=np.int32),
+        ),
+        filter_white=filter_params.filter_white,
+        filter_black=filter_params.filter_black,
+        white_threshold=filter_params.white_threshold,
+        black_threshold=filter_params.black_threshold,
+        fraction_threshold=filter_params.fraction_threshold,
+        filter_grayspace=filter_params.filter_grayspace,
+        grayspace_saturation_threshold=filter_params.grayspace_saturation_threshold,
+        grayspace_fraction_threshold=filter_params.grayspace_fraction_threshold,
+        filter_blur=filter_params.filter_blur,
+        blur_threshold=filter_params.blur_threshold,
+        qc_spacing_um=filter_params.qc_spacing_um,
+    )
 
 
 def _validate_whole_slides(whole_slides: Sequence[SlideSpec]) -> None:
@@ -781,7 +865,13 @@ def _compute_and_save_tiling_artifacts_from_request(
     try:
         defer_pixel_filtering = request.save_tiles and _needs_pixel_filtering(request.filtering)
         effective_filtering = (
-            replace(request.filtering, filter_white=False, filter_black=False)
+            replace(
+                request.filtering,
+                filter_white=False,
+                filter_black=False,
+                filter_grayspace=False,
+                filter_blur=False,
+            )
             if defer_pixel_filtering
             else request.filtering
         )

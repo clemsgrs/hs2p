@@ -1056,3 +1056,13 @@ class TestNeedsPixelFiltering:
         assert _needs_pixel_filtering(
             FilterConfig(filter_white=True, filter_black=True)
         )
+
+    def test_grayspace_only(self):
+        from hs2p.api import _needs_pixel_filtering
+
+        assert _needs_pixel_filtering(FilterConfig(filter_grayspace=True))
+
+    def test_blur_only(self):
+        from hs2p.api import _needs_pixel_filtering
+
+        assert _needs_pixel_filtering(FilterConfig(filter_blur=True))

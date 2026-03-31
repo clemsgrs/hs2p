@@ -493,6 +493,12 @@ def test_save_tiling_result_writes_preprocessing_npz_and_json(tmp_path: Path):
     assert meta["tiling"]["overlap"] == 0.0
     assert meta["tiling"]["min_tissue_fraction"] == 0.1
     assert meta["tiling"]["n_tiles"] == 2
+    assert meta["filtering"]["filter_grayspace"] is False
+    assert meta["filtering"]["grayspace_saturation_threshold"] == pytest.approx(0.05)
+    assert meta["filtering"]["grayspace_fraction_threshold"] == pytest.approx(0.6)
+    assert meta["filtering"]["filter_blur"] is False
+    assert meta["filtering"]["blur_threshold"] == pytest.approx(50.0)
+    assert meta["filtering"]["qc_spacing_um"] == pytest.approx(2.0)
 
 
 def test_save_and_load_tiling_result_round_trip(tmp_path: Path):
@@ -1803,6 +1809,23 @@ def test_config_dataclasses_apply_package_defaults_for_secondary_parameters():
     )
     assert filtering.fraction_threshold == pytest.approx(
         default_config.tiling.filter_params.fraction_threshold
+    )
+    assert (
+        filtering.filter_grayspace
+        == default_config.tiling.filter_params.filter_grayspace
+    )
+    assert filtering.grayspace_saturation_threshold == pytest.approx(
+        default_config.tiling.filter_params.grayspace_saturation_threshold
+    )
+    assert filtering.grayspace_fraction_threshold == pytest.approx(
+        default_config.tiling.filter_params.grayspace_fraction_threshold
+    )
+    assert filtering.filter_blur == default_config.tiling.filter_params.filter_blur
+    assert filtering.blur_threshold == pytest.approx(
+        default_config.tiling.filter_params.blur_threshold
+    )
+    assert filtering.qc_spacing_um == pytest.approx(
+        default_config.tiling.filter_params.qc_spacing_um
     )
 
 

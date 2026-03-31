@@ -7,6 +7,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import cv2
@@ -15,6 +16,7 @@ from PIL import Image
 
 from hs2p.wsi.geometry import project_discrete_grid_origins
 from hs2p.wsi.reader import open_slide, select_level, select_level_for_downsample
+from hs2p.tile_qc import filter_coordinate_tiles, needs_pixel_qc
 
 
 def _normalize_level_downsamples(
@@ -271,6 +273,12 @@ class TilingResult:
     white_threshold: int
     black_threshold: int
     fraction_threshold: float
+    filter_grayspace: bool = False
+    grayspace_saturation_threshold: float = 0.05
+    grayspace_fraction_threshold: float = 0.6
+    filter_blur: bool = False
+    blur_threshold: float = 50.0
+    qc_spacing_um: float = 2.0
     # -- optional (legitimately None in some paths) --
     seg_use_otsu: bool | None = None
     seg_use_hsv: bool | None = None
@@ -621,6 +629,21 @@ _FILTERING_KEYS = {
     "white_threshold",
     "black_threshold",
     "fraction_threshold",
+    "filter_grayspace",
+    "grayspace_saturation_threshold",
+    "grayspace_fraction_threshold",
+    "filter_blur",
+    "blur_threshold",
+    "qc_spacing_um",
+}
+
+_FILTERING_DEFAULTS = {
+    "filter_grayspace": False,
+    "grayspace_saturation_threshold": 0.05,
+    "grayspace_fraction_threshold": 0.6,
+    "filter_blur": False,
+    "blur_threshold": 50.0,
+    "qc_spacing_um": 2.0,
 }
 _ARTIFACT_KEYS = {
     "coordinate_space",
@@ -685,6 +708,12 @@ def _build_tiling_metadata(result: TilingResult) -> dict[str, Any]:
         "white_threshold": result.white_threshold,
         "black_threshold": result.black_threshold,
         "fraction_threshold": result.fraction_threshold,
+        "filter_grayspace": result.filter_grayspace,
+        "grayspace_saturation_threshold": result.grayspace_saturation_threshold,
+        "grayspace_fraction_threshold": result.grayspace_fraction_threshold,
+        "filter_blur": result.filter_blur,
+        "blur_threshold": result.blur_threshold,
+        "qc_spacing_um": result.qc_spacing_um,
     }
     artifact = {
         "coordinate_space": COORDINATE_SPACE,
@@ -745,6 +774,13 @@ def _validate_metadata_schema(meta: dict[str, Any]) -> None:
         extra = section_keys - expected_keys
         if missing or extra:
             _raise_key_error(section_name, missing, extra)
+
+
+def _normalize_filtering_metadata(filtering: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(filtering)
+    for key, value in _FILTERING_DEFAULTS.items():
+        normalized.setdefault(key, value)
+    return normalized
 
 
 def normalize_artifact_path(path: str | Path | None) -> str | None:
@@ -847,6 +883,9 @@ def load_tiling_result(npz_path: Path, meta_path: Path) -> TilingResult:
 
 def _load_tiling_result(*, npz_path: Path, meta: dict[str, Any]) -> TilingResult:
     data = np.load(npz_path, allow_pickle=False)
+    meta = dict(meta)
+    if isinstance(meta.get("filtering"), dict):
+        meta["filtering"] = _normalize_filtering_metadata(meta["filtering"])
     _validate_metadata_schema(meta)
 
     if "tile_index" not in data:
@@ -912,6 +951,12 @@ def _load_tiling_result(*, npz_path: Path, meta: dict[str, Any]) -> TilingResult
         white_threshold=filtering["white_threshold"],
         black_threshold=filtering["black_threshold"],
         fraction_threshold=filtering["fraction_threshold"],
+        filter_grayspace=filtering["filter_grayspace"],
+        grayspace_saturation_threshold=filtering["grayspace_saturation_threshold"],
+        grayspace_fraction_threshold=filtering["grayspace_fraction_threshold"],
+        filter_blur=filtering["filter_blur"],
+        blur_threshold=filtering["blur_threshold"],
+        qc_spacing_um=filtering["qc_spacing_um"],
         seg_use_otsu=segmentation["use_otsu"],
         seg_use_hsv=segmentation["use_hsv"],
         mask_path=segmentation["mask_path"],
@@ -1059,6 +1104,12 @@ def preprocess_slide(
     white_threshold: int = 220,
     black_threshold: int = 25,
     fraction_threshold: float = 0.9,
+    filter_grayspace: bool = False,
+    grayspace_saturation_threshold: float = 0.05,
+    grayspace_fraction_threshold: float = 0.6,
+    filter_blur: bool = False,
+    blur_threshold: float = 50.0,
+    qc_spacing_um: float = 2.0,
     num_workers: int = 1,
     annotation: str | None = None,
     selection_strategy: str | None = None,
@@ -1131,6 +1182,47 @@ def preprocess_slide(
             tolerance=tolerance,
             num_workers=num_workers,
         )
+        filter_params = SimpleNamespace(
+            filter_white=filter_white,
+            filter_black=filter_black,
+            white_threshold=white_threshold,
+            black_threshold=black_threshold,
+            fraction_threshold=fraction_threshold,
+            filter_grayspace=filter_grayspace,
+            grayspace_saturation_threshold=grayspace_saturation_threshold,
+            grayspace_fraction_threshold=grayspace_fraction_threshold,
+            filter_blur=filter_blur,
+            blur_threshold=blur_threshold,
+            qc_spacing_um=qc_spacing_um,
+        )
+        if needs_pixel_qc(filter_params):
+            keep_flags = filter_coordinate_tiles(
+                coord_candidates=tiles.coordinates,
+                keep_flags=np.ones(len(tiles.coordinates), dtype=np.uint8),
+                level_dimensions=slide.level_dimensions,
+                level_downsamples=slide.level_downsamples,
+                target_tile_size_px=requested_tile_size_px,
+                target_spacing_um=requested_spacing_um,
+                base_spacing_um=float(slide.spacing),
+                tolerance=tolerance,
+                filter_params=filter_params,
+                read_window=lambda x, y, width, height, level: slide.read_region(
+                    (x, y),
+                    level,
+                    (width, height),
+                    pad_missing=False,
+                ),
+                batch_read_windows=None,
+                num_workers=num_workers,
+                source_label=str(image_path),
+            )
+            keep = np.asarray(keep_flags, dtype=bool)
+            tiles = replace(
+                tiles,
+                coordinates=tiles.coordinates[keep],
+                tissue_fractions=tiles.tissue_fractions[keep],
+                tile_index=np.arange(int(keep.sum()), dtype=np.int32),
+            )
         step_px_lv0 = max(1, round(tiles.tile_size_lv0 * (1.0 - overlap)))
         return TilingResult(
             tiles=tiles,
@@ -1156,6 +1248,12 @@ def preprocess_slide(
             white_threshold=white_threshold,
             black_threshold=black_threshold,
             fraction_threshold=fraction_threshold,
+            filter_grayspace=filter_grayspace,
+            grayspace_saturation_threshold=grayspace_saturation_threshold,
+            grayspace_fraction_threshold=grayspace_fraction_threshold,
+            filter_blur=filter_blur,
+            blur_threshold=blur_threshold,
+            qc_spacing_um=qc_spacing_um,
             seg_use_otsu=use_otsu,
             seg_use_hsv=use_hsv,
             mask_path=tissue_mask_path,

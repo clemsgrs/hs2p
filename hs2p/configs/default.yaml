@@ -46,6 +46,12 @@ tiling:
     white_threshold: 220 # threshold for white pixels (0-255)
     black_threshold: 25 # threshold for black pixels (0-255)
     fraction_threshold: 0.9 # fraction of pixels that must be white/black to filter out the tile
+    filter_grayspace: false # whether to filter out tiles with too much low-saturation gray content
+    grayspace_saturation_threshold: 0.05 # HSV saturation below which a pixel is considered gray
+    grayspace_fraction_threshold: 0.6 # maximum allowed fraction of gray pixels
+    filter_blur: false # whether to filter out blurry tiles using Laplacian variance
+    blur_threshold: 50.0 # minimum blur score (higher is sharper)
+    qc_spacing_um: 2.0 # spacing at which pixel-based QC is evaluated
   preview:
     downsample: 32 # downsample to use for preview rendering
   sampling_params:
