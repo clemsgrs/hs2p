@@ -18,6 +18,7 @@ from hs2p.configs.resolvers import (
     resolve_sampling_strategy,
     resolve_segmentation_config,
     resolve_tiling_config,
+    validate_color_mapping,
 )
 import hs2p.progress as progress
 from hs2p.sampling_support import (
