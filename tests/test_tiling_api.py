@@ -404,30 +404,6 @@ def test_compute_tiling_result_uses_preprocessing_core(
         np.array([0.25, 0.75], dtype=np.float32),
     )
 
-def test_tile_slide_warns_when_preview_qc_is_requested(
-    monkeypatch, tiling_config, segmentation_config, filter_config
-):
-    _patch_preprocess_slide(
-        monkeypatch,
-        result=_build_preprocessing_result(
-            sample_id="slide-qc",
-            image_path="slide-qc.svs",
-            mask_path=None,
-        ),
-    )
-
-    with pytest.warns(
-        UserWarning,
-        match="write_tiling_preview\\(\\).*overlay_mask_on_slide\\(\\)",
-    ):
-        tile_slide(
-            SlideSpec(sample_id="slide-qc", image_path=Path("slide-qc.svs")),
-            tiling=tiling_config,
-            segmentation=segmentation_config,
-            filtering=filter_config,
-            preview=PreviewConfig(save_mask_preview=True, save_tiling_preview=True),
-        )
-
 
 def test_save_tiling_result_writes_preprocessing_npz_and_json(tmp_path: Path):
     result = _build_preprocessing_result(

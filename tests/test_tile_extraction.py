@@ -439,11 +439,12 @@ class TestExtractTilesToTar:
             _solid_patch((0, 0, 128)),   # keep
         ]
 
-        mock_reader = _make_mock_reader(
+        qc_reader = _make_mock_reader(
             *patches,
             level_dimensions=[tuple(result.slide_dimensions)],
             level_downsamples=result.level_downsamples,
         )
+        export_reader = _make_mock_reader(patches[0], patches[2])
 
         filter_cfg = FilterConfig(
             filter_white=True,
@@ -451,7 +452,10 @@ class TestExtractTilesToTar:
             fraction_threshold=0.9,
         )
 
-        with patch("hs2p.wsi.tile_stream.open_slide", return_value=mock_reader):
+        with patch(
+            "hs2p.wsi.tile_stream.open_slide",
+            side_effect=[qc_reader, export_reader],
+        ):
             tar_path, filtered = extract_tiles_to_tar(
                 result,
                 output_dir=tmp_path,
@@ -476,11 +480,12 @@ class TestExtractTilesToTar:
             _solid_patch((128, 128, 0)),  # keep
         ]
 
-        mock_reader = _make_mock_reader(
+        qc_reader = _make_mock_reader(
             *patches,
             level_dimensions=[tuple(result.slide_dimensions)],
             level_downsamples=result.level_downsamples,
         )
+        export_reader = _make_mock_reader(patches[1])
 
         filter_cfg = FilterConfig(
             filter_black=True,
@@ -488,7 +493,10 @@ class TestExtractTilesToTar:
             fraction_threshold=0.9,
         )
 
-        with patch("hs2p.wsi.tile_stream.open_slide", return_value=mock_reader):
+        with patch(
+            "hs2p.wsi.tile_stream.open_slide",
+            side_effect=[qc_reader, export_reader],
+        ):
             tar_path, filtered = extract_tiles_to_tar(
                 result,
                 output_dir=tmp_path,
@@ -509,11 +517,12 @@ class TestExtractTilesToTar:
             _solid_patch((128, 128, 0)),
         ]
 
-        mock_reader = _make_mock_reader(
+        qc_reader = _make_mock_reader(
             *patches,
             level_dimensions=[tuple(result.slide_dimensions)],
             level_downsamples=result.level_downsamples,
         )
+        export_reader = _make_mock_reader(patches[1])
 
         filter_cfg = FilterConfig(
             filter_black=True,
@@ -521,7 +530,10 @@ class TestExtractTilesToTar:
             fraction_threshold=0.9,
         )
 
-        with patch("hs2p.wsi.tile_stream.open_slide", return_value=mock_reader):
+        with patch(
+            "hs2p.wsi.tile_stream.open_slide",
+            side_effect=[qc_reader, export_reader],
+        ):
             _, filtered = extract_tiles_to_tar(
                 result,
                 output_dir=tmp_path,
@@ -536,11 +548,12 @@ class TestExtractTilesToTar:
 
     def test_all_tiles_filtered_produces_empty_tar(self, tmp_path: Path):
         result = _make_tiling_result(num_tiles=1)
-        mock_reader = _make_mock_reader(
+        qc_reader = _make_mock_reader(
             _solid_patch((250, 250, 250)),
             level_dimensions=[tuple(result.slide_dimensions)],
             level_downsamples=result.level_downsamples,
         )
+        export_reader = _make_mock_reader()
 
         filter_cfg = FilterConfig(
             filter_white=True,
@@ -548,7 +561,10 @@ class TestExtractTilesToTar:
             fraction_threshold=0.9,
         )
 
-        with patch("hs2p.wsi.tile_stream.open_slide", return_value=mock_reader):
+        with patch(
+            "hs2p.wsi.tile_stream.open_slide",
+            side_effect=[qc_reader, export_reader],
+        ):
             tar_path, filtered = extract_tiles_to_tar(
                 result, output_dir=tmp_path, filter_params=filter_cfg
             )

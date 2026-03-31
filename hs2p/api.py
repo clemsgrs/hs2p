@@ -6,7 +6,6 @@ import tarfile
 import tempfile
 import time
 import traceback
-import warnings
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -140,25 +139,10 @@ def tile_slide(
     whole_slide: SlideSpec,
     *,
     tiling: TilingConfig,
-    segmentation: SegmentationConfig,
-    filtering: FilterConfig,
-    preview: PreviewConfig | None = None,
+    segmentation: SegmentationConfig = SegmentationConfig(),
+    filtering: FilterConfig = FilterConfig(),
     num_workers: int = 1,
 ) -> TilingResult:
-    if preview is not None and (
-        preview.save_mask_preview or preview.save_tiling_preview
-    ):
-        warnings.warn(
-            "tile_slide() is compute-only and does not write preview artifacts; "
-            "use write_tiling_preview() for tiling overlays and "
-            "overlay_mask_on_slide() for mask overlays.",
-            stacklevel=2,
-        )
-    sampling_spec = (
-        build_default_sampling_spec(tiling)
-        if whole_slide.mask_path is not None
-        else None
-    )
     backend_selection = resolve_backend(
         tiling.requested_backend,
         wsi_path=whole_slide.image_path,
@@ -764,8 +748,8 @@ def tile_slides(
     whole_slides: Sequence[SlideSpec],
     *,
     tiling: TilingConfig,
-    segmentation: SegmentationConfig,
-    filtering: FilterConfig,
+    segmentation: SegmentationConfig = SegmentationConfig(),
+    filtering: FilterConfig = FilterConfig(),
     preview: PreviewConfig | None = None,
     output_dir: Path,
     num_workers: int = 1,
