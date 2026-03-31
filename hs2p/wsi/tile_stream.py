@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-import warnings
 from collections.abc import Iterator, Sequence
 from typing import Any
 
@@ -13,7 +11,7 @@ from hs2p.wsi.read_plans import (
     resolve_read_step_px,
     resolve_step_px_lv0,
 )
-from hs2p.wsi.reader import AUTO_BACKEND, SlideReader, open_slide
+from hs2p.wsi.reader import SlideReader, open_slide
 from hs2p.wsi.region_tiles import PlannedTileView, iter_plan_region_tile_views
 
 
@@ -21,31 +19,13 @@ def open_reader_for_result(
     result: Any,
     *,
     gpu_decode: bool = False,
-    backend_override: str | None = None,
-    allow_backend_fallback: bool = False,
 ) -> SlideReader:
-    backend = str(backend_override or result.backend)
-    try:
-        return open_slide(
-            result.image_path,
-            backend=backend,
-            spacing_override=result.base_spacing_um,
-            gpu_decode=gpu_decode,
-        )
-    except (ImportError, ModuleNotFoundError):
-        if not allow_backend_fallback or backend != "cucim":
-            raise
-        warnings.warn(
-            "CuCIM is unavailable for backend='cucim'; falling back to the generic slide reader.",
-            UserWarning,
-            stacklevel=2,
-        )
-        return open_slide(
-            result.image_path,
-            backend=AUTO_BACKEND,
-            spacing_override=result.base_spacing_um,
-            gpu_decode=False,
-        )
+    return open_slide(
+        result.image_path,
+        backend=str(result.backend),
+        spacing_override=result.base_spacing_um,
+        gpu_decode=gpu_decode,
+    )
 
 
 def iter_tile_records_from_reader(
@@ -174,26 +154,13 @@ def _iter_cucim_tile_records_from_result(
         )
         for read_plan in read_plans
     ]
-    try:
-        batched_regions = iter_cucim_batched_read_regions(
-            image_path=result.image_path,
-            requests=requests,
-            level=int(result.read_level),
-            num_workers=int(num_workers),
-            gpu_decode=gpu_decode,
-        )
-    except (ImportError, ModuleNotFoundError):
-        with open_reader_for_result(
-            result,
-            gpu_decode=False,
-            allow_backend_fallback=True,
-        ) as reader:
-            yield from iter_tile_records_from_reader(
-                reader,
-                result=result,
-                supertile_sizes=supertile_sizes,
-            )
-        return
+    batched_regions = iter_cucim_batched_read_regions(
+        image_path=result.image_path,
+        requests=requests,
+        level=int(result.read_level),
+        num_workers=int(num_workers),
+        gpu_decode=gpu_decode,
+    )
 
     for request, region in batched_regions:
         yield from _iter_tile_records_from_region(

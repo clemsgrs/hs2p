@@ -391,7 +391,6 @@ def _apply_qc_filtering_to_result(
     with open_reader_for_result(
         result,
         gpu_decode=gpu_decode,
-        allow_backend_fallback=True,
     ) as slide:
         batch_read_windows = None
         if isinstance(slide, BatchRegionReader):

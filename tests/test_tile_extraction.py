@@ -745,7 +745,7 @@ class TestExtractTilesToTar:
         )
         mock_open_slide.assert_not_called()
 
-    def test_cucim_backend_falls_back_to_generic_reader_when_cucim_is_unavailable(
+    def test_cucim_backend_raises_when_cucim_is_unavailable(
         self, monkeypatch, tmp_path: Path
     ):
         result = _make_tiling_result(num_tiles=1)
@@ -759,22 +759,17 @@ class TestExtractTilesToTar:
             raise AssertionError(f"unexpected module import: {name}")
 
         monkeypatch.setattr(cucim_reader_mod.importlib, "import_module", _import_module)
-        mock_reader = _make_mock_reader(_solid_patch((70, 80, 90)))
-
-        with pytest.warns(UserWarning, match="CuCIM is unavailable"), patch(
+        with patch(
             "hs2p.wsi.tile_stream.open_slide",
-            return_value=mock_reader,
         ) as mock_open_slide:
-            tar_path, out_result = extract_tiles_to_tar(
-                result,
-                output_dir=tmp_path,
-                num_workers=4,
-            )
+            with pytest.raises(ModuleNotFoundError, match="cucim"):
+                extract_tiles_to_tar(
+                    result,
+                    output_dir=tmp_path,
+                    num_workers=4,
+                )
 
-        assert tar_path.is_file()
-        assert out_result is result
-        mock_open_slide.assert_called_once()
-        assert mock_open_slide.call_args.kwargs["backend"] == "auto"
+        mock_open_slide.assert_not_called()
 
     def test_cucim_iterator_groups_dense_4x4_grid_into_one_batched_read(
         self, monkeypatch
