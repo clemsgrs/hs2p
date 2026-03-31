@@ -1188,11 +1188,27 @@ def test_validate_tiling_artifacts_rejects_mismatched_tiling_config(
 
 def test_validate_tiling_artifacts_ignores_disabled_filter_threshold_mismatches(
     tmp_path: Path,
-    tiling_config: TilingConfig,
-    segmentation_config: SegmentationConfig,
 ):
     result = _build_result(sample_id="slide-filter", image_path="slide-filter.svs")
     artifacts = save_tiling_result(result, output_dir=tmp_path)
+    matching_tiling = TilingConfig(
+        target_spacing_um=result.requested_spacing_um,
+        target_tile_size_px=result.requested_tile_size_px,
+        tolerance=result.tolerance,
+        overlap=result.overlap,
+        tissue_threshold=result.min_tissue_fraction,
+        use_padding=result.use_padding,
+        backend=result.backend,
+    )
+    matching_segmentation = SegmentationConfig(
+        downsample=result.seg_downsample,
+        sthresh=result.seg_sthresh,
+        sthresh_up=result.seg_sthresh_up,
+        mthresh=result.seg_mthresh,
+        close=result.seg_close,
+        use_otsu=result.seg_use_otsu,
+        use_hsv=result.seg_use_hsv,
+    )
 
     compatibility_filter = FilterConfig(
         ref_tile_size=result.ref_tile_size_px,
@@ -1219,8 +1235,8 @@ def test_validate_tiling_artifacts_ignores_disabled_filter_threshold_mismatches(
         coordinates_npz_path=artifacts.coordinates_npz_path,
         coordinates_meta_path=artifacts.coordinates_meta_path,
         compatibility=_artifact_compatibility(
-            tiling_config=tiling_config,
-            segmentation_config=segmentation_config,
+            tiling_config=matching_tiling,
+            segmentation_config=matching_segmentation,
             filter_config=compatibility_filter,
         ),
     )
