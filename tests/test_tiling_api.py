@@ -247,7 +247,7 @@ def _save_valid_preprocessing_artifact(
         image_path=f"{sample_id}.svs",
         mask_path=f"{sample_id}-mask.png",
     )
-    paths = preprocessing_mod.save_tiling_result(result, output_dir=tmp_path)
+    paths = preprocessing_mod._save_tiling_result(result, output_dir=tmp_path)
     return Path(paths["npz"]), Path(paths["meta"])
 
 
@@ -404,30 +404,6 @@ def test_compute_tiling_result_uses_preprocessing_core(
         np.array([0.25, 0.75], dtype=np.float32),
     )
 
-def test_tile_slide_warns_when_preview_qc_is_requested(
-    monkeypatch, tiling_config, segmentation_config, filter_config
-):
-    _patch_preprocess_slide(
-        monkeypatch,
-        result=_build_preprocessing_result(
-            sample_id="slide-qc",
-            image_path="slide-qc.svs",
-            mask_path=None,
-        ),
-    )
-
-    with pytest.warns(
-        UserWarning,
-        match="write_tiling_preview\\(\\).*overlay_mask_on_slide\\(\\)",
-    ):
-        tile_slide(
-            SlideSpec(sample_id="slide-qc", image_path=Path("slide-qc.svs")),
-            tiling=tiling_config,
-            segmentation=segmentation_config,
-            filtering=filter_config,
-            preview=PreviewConfig(save_mask_preview=True, save_tiling_preview=True),
-        )
-
 
 def test_save_tiling_result_writes_preprocessing_npz_and_json(tmp_path: Path):
     result = _build_preprocessing_result(
@@ -493,6 +469,12 @@ def test_save_tiling_result_writes_preprocessing_npz_and_json(tmp_path: Path):
     assert meta["tiling"]["overlap"] == 0.0
     assert meta["tiling"]["min_tissue_fraction"] == 0.1
     assert meta["tiling"]["n_tiles"] == 2
+    assert meta["filtering"]["filter_grayspace"] is False
+    assert meta["filtering"]["grayspace_saturation_threshold"] == pytest.approx(0.05)
+    assert meta["filtering"]["grayspace_fraction_threshold"] == pytest.approx(0.6)
+    assert meta["filtering"]["filter_blur"] is False
+    assert meta["filtering"]["blur_threshold"] == pytest.approx(50.0)
+    assert meta["filtering"]["qc_spacing_um"] == pytest.approx(2.0)
 
 
 def test_save_and_load_tiling_result_round_trip(tmp_path: Path):
@@ -633,7 +615,7 @@ def test_load_tiling_result_accepts_preprocessing_artifact(tmp_path: Path):
         output_mode="multi_output",
     )
 
-    artifacts = preprocessing_mod.save_tiling_result(
+    artifacts = preprocessing_mod._save_tiling_result(
         preprocessing_result,
         output_dir=tmp_path / "tiles",
     )
@@ -1202,6 +1184,64 @@ def test_validate_tiling_artifacts_rejects_mismatched_tiling_config(
                 filter_config=filter_config,
             ),
         )
+
+
+def test_validate_tiling_artifacts_ignores_disabled_filter_threshold_mismatches(
+    tmp_path: Path,
+):
+    result = _build_result(sample_id="slide-filter", image_path="slide-filter.svs")
+    artifacts = save_tiling_result(result, output_dir=tmp_path)
+    matching_tiling = TilingConfig(
+        target_spacing_um=result.requested_spacing_um,
+        target_tile_size_px=result.requested_tile_size_px,
+        tolerance=result.tolerance,
+        overlap=result.overlap,
+        tissue_threshold=result.min_tissue_fraction,
+        use_padding=result.use_padding,
+        backend=result.backend,
+    )
+    matching_segmentation = SegmentationConfig(
+        downsample=result.seg_downsample,
+        sthresh=result.seg_sthresh,
+        sthresh_up=result.seg_sthresh_up,
+        mthresh=result.seg_mthresh,
+        close=result.seg_close,
+        use_otsu=result.seg_use_otsu,
+        use_hsv=result.seg_use_hsv,
+    )
+
+    compatibility_filter = FilterConfig(
+        ref_tile_size=result.ref_tile_size_px,
+        a_t=result.a_t,
+        a_h=result.a_h,
+        filter_white=False,
+        filter_black=False,
+        white_threshold=111,
+        black_threshold=9,
+        fraction_threshold=0.25,
+        filter_grayspace=False,
+        grayspace_saturation_threshold=0.99,
+        grayspace_fraction_threshold=0.12,
+        filter_blur=False,
+        blur_threshold=5.0,
+        qc_spacing_um=9.0,
+    )
+
+    validated = validate_tiling_artifacts(
+        whole_slide=SlideSpec(
+            sample_id="slide-filter",
+            image_path=Path("slide-filter.svs"),
+        ),
+        coordinates_npz_path=artifacts.coordinates_npz_path,
+        coordinates_meta_path=artifacts.coordinates_meta_path,
+        compatibility=_artifact_compatibility(
+            tiling_config=matching_tiling,
+            segmentation_config=matching_segmentation,
+            filter_config=compatibility_filter,
+        ),
+    )
+
+    assert validated.coordinates_meta_path == artifacts.coordinates_meta_path
 
 
 def test_validate_tiling_artifacts_rejects_mismatched_image_path(tmp_path: Path):
@@ -1803,6 +1843,23 @@ def test_config_dataclasses_apply_package_defaults_for_secondary_parameters():
     )
     assert filtering.fraction_threshold == pytest.approx(
         default_config.tiling.filter_params.fraction_threshold
+    )
+    assert (
+        filtering.filter_grayspace
+        == default_config.tiling.filter_params.filter_grayspace
+    )
+    assert filtering.grayspace_saturation_threshold == pytest.approx(
+        default_config.tiling.filter_params.grayspace_saturation_threshold
+    )
+    assert filtering.grayspace_fraction_threshold == pytest.approx(
+        default_config.tiling.filter_params.grayspace_fraction_threshold
+    )
+    assert filtering.filter_blur == default_config.tiling.filter_params.filter_blur
+    assert filtering.blur_threshold == pytest.approx(
+        default_config.tiling.filter_params.blur_threshold
+    )
+    assert filtering.qc_spacing_um == pytest.approx(
+        default_config.tiling.filter_params.qc_spacing_um
     )
 
 

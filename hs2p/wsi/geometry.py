@@ -38,18 +38,6 @@ def project_discrete_grid_origins(
     return projected
 
 
-def normalize_level_downsamples(
-    level_downsamples: list[float | tuple[float, float]],
-) -> list[tuple[float, float]]:
-    normalized: list[tuple[float, float]] = []
-    for value in level_downsamples:
-        if isinstance(value, tuple):
-            normalized.append((float(value[0]), float(value[1])))
-        else:
-            normalized.append((float(value), float(value)))
-    return normalized
-
-
 def compute_level_downsamples(
     level_dimensions: list[tuple[int, int]],
 ) -> list[tuple[float, float]]:

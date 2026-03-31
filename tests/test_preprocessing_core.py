@@ -10,10 +10,10 @@ from hs2p.preprocessing import (
     ContourResult,
     TileGeometry,
     TilingResult,
+    _load_tiling_result_from_paths as load_tiling_result,
+    _save_tiling_result as save_tiling_result,
     detect_contours,
     generate_tiles,
-    load_tiling_result,
-    save_tiling_result,
 )
 from hs2p.wsi.read_plans import resolve_read_step_px
 
@@ -156,13 +156,17 @@ def test_tiling_artifact_roundtrip_uses_strict_rich_metadata(tmp_path):
     assert loaded.base_spacing_um == pytest.approx(0.25)
     assert loaded.seg_level == 2
     assert loaded.mask_level == 1
+    assert meta["filtering"]["filter_grayspace"] is False
+    assert meta["filtering"]["grayspace_saturation_threshold"] == pytest.approx(0.05)
+    assert meta["filtering"]["grayspace_fraction_threshold"] == pytest.approx(0.6)
+    assert meta["filtering"]["filter_blur"] is False
+    assert meta["filtering"]["blur_threshold"] == pytest.approx(50.0)
+    assert meta["filtering"]["qc_spacing_um"] == pytest.approx(2.0)
 
     meta["unexpected_key"] = True
     paths["meta"].write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n")
     with pytest.raises(ValueError, match="unexpected keys"):
         load_tiling_result(paths["npz"], paths["meta"])
-
-
 def test_top_level_package_reexports_preprocessing_core_surface():
     assert hs2p.ContourResult is ContourResult
     assert hs2p.TileGeometry is TileGeometry

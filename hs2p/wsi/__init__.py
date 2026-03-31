@@ -31,4 +31,11 @@ from .visualization import (
     save_overlay_preview,
     write_coordinate_preview,
 )
+from .tile_stream import (
+    PlannedTileView,
+    iter_tile_arrays_from_result,
+    iter_tile_records_from_reader,
+    iter_tile_records_from_result,
+    open_reader_for_result,
+)
 from .types import SamplingSpec

@@ -12,8 +12,6 @@ from PIL import Image
 
 from hs2p.configs import FilterConfig, SegmentationConfig, TilingConfig
 from hs2p.wsi.backend import coerce_wsd_path, resolve_backend
-from hs2p.wsi.batched_reads import BatchedReadRequest, group_batched_read_requests_by_size
-from hs2p.wsi.geometry import project_discrete_grid_origins
 from hs2p.wsi.types import SamplingSpec
 from hs2p.wsi.utils import TissueFilter, ResolvedGeometry
 
@@ -235,7 +233,6 @@ class WSI(object):
         ), f"Unable to find a spacing less than or equal to the target spacing ({target_spacing}) or within {int(tolerance * 100)}% of the target spacing."
         return level, is_within_tolerance
 
-    # def get_best_level_for_downsample_custom(self, downsample: float | int):
     def get_best_level_for_downsample_custom(self, downsample: int):
         """
         Determines the best level for a given downsample factor based on the available
@@ -425,6 +422,9 @@ class WSI(object):
         """
         scale = tiling_params.target_spacing_um / self.get_level_spacing(0)
         tile_size_lv0 = int(round(tiling_params.target_tile_size_px * scale, 0))
+        self._active_target_tile_size_px = int(tiling_params.target_tile_size_px)
+        self._active_target_spacing_um = float(tiling_params.target_spacing_um)
+        self._active_tolerance = float(tiling_params.tolerance)
 
         contours, holes = self.detect_contours(
             target_spacing=tiling_params.target_spacing_um,
@@ -448,6 +448,20 @@ class WSI(object):
             disable_tqdm=disable_tqdm,
             num_workers=num_workers,
         )
+        coord_candidates = np.column_stack([running_x_coords, running_y_coords])
+        keep_flags = self.filter_black_and_white_tiles(
+            np.ones(len(coord_candidates), dtype=np.uint8),
+            coord_candidates,
+            0,
+            0,
+            filter_params,
+            num_workers=num_workers,
+        )
+        keep_mask = np.asarray(keep_flags, dtype=bool)
+        running_x_coords = running_x_coords[keep_mask]
+        running_y_coords = running_y_coords[keep_mask]
+        tissue_percentages = tissue_percentages[keep_mask]
+        contour_indices = contour_indices[keep_mask]
         tile_coordinates = list(zip(running_x_coords, running_y_coords))
         return (
             tile_coordinates,
@@ -467,182 +481,51 @@ class WSI(object):
         filter_params,
         num_workers: int = 1,
     ):
-        if filter_params.filter_white or filter_params.filter_black:
-            img_w, img_h = self.level_dimensions[tile_level]
-            downsample_x, downsample_y = self.level_downsamples[tile_level]
-            keep_array = np.asarray(keep_flags, dtype=np.uint8).copy()
-            active_indices = np.flatnonzero(keep_array)
-            if active_indices.size == 0:
-                return keep_array.tolist()
+        target_tile_size_px = int(
+            getattr(self, "_active_target_tile_size_px", int(tile_size))
+        )
+        target_spacing_um = float(
+            getattr(self, "_active_target_spacing_um", self.get_level_spacing(tile_level))
+        )
+        tolerance = float(getattr(self, "_active_tolerance", 0.05))
+        batch_read_windows = None
+        if self.backend == "cucim":
+            try:
+                from hs2p.wsi.cucim_reader import CuImageReader
 
-            level_coords = project_discrete_grid_origins(
-                coord_candidates,
-                scale_x=1.0 / downsample_x,
-                scale_y=1.0 / downsample_y,
-            )
-
-            supertile_span = int(tile_size) * 8
-            batched_indices: dict[tuple[int, int], list[int]] = {}
-            for idx in active_indices.tolist():
-                x_level, y_level = level_coords[idx]
-                batch_key = (
-                    int(x_level // supertile_span),
-                    int(y_level // supertile_span),
-                )
-                batched_indices.setdefault(batch_key, []).append(idx)
-
-            error_count = 0
-            error_samples = []
-            batch_requests: list[BatchedReadRequest] = []
-            for (batch_x, batch_y), batch_member_indices in batched_indices.items():
-                x0_level = batch_x * supertile_span
-                y0_level = batch_y * supertile_span
-                read_width = int(min(supertile_span + tile_size, max(0, img_w - x0_level)))
-                read_height = int(
-                    min(supertile_span + tile_size, max(0, img_h - y0_level))
-                )
-                x0 = int(round(x0_level * downsample_x))
-                y0 = int(round(y0_level * downsample_y))
-                batch_requests.append(
-                    BatchedReadRequest(
-                        location=(x0, y0),
-                        size=(read_width, read_height),
-                        payload=(
-                            tuple(batch_member_indices),
-                            int(x0_level),
-                            int(y0_level),
-                        ),
+                reader = CuImageReader(self.path, gpu_decode=False)
+                reader._ensure_open()
+                batch_read_windows = (
+                    lambda locations, size, level, workers: reader.read_region(
+                        locations,
+                        size,
+                        level=int(level),
+                        num_workers=max(1, int(workers)),
                     )
                 )
-
-            def _consume_window(
-                window: np.ndarray,
-                *,
-                batch_member_indices: list[int],
-                x0_level: int,
-                y0_level: int,
-            ) -> None:
-                window = np.asarray(window)
-
-                tiles = np.zeros(
-                    (len(batch_member_indices), tile_size, tile_size, 3),
-                    dtype=window.dtype,
-                )
-                valid_mask = np.zeros(
-                    (len(batch_member_indices), tile_size, tile_size),
-                    dtype=bool,
-                )
-                for local_idx, coord_idx in enumerate(batch_member_indices):
-                    x_level, y_level = level_coords[coord_idx]
-                    offset_x = int(x_level - x0_level)
-                    offset_y = int(y_level - y0_level)
-                    tile_view = window[
-                        offset_y : offset_y + tile_size,
-                        offset_x : offset_x + tile_size,
-                        :3,
-                    ]
-                    height = min(tile_size, tile_view.shape[0])
-                    width = min(tile_size, tile_view.shape[1])
-                    if height > 0 and width > 0:
-                        tiles[local_idx, :height, :width, :] = tile_view[:height, :width]
-
-                    valid_w = int(min(tile_size, max(0, img_w - x_level)))
-                    valid_h = int(min(tile_size, max(0, img_h - y_level)))
-                    if valid_h > 0 and valid_w > 0:
-                        valid_mask[local_idx, :valid_h, :valid_w] = True
-
-                valid_area = np.maximum(valid_mask.sum(axis=(1, 2)), 1)
-                keep_batch = np.ones(len(batch_member_indices), dtype=np.uint8)
-                if filter_params.filter_white:
-                    white_pixels = np.all(
-                        tiles > filter_params.white_threshold, axis=-1
-                    ) & valid_mask
-                    white_fraction = white_pixels.sum(axis=(1, 2)) / valid_area
-                    keep_batch = (
-                        white_fraction <= filter_params.fraction_threshold
-                    ).astype(np.uint8)
-                if filter_params.filter_black:
-                    black_pixels = np.all(
-                        tiles < filter_params.black_threshold, axis=-1
-                    ) & valid_mask
-                    black_fraction = black_pixels.sum(axis=(1, 2)) / valid_area
-                    keep_batch = keep_batch & (
-                        black_fraction <= filter_params.fraction_threshold
-                    ).astype(np.uint8)
-
-                for coord_idx, keep in zip(batch_member_indices, keep_batch.tolist()):
-                    keep_array[coord_idx] = keep
-
-            used_cucim_batch = False
-            if self.backend == "cucim":
-                try:
-                    from hs2p.wsi.cucim_reader import CuImageReader
-
-                    reader = CuImageReader(self.path, gpu_decode=False)
-                    reader._ensure_open()
-                    used_cucim_batch = True
-                    for size_requests in group_batched_read_requests_by_size(
-                        batch_requests
-                    ).values():
-                        try:
-                            regions = reader.read_region(
-                                [request.location for request in size_requests],
-                                size_requests[0].size,
-                                level=int(tile_level),
-                                num_workers=max(1, int(num_workers)),
-                            )
-                            for request, region in zip(size_requests, regions):
-                                batch_member_indices, x0_level, y0_level = request.payload
-                                _consume_window(
-                                    np.asarray(region),
-                                    batch_member_indices=list(batch_member_indices),
-                                    x0_level=int(x0_level),
-                                    y0_level=int(y0_level),
-                                )
-                        except Exception as e:
-                            error_count += sum(
-                                len(request.payload[0]) for request in size_requests
-                            )
-                            if len(error_samples) < 3:
-                                error_samples.append(str(e))
-                except ModuleNotFoundError:
-                    warnings.warn(
-                        "CuCIM is unavailable for backend='cucim'; falling back to sequential tile filtering reads.",
-                        UserWarning,
-                    )
-
-            if not used_cucim_batch:
-                for request in batch_requests:
-                    batch_member_indices, x0_level, y0_level = request.payload
-                    try:
-                        window = self.get_tile(
-                            request.location[0],
-                            request.location[1],
-                            request.size[0],
-                            request.size[1],
-                            tile_level,
-                        )
-                    except Exception as e:
-                        error_count += len(batch_member_indices)
-                        if len(error_samples) < 3:
-                            error_samples.append(str(e))
-                        continue
-                    _consume_window(
-                        window,
-                        batch_member_indices=list(batch_member_indices),
-                        x0_level=int(x0_level),
-                        y0_level=int(y0_level),
-                    )
-            if error_count > 0:
-                slide_id = getattr(self, "path", "<unknown-slide>")
-                sample_msg = "; ".join(error_samples)
+            except ModuleNotFoundError:
                 warnings.warn(
-                    f"Encountered {error_count} tile filtering error(s) on slide {slide_id}. "
-                    f"Keeping affected tile(s). Sample error(s): {sample_msg}",
+                    "CuCIM is unavailable for backend='cucim'; falling back to sequential tile filtering reads.",
                     UserWarning,
                 )
-            return keep_array.tolist()
-        return keep_flags
+
+        from hs2p.tile_qc import filter_coordinate_tiles  # local import to avoid circular dependency
+        keep_array = filter_coordinate_tiles(
+            coord_candidates=np.asarray(coord_candidates, dtype=np.int64),
+            keep_flags=keep_flags,
+            level_dimensions=self.level_dimensions,
+            level_downsamples=self.level_downsamples,
+            target_tile_size_px=target_tile_size_px,
+            target_spacing_um=target_spacing_um,
+            base_spacing_um=float(self.get_level_spacing(0)),
+            tolerance=tolerance,
+            filter_params=filter_params,
+            read_window=self.get_tile,
+            batch_read_windows=batch_read_windows,
+            num_workers=num_workers,
+            source_label=str(getattr(self, "path", "<unknown-slide>")),
+        )
+        return keep_array.tolist()
 
     @staticmethod
     def filter_contours(contours, hierarchy, filter_params: FilterConfig):
@@ -1013,19 +896,6 @@ class WSI(object):
 
         # filter coordinates based on tissue coverage (reads tissue mask for active contour only)
         keep_flags, tissue_pcts = tissue_checker.check_coordinates(coord_candidates)
-
-        # further filter coordinates based on black/white tile filtering
-        # (reads RGB values from the wsi at the tile level)
-        # (note that this step is after the tissue mask filtering, so it only applies to tiles that have enough tissue coverage)
-        # (speed could improved by working at a lower resolution)
-        keep_flags = self.filter_black_and_white_tiles(
-            keep_flags,
-            coord_candidates,
-            tile_size_resized,
-            tile_level,
-            filter_params,
-            num_workers=num_workers,
-        )
 
         filtered_coordinates = coord_candidates[np.array(keep_flags) == 1]
         filtered_tissue_percentages = np.array(tissue_pcts)[np.array(keep_flags) == 1]

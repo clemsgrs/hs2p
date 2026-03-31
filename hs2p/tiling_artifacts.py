@@ -9,7 +9,11 @@ from typing import Any, Sequence
 import numpy as np
 
 from hs2p.configs import FilterConfig, SegmentationConfig, TilingConfig
-from hs2p.preprocessing import TilingResult, load_tiling_result as load_preprocessing_tiling_result
+from hs2p.preprocessing import (
+    TilingResult,
+    _save_tiling_result,
+    _load_tiling_result_from_paths,
+)
 
 
 @dataclass(frozen=True)
@@ -81,12 +85,38 @@ def validate_result_consistency(result: TilingResult) -> None:
         raise ValueError("tile_index must be a contiguous range from 0 to num_tiles-1")
 
 
+def save_tiling_result(
+    result: TilingResult,
+    output_dir: Path,
+    *,
+    tiles_dir: Path | None = None,
+) -> "TilingArtifacts":
+    validate_result_consistency(result)
+    tiles_dir = (
+        Path(tiles_dir)
+        if tiles_dir is not None
+        else Path(output_dir) / "tiles"
+    )
+    tiles_dir.mkdir(parents=True, exist_ok=True)
+    artifact_paths = _save_tiling_result(
+        result,
+        output_dir=tiles_dir,
+        sample_id=result.sample_id,
+    )
+    return TilingArtifacts(
+        sample_id=result.sample_id,
+        coordinates_npz_path=artifact_paths["npz"],
+        coordinates_meta_path=artifact_paths["meta"],
+        num_tiles=len(result.coordinates),
+    )
+
+
 def load_tiling_result(
     coordinates_npz_path: Path,
     coordinates_meta_path: Path,
 ) -> TilingResult:
     try:
-        preprocessing_result = load_preprocessing_tiling_result(
+        result = _load_tiling_result_from_paths(
             coordinates_npz_path,
             coordinates_meta_path,
         )
@@ -95,8 +125,8 @@ def load_tiling_result(
             "Unable to load tiling artifacts "
             f"{coordinates_npz_path} and {coordinates_meta_path}: {exc}"
         ) from exc
-    validate_result_consistency(preprocessing_result)
-    return preprocessing_result
+    validate_result_consistency(result)
+    return result
 
 
 def optional_path(value: Any) -> Path | None:
@@ -186,12 +216,56 @@ def validate_tiling_artifacts(
         raise ValueError("precomputed tiles filter_white mismatch")
     if result.filter_black != compatibility.filtering.filter_black:
         raise ValueError("precomputed tiles filter_black mismatch")
-    if result.white_threshold != compatibility.filtering.white_threshold:
+    if (
+        compatibility.filtering.filter_white
+        and result.white_threshold != compatibility.filtering.white_threshold
+    ):
         raise ValueError("precomputed tiles white_threshold mismatch")
-    if result.black_threshold != compatibility.filtering.black_threshold:
+    if (
+        compatibility.filtering.filter_black
+        and result.black_threshold != compatibility.filtering.black_threshold
+    ):
         raise ValueError("precomputed tiles black_threshold mismatch")
-    if result.fraction_threshold != compatibility.filtering.fraction_threshold:
+    if (
+        (compatibility.filtering.filter_white or compatibility.filtering.filter_black)
+        and result.fraction_threshold != compatibility.filtering.fraction_threshold
+    ):
         raise ValueError("precomputed tiles fraction_threshold mismatch")
+    if result.filter_grayspace != compatibility.filtering.filter_grayspace:
+        raise ValueError("precomputed tiles filter_grayspace mismatch")
+    if (
+        compatibility.filtering.filter_grayspace
+        and (
+        result.grayspace_saturation_threshold
+        != compatibility.filtering.grayspace_saturation_threshold
+        )
+    ):
+        raise ValueError("precomputed tiles grayspace_saturation_threshold mismatch")
+    if (
+        compatibility.filtering.filter_grayspace
+        and (
+        result.grayspace_fraction_threshold
+        != compatibility.filtering.grayspace_fraction_threshold
+        )
+    ):
+        raise ValueError("precomputed tiles grayspace_fraction_threshold mismatch")
+    if result.filter_blur != compatibility.filtering.filter_blur:
+        raise ValueError("precomputed tiles filter_blur mismatch")
+    if (
+        compatibility.filtering.filter_blur
+        and result.blur_threshold != compatibility.filtering.blur_threshold
+    ):
+        raise ValueError("precomputed tiles blur_threshold mismatch")
+    if (
+        (
+            compatibility.filtering.filter_white
+            or compatibility.filtering.filter_black
+            or compatibility.filtering.filter_grayspace
+            or compatibility.filtering.filter_blur
+        )
+        and result.qc_spacing_um != compatibility.filtering.qc_spacing_um
+    ):
+        raise ValueError("precomputed tiles qc_spacing_um mismatch")
     if result.selection_strategy != compatibility.selection_strategy:
         raise ValueError("precomputed tiles selection_strategy mismatch")
     if result.output_mode != compatibility.output_mode:
@@ -266,6 +340,7 @@ __all__ = [
     "TilingArtifacts",
     "load_tiling_result",
     "load_whole_slides_from_rows",
+    "save_tiling_result",
     "maybe_load_existing_artifacts",
     "optional_path",
     "validate_required_columns",

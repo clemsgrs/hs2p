@@ -53,6 +53,16 @@ class FilterConfig:
     white_threshold: int = int(_DEFAULT_FILTERING.white_threshold)
     black_threshold: int = int(_DEFAULT_FILTERING.black_threshold)
     fraction_threshold: float = float(_DEFAULT_FILTERING.fraction_threshold)
+    filter_grayspace: bool = bool(_DEFAULT_FILTERING.filter_grayspace)
+    grayspace_saturation_threshold: float = float(
+        _DEFAULT_FILTERING.grayspace_saturation_threshold
+    )
+    grayspace_fraction_threshold: float = float(
+        _DEFAULT_FILTERING.grayspace_fraction_threshold
+    )
+    filter_blur: bool = bool(_DEFAULT_FILTERING.filter_blur)
+    blur_threshold: float = float(_DEFAULT_FILTERING.blur_threshold)
+    qc_spacing_um: float = float(_DEFAULT_FILTERING.qc_spacing_um)
 
 
 @dataclass(frozen=True)

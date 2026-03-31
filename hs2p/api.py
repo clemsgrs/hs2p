@@ -1,13 +1,10 @@
 import csv
-import importlib
 import io
-import itertools
 import multiprocessing as mp
 import tarfile
 import tempfile
 import time
 import traceback
-import warnings
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -15,6 +12,7 @@ from typing import Any, Sequence
 
 import numpy as np
 import pandas as pd
+from PIL import Image
 
 from hs2p.configs import (
     FilterConfig,
@@ -22,27 +20,22 @@ from hs2p.configs import (
     SegmentationConfig,
     TilingConfig,
 )
-from hs2p.configs.resolvers import build_default_sampling_spec
 from hs2p.progress import emit_progress, emit_progress_log
+from hs2p.tile_qc import filter_coordinate_tiles, needs_pixel_qc
 from hs2p.wsi import (
     CoordinateOutputMode,
     CoordinateSelectionStrategy,
     extract_coordinates,
+    iter_tile_records_from_result,
+    open_reader_for_result,
     overlay_mask_on_slide as _overlay_mask_on_slide,
     write_coordinate_preview,
 )
-from hs2p.wsi.backend import coerce_wsd_path, resolve_backend
-from hs2p.wsi.read_plans import (
-    GroupedReadPlan,
-    iter_grouped_read_plans,
-    resolve_read_step_px,
-    resolve_step_px_lv0,
-)
-from hs2p.wsi.region_tiles import iter_plan_region_tile_views
+from hs2p.wsi.backend import resolve_backend
+from hs2p.wsi.reader import BatchRegionReader
 from hs2p.preprocessing import (
     TilingResult,
     preprocess_slide,
-    save_tiling_result as save_preprocessing_tiling_result,
 )
 from hs2p.tiling_artifacts import (
     CompatibilitySpec,
@@ -51,6 +44,7 @@ from hs2p.tiling_artifacts import (
     load_tiling_result,
     load_whole_slides_from_rows,
     maybe_load_existing_artifacts,
+    save_tiling_result,
     validate_required_columns,
     validate_result_consistency,
     validate_tiling_artifacts,
@@ -73,8 +67,6 @@ def _write_mask_preview(
         mask = mask.astype(np.uint8, copy=False)
     if mask.max(initial=0) <= 1:
         mask = mask * 255
-    from PIL import Image
-
     Image.fromarray(mask).save(mask_preview_path)
 
 
@@ -87,9 +79,7 @@ def _compute_tiling_result(
     mask_preview_path: Path | None,
     num_workers: int,
 ) -> TilingResult:
-    sampling_spec = None
-    if whole_slide.mask_path is not None:
-        sampling_spec = build_default_sampling_spec(tiling)
+    has_mask = whole_slide.mask_path is not None
     preprocessing_result = preprocess_slide(
         image_path=whole_slide.image_path,
         sample_id=whole_slide.sample_id,
@@ -112,19 +102,23 @@ def _compute_tiling_result(
         ref_tile_size_px=filtering.ref_tile_size,
         a_t=filtering.a_t,
         a_h=filtering.a_h,
-filter_white=filtering.filter_white,
+        filter_white=filtering.filter_white,
         filter_black=filtering.filter_black,
         white_threshold=filtering.white_threshold,
         black_threshold=filtering.black_threshold,
         fraction_threshold=filtering.fraction_threshold,
+        filter_grayspace=filtering.filter_grayspace,
+        grayspace_saturation_threshold=filtering.grayspace_saturation_threshold,
+        grayspace_fraction_threshold=filtering.grayspace_fraction_threshold,
+        filter_blur=filtering.filter_blur,
+        blur_threshold=filtering.blur_threshold,
+        qc_spacing_um=filtering.qc_spacing_um,
         num_workers=num_workers,
         selection_strategy=(
-            CoordinateSelectionStrategy.MERGED_DEFAULT_TILING
-            if sampling_spec is not None
-            else None
+            CoordinateSelectionStrategy.MERGED_DEFAULT_TILING if has_mask else None
         ),
         output_mode=(
-            CoordinateOutputMode.SINGLE_OUTPUT if sampling_spec is not None else None
+            CoordinateOutputMode.SINGLE_OUTPUT if has_mask else None
         ),
     )
     _write_mask_preview(
@@ -138,25 +132,10 @@ def tile_slide(
     whole_slide: SlideSpec,
     *,
     tiling: TilingConfig,
-    segmentation: SegmentationConfig,
-    filtering: FilterConfig,
-    preview: PreviewConfig | None = None,
+    segmentation: SegmentationConfig = SegmentationConfig(),
+    filtering: FilterConfig = FilterConfig(),
     num_workers: int = 1,
 ) -> TilingResult:
-    if preview is not None and (
-        preview.save_mask_preview or preview.save_tiling_preview
-    ):
-        warnings.warn(
-            "tile_slide() is compute-only and does not write preview artifacts; "
-            "use write_tiling_preview() for tiling overlays and "
-            "overlay_mask_on_slide() for mask overlays.",
-            stacklevel=2,
-        )
-    sampling_spec = (
-        build_default_sampling_spec(tiling)
-        if whole_slide.mask_path is not None
-        else None
-    )
     backend_selection = resolve_backend(
         tiling.requested_backend,
         wsi_path=whole_slide.image_path,
@@ -181,32 +160,6 @@ def tile_slide(
     )
 
 
-def save_tiling_result(
-    result: TilingResult,
-    output_dir: Path,
-    *,
-    tiles_dir: Path | None = None,
-) -> TilingArtifacts:
-    validate_result_consistency(result)
-    tiles_dir = (
-        Path(tiles_dir)
-        if tiles_dir is not None
-        else Path(output_dir) / "tiles"
-    )
-    tiles_dir.mkdir(parents=True, exist_ok=True)
-    artifact_paths = save_preprocessing_tiling_result(
-        result,
-        output_dir=tiles_dir,
-        sample_id=result.sample_id,
-    )
-    return TilingArtifacts(
-        sample_id=result.sample_id,
-        coordinates_npz_path=artifact_paths["npz"],
-        coordinates_meta_path=artifact_paths["meta"],
-        num_tiles=len(result.coordinates),
-    )
-
-
 def extract_tiles_to_tar(
     result: TilingResult,
     output_dir: Path,
@@ -222,12 +175,11 @@ def extract_tiles_to_tar(
 ) -> tuple[Path, TilingResult]:
     """Extract tile images from a WSI and save them as a JPEG tar archive.
 
-    When *filter_params* requests white/black filtering the tiles are checked
-    during extraction so that pixel data is read only once.  The returned
-    ``TilingResult`` has its coordinate arrays trimmed to the surviving tiles.
+    When *filter_params* requests pixel QC, candidate coordinates are filtered
+    first at the configured QC spacing so rejected tiles are never read at the
+    final extraction spacing. The returned ``TilingResult`` has its coordinate
+    arrays trimmed to the surviving tiles.
     """
-    from PIL import Image
-
     jpeg_backend = str(jpeg_backend)
     _jpeg_encoder = None
     if jpeg_backend == "turbojpeg":
@@ -240,11 +192,13 @@ def extract_tiles_to_tar(
     tar_path = tiles_dir / f"{result.sample_id}.tiles.tar"
     manifest_path = tiles_dir / f"{result.sample_id}.tiles.manifest.csv"
 
-    do_filter_white = filter_params is not None and filter_params.filter_white
-    do_filter_black = filter_params is not None and filter_params.filter_black
-    white_thresh = getattr(filter_params, "white_threshold", 220) if filter_params else 220
-    black_thresh = getattr(filter_params, "black_threshold", 25) if filter_params else 25
-    frac_thresh = getattr(filter_params, "fraction_threshold", 0.9) if filter_params else 0.9
+    if filter_params is not None and needs_pixel_qc(filter_params):
+        result = _apply_qc_filtering_to_result(
+            result=result,
+            filter_params=filter_params,
+            num_workers=num_workers,
+            gpu_decode=gpu_decode,
+        )
 
     kept_indices: list[int] = []
 
@@ -269,12 +223,12 @@ def extract_tiles_to_tar(
                 fieldnames=["tile_index", "x", "y"],
             )
             manifest_writer.writeheader()
-            tile_records = _iter_tile_records_for_tar_extraction(
-                    result=result,
-                    num_workers=num_workers,
-                    gpu_decode=gpu_decode,
-                    supertile_sizes=supertile_sizes,
-                )
+            tile_records = iter_tile_records_from_result(
+                result=result,
+                num_workers=num_workers,
+                gpu_decode=gpu_decode,
+                supertile_sizes=supertile_sizes,
+            )
             while True:
                 read_start = time.perf_counter()
                 try:
@@ -287,17 +241,6 @@ def extract_tiles_to_tar(
                 tile_arr = record.tile_arr
                 if tile_arr.shape[2] > 3:
                     tile_arr = tile_arr[:, :, :3]
-
-                if do_filter_white or do_filter_black:
-                    total_pixels = tile_arr.shape[0] * tile_arr.shape[1]
-                    if do_filter_white:
-                        white_frac = np.all(tile_arr > white_thresh, axis=-1).sum() / total_pixels
-                        if white_frac > frac_thresh:
-                            continue
-                    if do_filter_black:
-                        black_frac = np.all(tile_arr < black_thresh, axis=-1).sum() / total_pixels
-                        if black_frac > frac_thresh:
-                            continue
 
                 encode_start = time.perf_counter()
                 if result.effective_tile_size_px != result.requested_tile_size_px:
@@ -379,196 +322,93 @@ def extract_tiles_to_tar(
     )
     return tar_path, filtered_result
 
-
-def _iter_tile_arrays_for_tar_extraction(
-    *,
-    result: TilingResult,
-    num_workers: int,
-    gpu_decode: bool = False,
-    supertile_sizes: Sequence[int] | None = None,
-):
-    tile_records = _iter_tile_records_for_tar_extraction(
-        result=result,
-        num_workers=num_workers,
-        gpu_decode=gpu_decode,
-        supertile_sizes=supertile_sizes,
-    )
-    for record in tile_records:
-        yield record.tile_arr
-
-
-def _iter_tile_records_for_tar_extraction(
-    *,
-    result: TilingResult,
-    num_workers: int,
-    gpu_decode: bool = False,
-    supertile_sizes: Sequence[int] | None = None,
-):
-    tile_records = _iter_cucim_tile_records_for_tar_extraction(
-        result=result,
-        num_workers=num_workers,
-        gpu_decode=gpu_decode,
-        supertile_sizes=supertile_sizes,
-    )
-    if tile_records is not None:
-        yield from tile_records
-        return
-    yield from _iter_wsd_tile_records_for_tar_extraction(
-        result=result,
-        supertile_sizes=supertile_sizes,
-    )
-
-
-def _iter_cucim_tile_records_for_tar_extraction(
-    *,
-    result: TilingResult,
-    num_workers: int,
-    gpu_decode: bool = False,
-    supertile_sizes: Sequence[int] | None = None,
-):
-    if result.backend != "cucim":
-        return None
-    from hs2p.wsi.batched_reads import (
-        BatchedReadRequest,
-        iter_cucim_batched_read_regions,
-    )
-    try:
-        requests = []
-        read_step_px = resolve_read_step_px(result)
-        step_px_lv0 = resolve_step_px_lv0(result)
-        read_plans = list(
-            iter_grouped_read_plans(
-                result=result,
-                read_step_px=read_step_px,
-                step_px_lv0=step_px_lv0,
-                supertile_sizes=supertile_sizes,
-            )
-        )
-        for read_plan in read_plans:
-            requests.append(
-                BatchedReadRequest(
-                    location=(int(read_plan.x), int(read_plan.y)),
-                    size=(int(read_plan.read_size_px), int(read_plan.read_size_px)),
-                    payload=read_plan,
-                )
-            )
-        batched_regions = iter_cucim_batched_read_regions(
-            image_path=result.image_path,
-            requests=requests,
-            level=int(result.read_level),
-            num_workers=int(num_workers),
-            gpu_decode=gpu_decode,
-        )
-    except ModuleNotFoundError:
-        warnings.warn(
-            "CuCIM is unavailable for backend='cucim'; falling back to sequential wholeslidedata tile extraction.",
-            UserWarning,
-            stacklevel=2,
-        )
-        return None
-
-    def _iter_tiles():
-        for request, region in batched_regions:
-            read_plan = request.payload
-            yield from _iter_planned_tile_views_from_read_plan_region(
-                np.asarray(region),
-                read_plan=read_plan,
-                tile_size_px=int(result.effective_tile_size_px),
-                read_step_px=read_step_px,
-            )
-
-    return _iter_tiles()
-def _iter_cucim_tile_arrays_for_tar_extraction(
-    *,
-    result: TilingResult,
-    num_workers: int,
-    gpu_decode: bool = False,
-):
-    tile_records = _iter_cucim_tile_records_for_tar_extraction(
-        result=result,
-        num_workers=num_workers,
-        gpu_decode=gpu_decode,
-    )
-    if tile_records is None:
-        return None
-
-    def _iter_tiles():
-        for record in tile_records:
-            yield record.tile_arr
-
-    return _iter_tiles()
-
-
-def _iter_wsd_tile_records_for_tar_extraction(
-    *,
-    result: TilingResult,
-    supertile_sizes: Sequence[int] | None = None,
-):
-    import wholeslidedata as wsd
-
-    wsi = wsd.WholeSlideImage(
-        coerce_wsd_path(result.image_path, backend=result.backend),
-        backend=result.backend,
-    )
-    read_step_px = resolve_read_step_px(result)
-    step_px_lv0 = resolve_step_px_lv0(result)
-    for read_plan in iter_grouped_read_plans(
-        result=result,
-        read_step_px=read_step_px,
-        step_px_lv0=step_px_lv0,
-        supertile_sizes=supertile_sizes,
-    ):
-        region = wsi.get_patch(
-            int(read_plan.x),
-            int(read_plan.y),
-            int(read_plan.read_size_px),
-            int(read_plan.read_size_px),
-            spacing=float(result.effective_spacing_um),
-            center=False,
-        )
-        region = np.asarray(region)
-        yield from _iter_planned_tile_views_from_read_plan_region(
-            region,
-            read_plan=read_plan,
-            tile_size_px=int(result.effective_tile_size_px),
-            read_step_px=read_step_px,
-        )
-
-
-def _iter_wsd_tile_arrays_for_tar_extraction(
-    *,
-    result: TilingResult,
-):
-    tile_records = _iter_wsd_tile_records_for_tar_extraction(result=result)
-
-    def _iter_tiles():
-        for record in tile_records:
-            yield record.tile_arr
-
-    return _iter_tiles()
-
-def _iter_planned_tile_views_from_read_plan_region(
-    region: np.ndarray,
-    *,
-    read_plan: GroupedReadPlan,
-    tile_size_px: int,
-    read_step_px: int,
-):
-    for tile_view in iter_plan_region_tile_views(
-        region,
-        read_plan=read_plan,
-        tile_size_px=int(tile_size_px),
-        read_step_px=int(read_step_px),
-    ):
-        yield tile_view
-
-
 def _format_tar_member_name(tile_index: int) -> str:
     return f"{int(tile_index):06d}.jpg"
 
 
 def _needs_pixel_filtering(filtering: FilterConfig) -> bool:
-    return bool(filtering.filter_white or filtering.filter_black)
+    return needs_pixel_qc(filtering)
+
+
+def _apply_qc_filtering_to_result(
+    *,
+    result: TilingResult,
+    filter_params: FilterConfig,
+    num_workers: int,
+    gpu_decode: bool = False,
+) -> TilingResult:
+    with open_reader_for_result(
+        result,
+        gpu_decode=gpu_decode,
+    ) as slide:
+        batch_read_windows = None
+        if isinstance(slide, BatchRegionReader):
+            batch_read_windows = (
+                lambda locations, size, level, workers: slide.read_regions(
+                    locations,
+                    level,
+                    size,
+                    num_workers=workers,
+                    pad_missing=False,
+                )
+            )
+        keep_flags = filter_coordinate_tiles(
+            coord_candidates=result.coordinates,
+            keep_flags=np.ones(len(result.coordinates), dtype=np.uint8),
+            level_dimensions=slide.level_dimensions,
+            level_downsamples=slide.level_downsamples,
+            target_tile_size_px=result.requested_tile_size_px,
+            target_spacing_um=result.requested_spacing_um,
+            base_spacing_um=result.base_spacing_um,
+            tolerance=result.tolerance,
+            filter_params=filter_params,
+            read_window=lambda x, y, width, height, level: slide.read_region(
+                (x, y),
+                level,
+                (width, height),
+                pad_missing=False,
+            ),
+            batch_read_windows=batch_read_windows,
+            num_workers=num_workers,
+            source_label=str(result.image_path),
+        )
+    keep = np.asarray(keep_flags, dtype=bool)
+    if int(keep.sum()) == len(result.coordinates):
+        return replace(
+            result,
+            filter_white=filter_params.filter_white,
+            filter_black=filter_params.filter_black,
+            white_threshold=filter_params.white_threshold,
+            black_threshold=filter_params.black_threshold,
+            fraction_threshold=filter_params.fraction_threshold,
+            filter_grayspace=filter_params.filter_grayspace,
+            grayspace_saturation_threshold=filter_params.grayspace_saturation_threshold,
+            grayspace_fraction_threshold=filter_params.grayspace_fraction_threshold,
+            filter_blur=filter_params.filter_blur,
+            blur_threshold=filter_params.blur_threshold,
+            qc_spacing_um=filter_params.qc_spacing_um,
+        )
+
+    return replace(
+        result,
+        tiles=replace(
+            result.tiles,
+            coordinates=result.coordinates[keep],
+            tissue_fractions=result.tissue_fractions[keep],
+            tile_index=np.arange(int(keep.sum()), dtype=np.int32),
+        ),
+        filter_white=filter_params.filter_white,
+        filter_black=filter_params.filter_black,
+        white_threshold=filter_params.white_threshold,
+        black_threshold=filter_params.black_threshold,
+        fraction_threshold=filter_params.fraction_threshold,
+        filter_grayspace=filter_params.filter_grayspace,
+        grayspace_saturation_threshold=filter_params.grayspace_saturation_threshold,
+        grayspace_fraction_threshold=filter_params.grayspace_fraction_threshold,
+        filter_blur=filter_params.filter_blur,
+        blur_threshold=filter_params.blur_threshold,
+        qc_spacing_um=filter_params.qc_spacing_um,
+    )
 
 
 def _validate_whole_slides(whole_slides: Sequence[SlideSpec]) -> None:
@@ -781,7 +621,13 @@ def _compute_and_save_tiling_artifacts_from_request(
     try:
         defer_pixel_filtering = request.save_tiles and _needs_pixel_filtering(request.filtering)
         effective_filtering = (
-            replace(request.filtering, filter_white=False, filter_black=False)
+            replace(
+                request.filtering,
+                filter_white=False,
+                filter_black=False,
+                filter_grayspace=False,
+                filter_blur=False,
+            )
             if defer_pixel_filtering
             else request.filtering
         )
@@ -867,8 +713,8 @@ def tile_slides(
     whole_slides: Sequence[SlideSpec],
     *,
     tiling: TilingConfig,
-    segmentation: SegmentationConfig,
-    filtering: FilterConfig,
+    segmentation: SegmentationConfig = SegmentationConfig(),
+    filtering: FilterConfig = FilterConfig(),
     preview: PreviewConfig | None = None,
     output_dir: Path,
     num_workers: int = 1,
@@ -931,24 +777,16 @@ def tile_slides(
             effective_tiling = _resolve_effective_tiling(whole_slide)
             key = (whole_slide.mask_path is not None, effective_tiling.backend)
             if key not in compatibility_specs:
-                sampling_spec = (
-                    build_default_sampling_spec(effective_tiling)
-                    if whole_slide.mask_path is not None
-                    else None
-                )
+                has_mask = whole_slide.mask_path is not None
                 compatibility_specs[key] = CompatibilitySpec(
                     tiling=effective_tiling,
                     segmentation=segmentation,
                     filtering=filtering,
                     selection_strategy=(
-                        CoordinateSelectionStrategy.MERGED_DEFAULT_TILING
-                        if sampling_spec is not None
-                        else None
+                        CoordinateSelectionStrategy.MERGED_DEFAULT_TILING if has_mask else None
                     ),
                     output_mode=(
-                        CoordinateOutputMode.SINGLE_OUTPUT
-                        if sampling_spec is not None
-                        else None
+                        CoordinateOutputMode.SINGLE_OUTPUT if has_mask else None
                     ),
                 )
             compatibility = compatibility_specs[key]

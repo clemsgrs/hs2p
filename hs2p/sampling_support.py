@@ -143,6 +143,12 @@ def save_sampling_coordinates(
         white_threshold=filter_config.white_threshold,
         black_threshold=filter_config.black_threshold,
         fraction_threshold=filter_config.fraction_threshold,
+        filter_grayspace=filter_config.filter_grayspace,
+        grayspace_saturation_threshold=filter_config.grayspace_saturation_threshold,
+        grayspace_fraction_threshold=filter_config.grayspace_fraction_threshold,
+        filter_blur=filter_config.filter_blur,
+        blur_threshold=filter_config.blur_threshold,
+        qc_spacing_um=filter_config.qc_spacing_um,
         seg_use_otsu=segmentation_config.use_otsu,
         seg_use_hsv=segmentation_config.use_hsv,
         annotation=annotation,
@@ -245,12 +251,47 @@ def validate_sampling_artifact_row(
         raise ValueError("sampling filter_white mismatch")
     if result.filter_black != filter_config.filter_black:
         raise ValueError("sampling filter_black mismatch")
-    if result.white_threshold != filter_config.white_threshold:
+    if filter_config.filter_white and result.white_threshold != filter_config.white_threshold:
         raise ValueError("sampling white_threshold mismatch")
-    if result.black_threshold != filter_config.black_threshold:
+    if filter_config.filter_black and result.black_threshold != filter_config.black_threshold:
         raise ValueError("sampling black_threshold mismatch")
-    if result.fraction_threshold != filter_config.fraction_threshold:
+    if (
+        (filter_config.filter_white or filter_config.filter_black)
+        and result.fraction_threshold != filter_config.fraction_threshold
+    ):
         raise ValueError("sampling fraction_threshold mismatch")
+    if result.filter_grayspace != filter_config.filter_grayspace:
+        raise ValueError("sampling filter_grayspace mismatch")
+    if (
+        filter_config.filter_grayspace
+        and (
+        result.grayspace_saturation_threshold
+        != filter_config.grayspace_saturation_threshold
+        )
+    ):
+        raise ValueError("sampling grayspace_saturation_threshold mismatch")
+    if (
+        filter_config.filter_grayspace
+        and (
+        result.grayspace_fraction_threshold
+        != filter_config.grayspace_fraction_threshold
+        )
+    ):
+        raise ValueError("sampling grayspace_fraction_threshold mismatch")
+    if result.filter_blur != filter_config.filter_blur:
+        raise ValueError("sampling filter_blur mismatch")
+    if filter_config.filter_blur and result.blur_threshold != filter_config.blur_threshold:
+        raise ValueError("sampling blur_threshold mismatch")
+    if (
+        (
+            filter_config.filter_white
+            or filter_config.filter_black
+            or filter_config.filter_grayspace
+            or filter_config.filter_blur
+        )
+        and result.qc_spacing_um != filter_config.qc_spacing_um
+    ):
+        raise ValueError("sampling qc_spacing_um mismatch")
     if result.annotation != row["annotation"]:
         raise ValueError("sampling annotation mismatch")
     if result.selection_strategy != selection_strategy:

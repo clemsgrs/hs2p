@@ -16,7 +16,7 @@ The Python API is the best entrypoint when you want to integrate `hs2p` into you
 - `SegmentationConfig`
   - Tissue-segmentation settings used before coordinate extraction
 - `FilterConfig`
-  - Contour and optional white/black filtering settings
+  - Contour filtering plus optional coarse tile QC for white-space, black-space, grayspace, and blur
 - `PreviewConfig`
   - Batch preview toggles and preview downsample
 - `TilingResult`

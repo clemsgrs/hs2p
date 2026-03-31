@@ -96,9 +96,7 @@ def _open_asap(
     path: str | Path,
     *,
     spacing_override: float | None = None,
-    gpu_decode: bool = False,
 ) -> SlideReader:
-    del gpu_decode
     return ASAPReader(path, spacing_override=spacing_override)
 
 
@@ -106,9 +104,7 @@ def _open_openslide(
     path: str | Path,
     *,
     spacing_override: float | None = None,
-    gpu_decode: bool = False,
 ) -> SlideReader:
-    del gpu_decode
     return OpenSlideReader(path, spacing_override=spacing_override)
 
 
@@ -125,9 +121,7 @@ def _open_vips(
     path: str | Path,
     *,
     spacing_override: float | None = None,
-    gpu_decode: bool = False,
 ) -> SlideReader:
-    del gpu_decode
     return VIPSReader(path, spacing_override=spacing_override)
 
 
@@ -154,11 +148,9 @@ def open_slide(
     if spec is None:
         available = ", ".join(["auto", *_BACKENDS.keys()])
         raise ValueError(f"Unknown backend: '{backend}'. Available: {available}")
-    return spec.opener(
-        path,
-        spacing_override=spacing_override,
-        gpu_decode=gpu_decode,
-    )
+    if backend == "cucim":
+        return spec.opener(path, spacing_override=spacing_override, gpu_decode=gpu_decode)
+    return spec.opener(path, spacing_override=spacing_override)
 
 
 def _normalize_path(path: Path | None) -> str | None:

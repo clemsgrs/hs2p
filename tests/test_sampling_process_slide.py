@@ -989,6 +989,117 @@ def test_validate_sampling_artifact_row_accepts_matching_metadata(tmp_path):
     )
 
 
+def test_validate_sampling_artifact_row_ignores_disabled_filter_threshold_mismatches(
+    tmp_path,
+):
+    cfg = SimpleNamespace(
+        output_dir=str(tmp_path),
+        tiling=SimpleNamespace(
+            sampling_params=SimpleNamespace(independent_sampling=False),
+        ),
+    )
+    tiling_config = sampling_mod.TilingConfig(
+        target_spacing_um=0.5,
+        target_tile_size_px=256,
+        tolerance=0.05,
+        overlap=0.0,
+        tissue_threshold=0.1,
+        use_padding=True,
+        backend="asap",
+    )
+    segmentation_config = sampling_mod.SegmentationConfig(
+        downsample=64,
+        sthresh=8,
+        sthresh_up=255,
+        mthresh=7,
+        close=4,
+        use_otsu=False,
+        use_hsv=True,
+    )
+    stored_filter_config = sampling_mod.FilterConfig(
+        ref_tile_size=16,
+        a_t=4,
+        a_h=2,
+        filter_white=False,
+        filter_black=False,
+        white_threshold=220,
+        black_threshold=25,
+        fraction_threshold=0.9,
+    )
+    resolved_sampling_spec = _resolved_sampling_spec(
+        pixel_mapping={"background": 0, "tumor": 1},
+        color_mapping={"background": None, "tumor": None},
+        tissue_percentage={"background": None, "tumor": 0.7},
+    )
+    extraction = sampling_mod.CoordinateExtractionResult(
+        contour_indices=[],
+        tissue_percentages=[],
+        x=np.array([0], dtype=np.int64),
+        y=np.array([0], dtype=np.int64),
+        read_level=0,
+        read_spacing_um=0.5,
+        read_tile_size_px=256,
+        read_step_px=256,
+        resize_factor=1.0,
+        tile_size_lv0=256,
+        step_px_lv0=256,
+    )
+    artifacts = sampling_support_mod.save_sampling_coordinates(
+        sample_id="sample-1",
+        image_path=Path("slide.svs"),
+        mask_path=Path("mask.tif"),
+        backend="asap",
+        cfg=cfg,
+        tiling_config=tiling_config,
+        segmentation_config=segmentation_config,
+        filter_config=stored_filter_config,
+        annotation="tumor",
+        coordinates=[(0, 0)],
+        extraction=extraction,
+        resolved_sampling_spec=resolved_sampling_spec,
+        save_tiling_result=sampling_mod.save_tiling_result,
+    )
+    compatibility_filter_config = sampling_mod.FilterConfig(
+        ref_tile_size=16,
+        a_t=4,
+        a_h=2,
+        filter_white=False,
+        filter_black=False,
+        white_threshold=111,
+        black_threshold=9,
+        fraction_threshold=0.25,
+        filter_grayspace=False,
+        grayspace_saturation_threshold=0.99,
+        grayspace_fraction_threshold=0.12,
+        filter_blur=False,
+        blur_threshold=5.0,
+        qc_spacing_um=9.0,
+    )
+
+    sampling_support_mod.validate_sampling_artifact_row(
+        row={
+            "sample_id": "sample-1",
+            "annotation": "tumor",
+            "image_path": "slide.svs",
+            "annotation_mask_path": "mask.tif",
+            "sampling_status": "success",
+            "num_tiles": 1,
+            "coordinates_npz_path": str(artifacts.coordinates_npz_path),
+            "coordinates_meta_path": str(artifacts.coordinates_meta_path),
+        },
+        whole_slide=SimpleNamespace(
+            sample_id="sample-1",
+            image_path=Path("slide.svs"),
+            mask_path=Path("mask.tif"),
+        ),
+        tiling_config=tiling_config,
+        segmentation_config=segmentation_config,
+        filter_config=compatibility_filter_config,
+        expected_tissue_threshold=0.7,
+        selection_strategy=sampling_mod.CoordinateSelectionStrategy.JOINT_SAMPLING,
+    )
+
+
 def test_validate_sampling_artifact_row_rejects_mismatched_tiling_config(tmp_path):
     cfg = SimpleNamespace(
         output_dir=str(tmp_path),

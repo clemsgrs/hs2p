@@ -151,11 +151,11 @@ Detailed logs still go to `output_dir/logs/log.txt`.
 - larger values are faster and coarser
 - smaller values improve edge precision but cost more time and memory
 
-### White/black filtering
+### Tile pixel QC
 
-`tiling.filter_params.filter_white` and `filter_black` are disabled by default.
+`tiling.filter_params.filter_white`, `filter_black`, `filter_grayspace`, and `filter_blur` are disabled by default.
 
-When enabled, HS2P reads actual tile pixels for candidate tiles, which is much slower than mask-based filtering alone.
+When enabled, HS2P evaluates candidate tiles at `tiling.filter_params.qc_spacing_um`, which is typically coarser than the final extraction spacing. This is still slower than mask-only tiling, but cheaper than running pixel QC at the requested tile spacing.
 
 ### Tile tar export
 
