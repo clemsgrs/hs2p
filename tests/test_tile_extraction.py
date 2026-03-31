@@ -444,8 +444,8 @@ class TestExtractTilesToTar:
         tile_size = 256
         slide_w = result.slide_dimensions[0]
         qc_window = np.zeros((tile_size, slide_w, 3), dtype=np.uint8)
-        for i, patch in enumerate(patches):
-            qc_window[:, i * tile_size : (i + 1) * tile_size, :] = patch
+        for i, p in enumerate(patches):
+            qc_window[:, i * tile_size : (i + 1) * tile_size, :] = p
         qc_reader = _make_mock_reader(
             qc_window,
             level_dimensions=[tuple(result.slide_dimensions)],
@@ -490,8 +490,8 @@ class TestExtractTilesToTar:
         tile_size = 256
         slide_w = result.slide_dimensions[0]
         qc_window = np.zeros((tile_size, slide_w, 3), dtype=np.uint8)
-        for i, patch in enumerate(patches):
-            qc_window[:, i * tile_size : (i + 1) * tile_size, :] = patch
+        for i, p in enumerate(patches):
+            qc_window[:, i * tile_size : (i + 1) * tile_size, :] = p
         qc_reader = _make_mock_reader(
             qc_window,
             level_dimensions=[tuple(result.slide_dimensions)],
@@ -532,8 +532,8 @@ class TestExtractTilesToTar:
         tile_size = 256
         slide_w = result.slide_dimensions[0]
         qc_window = np.zeros((tile_size, slide_w, 3), dtype=np.uint8)
-        for i, patch in enumerate(patches):
-            qc_window[:, i * tile_size : (i + 1) * tile_size, :] = patch
+        for i, p in enumerate(patches):
+            qc_window[:, i * tile_size : (i + 1) * tile_size, :] = p
         qc_reader = _make_mock_reader(
             qc_window,
             level_dimensions=[tuple(result.slide_dimensions)],
