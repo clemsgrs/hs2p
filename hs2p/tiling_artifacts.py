@@ -216,29 +216,55 @@ def validate_tiling_artifacts(
         raise ValueError("precomputed tiles filter_white mismatch")
     if result.filter_black != compatibility.filtering.filter_black:
         raise ValueError("precomputed tiles filter_black mismatch")
-    if result.white_threshold != compatibility.filtering.white_threshold:
+    if (
+        compatibility.filtering.filter_white
+        and result.white_threshold != compatibility.filtering.white_threshold
+    ):
         raise ValueError("precomputed tiles white_threshold mismatch")
-    if result.black_threshold != compatibility.filtering.black_threshold:
+    if (
+        compatibility.filtering.filter_black
+        and result.black_threshold != compatibility.filtering.black_threshold
+    ):
         raise ValueError("precomputed tiles black_threshold mismatch")
-    if result.fraction_threshold != compatibility.filtering.fraction_threshold:
+    if (
+        (compatibility.filtering.filter_white or compatibility.filtering.filter_black)
+        and result.fraction_threshold != compatibility.filtering.fraction_threshold
+    ):
         raise ValueError("precomputed tiles fraction_threshold mismatch")
     if result.filter_grayspace != compatibility.filtering.filter_grayspace:
         raise ValueError("precomputed tiles filter_grayspace mismatch")
     if (
+        compatibility.filtering.filter_grayspace
+        and (
         result.grayspace_saturation_threshold
         != compatibility.filtering.grayspace_saturation_threshold
+        )
     ):
         raise ValueError("precomputed tiles grayspace_saturation_threshold mismatch")
     if (
+        compatibility.filtering.filter_grayspace
+        and (
         result.grayspace_fraction_threshold
         != compatibility.filtering.grayspace_fraction_threshold
+        )
     ):
         raise ValueError("precomputed tiles grayspace_fraction_threshold mismatch")
     if result.filter_blur != compatibility.filtering.filter_blur:
         raise ValueError("precomputed tiles filter_blur mismatch")
-    if result.blur_threshold != compatibility.filtering.blur_threshold:
+    if (
+        compatibility.filtering.filter_blur
+        and result.blur_threshold != compatibility.filtering.blur_threshold
+    ):
         raise ValueError("precomputed tiles blur_threshold mismatch")
-    if result.qc_spacing_um != compatibility.filtering.qc_spacing_um:
+    if (
+        (
+            compatibility.filtering.filter_white
+            or compatibility.filtering.filter_black
+            or compatibility.filtering.filter_grayspace
+            or compatibility.filtering.filter_blur
+        )
+        and result.qc_spacing_um != compatibility.filtering.qc_spacing_um
+    ):
         raise ValueError("precomputed tiles qc_spacing_um mismatch")
     if result.selection_strategy != compatibility.selection_strategy:
         raise ValueError("precomputed tiles selection_strategy mismatch")

@@ -1186,6 +1186,48 @@ def test_validate_tiling_artifacts_rejects_mismatched_tiling_config(
         )
 
 
+def test_validate_tiling_artifacts_ignores_disabled_filter_threshold_mismatches(
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+):
+    result = _build_result(sample_id="slide-filter", image_path="slide-filter.svs")
+    artifacts = save_tiling_result(result, output_dir=tmp_path)
+
+    compatibility_filter = FilterConfig(
+        ref_tile_size=result.ref_tile_size_px,
+        a_t=result.a_t,
+        a_h=result.a_h,
+        filter_white=False,
+        filter_black=False,
+        white_threshold=111,
+        black_threshold=9,
+        fraction_threshold=0.25,
+        filter_grayspace=False,
+        grayspace_saturation_threshold=0.99,
+        grayspace_fraction_threshold=0.12,
+        filter_blur=False,
+        blur_threshold=5.0,
+        qc_spacing_um=9.0,
+    )
+
+    validated = validate_tiling_artifacts(
+        whole_slide=SlideSpec(
+            sample_id="slide-filter",
+            image_path=Path("slide-filter.svs"),
+        ),
+        coordinates_npz_path=artifacts.coordinates_npz_path,
+        coordinates_meta_path=artifacts.coordinates_meta_path,
+        compatibility=_artifact_compatibility(
+            tiling_config=tiling_config,
+            segmentation_config=segmentation_config,
+            filter_config=compatibility_filter,
+        ),
+    )
+
+    assert validated.coordinates_meta_path == artifacts.coordinates_meta_path
+
+
 def test_validate_tiling_artifacts_rejects_mismatched_image_path(tmp_path: Path):
     result = _build_result(sample_id="slide-4", image_path="stored-slide.svs")
     artifacts = save_tiling_result(result, output_dir=tmp_path)
