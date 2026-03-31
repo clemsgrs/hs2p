@@ -441,7 +441,7 @@ class TestExtractTilesToTar:
 
         mock_reader = _make_mock_reader(
             *patches,
-            level_dimensions=result.level_dimensions,
+            level_dimensions=[tuple(result.slide_dimensions)],
             level_downsamples=result.level_downsamples,
         )
 
@@ -478,7 +478,7 @@ class TestExtractTilesToTar:
 
         mock_reader = _make_mock_reader(
             *patches,
-            level_dimensions=result.level_dimensions,
+            level_dimensions=[tuple(result.slide_dimensions)],
             level_downsamples=result.level_downsamples,
         )
 
@@ -511,7 +511,7 @@ class TestExtractTilesToTar:
 
         mock_reader = _make_mock_reader(
             *patches,
-            level_dimensions=result.level_dimensions,
+            level_dimensions=[tuple(result.slide_dimensions)],
             level_downsamples=result.level_downsamples,
         )
 
@@ -538,7 +538,7 @@ class TestExtractTilesToTar:
         result = _make_tiling_result(num_tiles=1)
         mock_reader = _make_mock_reader(
             _solid_patch((250, 250, 250)),
-            level_dimensions=result.level_dimensions,
+            level_dimensions=[tuple(result.slide_dimensions)],
             level_downsamples=result.level_downsamples,
         )
 
