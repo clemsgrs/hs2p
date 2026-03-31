@@ -36,7 +36,7 @@ class TilingArtifacts:
 
 
 @dataclass(frozen=True)
-class ArtifactCompatibilitySpec:
+class CompatibilitySpec:
     tiling: TilingConfig
     segmentation: SegmentationConfig
     filtering: FilterConfig
@@ -128,7 +128,7 @@ def validate_tiling_artifacts(
     whole_slide: SlideSpec,
     coordinates_npz_path: Path,
     coordinates_meta_path: Path,
-    compatibility: ArtifactCompatibilitySpec,
+    compatibility: CompatibilitySpec,
 ) -> TilingArtifacts:
     result = load_tiling_result(
         coordinates_npz_path=coordinates_npz_path, coordinates_meta_path=coordinates_meta_path
@@ -210,7 +210,7 @@ def maybe_load_existing_artifacts(
     *,
     whole_slide: SlideSpec,
     read_coordinates_from: Path,
-    compatibility: ArtifactCompatibilitySpec,
+    compatibility: CompatibilitySpec,
 ) -> TilingArtifacts | None:
     npz_path = read_coordinates_from / f"{whole_slide.sample_id}.coordinates.npz"
     meta_path = read_coordinates_from / f"{whole_slide.sample_id}.coordinates.meta.json"
@@ -261,7 +261,7 @@ def load_whole_slides_from_rows(rows: Sequence[dict[str, Any]]) -> list[SlideSpe
 
 
 __all__ = [
-    "ArtifactCompatibilitySpec",
+    "CompatibilitySpec",
     "SlideSpec",
     "TilingArtifacts",
     "load_tiling_result",

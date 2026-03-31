@@ -9,7 +9,7 @@ import pytest
 
 import hs2p.preprocessing as preprocessing_mod
 from hs2p.api import (
-    ArtifactCompatibilitySpec,
+    CompatibilitySpec,
     FilterConfig,
     PreviewConfig,
     CoordinateOutputMode,
@@ -206,8 +206,8 @@ def _artifact_compatibility(
     selection_strategy: str | None = None,
     output_mode: str | None = None,
     annotation: str | None = None,
-) -> ArtifactCompatibilitySpec:
-    return ArtifactCompatibilitySpec(
+) -> CompatibilitySpec:
+    return CompatibilitySpec(
         tiling=tiling_config,
         segmentation=segmentation_config,
         filtering=filter_config,
@@ -999,7 +999,7 @@ def test_compute_request_passes_inner_workers_to_tile_extraction(
             num_tiles=len(result.coordinates),
         )
 
-    request = api_mod._SlideComputeRequest(
+    request = api_mod._ComputeRequest(
         input_index=0,
         whole_slide=SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs")),
         tiling=TilingConfig(
@@ -1051,7 +1051,7 @@ def test_tile_slides_defaults_gpu_decode_to_disabled_for_saved_tiles(
             num_tiles=1,
             tiles_tar_path=tmp_path / "tiles" / "slide-1.tiles.tar",
         )
-        return api_mod._SlideComputeResponse(
+        return api_mod._ComputeResponse(
             input_index=request.input_index,
             whole_slide=request.whole_slide,
             ok=True,

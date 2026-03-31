@@ -14,8 +14,8 @@ from hs2p.configs import FilterConfig, SegmentationConfig, TilingConfig
 from hs2p.wsi.backend import coerce_wsd_path, resolve_backend
 from hs2p.wsi.batched_reads import BatchedReadRequest, group_batched_read_requests_by_size
 from hs2p.wsi.geometry import project_discrete_grid_origins
-from hs2p.wsi.types import ResolvedSamplingSpec
-from hs2p.wsi.utils import HasEnoughTissue, ResolvedTileGeometry
+from hs2p.wsi.types import SamplingSpec
+from hs2p.wsi.utils import TissueFilter, ResolvedGeometry
 
 # ignore all warnings from wholeslidedata
 warnings.filterwarnings("ignore", module="wholeslidedata")
@@ -23,7 +23,7 @@ warnings.filterwarnings("ignore", module="wholeslidedata")
 Image.MAX_IMAGE_PIXELS = 933120000
 
 
-class WholeSlideImage(object):
+class WSI(object):
     """
     A class for handling Whole Slide Images (wsi) and tile extraction.
     Attributes:
@@ -50,7 +50,7 @@ class WholeSlideImage(object):
         spacing_at_level_0: float | None = None,
         segment: bool = False,
         segment_params: SegmentationConfig | None = None,
-        sampling_spec: ResolvedSamplingSpec | None = None,
+        sampling_spec: SamplingSpec | None = None,
         pixel_mapping: dict | None = None,
     ):
         """
@@ -63,7 +63,7 @@ class WholeSlideImage(object):
             backend (str): Backend to use for opening the wsi.
             segment (bool): Whether to segment the slide if tissue mask is not provided. Defaults to False.
             segment_params (SegmentationConfig, optional): Segmentation parameters used for either loading an existing tissue mask or segmenting the slide.
-            sampling_spec (ResolvedSamplingSpec, optional): Normalized sampling specification
+            sampling_spec (SamplingSpec, optional): Normalized sampling specification
                 used when loading an existing annotation mask.
         """
 
@@ -253,7 +253,7 @@ class WholeSlideImage(object):
     def load_segmentation(
         self,
         segment_params: SegmentationConfig,
-        sampling_spec: ResolvedSamplingSpec,
+        sampling_spec: SamplingSpec,
     ):
         """
         Load and process a segmentation mask for a whole slide image.
@@ -987,11 +987,11 @@ class WholeSlideImage(object):
                 if annotation is None
                 else self.annotation_pct[annotation]
             )
-        tissue_checker = HasEnoughTissue(
+        tissue_checker = TissueFilter(
             contour=cont,
             contour_holes=contour_holes,
             tissue_mask=mask,
-            geometry=ResolvedTileGeometry(
+            geometry=ResolvedGeometry(
                 target_tile_size_px=target_tile_size,
                 read_spacing_um=tile_spacing,
                 resize_factor=resize_factor,

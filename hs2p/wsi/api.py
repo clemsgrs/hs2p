@@ -17,14 +17,14 @@ from hs2p.wsi.visualization import (
 from hs2p.wsi.types import (
     CoordinateOutputMode,
     CoordinateSelectionStrategy,
-    ResolvedSamplingSpec,
+    SamplingSpec,
 )
 from hs2p.wsi.masks import (
     compose_overlay_mask_from_annotations,
     normalize_tissue_mask,
     read_aligned_mask,
 )
-from hs2p.wsi.wsi import WholeSlideImage
+from hs2p.wsi.wsi import WSI
 
 
 @dataclass(frozen=True)
@@ -35,7 +35,7 @@ class UnifiedCoordinateRequest:
     segment_params: SegmentationConfig
     tiling_params: TilingConfig
     filter_params: FilterConfig
-    sampling_spec: ResolvedSamplingSpec | None
+    sampling_spec: SamplingSpec | None
     selection_strategy: str
     output_mode: str
     mask_preview_path: Path | None = None
@@ -177,8 +177,8 @@ def _backend_name(wsi, fallback: str) -> str:
 
 def _build_default_tissue_sampling_spec(
     tiling_params: TilingConfig,
-) -> ResolvedSamplingSpec:
-    return ResolvedSamplingSpec(
+) -> SamplingSpec:
+    return SamplingSpec(
         pixel_mapping=DEFAULT_TISSUE_PIXEL_MAPPING,
         color_mapping={"background": None, "tissue": None},
         tissue_percentage={
@@ -297,7 +297,7 @@ def _filter_coordinates_for_sampling_with_wsi(
     tissue_percentages: list[float],
     tile_level: int,
     tiling_params: TilingConfig,
-    sampling_spec: ResolvedSamplingSpec,
+    sampling_spec: SamplingSpec,
 ):
     mask = read_aligned_mask(
         mask_obj=wsi.mask,
@@ -358,7 +358,7 @@ def _filter_coordinates_for_sampling_with_wsi(
 def execute_coordinate_request(
     request: UnifiedCoordinateRequest,
 ) -> UnifiedCoordinateResponse:
-    wsi = WholeSlideImage(
+    wsi = WSI(
         path=request.wsi_path,
         mask_path=request.mask_path,
         backend=request.backend,
@@ -470,7 +470,7 @@ def extract_coordinates(
     segment_params: SegmentationConfig,
     tiling_params: TilingConfig,
     filter_params: FilterConfig,
-    sampling_spec: ResolvedSamplingSpec | None = None,
+    sampling_spec: SamplingSpec | None = None,
     mask_preview_path: Path | None = None,
     preview_downsample: int = 32,
     preview_palette: np.ndarray | None = None,
@@ -517,7 +517,7 @@ def sample_coordinates(
     segment_params: SegmentationConfig,
     tiling_params: TilingConfig,
     filter_params: FilterConfig,
-    sampling_spec: ResolvedSamplingSpec | None = None,
+    sampling_spec: SamplingSpec | None = None,
     annotation: str,
     mask_preview_path: Path | None = None,
     preview_downsample: int = 32,
@@ -534,7 +534,7 @@ def sample_coordinates(
             segment_params=segment_params,
             tiling_params=tiling_params,
             filter_params=filter_params,
-            sampling_spec=ResolvedSamplingSpec(
+            sampling_spec=SamplingSpec(
                 pixel_mapping=sampling_spec.pixel_mapping,
                 color_mapping=sampling_spec.color_mapping,
                 tissue_percentage=sampling_spec.tissue_percentage,
@@ -569,13 +569,13 @@ def filter_coordinates(
     tile_level: int,
     segment_params: SegmentationConfig,
     tiling_params: TilingConfig,
-    sampling_spec: ResolvedSamplingSpec | None = None,
+    sampling_spec: SamplingSpec | None = None,
 ):
     if annotation_mask_path is None:
         raise ValueError("annotation_mask_path is required for filter_coordinates()")
     if sampling_spec is None:
         raise ValueError("sampling_spec is required for filter_coordinates()")
-    wsi = WholeSlideImage(
+    wsi = WSI(
         path=wsi_path,
         mask_path=annotation_mask_path,
         backend=backend,

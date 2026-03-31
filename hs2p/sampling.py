@@ -38,7 +38,7 @@ from hs2p.wsi import (
 from hs2p.wsi.types import (
     CoordinateOutputMode,
     CoordinateSelectionStrategy,
-    ResolvedSamplingSpec,
+    SamplingSpec,
 )
 from hs2p.tiling_artifacts import validate_required_columns, write_process_list
 from hs2p.wsi.backend import resolve_backend
@@ -83,7 +83,7 @@ def process_slide(
     filter_config: FilterConfig,
     mask_preview_dir,
     sampling_preview_dir,
-    resolved_sampling_spec: ResolvedSamplingSpec,
+    resolved_sampling_spec: SamplingSpec,
     selection_strategy: str | None = None,
     disable_tqdm: bool = False,
     num_workers: int = 4,

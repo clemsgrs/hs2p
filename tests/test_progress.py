@@ -191,7 +191,7 @@ def test_create_cli_progress_reporter_uses_rich_when_terminal(monkeypatch):
     sentinel = object()
     monkeypatch.setattr(
         progress,
-        "RichCliProgressReporter",
+        "RichReporter",
         lambda **kwargs: sentinel,
     )
 
@@ -209,7 +209,7 @@ def test_create_cli_progress_reporter_falls_back_when_stdout_is_not_terminal(
 
     reporter = progress.create_cli_progress_reporter(output_dir="out")
 
-    assert isinstance(reporter, progress.PlainTextCliProgressReporter)
+    assert isinstance(reporter, progress.TextReporter)
 
 
 def test_rich_tiling_summary_uses_zero_tile_label_without_process_list(monkeypatch):
@@ -225,7 +225,7 @@ def test_rich_tiling_summary_uses_zero_tile_label_without_process_list(monkeypat
         def print(self, *args, **kwargs):
             captured["printed"] = args
 
-    reporter = progress.RichCliProgressReporter(output_dir="out", console=FakeConsole())
+    reporter = progress.RichReporter(output_dir="out", console=FakeConsole())
     monkeypatch.setattr(
         reporter,
         "_print_summary",
@@ -460,7 +460,7 @@ def test_sampling_main_emits_progress_and_run_summary(monkeypatch, tmp_path: Pat
         SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs")),
         SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
     ]
-    resolved_sampling_spec = sampling_mod.ResolvedSamplingSpec(
+    resolved_sampling_spec = sampling_mod.SamplingSpec(
         pixel_mapping={"background": 0, "tumor": 1},
         color_mapping=None,
         tissue_percentage={"background": None, "tumor": 0.1},
@@ -593,7 +593,7 @@ def test_sampling_main_emits_finished_summary_when_resume_has_no_work(
     reporter = RecordingReporter()
     cfg = _base_cli_cfg(tmp_path, resume=True)
     slides = [SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs"))]
-    resolved_sampling_spec = sampling_mod.ResolvedSamplingSpec(
+    resolved_sampling_spec = sampling_mod.SamplingSpec(
         pixel_mapping={"background": 0, "tumor": 1},
         color_mapping=None,
         tissue_percentage={"background": None, "tumor": 0.1},

@@ -71,8 +71,8 @@ def test_overlay_mask_on_slide_matches_tile_semantics(monkeypatch):
                 return mask_arr
             return slide_arr
 
-    monkeypatch.setattr(coordinate_api_mod, "WholeSlideImage", FakeWSI)
-    monkeypatch.setattr(visualization_mod, "WholeSlideImage", FakeWSI)
+    monkeypatch.setattr(coordinate_api_mod, "WSI", FakeWSI)
+    monkeypatch.setattr(visualization_mod, "WSI", FakeWSI)
 
     pixel_mapping = {"background": 0, "gleason3": 3, "gleason4": 4}
     color_mapping = {
@@ -120,8 +120,8 @@ def test_overlay_mask_on_slide_accepts_in_memory_mask_array(monkeypatch):
         def get_slide(self, spacing):
             return slide_arr
 
-    monkeypatch.setattr(coordinate_api_mod, "WholeSlideImage", FakeWSI)
-    monkeypatch.setattr(visualization_mod, "WholeSlideImage", FakeWSI)
+    monkeypatch.setattr(coordinate_api_mod, "WSI", FakeWSI)
+    monkeypatch.setattr(visualization_mod, "WSI", FakeWSI)
 
     pixel_mapping = {"background": 0, "tissue": 1}
     color_mapping = {"background": None, "tissue": [157, 219, 129]}
@@ -161,7 +161,7 @@ def test_overlay_mask_on_slide_defaults_to_tissue_overlay_style(monkeypatch):
         def get_slide(self, spacing):
             return slide_arr
 
-    monkeypatch.setattr(visualization_mod, "WholeSlideImage", FakeWSI)
+    monkeypatch.setattr(visualization_mod, "WSI", FakeWSI)
 
     overlay = wsi_mod.overlay_mask_on_slide(
         wsi_path=Path("fake-wsi.tif"),
@@ -236,8 +236,8 @@ def test_extract_coordinates_uses_overlay_mask_preview_instead_of_line_rendering
         preview_calls.append(kwargs)
         return Image.fromarray(np.full((2, 2, 3), 200, dtype=np.uint8))
 
-    monkeypatch.setattr(coordinate_api_mod, "WholeSlideImage", FakeWSI)
-    monkeypatch.setattr(visualization_mod, "WholeSlideImage", FakeWSI)
+    monkeypatch.setattr(coordinate_api_mod, "WSI", FakeWSI)
+    monkeypatch.setattr(visualization_mod, "WSI", FakeWSI)
     monkeypatch.setattr(visualization_mod, "overlay_mask_on_slide", _fake_overlay_mask_on_slide)
 
     preview_path = tmp_path / "mask-preview.jpg"
@@ -345,8 +345,8 @@ def test_extract_coordinates_preview_uses_in_memory_annotation_labels_when_style
         preview_calls.append(kwargs)
         return Image.fromarray(np.full((2, 2, 3), 200, dtype=np.uint8))
 
-    monkeypatch.setattr(coordinate_api_mod, "WholeSlideImage", FakeWSI)
-    monkeypatch.setattr(visualization_mod, "WholeSlideImage", FakeWSI)
+    monkeypatch.setattr(coordinate_api_mod, "WSI", FakeWSI)
+    monkeypatch.setattr(visualization_mod, "WSI", FakeWSI)
     monkeypatch.setattr(visualization_mod, "overlay_mask_on_slide", _fake_overlay_mask_on_slide)
 
     preview_path = tmp_path / "mask-preview.jpg"

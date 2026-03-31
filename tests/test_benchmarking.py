@@ -349,7 +349,7 @@ def test_benchmark_wsd_mode_reports_region_and_tile_progress(monkeypatch):
         mp.setitem(
             sys.modules,
             "wholeslidedata",
-            SimpleNamespace(WholeSlideImage=_FakeWSI),
+            SimpleNamespace(WSI=_FakeWSI),
         )
         elapsed, tile_count, checksum = module.benchmark_wsd_mode(
             result=result,

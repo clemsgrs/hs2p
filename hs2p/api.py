@@ -45,7 +45,7 @@ from hs2p.preprocessing import (
     save_tiling_result as save_preprocessing_tiling_result,
 )
 from hs2p.tiling_artifacts import (
-    ArtifactCompatibilitySpec,
+    CompatibilitySpec,
     SlideSpec,
     TilingArtifacts,
     load_tiling_result,
@@ -650,7 +650,7 @@ def overlay_mask_on_slide(
 
 
 @dataclass
-class _PendingTilingPreview:
+class _PendingPreview:
     whole_slide: SlideSpec
     base_artifact: TilingArtifacts
     mask_preview_path: Path | None
@@ -658,7 +658,7 @@ class _PendingTilingPreview:
 
 
 @dataclass(frozen=True)
-class _PlannedSlideWork:
+class _SlideWork:
     whole_slide: SlideSpec
     artifact: TilingArtifacts | None = None
     compute_request: Any | None = None
@@ -667,7 +667,7 @@ class _PlannedSlideWork:
 
 
 @dataclass(frozen=True)
-class _SlideComputeRequest:
+class _ComputeRequest:
     input_index: int
     whole_slide: SlideSpec
     tiling: TilingConfig
@@ -683,7 +683,7 @@ class _SlideComputeRequest:
 
 
 @dataclass(frozen=True)
-class _SlideComputeResponse:
+class _ComputeResponse:
     input_index: int
     whole_slide: SlideSpec
     ok: bool
@@ -756,7 +756,7 @@ def _build_failure_process_row(
 
 def _finalize_pending_tiling_preview(
     *,
-    pending: _PendingTilingPreview,
+    pending: _PendingPreview,
 ) -> tuple[TilingArtifacts | None, dict[str, Any]]:
     tiling_preview_path = pending.future.result()
     tiling_preview_path = (
@@ -776,8 +776,8 @@ def _finalize_pending_tiling_preview(
     return artifact, row
 
 def _compute_and_save_tiling_artifacts_from_request(
-    request: _SlideComputeRequest,
-) -> _SlideComputeResponse:
+    request: _ComputeRequest,
+) -> _ComputeResponse:
     try:
         defer_pixel_filtering = request.save_tiles and _needs_pixel_filtering(request.filtering)
         effective_filtering = (
@@ -818,7 +818,7 @@ def _compute_and_save_tiling_artifacts_from_request(
             and request.mask_preview_path.is_file()
             else None
         )
-        return _SlideComputeResponse(
+        return _ComputeResponse(
             input_index=request.input_index,
             whole_slide=request.whole_slide,
             ok=True,
@@ -827,7 +827,7 @@ def _compute_and_save_tiling_artifacts_from_request(
             mask_preview_path=mask_preview_path,
         )
     except Exception as exc:
-        return _SlideComputeResponse(
+        return _ComputeResponse(
             input_index=request.input_index,
             whole_slide=request.whole_slide,
             ok=False,
@@ -906,7 +906,7 @@ def tile_slides(
         for row in existing_df.to_dict(orient="records"):
             if row.get("tiling_status") == "success":
                 existing_successes[str(row["sample_id"])] = row
-    compatibility_specs: dict[tuple[bool, str], ArtifactCompatibilitySpec] = {}
+    compatibility_specs: dict[tuple[bool, str], CompatibilitySpec] = {}
 
     def _resolve_effective_tiling(whole_slide: SlideSpec) -> TilingConfig:
         backend_selection = resolve_backend(
@@ -924,8 +924,8 @@ def tile_slides(
             else replace(tiling, backend=backend_selection.backend)
         )
 
-    planned_work: list[_PlannedSlideWork] = []
-    compute_requests: list[_SlideComputeRequest] = []
+    planned_work: list[_SlideWork] = []
+    compute_requests: list[_ComputeRequest] = []
     for whole_slide in whole_slides:
         try:
             effective_tiling = _resolve_effective_tiling(whole_slide)
@@ -936,7 +936,7 @@ def tile_slides(
                     if whole_slide.mask_path is not None
                     else None
                 )
-                compatibility_specs[key] = ArtifactCompatibilitySpec(
+                compatibility_specs[key] = CompatibilitySpec(
                     tiling=effective_tiling,
                     segmentation=segmentation,
                     filtering=filtering,
@@ -971,7 +971,7 @@ def tile_slides(
                 )
             if artifact is not None:
                 planned_work.append(
-                    _PlannedSlideWork(
+                    _SlideWork(
                         whole_slide=whole_slide,
                         artifact=artifact,
                     )
@@ -981,7 +981,7 @@ def tile_slides(
             if preview is not None and preview.save_mask_preview:
                 mask_dir = output_dir / "preview" / "mask"
                 mask_preview_path = mask_dir / f"{whole_slide.sample_id}.jpg"
-            compute_request = _SlideComputeRequest(
+            compute_request = _ComputeRequest(
                 input_index=len(planned_work),
                 whole_slide=whole_slide,
                 tiling=effective_tiling,
@@ -995,7 +995,7 @@ def tile_slides(
                 save_tiles=save_tiles,
             )
             planned_work.append(
-                _PlannedSlideWork(
+                _SlideWork(
                     whole_slide=whole_slide,
                     compute_request=compute_request,
                 )
@@ -1003,7 +1003,7 @@ def tile_slides(
             compute_requests.append(compute_request)
         except Exception as exc:
             planned_work.append(
-                _PlannedSlideWork(
+                _SlideWork(
                     whole_slide=whole_slide,
                     error=str(exc),
                     traceback_text=traceback.format_exc(),
@@ -1018,7 +1018,7 @@ def tile_slides(
         if preview is not None and preview.save_tiling_preview
         else None
     )
-    pending_preview: _PendingTilingPreview | None = None
+    pending_preview: _PendingPreview | None = None
     total_slides = len(planned_work)
 
     def _progress_snapshot() -> dict[str, int]:
@@ -1084,7 +1084,7 @@ def tile_slides(
                 )
             )
 
-    def _process_compute_response(response: _SlideComputeResponse) -> None:
+    def _process_compute_response(response: _ComputeResponse) -> None:
         nonlocal pending_preview
         if not response.ok:
             _finalize_pending_preview_if_any()
@@ -1124,7 +1124,7 @@ def tile_slides(
                     output_dir=output_dir,
                     downsample=preview.downsample,
                 )
-            pending_preview = _PendingTilingPreview(
+            pending_preview = _PendingPreview(
                 whole_slide=response.whole_slide,
                 base_artifact=base_artifact,
                 mask_preview_path=response.mask_preview_path,
@@ -1146,9 +1146,9 @@ def tile_slides(
         )
 
     def _drain_planned_work(compute_response_iter) -> None:
-        buffered_responses: dict[int, _SlideComputeResponse] = {}
+        buffered_responses: dict[int, _ComputeResponse] = {}
 
-        def _await_response(input_index: int) -> _SlideComputeResponse:
+        def _await_response(input_index: int) -> _ComputeResponse:
             while input_index not in buffered_responses:
                 response = next(compute_response_iter)
                 buffered_responses[response.input_index] = response
@@ -1185,7 +1185,7 @@ def tile_slides(
     try:
         if use_slide_pool:
             pool_requests = [
-                _SlideComputeRequest(
+                _ComputeRequest(
                     input_index=request.input_index,
                     whole_slide=request.whole_slide,
                     tiling=request.tiling,
@@ -1212,7 +1212,7 @@ def tile_slides(
                 )
         else:
             serial_requests = [
-                _SlideComputeRequest(
+                _ComputeRequest(
                     input_index=request.input_index,
                     whole_slide=request.whole_slide,
                     tiling=request.tiling,

@@ -7,7 +7,7 @@ from hs2p.api import FilterConfig, SegmentationConfig, TilingConfig
 import hs2p.wsi as wsi_api
 from hs2p.wsi import api as wsi_api_mod
 import hs2p.wsi.wsi as wsimod
-from hs2p.wsi import ResolvedSamplingSpec
+from hs2p.wsi import SamplingSpec
 from tests.helpers.fake_wsi_backend import FakePyramidWSI, PyramidSpec
 
 
@@ -54,8 +54,8 @@ def _tiling_config(
     )
 
 
-def _sampling_spec(*, tissue_threshold: float) -> ResolvedSamplingSpec:
-    return ResolvedSamplingSpec(
+def _sampling_spec(*, tissue_threshold: float) -> SamplingSpec:
+    return SamplingSpec(
         pixel_mapping={"background": 0, "tissue": 1},
         color_mapping={"background": None, "tissue": None},
         tissue_percentage={"background": None, "tissue": tissue_threshold},
@@ -291,7 +291,7 @@ def test_extract_coordinates_segments_maskless_slides_without_annotation_pct_cra
         return 0
 
     monkeypatch.setattr(wsimod.wsd, "WholeSlideImage", _fake_wholeslide)
-    monkeypatch.setattr(wsimod.WholeSlideImage, "segment_tissue", _fake_segment_tissue)
+    monkeypatch.setattr(wsimod.WSI, "segment_tissue", _fake_segment_tissue)
 
     result = wsi_api.extract_coordinates(
         wsi_path=Path("synthetic-slide.tif"),

@@ -38,7 +38,7 @@ def test_wsi_package_reexports_coordinate_api_from_owner_module():
     assert wsi_pkg.UnifiedCoordinateResponse is wsi_api_mod.UnifiedCoordinateResponse
     assert wsi_pkg.CoordinateSelectionStrategy is wsi_types_mod.CoordinateSelectionStrategy
     assert wsi_pkg.CoordinateOutputMode is wsi_types_mod.CoordinateOutputMode
-    assert wsi_pkg.ResolvedSamplingSpec is wsi_types_mod.ResolvedSamplingSpec
+    assert wsi_pkg.SamplingSpec is wsi_types_mod.SamplingSpec
     assert wsi_pkg.extract_coordinates is wsi_api_mod.extract_coordinates
     assert wsi_pkg.sample_coordinates is wsi_api_mod.sample_coordinates
 

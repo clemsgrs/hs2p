@@ -16,7 +16,7 @@ from hs2p.wsi import CoordinateExtractionResult
 from hs2p.wsi.types import (
     CoordinateOutputMode,
     CoordinateSelectionStrategy,
-    ResolvedSamplingSpec,
+    SamplingSpec,
 )
 
 
@@ -41,7 +41,7 @@ def selection_strategy_from_cfg(cfg) -> str:
 
 
 def build_sampling_preview_assets(
-    resolved_sampling_spec: ResolvedSamplingSpec,
+    resolved_sampling_spec: SamplingSpec,
     *,
     save_previews: bool,
 ):
@@ -90,7 +90,7 @@ def save_sampling_coordinates(
     annotation: str,
     coordinates: list[tuple[int, int]],
     extraction: CoordinateExtractionResult,
-    resolved_sampling_spec: ResolvedSamplingSpec,
+    resolved_sampling_spec: SamplingSpec,
     save_tiling_result,
     selection_strategy: str | None = None,
     output_mode: str = CoordinateOutputMode.PER_ANNOTATION,

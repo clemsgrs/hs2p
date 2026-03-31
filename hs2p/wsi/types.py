@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
-class ResolvedSamplingSpec:
+class SamplingSpec:
     pixel_mapping: dict[str, int]
     color_mapping: dict[str, list[int] | None] | None
     tissue_percentage: dict[str, float | None]
@@ -25,5 +25,5 @@ class CoordinateOutputMode:
 __all__ = [
     "CoordinateOutputMode",
     "CoordinateSelectionStrategy",
-    "ResolvedSamplingSpec",
+    "SamplingSpec",
 ]

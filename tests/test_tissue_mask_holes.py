@@ -16,11 +16,11 @@ def test_precomputed_mask_subtracts_all_holes():
     holes = [_rect(4, 4, 6, 6), _rect(12, 12, 14, 14)]
     tissue_mask = np.full((20, 20), 255, dtype=np.uint8)
 
-    checker = utils_mod.HasEnoughTissue(
+    checker = utils_mod.TissueFilter(
         contour=contour,
         contour_holes=holes,
         tissue_mask=tissue_mask,
-        geometry=utils_mod.ResolvedTileGeometry(
+        geometry=utils_mod.ResolvedGeometry(
             target_tile_size_px=4,
             read_spacing_um=1.0,
             resize_factor=1.0,
@@ -43,11 +43,11 @@ def test_check_coordinates_returns_vectorized_outputs_with_expected_coverages():
     tissue_mask[:4, :4] = 255
     tissue_mask[4:, :4] = 255
 
-    checker = utils_mod.HasEnoughTissue(
+    checker = utils_mod.TissueFilter(
         contour=contour,
         contour_holes=holes,
         tissue_mask=tissue_mask,
-        geometry=utils_mod.ResolvedTileGeometry(
+        geometry=utils_mod.ResolvedGeometry(
             target_tile_size_px=4,
             read_spacing_um=1.0,
             resize_factor=1.0,

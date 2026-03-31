@@ -3,7 +3,7 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from hs2p.wsi.types import CoordinateSelectionStrategy, ResolvedSamplingSpec
+from hs2p.wsi.types import CoordinateSelectionStrategy, SamplingSpec
 
 from .models import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig
 
@@ -49,8 +49,8 @@ def resolve_sampling_strategy(cfg: Any) -> str:
     return CoordinateSelectionStrategy.JOINT_SAMPLING
 
 
-def build_default_sampling_spec(tiling: TilingConfig) -> ResolvedSamplingSpec:
-    return ResolvedSamplingSpec(
+def build_default_sampling_spec(tiling: TilingConfig) -> SamplingSpec:
+    return SamplingSpec(
         pixel_mapping={"background": 0, "tissue": 1},
         color_mapping={"background": None, "tissue": None},
         tissue_percentage={
@@ -126,7 +126,7 @@ def resolve_sampling_spec(
     cfg: Any,
     *,
     tiling: TilingConfig,
-) -> ResolvedSamplingSpec:
+) -> SamplingSpec:
     sampling_config = getattr(cfg.tiling, "sampling_params", None)
     if sampling_config is None:
         return build_default_sampling_spec(tiling)
@@ -165,7 +165,7 @@ def resolve_sampling_spec(
             color_mapping=color_mapping,
         )
 
-    return ResolvedSamplingSpec(
+    return SamplingSpec(
         pixel_mapping=pixel_mapping,
         color_mapping=color_mapping,
         tissue_percentage=tissue_percentage,
