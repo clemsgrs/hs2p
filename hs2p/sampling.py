@@ -13,12 +13,10 @@ from hs2p.preprocessing import TileGeometry, TilingResult
 from hs2p.api import (
     CoordinateOutputMode,
     FilterConfig,
-    ResolvedSamplingSpec,
     SegmentationConfig,
     TilingConfig,
     _write_process_list,
     _validate_required_columns,
-    compute_effective_config_hash,
     load_tiling_result,
     save_tiling_result,
 )
@@ -35,6 +33,7 @@ from hs2p.utils import setup, load_csv
 from hs2p.wsi import (
     CoordinateExtractionResult,
     CoordinateSelectionStrategy,
+    ResolvedSamplingSpec,
     UnifiedCoordinateRequest,
     execute_coordinate_request,
     write_coordinate_preview,
@@ -179,15 +178,6 @@ def _save_sampling_coordinates(
         tissue_mask_path=mask_path,
         backend=backend,
         requested_backend=backend,
-        config_hash=compute_effective_config_hash(
-            tiling=tiling_config,
-            segmentation=segmentation_config,
-            filtering=filter_config,
-            sampling_spec=resolved_sampling_spec,
-            selection_strategy=selection_strategy,
-            output_mode=output_mode,
-            annotation=annotation,
-        ),
         step_px_lv0=extraction.step_px_lv0,
         tolerance=tiling_config.tolerance,
         tissue_method="unknown",
@@ -335,15 +325,6 @@ def process_slide(
                         pixel_mapping=resolved_sampling_spec.pixel_mapping,
                         color_mapping=color_mapping,
                     )
-            config_hash = compute_effective_config_hash(
-                tiling=effective_tiling_config,
-                segmentation=segmentation_config,
-                filtering=filter_config,
-                sampling_spec=resolved_sampling_spec,
-                selection_strategy=selection_strategy,
-                output_mode=CoordinateOutputMode.PER_ANNOTATION,
-                annotation=annotation,
-            )
             rows.append(
                 {
                     "sample_id": sample_id,
@@ -360,7 +341,6 @@ def process_slide(
                         if artifacts is not None
                         else np.nan
                     ),
-                    "config_hash": config_hash,
                     "error": np.nan,
                     "traceback": np.nan,
                 }
@@ -385,7 +365,6 @@ def process_slide(
                     "num_tiles": 0,
                     "coordinates_npz_path": np.nan,
                     "coordinates_meta_path": np.nan,
-                    "config_hash": np.nan,
                     "error": str(e),
                     "traceback": str(traceback.format_exc()),
                 }
@@ -413,7 +392,6 @@ def _build_sampling_process_rows(
                     "num_tiles": 0,
                     "coordinates_npz_path": np.nan,
                     "coordinates_meta_path": np.nan,
-                    "config_hash": np.nan,
                     "error": np.nan,
                     "traceback": np.nan,
                 }
@@ -425,13 +403,14 @@ def _validate_sampling_artifact_row(
     *,
     row: dict[str, object],
     whole_slide,
-    expected_hash: str,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+    expected_tissue_threshold: float,
     selection_strategy: str,
 ) -> None:
     if row.get("sampling_status") != "success":
         raise ValueError("sampling row is not successful")
-    if str(row.get("config_hash")) != expected_hash:
-        raise ValueError("sampling config_hash mismatch")
     num_tiles = int(row.get("num_tiles", 0))
     if num_tiles == 0:
         return
@@ -444,8 +423,52 @@ def _validate_sampling_artifact_row(
         raise ValueError("sampling image_path mismatch")
     if result.mask_path != whole_slide.mask_path:
         raise ValueError("sampling mask_path mismatch")
-    if result.config_hash != expected_hash:
-        raise ValueError("sampling config_hash mismatch")
+    if result.backend != tiling_config.backend:
+        raise ValueError("sampling backend mismatch")
+    if result.target_spacing_um != tiling_config.target_spacing_um:
+        raise ValueError("sampling target_spacing_um mismatch")
+    if result.target_tile_size_px != tiling_config.target_tile_size_px:
+        raise ValueError("sampling target_tile_size_px mismatch")
+    if result.overlap != tiling_config.overlap:
+        raise ValueError("sampling overlap mismatch")
+    if result.tissue_threshold != expected_tissue_threshold:
+        raise ValueError("sampling tissue_threshold mismatch")
+    if result.use_padding != tiling_config.use_padding:
+        raise ValueError("sampling use_padding mismatch")
+    if result.tolerance != tiling_config.tolerance:
+        raise ValueError("sampling tolerance mismatch")
+    if result.seg_downsample != segmentation_config.downsample:
+        raise ValueError("sampling seg_downsample mismatch")
+    if result.seg_sthresh != segmentation_config.sthresh:
+        raise ValueError("sampling sthresh mismatch")
+    if result.seg_sthresh_up != segmentation_config.sthresh_up:
+        raise ValueError("sampling sthresh_up mismatch")
+    if result.seg_mthresh != segmentation_config.mthresh:
+        raise ValueError("sampling mthresh mismatch")
+    if result.seg_close != segmentation_config.close:
+        raise ValueError("sampling close mismatch")
+    if result.seg_use_otsu != segmentation_config.use_otsu:
+        raise ValueError("sampling use_otsu mismatch")
+    if result.seg_use_hsv != segmentation_config.use_hsv:
+        raise ValueError("sampling use_hsv mismatch")
+    if result.ref_tile_size_px != filter_config.ref_tile_size:
+        raise ValueError("sampling ref_tile_size mismatch")
+    if result.a_t != filter_config.a_t:
+        raise ValueError("sampling a_t mismatch")
+    if result.a_h != filter_config.a_h:
+        raise ValueError("sampling a_h mismatch")
+    if result.max_n_holes != filter_config.max_n_holes:
+        raise ValueError("sampling max_n_holes mismatch")
+    if result.filter_white != filter_config.filter_white:
+        raise ValueError("sampling filter_white mismatch")
+    if result.filter_black != filter_config.filter_black:
+        raise ValueError("sampling filter_black mismatch")
+    if result.white_threshold != filter_config.white_threshold:
+        raise ValueError("sampling white_threshold mismatch")
+    if result.black_threshold != filter_config.black_threshold:
+        raise ValueError("sampling black_threshold mismatch")
+    if result.fraction_threshold != filter_config.fraction_threshold:
+        raise ValueError("sampling fraction_threshold mismatch")
     if result.annotation != row["annotation"]:
         raise ValueError("sampling annotation mismatch")
     if result.selection_strategy != selection_strategy:
@@ -497,7 +520,6 @@ def main(args):
                         "num_tiles",
                         "coordinates_npz_path",
                         "coordinates_meta_path",
-                        "config_hash",
                         "error",
                         "traceback",
                     },
@@ -522,24 +544,11 @@ def main(args):
                         "num_tiles",
                         "coordinates_npz_path",
                         "coordinates_meta_path",
-                        "config_hash",
                         "error",
                         "traceback",
                     ],
                 )
 
-            expected_hash_by_annotation = {
-                annotation: compute_effective_config_hash(
-                    tiling=tiling_config,
-                    segmentation=segmentation_config,
-                    filtering=filter_config,
-                    sampling_spec=resolved_sampling_spec,
-                    selection_strategy=selection_strategy,
-                    output_mode=CoordinateOutputMode.PER_ANNOTATION,
-                    annotation=annotation,
-                )
-                for annotation in active_annotations
-            }
             slides_to_process = []
             for slide in whole_slides:
                 slide_rows = process_df[process_df["sample_id"] == slide.sample_id]
@@ -555,7 +564,12 @@ def main(args):
                         _validate_sampling_artifact_row(
                             row=row.iloc[0].to_dict(),
                             whole_slide=slide,
-                            expected_hash=expected_hash_by_annotation[annotation],
+                            tiling_config=tiling_config,
+                            segmentation_config=segmentation_config,
+                            filter_config=filter_config,
+                            expected_tissue_threshold=resolved_sampling_spec.tissue_percentage[
+                                annotation
+                            ],
                             selection_strategy=selection_strategy,
                         )
                 except Exception:

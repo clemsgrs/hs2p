@@ -585,14 +585,13 @@ def test_sampling_main_defaults_inner_slide_workers_to_one(monkeypatch, tmp_path
                             if kwargs["mask_path"] is not None
                             else None
                         ),
-                        "sampling_status": "success",
-                        "num_tiles": 0,
-                        "coordinates_npz_path": np.nan,
-                        "coordinates_meta_path": np.nan,
-                        "config_hash": "hash",
-                        "error": np.nan,
-                        "traceback": np.nan,
-                    }
+                    "sampling_status": "success",
+                    "num_tiles": 0,
+                    "coordinates_npz_path": np.nan,
+                    "coordinates_meta_path": np.nan,
+                    "error": np.nan,
+                    "traceback": np.nan,
+                }
                 ],
             },
         ),
@@ -705,14 +704,13 @@ def test_sampling_main_rejects_explicit_inner_slide_workers_override(
                             if kwargs["mask_path"] is not None
                             else None
                         ),
-                        "sampling_status": "success",
-                        "num_tiles": 0,
-                        "coordinates_npz_path": np.nan,
-                        "coordinates_meta_path": np.nan,
-                        "config_hash": "hash",
-                        "error": np.nan,
-                        "traceback": np.nan,
-                    }
+                    "sampling_status": "success",
+                    "num_tiles": 0,
+                    "coordinates_npz_path": np.nan,
+                    "coordinates_meta_path": np.nan,
+                    "error": np.nan,
+                    "traceback": np.nan,
+                }
                 ],
             },
         ),
@@ -722,7 +720,7 @@ def test_sampling_main_rejects_explicit_inner_slide_workers_override(
         sampling_mod.main(SimpleNamespace())
 
 
-def test_save_sampling_coordinates_uses_annotation_threshold_and_sampling_mode_in_hash(
+def test_save_sampling_coordinates_uses_annotation_threshold_and_sampling_mode(
     monkeypatch,
     tmp_path,
 ):
@@ -814,15 +812,9 @@ def test_save_sampling_coordinates_uses_annotation_threshold_and_sampling_mode_i
     assert result.tissue_threshold == 0.7
     assert result.read_step_px == 256
     assert result.step_px_lv0 == 256
-    assert result.config_hash == sampling_mod.compute_effective_config_hash(
-        tiling=tiling_config,
-        segmentation=segmentation_config,
-        filtering=filter_config,
-        sampling_spec=resolved_sampling_spec,
-        selection_strategy=sampling_mod.CoordinateSelectionStrategy.JOINT_SAMPLING,
-        output_mode=sampling_mod.CoordinateOutputMode.PER_ANNOTATION,
-        annotation="tumor",
-    )
+    assert result.annotation == "tumor"
+    assert result.selection_strategy == sampling_mod.CoordinateSelectionStrategy.JOINT_SAMPLING
+    assert result.output_mode == sampling_mod.CoordinateOutputMode.PER_ANNOTATION
     assert captured["tiles_dir"] == tmp_path / "tiles" / "tumor"
 
 
@@ -900,6 +892,202 @@ def test_save_sampling_coordinates_writes_sampling_metadata_fields(tmp_path):
     assert meta["artifact"]["selection_strategy"] == "joint_sampling"
     assert meta["artifact"]["output_mode"] == "per_annotation"
     assert meta["tiling"]["step_px_lv0"] == 256
+
+
+def test_validate_sampling_artifact_row_accepts_matching_metadata(tmp_path):
+    cfg = SimpleNamespace(
+        output_dir=str(tmp_path),
+        tiling=SimpleNamespace(
+            sampling_params=SimpleNamespace(independent_sampling=False),
+        ),
+    )
+    tiling_config = sampling_mod.TilingConfig(
+        target_spacing_um=0.5,
+        target_tile_size_px=256,
+        tolerance=0.05,
+        overlap=0.0,
+        tissue_threshold=0.1,
+        use_padding=True,
+        backend="asap",
+    )
+    segmentation_config = sampling_mod.SegmentationConfig(
+        downsample=64,
+        sthresh=8,
+        sthresh_up=255,
+        mthresh=7,
+        close=4,
+        use_otsu=False,
+        use_hsv=True,
+    )
+    filter_config = sampling_mod.FilterConfig(
+        ref_tile_size=16,
+        a_t=4,
+        a_h=2,
+        max_n_holes=8,
+        filter_white=False,
+        filter_black=False,
+        white_threshold=220,
+        black_threshold=25,
+        fraction_threshold=0.9,
+    )
+    resolved_sampling_spec = _resolved_sampling_spec(
+        pixel_mapping={"background": 0, "tumor": 1},
+        color_mapping={"background": None, "tumor": None},
+        tissue_percentage={"background": None, "tumor": 0.7},
+    )
+    extraction = sampling_mod.CoordinateExtractionResult(
+        contour_indices=[],
+        tissue_percentages=[],
+        x=np.array([0], dtype=np.int64),
+        y=np.array([0], dtype=np.int64),
+        read_level=0,
+        read_spacing_um=0.5,
+        read_tile_size_px=256,
+        read_step_px=256,
+        resize_factor=1.0,
+        tile_size_lv0=256,
+        step_px_lv0=256,
+    )
+    artifacts = sampling_mod._save_sampling_coordinates(
+        sample_id="sample-1",
+        image_path=Path("slide.svs"),
+        mask_path=Path("mask.tif"),
+        backend="asap",
+        cfg=cfg,
+        tiling_config=tiling_config,
+        segmentation_config=segmentation_config,
+        filter_config=filter_config,
+        annotation="tumor",
+        coordinates=[(0, 0)],
+        extraction=extraction,
+        resolved_sampling_spec=resolved_sampling_spec,
+    )
+
+    sampling_mod._validate_sampling_artifact_row(
+        row={
+            "sample_id": "sample-1",
+            "annotation": "tumor",
+            "image_path": "slide.svs",
+            "mask_path": "mask.tif",
+            "sampling_status": "success",
+            "num_tiles": 1,
+            "coordinates_npz_path": str(artifacts.coordinates_npz_path),
+            "coordinates_meta_path": str(artifacts.coordinates_meta_path),
+        },
+        whole_slide=SimpleNamespace(
+            sample_id="sample-1",
+            image_path=Path("slide.svs"),
+            mask_path=Path("mask.tif"),
+        ),
+        tiling_config=tiling_config,
+        segmentation_config=segmentation_config,
+        filter_config=filter_config,
+        expected_tissue_threshold=0.7,
+        selection_strategy=sampling_mod.CoordinateSelectionStrategy.JOINT_SAMPLING,
+    )
+
+
+def test_validate_sampling_artifact_row_rejects_mismatched_tiling_config(tmp_path):
+    cfg = SimpleNamespace(
+        output_dir=str(tmp_path),
+        tiling=SimpleNamespace(
+            sampling_params=SimpleNamespace(independent_sampling=False),
+        ),
+    )
+    tiling_config = sampling_mod.TilingConfig(
+        target_spacing_um=0.5,
+        target_tile_size_px=256,
+        tolerance=0.05,
+        overlap=0.0,
+        tissue_threshold=0.1,
+        use_padding=True,
+        backend="asap",
+    )
+    segmentation_config = sampling_mod.SegmentationConfig(
+        downsample=64,
+        sthresh=8,
+        sthresh_up=255,
+        mthresh=7,
+        close=4,
+        use_otsu=False,
+        use_hsv=True,
+    )
+    filter_config = sampling_mod.FilterConfig(
+        ref_tile_size=16,
+        a_t=4,
+        a_h=2,
+        max_n_holes=8,
+        filter_white=False,
+        filter_black=False,
+        white_threshold=220,
+        black_threshold=25,
+        fraction_threshold=0.9,
+    )
+    resolved_sampling_spec = _resolved_sampling_spec(
+        pixel_mapping={"background": 0, "tumor": 1},
+        color_mapping={"background": None, "tumor": None},
+        tissue_percentage={"background": None, "tumor": 0.7},
+    )
+    extraction = sampling_mod.CoordinateExtractionResult(
+        contour_indices=[],
+        tissue_percentages=[],
+        x=np.array([0], dtype=np.int64),
+        y=np.array([0], dtype=np.int64),
+        read_level=0,
+        read_spacing_um=0.5,
+        read_tile_size_px=256,
+        read_step_px=256,
+        resize_factor=1.0,
+        tile_size_lv0=256,
+        step_px_lv0=256,
+    )
+    artifacts = sampling_mod._save_sampling_coordinates(
+        sample_id="sample-1",
+        image_path=Path("slide.svs"),
+        mask_path=Path("mask.tif"),
+        backend="asap",
+        cfg=cfg,
+        tiling_config=tiling_config,
+        segmentation_config=segmentation_config,
+        filter_config=filter_config,
+        annotation="tumor",
+        coordinates=[(0, 0)],
+        extraction=extraction,
+        resolved_sampling_spec=resolved_sampling_spec,
+    )
+    incompatible_tiling = sampling_mod.TilingConfig(
+        target_spacing_um=0.75,
+        target_tile_size_px=256,
+        tolerance=0.05,
+        overlap=0.0,
+        tissue_threshold=0.1,
+        use_padding=True,
+        backend="asap",
+    )
+
+    with pytest.raises(ValueError, match="target_spacing_um mismatch"):
+        sampling_mod._validate_sampling_artifact_row(
+            row={
+                "sample_id": "sample-1",
+                "annotation": "tumor",
+                "image_path": "slide.svs",
+                "mask_path": "mask.tif",
+                "sampling_status": "success",
+                "num_tiles": 1,
+                "coordinates_npz_path": str(artifacts.coordinates_npz_path),
+                "coordinates_meta_path": str(artifacts.coordinates_meta_path),
+            },
+            whole_slide=SimpleNamespace(
+                sample_id="sample-1",
+                image_path=Path("slide.svs"),
+                mask_path=Path("mask.tif"),
+            ),
+            tiling_config=incompatible_tiling,
+            segmentation_config=segmentation_config,
+            filter_config=filter_config,
+            expected_tissue_threshold=0.7,
+            selection_strategy=sampling_mod.CoordinateSelectionStrategy.JOINT_SAMPLING,
+        )
 
 
 def test_coordinate_extraction_result_requires_stride_metadata():

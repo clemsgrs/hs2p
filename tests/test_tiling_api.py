@@ -9,16 +9,15 @@ import pytest
 
 import hs2p.preprocessing as preprocessing_mod
 from hs2p.api import (
+    ArtifactCompatibilitySpec,
     FilterConfig,
     PreviewConfig,
     CoordinateOutputMode,
     CoordinateSelectionStrategy,
     SegmentationConfig,
-    ResolvedSamplingSpec,
     SlideSpec,
     TilingArtifacts,
     TilingConfig,
-    compute_config_hash,
     load_tiling_result,
     load_whole_slides_from_rows,
     save_tiling_result,
@@ -103,13 +102,11 @@ def _build_result(
     sample_id: str,
     image_path: str,
     mask_path: str | None = None,
-    config_hash: str = "actual-hash",
 ) -> preprocessing_mod.TilingResult:
     return _build_preprocessing_result(
         sample_id=sample_id,
         image_path=image_path,
         mask_path=mask_path,
-        config_hash=config_hash,
         coords=np.array([[10, 20]], dtype=np.int64),
         tissue_fractions=np.array([0.0], dtype=np.float32),
         read_level=0,
@@ -127,7 +124,6 @@ def _build_preprocessing_result(
     sample_id: str = "slide-preprocess",
     image_path: str = "slide-preprocess.svs",
     mask_path: str | None = None,
-    config_hash: str | None = None,
     annotation: str | None = None,
     selection_strategy: str | None = None,
     output_mode: str | None = None,
@@ -173,7 +169,6 @@ def _build_preprocessing_result(
         ),
         sample_id=sample_id,
         image_path=image_path,
-        config_hash=config_hash,
         backend=backend,
         requested_backend=requested_backend,
         tolerance=0.07,
@@ -201,6 +196,25 @@ def _build_preprocessing_result(
         annotation=annotation,
         selection_strategy=selection_strategy,
         output_mode=output_mode,
+    )
+
+
+def _artifact_compatibility(
+    *,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+    selection_strategy: str | None = None,
+    output_mode: str | None = None,
+    annotation: str | None = None,
+) -> ArtifactCompatibilitySpec:
+    return ArtifactCompatibilitySpec(
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        selection_strategy=selection_strategy,
+        output_mode=output_mode,
+        annotation=annotation,
     )
 
 
@@ -233,7 +247,6 @@ def _save_valid_preprocessing_artifact(
         sample_id=sample_id,
         image_path=f"{sample_id}.svs",
         mask_path=f"{sample_id}-mask.png",
-        config_hash=f"{sample_id}-hash",
     )
     paths = preprocessing_mod.save_tiling_result(result, output_dir=tmp_path)
     return Path(paths["npz"]), Path(paths["meta"])
@@ -321,26 +334,6 @@ def test_tile_slide_returns_named_arrays(
     assert result.overlap == tiling_config.overlap
     assert result.tissue_threshold == tiling_config.tissue_threshold
     assert result.num_tiles == 2
-    assert result.config_hash == compute_config_hash(
-        tiling=tiling_config,
-        segmentation=segmentation_config,
-        filtering=filter_config,
-        extra={
-            "sampling": {
-                "output_mode": CoordinateOutputMode.SINGLE_OUTPUT,
-                "selection_strategy": CoordinateSelectionStrategy.MERGED_DEFAULT_TILING,
-                "resolved_sampling_spec": {
-                    "pixel_mapping": {"background": 0, "tissue": 1},
-                    "tissue_percentage": {
-                        "background": None,
-                        "tissue": tiling_config.tissue_threshold,
-                    },
-                    "color_mapping": {"background": None, "tissue": None},
-                    "active_annotations": ["tissue"],
-                },
-            }
-        },
-    )
 
 
 def test_compute_tiling_result_uses_preprocessing_core(
@@ -372,7 +365,6 @@ def test_compute_tiling_result_uses_preprocessing_core(
         filtering=filter_config,
         mask_preview_path=None,
         num_workers=2,
-        config_hash="preprocess-hash",
     )
 
     assert captured["image_path"] == Path("slide-1.svs")
@@ -403,7 +395,6 @@ def test_compute_tiling_result_uses_preprocessing_core(
     assert result.mask_path == Path("slide-1-mask.png")
     assert result.backend == "asap"
     assert result.num_tiles == 2
-    assert result.config_hash == "preprocess-hash"
     assert result.selection_strategy == CoordinateSelectionStrategy.MERGED_DEFAULT_TILING
     assert result.output_mode == CoordinateOutputMode.SINGLE_OUTPUT
     np.testing.assert_array_equal(result.x, np.array([100, 300], dtype=np.int64))
@@ -412,83 +403,6 @@ def test_compute_tiling_result_uses_preprocessing_core(
         result.tissue_fraction,
         np.array([0.25, 0.75], dtype=np.float32),
     )
-
-
-def test_tile_slide_unmasked_hash_stays_legacy(
-    monkeypatch, tiling_config, segmentation_config, filter_config
-):
-    _patch_preprocess_slide(
-        monkeypatch,
-        result=_build_preprocessing_result(
-            sample_id="slide-1",
-            image_path="slide-1.svs",
-            mask_path=None,
-            selection_strategy=None,
-            output_mode=None,
-        ),
-    )
-
-    result = tile_slide(
-        SlideSpec(
-            sample_id="slide-1",
-            image_path=Path("slide-1.svs"),
-            mask_path=None,
-        ),
-        tiling=tiling_config,
-        segmentation=segmentation_config,
-        filtering=filter_config,
-    )
-
-    assert result.config_hash == compute_config_hash(
-        tiling=tiling_config,
-        segmentation=segmentation_config,
-        filtering=filter_config,
-    )
-
-
-def test_masked_default_tiling_hash_changes_when_sampling_semantics_change(
-    tiling_config, segmentation_config, filter_config
-):
-    default_spec = ResolvedSamplingSpec(
-        pixel_mapping={"background": 0, "tissue": 1},
-        color_mapping={"background": None, "tissue": None},
-        tissue_percentage={"background": None, "tissue": tiling_config.tissue_threshold},
-        active_annotations=("tissue",),
-    )
-    changed_spec = ResolvedSamplingSpec(
-        pixel_mapping={"background": 0, "tumor": 2},
-        color_mapping={"background": None, "tumor": None},
-        tissue_percentage={"background": None, "tumor": 0.3},
-        active_annotations=("tumor",),
-    )
-
-    default_hash = compute_config_hash(
-        tiling=tiling_config,
-        segmentation=segmentation_config,
-        filtering=filter_config,
-        extra={
-            "sampling": {
-                "output_mode": CoordinateOutputMode.SINGLE_OUTPUT,
-                "selection_strategy": CoordinateSelectionStrategy.MERGED_DEFAULT_TILING,
-                "resolved_sampling_spec": default_spec,
-            }
-        },
-    )
-    changed_hash = compute_config_hash(
-        tiling=tiling_config,
-        segmentation=segmentation_config,
-        filtering=filter_config,
-        extra={
-            "sampling": {
-                "output_mode": CoordinateOutputMode.SINGLE_OUTPUT,
-                "selection_strategy": CoordinateSelectionStrategy.MERGED_DEFAULT_TILING,
-                "resolved_sampling_spec": changed_spec,
-            }
-        },
-    )
-
-    assert default_hash != changed_hash
-
 
 def test_tile_slide_warns_when_preview_qc_is_requested(
     monkeypatch, tiling_config, segmentation_config, filter_config
@@ -519,7 +433,6 @@ def test_save_tiling_result_writes_preprocessing_npz_and_json(tmp_path: Path):
     result = _build_preprocessing_result(
         sample_id="slide-2",
         image_path="slide-2.svs",
-        config_hash="abc123",
         coords=np.array([[10, 20], [30, 40]], dtype=np.int64),
         tissue_fractions=np.array([0.3, 0.7], dtype=np.float32),
         read_level=0,
@@ -569,7 +482,6 @@ def test_save_tiling_result_writes_preprocessing_npz_and_json(tmp_path: Path):
         "sample_id": "slide-2",
         "image_path": "slide-2.svs",
         "tissue_mask_path": None,
-        "config_hash": "abc123",
         "backend": "asap",
         "requested_backend": "asap",
     }
@@ -590,7 +502,6 @@ def test_save_and_load_tiling_result_round_trip(tmp_path: Path):
         sample_id="slide-roundtrip",
         image_path="slide-roundtrip.svs",
         mask_path="slide-roundtrip-mask.png",
-        config_hash="roundtrip-hash",
         coords=np.array([[10, 20], [30, 40]], dtype=np.int64),
         tissue_fractions=np.array([0.3, 0.7], dtype=np.float32),
         read_level=0,
@@ -619,7 +530,6 @@ def test_save_and_load_tiling_result_round_trip(tmp_path: Path):
     assert loaded.overlap == result.overlap
     assert loaded.tissue_threshold == result.tissue_threshold
     assert loaded.num_tiles == result.num_tiles
-    assert loaded.config_hash == result.config_hash
     np.testing.assert_array_equal(loaded.x, result.x)
     np.testing.assert_array_equal(loaded.y, result.y)
     np.testing.assert_array_equal(loaded.tile_index, result.tile_index)
@@ -631,7 +541,6 @@ def test_preprocessing_result_builder_preserves_core_fields():
         sample_id="slide-adapter",
         image_path="slide-adapter.svs",
         mask_path="slide-adapter-mask.png",
-        config_hash="adapter-hash",
         coords=np.array([[10, 20], [30, 40]], dtype=np.int64),
         tissue_fractions=np.array([0.3, 0.7], dtype=np.float32),
         backend="openslide",
@@ -664,7 +573,6 @@ def test_preprocessing_result_builder_preserves_core_fields():
     assert result.overlap == 0.1
     assert result.tissue_threshold == 0.2
     assert result.num_tiles == 2
-    assert result.config_hash == "adapter-hash"
     assert result.annotation == "tumor"
     assert result.selection_strategy == "per_annotation"
     assert result.output_mode == "multi_output"
@@ -699,7 +607,6 @@ def test_load_tiling_result_accepts_preprocessing_artifact(tmp_path: Path):
         ),
         sample_id="slide-preprocessing",
         image_path="slide-preprocessing.svs",
-        config_hash="preprocessing-hash",
         backend="openslide",
         requested_backend="openslide",
         tolerance=0.07,
@@ -752,7 +659,6 @@ def test_load_tiling_result_accepts_preprocessing_artifact(tmp_path: Path):
     assert loaded.overlap == pytest.approx(0.1)
     assert loaded.tissue_threshold == pytest.approx(0.2)
     assert loaded.num_tiles == 2
-    assert loaded.config_hash == "preprocessing-hash"
     assert loaded.annotation == "tumor"
     assert loaded.selection_strategy == "per_annotation"
     assert loaded.output_mode == "multi_output"
@@ -769,7 +675,6 @@ def test_write_tiling_preview_writes_expected_preview(monkeypatch, tmp_path: Pat
     result = _build_preprocessing_result(
         sample_id="slide-preview",
         image_path="slide-preview.svs",
-        config_hash="preview-hash",
         coords=np.array([[10, 20], [30, 40]], dtype=np.int64),
         tissue_fractions=np.array([0.0, 0.0], dtype=np.float32),
         read_level=0,
@@ -815,14 +720,12 @@ def test_tile_slides_defers_preview_writes_until_after_next_slide_compute(
         filtering,
         mask_preview_path,
         num_workers,
-        config_hash=None,
     ):
-        del tiling, segmentation, filtering, mask_preview_path, num_workers, config_hash
+        del tiling, segmentation, filtering, mask_preview_path, num_workers
         events.append(f"compute:{whole_slide.sample_id}")
         return _build_result(
             sample_id=whole_slide.sample_id,
             image_path=str(whole_slide.image_path),
-            config_hash="hash",
         )
 
     def _fake_save_tiling_result(result, output_dir, tiles_dir=None):
@@ -1056,7 +959,6 @@ def test_compute_request_passes_inner_workers_to_tile_extraction(
         return _build_preprocessing_result(
             sample_id="slide-1",
             image_path="slide-1.svs",
-            config_hash="hash",
             coords=np.array([[10, 20]], dtype=np.int64),
             tissue_fractions=np.array([0.0], dtype=np.float32),
             backend="cucim",
@@ -1113,7 +1015,6 @@ def test_compute_request_passes_inner_workers_to_tile_extraction(
         ),
         segmentation=SegmentationConfig(64, 8, 255, 7, 4, False, True),
         filtering=FilterConfig(224, 4, 2, 8, False, False, 220, 25, 0.9),
-        config_hash="hash",
         mask_preview_path=None,
         output_dir=tmp_path,
         num_workers=6,
@@ -1273,16 +1174,35 @@ def test_tile_slide_surfaces_preprocessing_errors(
         )
 
 
-def test_validate_tiling_artifacts_rejects_mismatched_hash(tmp_path: Path):
+def test_validate_tiling_artifacts_rejects_mismatched_tiling_config(
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
     result = _build_result(sample_id="slide-3", image_path="slide-3.svs")
     artifacts = save_tiling_result(result, output_dir=tmp_path)
 
-    with pytest.raises(ValueError, match="config_hash"):
+    incompatible_tiling = TilingConfig(
+        target_spacing_um=0.75,
+        target_tile_size_px=tiling_config.target_tile_size_px,
+        tolerance=tiling_config.tolerance,
+        overlap=tiling_config.overlap,
+        tissue_threshold=tiling_config.tissue_threshold,
+        use_padding=tiling_config.use_padding,
+        backend=tiling_config.backend,
+    )
+
+    with pytest.raises(ValueError, match="target_spacing_um mismatch"):
         validate_tiling_artifacts(
             whole_slide=SlideSpec(sample_id="slide-3", image_path=Path("slide-3.svs")),
             coordinates_npz_path=artifacts.coordinates_npz_path,
             coordinates_meta_path=artifacts.coordinates_meta_path,
-            expected_config_hash="different-hash",
+            compatibility=_artifact_compatibility(
+                tiling_config=incompatible_tiling,
+                segmentation_config=segmentation_config,
+                filter_config=filter_config,
+            ),
         )
 
 
@@ -1297,7 +1217,11 @@ def test_validate_tiling_artifacts_rejects_mismatched_image_path(tmp_path: Path)
             ),
             coordinates_npz_path=artifacts.coordinates_npz_path,
             coordinates_meta_path=artifacts.coordinates_meta_path,
-            expected_config_hash="actual-hash",
+            compatibility=_artifact_compatibility(
+                tiling_config=TilingConfig(0.5, 224, 0.07, 0.0, 0.1, True, "asap"),
+                segmentation_config=SegmentationConfig(64, 8, 255, 7, 4, False, True),
+                filter_config=FilterConfig(224, 4, 2, 8, False, False, 220, 25, 0.9),
+            ),
         )
 
 
@@ -1318,7 +1242,11 @@ def test_validate_tiling_artifacts_rejects_mismatched_mask_path(tmp_path: Path):
             ),
             coordinates_npz_path=artifacts.coordinates_npz_path,
             coordinates_meta_path=artifacts.coordinates_meta_path,
-            expected_config_hash="actual-hash",
+            compatibility=_artifact_compatibility(
+                tiling_config=TilingConfig(0.5, 224, 0.07, 0.0, 0.1, True, "asap"),
+                segmentation_config=SegmentationConfig(64, 8, 255, 7, 4, False, True),
+                filter_config=FilterConfig(224, 4, 2, 8, False, False, 220, 25, 0.9),
+            ),
         )
 
 
@@ -1429,7 +1357,6 @@ def test_tile_slides_omits_tiling_preview_path_when_no_tiles(
             ),
             sample_id="slide-0",
             image_path="slide-0.svs",
-            config_hash=None,
             backend="asap",
             requested_backend="asap",
             tolerance=0.07,
@@ -1529,11 +1456,6 @@ def test_tile_slides_resume_marks_stale_artifact_as_failed(
     result = _build_result(
         sample_id="slide-6",
         image_path="stored-slide.svs",
-        config_hash=compute_config_hash(
-            tiling=tiling_config,
-            segmentation=segmentation_config,
-            filtering=filter_config,
-        ),
     )
     artifacts = save_tiling_result(result, output_dir=tmp_path / "run")
     pd.DataFrame(
@@ -1601,125 +1523,6 @@ def test_tile_slides_logs_failures_in_real_time(
     assert artifacts == []
     captured = capsys.readouterr()
     assert "[tile_slides] FAILED slide-log: boom" in captured.out
-
-
-def test_tile_slides_computes_resume_hash_once_per_batch(
-    monkeypatch,
-    tmp_path: Path,
-    tiling_config: TilingConfig,
-    segmentation_config: SegmentationConfig,
-    filter_config: FilterConfig,
-):
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    pd.DataFrame(
-        [
-            {
-                "sample_id": "slide-1",
-                "image_path": "slide-1.svs",
-                "mask_path": np.nan,
-                "tiling_status": "success",
-                "num_tiles": 1,
-                "coordinates_npz_path": "slide-1.coordinates.npz",
-                "coordinates_meta_path": "slide-1.coordinates.meta.json",
-                "error": np.nan,
-                "traceback": np.nan,
-            },
-            {
-                "sample_id": "slide-2",
-                "image_path": "slide-2.svs",
-                "mask_path": np.nan,
-                "tiling_status": "success",
-                "num_tiles": 1,
-                "coordinates_npz_path": "slide-2.coordinates.npz",
-                "coordinates_meta_path": "slide-2.coordinates.meta.json",
-                "error": np.nan,
-                "traceback": np.nan,
-            },
-        ]
-    ).to_csv(run_dir / "process_list.csv", index=False)
-
-    call_count = {"count": 0}
-
-    def _fake_compute_config_hash(**kwargs):
-        call_count["count"] += 1
-        return "expected-hash"
-
-    def _fake_validate_tiling_artifacts(**kwargs):
-        sample_id = kwargs["whole_slide"].sample_id
-        return TilingArtifacts(
-            sample_id=sample_id,
-            coordinates_npz_path=Path(f"{sample_id}.coordinates.npz"),
-            coordinates_meta_path=Path(f"{sample_id}.coordinates.meta.json"),
-            num_tiles=1,
-        )
-
-    monkeypatch.setattr("hs2p.api.compute_config_hash", _fake_compute_config_hash)
-    monkeypatch.setattr(
-        "hs2p.api.validate_tiling_artifacts", _fake_validate_tiling_artifacts
-    )
-    monkeypatch.setattr(
-        api_mod,
-        "preprocess_slide",
-        lambda **_: (_ for _ in ()).throw(
-            AssertionError("resume path should not recompute tiles")
-        ),
-    )
-
-    artifacts = tile_slides(
-        [
-            SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs")),
-            SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
-        ],
-        tiling=tiling_config,
-        segmentation=segmentation_config,
-        filtering=filter_config,
-        output_dir=run_dir,
-        resume=True,
-    )
-
-    assert [artifact.sample_id for artifact in artifacts] == ["slide-1", "slide-2"]
-    assert call_count["count"] == 1
-
-
-def test_tile_slides_reuses_precomputed_hash_during_compute(
-    monkeypatch,
-    tmp_path: Path,
-    tiling_config: TilingConfig,
-    segmentation_config: SegmentationConfig,
-    filter_config: FilterConfig,
-):
-    call_count = {"count": 0}
-
-    def _fake_compute_config_hash(**kwargs):
-        del kwargs
-        call_count["count"] += 1
-        return "expected-hash"
-
-    monkeypatch.setattr("hs2p.api.compute_config_hash", _fake_compute_config_hash)
-    _patch_preprocess_slide(
-        monkeypatch,
-        result=lambda **kwargs: _build_preprocessing_result(
-            sample_id=kwargs["sample_id"],
-            image_path=str(kwargs["image_path"]),
-            mask_path=None,
-        ),
-    )
-
-    artifacts = tile_slides(
-        [
-            SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs")),
-            SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
-        ],
-        tiling=tiling_config,
-        segmentation=segmentation_config,
-        filtering=filter_config,
-        output_dir=tmp_path,
-    )
-
-    assert [artifact.sample_id for artifact in artifacts] == ["slide-1", "slide-2"]
-    assert call_count["count"] == 1
-
 
 def test_tile_slides_resume_rejects_unsupported_process_list_schema(
     tmp_path: Path,
@@ -1830,7 +1633,6 @@ def test_load_tiling_result_rejects_legacy_artifacts(tmp_path: Path):
                 "overlap": 0.0,
                 "tissue_threshold": 0.1,
                 "num_tiles": 1,
-                "config_hash": "legacy-hash",
             }
         )
     )

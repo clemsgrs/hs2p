@@ -135,7 +135,6 @@ def test_generated_tiles_match_checked_in_ground_truth_outputs(
     assert generated_loaded.overlap == pytest.approx(golden.overlap)
     assert generated_loaded.tissue_threshold == pytest.approx(golden.tissue_threshold)
     assert generated_loaded.num_tiles == golden.num_tiles == 459
-    assert generated_loaded.config_hash == golden.config_hash == result.config_hash
     assert artifacts.num_tiles == golden.num_tiles
     np.testing.assert_array_equal(generated_loaded.tile_index, golden.tile_index)
     np.testing.assert_array_equal(generated_loaded.x, golden.x)
@@ -167,8 +166,6 @@ def test_repeated_tiling_run_writes_identical_artifacts(
         tissue_pct=tissue_pct,
         output_dir=tmp_path / "run2",
     )
-
-    assert first_result.config_hash == second_result.config_hash
     assert first_tiles.files == second_tiles.files
     for key in first_tiles.files:
         np.testing.assert_array_equal(first_tiles[key], second_tiles[key])
