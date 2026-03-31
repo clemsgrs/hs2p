@@ -805,7 +805,7 @@ def validate_tiling_result_provenance(
         )
 
 
-def save_tiling_result(
+def _save_tiling_result(
     result: TilingResult,
     output_dir: Path,
     sample_id: str | None = None,
@@ -859,7 +859,7 @@ def save_tiling_result(
     return {"npz": npz_path, "meta": meta_path}
 
 
-def load_tiling_result(npz_path: Path, meta_path: Path) -> TilingResult:
+def _load_tiling_result_from_paths(npz_path: Path, meta_path: Path) -> TilingResult:
     meta = json.loads(Path(meta_path).read_text())
     return _load_tiling_result(npz_path=npz_path, meta=meta)
 
@@ -1260,12 +1260,10 @@ __all__ = [
     "detect_contours",
     "generate_tiles",
     "load_precomputed_tissue_mask",
-    "load_tiling_result",
     "normalize_artifact_path",
     "open_slide",
     "preprocess_slide",
     "resolve_base_spacing_um",
-    "save_tiling_result",
     "segment_tissue",
     "select_level",
     "select_level_for_downsample",

@@ -10,10 +10,10 @@ from hs2p.preprocessing import (
     ContourResult,
     TileGeometry,
     TilingResult,
+    _load_tiling_result_from_paths as load_tiling_result,
+    _save_tiling_result as save_tiling_result,
     detect_contours,
     generate_tiles,
-    load_tiling_result,
-    save_tiling_result,
 )
 from hs2p.wsi.read_plans import resolve_read_step_px
 

@@ -1,6 +1,5 @@
 import csv
 import io
-import itertools
 import multiprocessing as mp
 import tarfile
 import tempfile
@@ -13,6 +12,7 @@ from typing import Any, Sequence
 
 import numpy as np
 import pandas as pd
+from PIL import Image
 
 from hs2p.configs import (
     FilterConfig,
@@ -20,7 +20,6 @@ from hs2p.configs import (
     SegmentationConfig,
     TilingConfig,
 )
-from hs2p.configs.resolvers import build_default_sampling_spec
 from hs2p.progress import emit_progress, emit_progress_log
 from hs2p.tile_qc import filter_coordinate_tiles, needs_pixel_qc
 from hs2p.wsi import (
@@ -37,7 +36,6 @@ from hs2p.wsi.reader import BatchRegionReader
 from hs2p.preprocessing import (
     TilingResult,
     preprocess_slide,
-    save_tiling_result as save_preprocessing_tiling_result,
 )
 from hs2p.tiling_artifacts import (
     CompatibilitySpec,
@@ -46,6 +44,7 @@ from hs2p.tiling_artifacts import (
     load_tiling_result,
     load_whole_slides_from_rows,
     maybe_load_existing_artifacts,
+    save_tiling_result,
     validate_required_columns,
     validate_result_consistency,
     validate_tiling_artifacts,
@@ -68,8 +67,6 @@ def _write_mask_preview(
         mask = mask.astype(np.uint8, copy=False)
     if mask.max(initial=0) <= 1:
         mask = mask * 255
-    from PIL import Image
-
     Image.fromarray(mask).save(mask_preview_path)
 
 
@@ -82,9 +79,7 @@ def _compute_tiling_result(
     mask_preview_path: Path | None,
     num_workers: int,
 ) -> TilingResult:
-    sampling_spec = None
-    if whole_slide.mask_path is not None:
-        sampling_spec = build_default_sampling_spec(tiling)
+    has_mask = whole_slide.mask_path is not None
     preprocessing_result = preprocess_slide(
         image_path=whole_slide.image_path,
         sample_id=whole_slide.sample_id,
@@ -120,12 +115,10 @@ def _compute_tiling_result(
         qc_spacing_um=filtering.qc_spacing_um,
         num_workers=num_workers,
         selection_strategy=(
-            CoordinateSelectionStrategy.MERGED_DEFAULT_TILING
-            if sampling_spec is not None
-            else None
+            CoordinateSelectionStrategy.MERGED_DEFAULT_TILING if has_mask else None
         ),
         output_mode=(
-            CoordinateOutputMode.SINGLE_OUTPUT if sampling_spec is not None else None
+            CoordinateOutputMode.SINGLE_OUTPUT if has_mask else None
         ),
     )
     _write_mask_preview(
@@ -167,32 +160,6 @@ def tile_slide(
     )
 
 
-def save_tiling_result(
-    result: TilingResult,
-    output_dir: Path,
-    *,
-    tiles_dir: Path | None = None,
-) -> TilingArtifacts:
-    validate_result_consistency(result)
-    tiles_dir = (
-        Path(tiles_dir)
-        if tiles_dir is not None
-        else Path(output_dir) / "tiles"
-    )
-    tiles_dir.mkdir(parents=True, exist_ok=True)
-    artifact_paths = save_preprocessing_tiling_result(
-        result,
-        output_dir=tiles_dir,
-        sample_id=result.sample_id,
-    )
-    return TilingArtifacts(
-        sample_id=result.sample_id,
-        coordinates_npz_path=artifact_paths["npz"],
-        coordinates_meta_path=artifact_paths["meta"],
-        num_tiles=len(result.coordinates),
-    )
-
-
 def extract_tiles_to_tar(
     result: TilingResult,
     output_dir: Path,
@@ -213,8 +180,6 @@ def extract_tiles_to_tar(
     final extraction spacing. The returned ``TilingResult`` has its coordinate
     arrays trimmed to the surviving tiles.
     """
-    from PIL import Image
-
     jpeg_backend = str(jpeg_backend)
     _jpeg_encoder = None
     if jpeg_backend == "turbojpeg":
@@ -812,24 +777,16 @@ def tile_slides(
             effective_tiling = _resolve_effective_tiling(whole_slide)
             key = (whole_slide.mask_path is not None, effective_tiling.backend)
             if key not in compatibility_specs:
-                sampling_spec = (
-                    build_default_sampling_spec(effective_tiling)
-                    if whole_slide.mask_path is not None
-                    else None
-                )
+                has_mask = whole_slide.mask_path is not None
                 compatibility_specs[key] = CompatibilitySpec(
                     tiling=effective_tiling,
                     segmentation=segmentation,
                     filtering=filtering,
                     selection_strategy=(
-                        CoordinateSelectionStrategy.MERGED_DEFAULT_TILING
-                        if sampling_spec is not None
-                        else None
+                        CoordinateSelectionStrategy.MERGED_DEFAULT_TILING if has_mask else None
                     ),
                     output_mode=(
-                        CoordinateOutputMode.SINGLE_OUTPUT
-                        if sampling_spec is not None
-                        else None
+                        CoordinateOutputMode.SINGLE_OUTPUT if has_mask else None
                     ),
                 )
             compatibility = compatibility_specs[key]

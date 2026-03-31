@@ -84,8 +84,8 @@ def test_reader_resolve_backend_prefers_cucim_when_supported(monkeypatch):
 def test_reader_backend_probe_uses_backend_openers(monkeypatch):
     seen_paths: list[str] = []
 
-    def _fake_opener(path, *, spacing_override=None, gpu_decode=False):
-        del spacing_override, gpu_decode
+    def _fake_opener(path, *, spacing_override=None):
+        del spacing_override
         seen_paths.append(str(path))
         return SimpleNamespace(close=lambda: None)
 

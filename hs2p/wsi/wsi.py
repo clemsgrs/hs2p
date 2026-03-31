@@ -11,7 +11,6 @@ import wholeslidedata as wsd
 from PIL import Image
 
 from hs2p.configs import FilterConfig, SegmentationConfig, TilingConfig
-from hs2p.tile_qc import filter_coordinate_tiles
 from hs2p.wsi.backend import coerce_wsd_path, resolve_backend
 from hs2p.wsi.types import SamplingSpec
 from hs2p.wsi.utils import TissueFilter, ResolvedGeometry
@@ -234,7 +233,6 @@ class WSI(object):
         ), f"Unable to find a spacing less than or equal to the target spacing ({target_spacing}) or within {int(tolerance * 100)}% of the target spacing."
         return level, is_within_tolerance
 
-    # def get_best_level_for_downsample_custom(self, downsample: float | int):
     def get_best_level_for_downsample_custom(self, downsample: int):
         """
         Determines the best level for a given downsample factor based on the available
@@ -511,6 +509,7 @@ class WSI(object):
                     UserWarning,
                 )
 
+        from hs2p.tile_qc import filter_coordinate_tiles  # local import to avoid circular dependency
         keep_array = filter_coordinate_tiles(
             coord_candidates=np.asarray(coord_candidates, dtype=np.int64),
             keep_flags=keep_flags,
