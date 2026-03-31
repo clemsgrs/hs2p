@@ -26,7 +26,7 @@ class NullProgressReporter:
         print(message, file=target, flush=True)
 
 
-class PlainTextCliProgressReporter:
+class TextReporter:
     def __init__(self, *, stream=None) -> None:
         self.stream = stream or sys.stdout
         self._last_line_by_kind: dict[str, tuple[float, str]] = {}
@@ -88,7 +88,7 @@ class PlainTextCliProgressReporter:
         return None
 
 
-class RichCliProgressReporter:
+class RichReporter:
     def __init__(self, *, output_dir=None, console=None) -> None:
         from rich.console import Console
         from rich.progress import (
@@ -236,11 +236,11 @@ def create_cli_progress_reporter(*, output_dir=None, stream=None):
     try:
         from rich.console import Console
     except ImportError:
-        return PlainTextCliProgressReporter(stream=stream)
+        return TextReporter(stream=stream)
     console = Console(file=stream or sys.stdout)
     if not console.is_terminal:
-        return PlainTextCliProgressReporter(stream=stream or sys.stdout)
-    return RichCliProgressReporter(output_dir=output_dir, console=console)
+        return TextReporter(stream=stream or sys.stdout)
+    return RichReporter(output_dir=output_dir, console=console)
 
 
 def get_progress_reporter():

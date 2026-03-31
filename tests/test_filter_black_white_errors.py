@@ -10,7 +10,7 @@ wsi_mod = pytest.importorskip("hs2p.wsi.wsi")
 
 
 def test_filter_black_white_tile_errors_warn_and_keep_tile():
-    wsi = object.__new__(wsi_mod.WholeSlideImage)
+    wsi = object.__new__(wsi_mod.WSI)
     wsi.path = "fake-slide.tif"
     wsi.backend = "openslide"
     wsi.level_dimensions = [(100, 100)]
@@ -49,7 +49,7 @@ def test_filter_black_white_tile_errors_warn_and_keep_tile():
 
 
 def test_filter_black_and_white_tiles_batches_reads_without_changing_decisions():
-    wsi = object.__new__(wsi_mod.WholeSlideImage)
+    wsi = object.__new__(wsi_mod.WSI)
     wsi.path = "fake-slide.tif"
     wsi.backend = "openslide"
     wsi.level_dimensions = [(4, 4)]
@@ -98,7 +98,7 @@ def test_filter_black_and_white_tiles_batches_reads_without_changing_decisions()
 
 
 def test_filter_black_and_white_tiles_uses_cucim_batched_read_region(monkeypatch):
-    wsi = object.__new__(wsi_mod.WholeSlideImage)
+    wsi = object.__new__(wsi_mod.WSI)
     wsi.path = Path("fake-slide.tif")
     wsi.backend = "cucim"
     wsi.level_dimensions = [(4, 4)]

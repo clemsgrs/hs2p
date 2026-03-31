@@ -132,13 +132,13 @@ def test_wholeslideimage_coerces_cucim_paths_to_strings(monkeypatch):
         ),
     )
     monkeypatch.setattr(wsi_mod.wsd, "WholeSlideImage", _fake_wholeslideimage)
-    monkeypatch.setattr(wsi_mod.WholeSlideImage, "load_segmentation", lambda *args, **kwargs: 0)
+    monkeypatch.setattr(wsi_mod.WSI, "load_segmentation", lambda *args, **kwargs: 0)
 
-    wsi_mod.WholeSlideImage(
+    wsi_mod.WSI(
         path=Path("/tmp/slide.tiff"),
         mask_path=Path("/tmp/mask.tiff"),
         backend="auto",
-        sampling_spec=wsi_mod.ResolvedSamplingSpec(
+        sampling_spec=wsi_mod.SamplingSpec(
             pixel_mapping={"background": 0, "tumor": 1},
             color_mapping={"background": None, "tumor": None},
             tissue_percentage={"background": None, "tumor": 0.1},

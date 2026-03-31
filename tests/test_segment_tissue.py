@@ -7,7 +7,7 @@ import hs2p.wsi.wsi as wsimod
 
 
 def _make_dummy(raw_spacings: list[float], seg_level: int = 0):
-    """Build a minimal WholeSlideImage stand-in for segment_tissue tests."""
+    """Build a minimal WSI stand-in for segment_tissue tests."""
     dummy = SimpleNamespace()
     dummy.raw_spacings = raw_spacings
     dummy.get_slide = lambda level: np.zeros((2, 2, 3), dtype=np.uint8)
@@ -58,7 +58,7 @@ def test_segment_tissue_strips_alpha_channel_before_hsv_conversion(monkeypatch):
     _patch_cv2_passthrough(monkeypatch)
     monkeypatch.setattr(wsimod.cv2, "cvtColor", _fake_cvt_color)
 
-    seg_level = wsimod.WholeSlideImage.segment_tissue(dummy, _SEG_PARAMS)
+    seg_level = wsimod.WSI.segment_tissue(dummy, _SEG_PARAMS)
 
     assert seg_level == 0
     assert captured_shape["shape"] == (2, 2, 3)
@@ -86,7 +86,7 @@ def test_segment_tissue_reads_from_correct_seg_level(monkeypatch):
 
     _patch_cv2_passthrough(monkeypatch)
 
-    wsimod.WholeSlideImage.segment_tissue(dummy, _SEG_PARAMS)
+    wsimod.WSI.segment_tissue(dummy, _SEG_PARAMS)
 
     assert levels_read == [4], (
         f"Expected get_slide(4) for a 5-level pyramid with seg_level=4, got {levels_read}. "

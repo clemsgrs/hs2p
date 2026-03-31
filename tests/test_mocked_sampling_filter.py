@@ -5,8 +5,8 @@ import numpy as np
 from hs2p.api import SegmentationConfig, TilingConfig
 import hs2p.wsi.api as wsi_api
 import hs2p.wsi.masks as wsi_masks
-from hs2p.wsi import ResolvedSamplingSpec
-from hs2p.wsi.wsi import WholeSlideImage
+from hs2p.wsi import SamplingSpec
+from hs2p.wsi.wsi import WSI
 
 
 def _segmentation_config(*, downsample: int = 2) -> SegmentationConfig:
@@ -33,8 +33,8 @@ def _tiling_config() -> TilingConfig:
     )
 
 
-def _sampling_spec() -> ResolvedSamplingSpec:
-    return ResolvedSamplingSpec(
+def _sampling_spec() -> SamplingSpec:
+    return SamplingSpec(
         pixel_mapping={"background": 0, "tumor": 1, "stroma": 2},
         color_mapping={"background": None, "tumor": None, "stroma": None},
         tissue_percentage={"background": None, "tumor": 0.5, "stroma": 0.5},
@@ -99,7 +99,7 @@ def test_filter_coordinates_reuses_loaded_mask_and_avoids_per_tile_mask_reads(
                 "filter_coordinates should not read one mask patch per tile"
             )
 
-    class FakeWholeSlideImage:
+    class FakeWSI:
         def __init__(
             self,
             path,
@@ -132,7 +132,7 @@ def test_filter_coordinates_reuses_loaded_mask_and_avoids_per_tile_mask_reads(
             assert level == 0
             return 1.0
 
-    monkeypatch.setattr(wsi_api, "WholeSlideImage", FakeWholeSlideImage)
+    monkeypatch.setattr(wsi_api, "WSI", FakeWSI)
 
     filtered, filtered_indices = wsi_api.filter_coordinates(
         wsi_path=Path("synthetic-slide.tif"),
@@ -183,7 +183,7 @@ def test_filter_coordinates_vectorized_path_avoids_per_tile_crops_and_handles_bo
                 dtype=np.uint8,
             )
 
-    class FakeWholeSlideImage:
+    class FakeWSI:
         def __init__(
             self,
             path,
@@ -213,7 +213,7 @@ def test_filter_coordinates_vectorized_path_avoids_per_tile_crops_and_handles_bo
             assert level == 0
             return 1.0
 
-    monkeypatch.setattr(wsi_api, "WholeSlideImage", FakeWholeSlideImage)
+    monkeypatch.setattr(wsi_api, "WSI", FakeWSI)
     monkeypatch.setattr(
         wsi_masks,
         "extract_padded_crop",
@@ -239,7 +239,7 @@ def test_filter_coordinates_vectorized_path_avoids_per_tile_crops_and_handles_bo
             use_padding=False,
             backend="asap",
         ),
-        sampling_spec=ResolvedSamplingSpec(
+        sampling_spec=SamplingSpec(
             pixel_mapping={"background": 0, "tumor": 1},
             color_mapping={"background": None, "tumor": None},
             tissue_percentage={"background": None, "tumor": 0.5},
@@ -259,14 +259,14 @@ def test_load_segmentation_preserves_discrete_labels_with_nearest_neighbor(
     mask_l0[4:12, 8:12, 0] = 2
     fake_backend(mask_l0)
 
-    sampling_spec = ResolvedSamplingSpec(
+    sampling_spec = SamplingSpec(
         pixel_mapping={"background": 0, "tumor": 1, "stroma": 2},
         color_mapping={"background": None, "tumor": None, "stroma": None},
         tissue_percentage={"background": None, "tumor": 0.0, "stroma": 0.0},
         active_annotations=("tumor", "stroma"),
     )
 
-    wsi = WholeSlideImage(
+    wsi = WSI(
         path=Path("synthetic-slide.tif"),
         mask_path=Path("synthetic-mask.tif"),
         backend="asap",

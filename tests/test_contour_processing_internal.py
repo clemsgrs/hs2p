@@ -46,7 +46,7 @@ def test_process_contours_concatenates_numpy_outputs_without_list_roundtrip():
             )
 
     x_coords, y_coords, tissue_pct, contour_indices, tile_level, resize_factor = (
-        wsimod.WholeSlideImage.process_contours(
+        wsimod.WSI.process_contours(
             DummyWSI(),
             contours=["first", "empty", "second"],
             holes=[[], [], []],

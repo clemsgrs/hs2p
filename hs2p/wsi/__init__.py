@@ -31,4 +31,4 @@ from .visualization import (
     save_overlay_preview,
     write_coordinate_preview,
 )
-from .types import ResolvedSamplingSpec
+from .types import SamplingSpec

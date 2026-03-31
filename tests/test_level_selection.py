@@ -4,8 +4,8 @@ import pytest
 
 from hs2p.api import FilterConfig, SegmentationConfig, TilingConfig
 import hs2p.wsi.api as wsi_api
-from hs2p.wsi import ResolvedSamplingSpec
-from hs2p.wsi.wsi import WholeSlideImage
+from hs2p.wsi import SamplingSpec
+from hs2p.wsi.wsi import WSI
 
 
 def _segmentation_config() -> SegmentationConfig:
@@ -45,8 +45,8 @@ def _tiling_config(*, spacing: float = 1.0, tolerance: float = 0.01) -> TilingCo
     )
 
 
-def _sampling_spec() -> ResolvedSamplingSpec:
-    return ResolvedSamplingSpec(
+def _sampling_spec() -> SamplingSpec:
+    return SamplingSpec(
         pixel_mapping={"background": 0, "tissue": 1},
         color_mapping={"background": None, "tissue": None},
         tissue_percentage={"background": None, "tissue": 0.0},
@@ -57,7 +57,7 @@ def _sampling_spec() -> ResolvedSamplingSpec:
 def test_get_best_level_for_spacing_returns_within_tolerance_level(fake_backend):
     mask = pytest.importorskip("numpy").zeros((16, 16, 1), dtype="uint8")
     fake_backend(mask)
-    wsi = WholeSlideImage(path=Path("synthetic-slide.tif"), backend="asap")
+    wsi = WSI(path=Path("synthetic-slide.tif"), backend="asap")
 
     level, within_tolerance = wsi.get_best_level_for_spacing(
         target_spacing=2.1, tolerance=0.10
@@ -72,7 +72,7 @@ def test_get_best_level_for_spacing_falls_back_to_finer_level_when_closest_is_to
 ):
     mask = pytest.importorskip("numpy").zeros((16, 16, 1), dtype="uint8")
     fake_backend(mask)
-    wsi = WholeSlideImage(path=Path("synthetic-slide.tif"), backend="asap")
+    wsi = WSI(path=Path("synthetic-slide.tif"), backend="asap")
 
     level, within_tolerance = wsi.get_best_level_for_spacing(
         target_spacing=3.5, tolerance=0.01
@@ -90,7 +90,7 @@ def test_extract_coordinates_raises_when_target_spacing_is_below_level0_beyond_t
         def __init__(self, *args, **kwargs):
             self.spacings = [1.0]
 
-    monkeypatch.setattr(wsi_api, "WholeSlideImage", GuardOnlyWSI)
+    monkeypatch.setattr(wsi_api, "WSI", GuardOnlyWSI)
 
     with pytest.raises(ValueError, match="Desired spacing"):
         wsi_api.extract_coordinates(

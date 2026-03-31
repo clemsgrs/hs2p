@@ -11,7 +11,7 @@ from .preview import (
     draw_grid_from_coordinates,
     pad_to_patch_size,
 )
-from .wsi import WholeSlideImage
+from .wsi import WSI
 
 DEFAULT_TISSUE_PIXEL_MAPPING = {"background": 0, "tissue": 1}
 DEFAULT_TISSUE_COLOR_MAPPING = {
@@ -89,7 +89,7 @@ def overlay_mask_on_slide(
         color_mapping=color_mapping,
     )
 
-    wsi_object = WholeSlideImage(path=wsi_path, backend=backend)
+    wsi_object = WSI(path=wsi_path, backend=backend)
 
     vis_level = wsi_object.get_best_level_for_downsample_custom(downsample)
     wsi_arr = wsi_object.get_slide(vis_level)
@@ -109,7 +109,7 @@ def overlay_mask_on_slide(
         )
         width, height = wsi.size
     if annotation_mask_path is not None:
-        mask_object = WholeSlideImage(
+        mask_object = WSI(
             path=annotation_mask_path,
             backend=backend,
         )
@@ -190,10 +190,10 @@ def write_coordinate_preview(
     pixel_mapping: dict[str, int] | None = None,
     color_mapping: dict[str, list[int] | None] | None = None,
 ):
-    wsi = WholeSlideImage(wsi_path, backend=backend)
+    wsi = WSI(wsi_path, backend=backend)
     vis_level = wsi.get_best_level_for_downsample_custom(downsample)
     if mask_path is not None:
-        mask = WholeSlideImage(mask_path, backend=backend)
+        mask = WSI(mask_path, backend=backend)
     else:
         mask = None
 

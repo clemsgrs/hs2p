@@ -32,7 +32,7 @@ def _resolved_sampling_spec(
     tissue_percentage: dict[str, float | None],
     color_mapping: dict[str, list[int] | None] | None = None,
 ):
-    return sampling_mod.ResolvedSamplingSpec(
+    return sampling_mod.SamplingSpec(
         pixel_mapping=pixel_mapping,
         color_mapping=color_mapping,
         tissue_percentage=tissue_percentage,
@@ -147,7 +147,7 @@ def test_process_slide_accepts_resolved_sampling_spec(monkeypatch, tmp_path):
             sampling_params=SimpleNamespace(independent_sampling=True),
         ),
     )
-    resolved_sampling_spec = sampling_mod.ResolvedSamplingSpec(
+    resolved_sampling_spec = sampling_mod.SamplingSpec(
         pixel_mapping={"background": 0, "tumor": 1},
         color_mapping={"background": None, "tumor": None},
         tissue_percentage={"background": None, "tumor": 0.1},

@@ -7,7 +7,7 @@ from hs2p.wsi.geometry import project_discrete_grid_origins
 
 
 @dataclass(frozen=True)
-class ResolvedTileGeometry:
+class ResolvedGeometry:
     target_tile_size_px: int
     read_spacing_um: float
     resize_factor: float
@@ -32,13 +32,13 @@ class ResolvedTileGeometry:
         return self.seg_spacing_um / self.level0_spacing_um
 
 
-class HasEnoughTissue(object):
+class TissueFilter(object):
     def __init__(
         self,
         contour,
         contour_holes,
         tissue_mask,
-        geometry: ResolvedTileGeometry,
+        geometry: ResolvedGeometry,
         pct=0.01,
     ):
         self.cont = contour

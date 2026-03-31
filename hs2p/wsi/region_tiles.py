@@ -8,14 +8,14 @@ from hs2p.wsi.read_plans import GroupedReadPlan
 
 
 @dataclass(frozen=True)
-class RegionTileView:
+class TileView:
     x: int
     y: int
     tile_arr: np.ndarray
 
 
 @dataclass(frozen=True)
-class PlannedRegionTileView:
+class PlannedTileView:
     tile_index: int
     x: int
     y: int
@@ -33,7 +33,7 @@ def iter_region_tile_views(
 ):
     region = np.asarray(region)
     if int(block_size) == 1:
-        yield RegionTileView(
+        yield TileView(
             x=int(origin_x),
             y=int(origin_y),
             tile_arr=region[:tile_size_px, :tile_size_px],
@@ -43,7 +43,7 @@ def iter_region_tile_views(
         x0 = x_idx * int(read_step_px)
         for y_idx in range(int(block_size)):
             y0 = y_idx * int(read_step_px)
-            yield RegionTileView(
+            yield TileView(
                 x=int(origin_x + x0),
                 y=int(origin_y + y0),
                 tile_arr=region[
@@ -69,7 +69,7 @@ def iter_plan_region_tile_views(
         tile_size_px=int(tile_size_px),
         read_step_px=int(read_step_px),
     ):
-        yield PlannedRegionTileView(
+        yield PlannedTileView(
             tile_index=next(tile_index_iter),
             x=int(tile_view.x),
             y=int(tile_view.y),
