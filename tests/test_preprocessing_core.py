@@ -167,33 +167,6 @@ def test_tiling_artifact_roundtrip_uses_strict_rich_metadata(tmp_path):
     paths["meta"].write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n")
     with pytest.raises(ValueError, match="unexpected keys"):
         load_tiling_result(paths["npz"], paths["meta"])
-
-
-def test_tiling_artifact_roundtrip_accepts_missing_new_filter_keys(tmp_path):
-    result = _make_tiling_result()
-    paths = save_tiling_result(result, tmp_path, "slide-001")
-
-    meta = json.loads(paths["meta"].read_text())
-    for key in (
-        "filter_grayspace",
-        "grayspace_saturation_threshold",
-        "grayspace_fraction_threshold",
-        "filter_blur",
-        "blur_threshold",
-        "qc_spacing_um",
-    ):
-        del meta["filtering"][key]
-    paths["meta"].write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n")
-
-    loaded = load_tiling_result(paths["npz"], paths["meta"])
-    assert loaded.filter_grayspace is False
-    assert loaded.grayspace_saturation_threshold == pytest.approx(0.05)
-    assert loaded.grayspace_fraction_threshold == pytest.approx(0.6)
-    assert loaded.filter_blur is False
-    assert loaded.blur_threshold == pytest.approx(50.0)
-    assert loaded.qc_spacing_um == pytest.approx(2.0)
-
-
 def test_top_level_package_reexports_preprocessing_core_surface():
     assert hs2p.ContourResult is ContourResult
     assert hs2p.TileGeometry is TileGeometry

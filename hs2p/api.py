@@ -577,45 +577,81 @@ def _apply_qc_filtering_to_result(
     num_workers: int,
     gpu_decode: bool = False,
 ) -> TilingResult:
-    from hs2p.wsi.reader import BatchRegionReader, open_slide
+    keep_flags: np.ndarray
+    if result.backend == "cucim":
+        from hs2p.wsi.reader import BatchRegionReader, open_slide
 
-    with open_slide(
-        result.image_path,
-        backend=result.backend,
-        spacing_override=result.base_spacing_um,
-        gpu_decode=gpu_decode,
-    ) as slide:
-        batch_read_windows = None
-        if isinstance(slide, BatchRegionReader):
-            batch_read_windows = (
-                lambda locations, size, level, workers: slide.read_regions(
-                    locations,
-                    level,
-                    size,
-                    num_workers=workers,
-                    pad_missing=False,
+        with open_slide(
+            result.image_path,
+            backend=result.backend,
+            spacing_override=result.base_spacing_um,
+            gpu_decode=gpu_decode,
+        ) as slide:
+            batch_read_windows = None
+            if isinstance(slide, BatchRegionReader):
+                batch_read_windows = (
+                    lambda locations, size, level, workers: slide.read_regions(
+                        locations,
+                        level,
+                        size,
+                        num_workers=workers,
+                        pad_missing=False,
+                    )
                 )
+            keep_flags = filter_coordinate_tiles(
+                coord_candidates=result.coordinates,
+                keep_flags=np.ones(len(result.coordinates), dtype=np.uint8),
+                level_dimensions=slide.level_dimensions,
+                level_downsamples=slide.level_downsamples,
+                target_tile_size_px=result.requested_tile_size_px,
+                target_spacing_um=result.requested_spacing_um,
+                base_spacing_um=result.base_spacing_um,
+                tolerance=result.tolerance,
+                filter_params=filter_params,
+                read_window=lambda x, y, width, height, level: slide.read_region(
+                    (x, y),
+                    level,
+                    (width, height),
+                    pad_missing=False,
+                ),
+                batch_read_windows=batch_read_windows,
+                num_workers=num_workers,
+                source_label=str(result.image_path),
             )
-        keep_flags = filter_coordinate_tiles(
-            coord_candidates=result.coordinates,
-            keep_flags=np.ones(len(result.coordinates), dtype=np.uint8),
-            level_dimensions=slide.level_dimensions,
-            level_downsamples=slide.level_downsamples,
-            target_tile_size_px=result.requested_tile_size_px,
-            target_spacing_um=result.requested_spacing_um,
-            base_spacing_um=result.base_spacing_um,
-            tolerance=result.tolerance,
-            filter_params=filter_params,
-            read_window=lambda x, y, width, height, level: slide.read_region(
-                (x, y),
-                level,
-                (width, height),
-                pad_missing=False,
-            ),
-            batch_read_windows=batch_read_windows,
-            num_workers=num_workers,
-            source_label=str(result.image_path),
+    else:
+        import wholeslidedata as wsd
+
+        wsi = wsd.WholeSlideImage(
+            coerce_wsd_path(result.image_path, backend=result.backend),
+            backend=result.backend,
         )
+        try:
+            keep_flags = filter_coordinate_tiles(
+                coord_candidates=result.coordinates,
+                keep_flags=np.ones(len(result.coordinates), dtype=np.uint8),
+                level_dimensions=result.level_dimensions,
+                level_downsamples=result.level_downsamples,
+                target_tile_size_px=result.requested_tile_size_px,
+                target_spacing_um=result.requested_spacing_um,
+                base_spacing_um=result.base_spacing_um,
+                tolerance=result.tolerance,
+                filter_params=filter_params,
+                read_window=lambda x, y, width, height, level: wsi.get_patch(
+                    x,
+                    y,
+                    width,
+                    height,
+                    spacing=wsi.spacings[level],
+                    center=False,
+                ),
+                batch_read_windows=None,
+                num_workers=num_workers,
+                source_label=str(result.image_path),
+            )
+        finally:
+            close = getattr(wsi, "close", None)
+            if callable(close):
+                close()
     keep = np.asarray(keep_flags, dtype=bool)
     if int(keep.sum()) == len(result.coordinates):
         return replace(

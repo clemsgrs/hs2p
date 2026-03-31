@@ -637,14 +637,6 @@ _FILTERING_KEYS = {
     "qc_spacing_um",
 }
 
-_FILTERING_DEFAULTS = {
-    "filter_grayspace": False,
-    "grayspace_saturation_threshold": 0.05,
-    "grayspace_fraction_threshold": 0.6,
-    "filter_blur": False,
-    "blur_threshold": 50.0,
-    "qc_spacing_um": 2.0,
-}
 _ARTIFACT_KEYS = {
     "coordinate_space",
     "tile_order",
@@ -774,15 +766,6 @@ def _validate_metadata_schema(meta: dict[str, Any]) -> None:
         extra = section_keys - expected_keys
         if missing or extra:
             _raise_key_error(section_name, missing, extra)
-
-
-def _normalize_filtering_metadata(filtering: dict[str, Any]) -> dict[str, Any]:
-    normalized = dict(filtering)
-    for key, value in _FILTERING_DEFAULTS.items():
-        normalized.setdefault(key, value)
-    return normalized
-
-
 def normalize_artifact_path(path: str | Path | None) -> str | None:
     if path is None:
         return None
@@ -883,9 +866,6 @@ def load_tiling_result(npz_path: Path, meta_path: Path) -> TilingResult:
 
 def _load_tiling_result(*, npz_path: Path, meta: dict[str, Any]) -> TilingResult:
     data = np.load(npz_path, allow_pickle=False)
-    meta = dict(meta)
-    if isinstance(meta.get("filtering"), dict):
-        meta["filtering"] = _normalize_filtering_metadata(meta["filtering"])
     _validate_metadata_schema(meta)
 
     if "tile_index" not in data:
