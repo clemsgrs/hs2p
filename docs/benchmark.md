@@ -1,6 +1,17 @@
-# Tile Store Benchmark
+# Benchmark Notes
 
-This note tells the story behind how I optimized the tile throughput when creating the tile store.
+The benchmark entrypoints now live in:
+
+- `scripts/benchmark_tile_read.py`
+- `scripts/benchmark_tile_store.py`
+
+with shared helper logic in:
+
+- `scripts/benchmark_tile_read_support.py`
+- `scripts/benchmark_tile_store_support.py`
+- `scripts/benchmark_tile_utils.py`
+
+This note tells the story behind the tile-store throughput improvements that motivated the current benchmark setup.
 
 <img src="../output/tile-store-benchmark-path-breakdown/throughput.png" alt="Tile-store benchmark progression" width="900">
 

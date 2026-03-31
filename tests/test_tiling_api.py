@@ -474,13 +474,11 @@ def test_save_tiling_result_writes_preprocessing_npz_and_json(tmp_path: Path):
     assert set(meta) == {
         "artifact",
         "filtering",
-        "format_version",
         "provenance",
         "segmentation",
         "slide",
         "tiling",
     }
-    assert meta["format_version"] == 2
     assert meta["provenance"] == {
         "sample_id": "slide-2",
         "image_path": "slide-2.svs",
@@ -1598,19 +1596,6 @@ def test_load_tiling_result_wraps_corrupt_npz_errors_with_path(tmp_path: Path):
         load_tiling_result(npz_path, meta_path)
 
 
-def test_load_tiling_result_rejects_missing_meta_keys(tmp_path: Path):
-    npz_path, meta_path = _save_valid_preprocessing_artifact(
-        tmp_path,
-        sample_id="broken-meta",
-    )
-    meta = json.loads(meta_path.read_text())
-    del meta["format_version"]
-    meta_path.write_text(json.dumps(meta))
-
-    with pytest.raises(ValueError, match="Unsupported tiling artifact format"):
-        load_tiling_result(npz_path, meta_path)
-
-
 def test_load_tiling_result_rejects_legacy_artifacts(tmp_path: Path):
     npz_path = tmp_path / "legacy.coordinates.npz"
     meta_path = tmp_path / "legacy.coordinates.meta.json"
@@ -1641,7 +1626,7 @@ def test_load_tiling_result_rejects_legacy_artifacts(tmp_path: Path):
         )
     )
 
-    with pytest.raises(ValueError, match="Unsupported tiling artifact format"):
+    with pytest.raises(ValueError, match="Invalid tiling metadata"):
         load_tiling_result(npz_path, meta_path)
 
 

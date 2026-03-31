@@ -562,9 +562,7 @@ def _compute_tissue_fractions(
 
 COORDINATE_SPACE = "level0_px"
 TILE_ORDER = "x_then_y"
-FORMAT_VERSION = 2
 _TOP_LEVEL_META_KEYS = {
-    "format_version",
     "provenance",
     "slide",
     "tiling",
@@ -699,7 +697,6 @@ def _build_tiling_metadata(result: TilingResult) -> dict[str, Any]:
         "output_mode": result.output_mode,
     }
     return {
-        "format_version": FORMAT_VERSION,
         "provenance": provenance,
         "slide": slide,
         "tiling": tiling,
@@ -848,15 +845,10 @@ def save_tiling_result(
 
 def load_tiling_result(npz_path: Path, meta_path: Path) -> TilingResult:
     meta = json.loads(Path(meta_path).read_text())
-    if meta.get("format_version") != FORMAT_VERSION:
-        raise ValueError(
-            "Unsupported tiling artifact format; "
-            f"expected format_version {FORMAT_VERSION}"
-        )
-    return _load_v2_tiling_result(npz_path=npz_path, meta=meta)
+    return _load_tiling_result(npz_path=npz_path, meta=meta)
 
 
-def _load_v2_tiling_result(*, npz_path: Path, meta: dict[str, Any]) -> TilingResult:
+def _load_tiling_result(*, npz_path: Path, meta: dict[str, Any]) -> TilingResult:
     data = np.load(npz_path, allow_pickle=False)
     _validate_metadata_schema(meta)
 

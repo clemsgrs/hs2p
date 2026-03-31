@@ -1,41 +1,48 @@
 # Python API
 
-The Python API is the primary interface when you want to call `hs2p` from your own code instead of driving it through the CLI. It supports:
+The Python API is the best entrypoint when you want to integrate `hs2p` into your own pipeline instead of driving it through the CLI. The current public surface is split into:
 
-- explicit slide objects through `SlideSpec`
-- extraction at any requested spacing, whether or not that spacing exists natively in the slide pyramid
-- direct in-memory results through `TilingResult`
-- reusable persisted artifacts through `save_tiling_result()` / `load_tiling_result()`
-- batch orchestration with optional previews through `tile_slides()`
-- explicit preview helpers for single-slide workflows through `write_tiling_preview()` and `overlay_mask_on_slide()`
+- high-level orchestration in `hs2p.api`
+- the canonical in-memory result model in `hs2p.preprocessing`
+- lower-level WSI helpers in `hs2p.wsi`
 
-The config dataclasses keep the main knobs explicit and fill secondary options from the packaged defaults in `hs2p/configs/default.yaml`.
-
-## Main types
+## Main public types
 
 - `SlideSpec`
-  - Identifies one sample through `sample_id`, `image_path`, and optional `mask_path`
-  - If `mask_path` is omitted, HS2P can segment tissue directly from the slide
-  - `spacing_at_level_0` overrides the spacing embedded in the file metadata (µm/px at pyramid level 0); all other pyramid-level spacings are rescaled proportionally. Use this when the file reports a wrong or missing spacing.
+  - Identifies one slide via `sample_id`, `image_path`, and optional `mask_path`
+  - `SlideSpec` stays generic because it is shared across tiling and sampling internals
+  - `spacing_at_level_0` can override broken or missing slide metadata
 - `TilingConfig`
-  - Defines the requested backend, spacing, tile size, overlap, and tissue threshold
+  - Requested backend, spacing, tile size, overlap, padding, and minimum tissue fraction
 - `SegmentationConfig`
-  - Controls tissue segmentation before coordinates are extracted
+  - Tissue-segmentation settings used before coordinate extraction
 - `FilterConfig`
-  - Controls contour and white/black filtering after segmentation
+  - Contour and optional white/black filtering settings
 - `PreviewConfig`
-  - Controls whether batch preview images are written and at what downsample
+  - Batch preview toggles and preview downsample
 - `TilingResult`
-  - In-memory tile coordinates plus read-level metadata for one slide
+  - Canonical in-memory result model from `hs2p.preprocessing`
+- `TileGeometry`
+  - Canonical geometry container with `coordinates`, `tissue_fractions`, and `tile_index`
 - `TilingArtifacts`
-  - Paths to the saved `.coordinates.npz` and `.coordinates.meta.json` outputs
-  - Can also carry preview-image paths when batch QC is enabled in `tile_slides()`
+  - Lightweight record of saved artifact paths and optional preview/tar outputs
 
-For field-by-field details, see the dataclass docstrings in [hs2p/api.py](../hs2p/api.py).
+## Canonical result contract
 
-## Single-slide flow
+`TilingResult` is the only supported tiling-result model. Downstream code should use:
 
-Use `tile_slide()` when you want an in-memory result for one slide and you will decide yourself whether to persist it.
+- `coordinates`
+- `tissue_fractions`
+- `tile_index`
+- `requested_tile_size_px`
+- `requested_spacing_um`
+- `effective_tile_size_px`
+- `effective_spacing_um`
+- `tile_size_lv0`
+- `step_px_lv0`
+- `min_tissue_fraction`
+
+## Single-slide tiling
 
 ```python
 from pathlib import Path
@@ -53,8 +60,7 @@ result = tile_slide(
     SlideSpec(
         sample_id="slide-1",
         image_path=Path("/data/slide-1.tif"),
-        mask_path=Path("/data/slide-1-mask.tif"),
-        spacing_at_level_0=0.25,  # omit to use the spacing embedded in the file
+        mask_path=Path("/data/slide-1-tissue-mask.tif"),
     ),
     tiling=TilingConfig(
         backend="openslide",
@@ -63,62 +69,26 @@ result = tile_slide(
         tolerance=0.07,
         overlap=0.0,
         tissue_threshold=0.1,
+        use_padding=True,
     ),
     segmentation=SegmentationConfig(downsample=64),
     filtering=FilterConfig(ref_tile_size=224, a_t=4, a_h=2),
-    num_workers=1,
 )
 
 artifacts = save_tiling_result(result, output_dir=Path("output"))
 ```
 
-`result` is a [`TilingResult`](../hs2p/api.py#L144) for one slide. That object is what downstream code should use when it needs coordinates immediately in memory.
+Use `tile_slide()` when you want an in-memory result for one slide.
 
-Typical downstream uses:
+## Batch tiling
 
-- extracting image patches from the WSI at the returned `x` / `y` coordinates
-- joining model outputs back to tiles through `tile_index`
-- persisting one tiling pass and reusing it across later training, inference, or QC jobs
+Use `tile_slides()` when you want:
 
-`tile_slide()` is intentionally compute-only. Persist the coordinates with `save_tiling_result()`, then call `write_tiling_preview()` or `overlay_mask_on_slide()` if you want preview images in the same single-slide workflow.
-
-## Preview helpers for single-slide workflows
-
-When you are not using `tile_slides()`, the public preview helpers let you render the same kinds of QC assets explicitly:
-
-- `write_tiling_preview(result=..., output_dir=..., downsample=...)`
-  - Draws the returned tile grid on the slide overview and writes `preview/tiling/{sample_id}.jpg`
-  - Useful after `tile_slide()` when you want a quick visual check of coverage without switching to the batch API
-- `overlay_mask_on_slide(...)`
-  - Overlays a tissue or annotation mask on the slide overview
-  - Useful when you want to inspect the mask itself, independently of the tiling grid
-  - The default tissue preview used by `tile_slides(..., preview=PreviewConfig(save_mask_preview=True, ...))` hides background and overlays tissue in `[157, 219, 129]`
-
-Example:
-
-```python
-from pathlib import Path
-
-from hs2p import overlay_mask_on_slide, write_tiling_preview
-
-tiling_preview_path = write_tiling_preview(
-    result=result,
-    output_dir=Path("output"),
-    downsample=32,
-)
-
-mask_overlay = overlay_mask_on_slide(
-    wsi_path=result.image_path,
-    annotation_mask_path=Path("/data/slide-1-mask.tif"),
-    downsample=32,
-    backend=result.backend,
-)
-mask_overlay.save("output/preview/mask/slide-1.jpg")
-```
-
-## Batch flow with previews
-
-Use `tile_slides()` when you want batch processing, named outputs, `process_list.csv`, resume support, or preview images.
+- `process_list.csv`
+- resume support
+- preview rendering
+- reuse from `read_coordinates_from`
+- optional tile tar export
 
 ```python
 from pathlib import Path
@@ -136,23 +106,21 @@ slides = [
     SlideSpec(
         sample_id="slide-1",
         image_path=Path("/data/slide-1.tif"),
-        mask_path=Path("/data/slide-1-mask.tif"),
+        mask_path=Path("/data/slide-1-tissue-mask.tif"),
     ),
-    SlideSpec(
-        sample_id="slide-2",
-        image_path=Path("/data/slide-2.tif"),
-    ),
+    SlideSpec(sample_id="slide-2", image_path=Path("/data/slide-2.tif")),
 ]
 
 artifacts = tile_slides(
     slides,
     tiling=TilingConfig(
-        backend="openslide",
+        backend="auto",
         target_spacing_um=0.5,
         target_tile_size_px=224,
         tolerance=0.07,
         overlap=0.0,
         tissue_threshold=0.1,
+        use_padding=True,
     ),
     segmentation=SegmentationConfig(downsample=64),
     filtering=FilterConfig(ref_tile_size=224, a_t=4, a_h=2),
@@ -166,52 +134,50 @@ artifacts = tile_slides(
 )
 ```
 
-In this mode, `PreviewConfig` is useful because preview rendering is handled by `tile_slides()`, not by `tile_slide()`. Mask previews are rendered as tissue overlays rather than contour-and-hole line drawings.
-
-## Results versus artifacts
-
-The API intentionally separates compute results from persisted artifacts:
-
-- `TilingResult`
-  - In-memory object returned by `tile_slide()`
-  - Best when your next step is immediate patch extraction or further Python-side processing
-- `TilingArtifacts`
-  - Lightweight record of the files written by `save_tiling_result()` or `tile_slides()`
-  - Best when you want to pass around filenames, manifests, or cached tiling outputs
-
-You can round-trip a saved result later:
+## Saving and loading artifacts
 
 ```python
 from hs2p import load_tiling_result
 
 loaded = load_tiling_result(
-    coordinates_npz_path=artifacts.coordinates_npz_path,
-    coordinates_meta_path=artifacts.coordinates_meta_path,
+    coordinates_npz_path=artifacts[0].coordinates_npz_path,
+    coordinates_meta_path=artifacts[0].coordinates_meta_path,
 )
 ```
 
-## Performance notes
+## Preview helpers
 
-### Segmentation downsample (`SegmentationConfig.downsample`)
+- `write_tiling_preview(result=..., output_dir=..., downsample=...)`
+- `overlay_mask_on_slide(...)`
 
-Tissue segmentation reads one thumbnail per slide from the pyramid. The `downsample` value controls which level is used:
+The lower-level WSI helpers use explicit public mask names:
 
-- **Larger value** (e.g. `64`, the default) → smaller thumbnail → faster read and less memory. At 64× downsample a 256 px tile maps to a 4×4 patch in the mask, which is coarse but sufficient for interior tiles.
-- **Smaller value** (e.g. `16` or `4`) → higher-resolution thumbnail → more precise tissue boundaries at tile edges, but the thumbnail read is proportionally larger and the in-memory mask grows as `1/downsample²`. Below `16`, segmentation quality rarely improves meaningfully while speed degrades noticeably.
+- `extract_coordinates(..., tissue_mask_path=...)`
+- `sample_coordinates(..., annotation_mask_path=...)`
+- `filter_coordinates(..., annotation_mask_path=...)`
 
-The tissue percentage check itself is entirely in-memory — it does not read any pixel data from the slide; it operates on the mask computed during segmentation.
+Internally, the shared coordinate engine still uses a generic `mask_path`.
 
-### Black/white tile filtering (`FilterConfig.filter_white` / `filter_black`)
+## Backend selection
 
-These filters are **disabled by default** and should stay off unless your dataset contains a meaningful fraction of pen marks, blank regions, or background tiles that tissue segmentation does not catch.
+`TilingConfig.backend` supports:
 
-When enabled, every candidate tile that passes the tissue mask check is read from the slide at full resolution and its pixel values inspected. This is the **only step in the tiling pipeline that reads actual tile pixel data**. For slides with large internal JPEG tiles (common in some scanner formats), each read triggers a full JPEG decode of the underlying tile block — which can be an order of magnitude slower than the rest of the pipeline per slide.
+- `auto`
+- `cucim`
+- `vips`
+- `openslide`
+- `asap`
 
-## Choosing the right entry point
+`auto` prefers `cucim -> vips -> openslide -> asap`.
 
-- Use `tile_slide()` for single-slide, in-memory use
-- Use `save_tiling_result()` when you want to persist that result explicitly
-- Use `load_tiling_result()` when a downstream stage should consume saved coordinates instead of recomputing them
-- Use `tile_slides()` when you want batch output directories, manifests, preview images, or resume/precomputed-artifact workflows
+## Low-level preprocessing
 
-If you want to create masks ahead of time instead of segmenting inside the tiling run, see [tissue-mask-generation.md](tissue-mask-generation.md). For the exact on-disk artifact format, see [artifacts.md](artifacts.md).
+`hs2p.preprocessing` exposes reusable lower-level compute primitives:
+
+- `preprocess_slide()`
+- `segment_tissue()`
+- `detect_contours()`
+- `generate_tiles()`
+- structured artifact IO helpers
+
+Use these when you want the lower-level building blocks directly. Use `hs2p.api` when you want the higher-level orchestration workflow.

@@ -1,17 +1,28 @@
 # Tissue Mask Generation
 
-For standalone tissue-mask creation outside the main tiling pipeline, use:
+For standalone binary tissue-mask generation outside the main tiling pipeline, use:
 
 ```bash
 python scripts/generate_tissue_mask.py --help
 ```
 
-## Installation note
+This script produces pyramidal tissue masks that can later be consumed by:
 
-The script relies on `tifffile` for pyramidal TIFF output:
+- CLI tiling through the `tissue_mask_path` CSV column
+- Python workflows through `SlideSpec(mask_path=...)`
+
+## Installation
+
+At minimum you need a whole-slide backend plus `tifffile`:
 
 ```bash
-python -m pip install tifffile
+pip install "hs2p[asap]" tifffile
+```
+
+or install the full backend set:
+
+```bash
+pip install "hs2p[all]" tifffile
 ```
 
 ## Single-slide example
@@ -36,38 +47,38 @@ python scripts/generate_tissue_mask.py \
 
 ## What it does
 
-- reads the WSI through `wholeslidedata`
-- computes a binary tissue mask with `0=background` and `1=tissue`
-- uses a coarse-to-fine ROI shortcut by default to reduce memory use
+- reads the slide through the selected whole-slide backend
+- computes a binary mask with `0 = background`, `1 = tissue`
+- can use a coarse-to-fine ROI shortcut to reduce memory and compute
 - writes a pyramidal TIFF mask at the requested spacing
-- prints a final success/skip/failure summary
+- writes a summary CSV for the run
 
 ## Common options
 
 - `--backend`
-  - Whole-slide backend, default `asap`
+  - whole-slide backend, default `asap`
 - `--output` / `--output-dir`
-  - Output path for single-slide or multi-slide mode
+  - output path for single-slide or multi-slide mode
 - `--num-workers`
-  - Parallelism for multi-slide processing
-- `--no-cache`
-  - Disable cache-based skipping
-- `--disable-coarse-roi-shortcut`
-  - Force legacy full-frame loading at target spacing
-- `--coarse-spacing`, `--coarse-roi-margin-um`, `--processing-tile-size`
-  - Coarse-to-fine ROI tuning
-- `--min-component-area-um2`, `--min-hole-area-um2`
-  - Morphology cleanup thresholds
-- `--gaussian-sigma-um`, `--open-radius-um`, `--close-radius-um`
-  - Smoothing and morphology controls
+  - parallelism for multi-slide processing
 - `--spacing-at-level-0`
-  - Override level-0 spacing when metadata is incorrect
+  - override when slide metadata is missing or wrong
+- `--no-cache`
+  - disable cache-based skipping
+- `--disable-coarse-roi-shortcut`
+  - force full-frame processing at the requested spacing
+- `--coarse-spacing`, `--coarse-roi-margin-um`, `--processing-tile-size`
+  - coarse-to-fine ROI tuning
+- `--min-component-area-um2`, `--min-hole-area-um2`
+  - morphology cleanup thresholds
+- `--gaussian-sigma-um`, `--open-radius-um`, `--close-radius-um`
+  - smoothing and morphology controls
 - `--compression`, `--tile-size`
   - TIFF output controls
 
 ## Outputs
 
 - `summary.csv`
-  - Run summary written next to `--output` or into `--output-dir`
+  - written next to `--output` or inside `--output-dir`
 - `cache_manifest.json`
-  - Cache manifest used for skip inference in the same output location
+  - cache manifest used for skip detection

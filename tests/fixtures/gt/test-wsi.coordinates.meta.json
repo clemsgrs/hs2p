@@ -16,7 +16,6 @@
     "max_n_holes": 0,
     "white_threshold": 220
   },
-  "format_version": 2,
   "provenance": {
     "backend": "asap",
     "image_path": "/workspace/tests/fixtures/input/test-wsi.tif",
