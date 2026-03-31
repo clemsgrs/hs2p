@@ -145,10 +145,10 @@ def _load_benchmark_script_module():
     script_path = (
         Path(__file__).resolve().parents[1]
         / "scripts"
-        / "benchmark_tile_read_strategies.py"
+        / "benchmark_tile_read.py"
     )
     spec = importlib.util.spec_from_file_location(
-        "benchmark_tile_read_strategies_script",
+        "benchmark_tile_read_script",
         script_path,
     )
     assert spec is not None and spec.loader is not None
@@ -386,20 +386,17 @@ def test_benchmark_cucim_batch_mode_reports_region_and_tile_progress(monkeypatch
                 for _ in locations
             ]
 
-    monkeypatch.setattr(
-        module,
-        "_require_cucim",
-        lambda: SimpleNamespace(CuImage=_FakeCuImage),
-    )
     updates: list[tuple[int, int]] = []
 
-    elapsed, tile_count, checksum = module.benchmark_cucim_batch_mode(
-        result=result,
-        plans=plans,
-        read_step_px=8,
-        num_workers=2,
-        progress_callback=lambda regions, tiles: updates.append((regions, tiles)),
-    )
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setitem(sys.modules, "cucim", SimpleNamespace(CuImage=_FakeCuImage))
+        elapsed, tile_count, checksum = module.benchmark_cucim_batch_mode(
+            result=result,
+            plans=plans,
+            read_step_px=8,
+            num_workers=2,
+            progress_callback=lambda regions, tiles: updates.append((regions, tiles)),
+        )
 
     assert elapsed >= 0.0
     assert tile_count == 17
