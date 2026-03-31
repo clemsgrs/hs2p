@@ -115,7 +115,6 @@ def test_independent_sampling_without_previews_does_not_crash(monkeypatch, tmp_p
             ref_tile_size=16,
             a_t=4,
             a_h=2,
-            max_n_holes=8,
             filter_white=False,
             filter_black=False,
             white_threshold=220,
@@ -202,7 +201,6 @@ def test_process_slide_accepts_resolved_sampling_spec(monkeypatch, tmp_path):
             ref_tile_size=16,
             a_t=4,
             a_h=2,
-            max_n_holes=8,
             filter_white=False,
             filter_black=False,
             white_threshold=220,
@@ -286,7 +284,6 @@ def test_sampling_main_uses_shared_config_resolvers(monkeypatch, tmp_path):
             ref_tile_size=16,
             a_t=4,
             a_h=2,
-            max_n_holes=8,
             filter_white=False,
             filter_black=False,
             white_threshold=220,
@@ -474,7 +471,6 @@ def test_process_slide_uses_extraction_preview_instead_of_reopening_overlay(
             ref_tile_size=16,
             a_t=4,
             a_h=2,
-            max_n_holes=8,
             filter_white=False,
             filter_black=False,
             white_threshold=220,
@@ -555,7 +551,7 @@ def test_sampling_main_defaults_inner_slide_workers_to_one(monkeypatch, tmp_path
     monkeypatch.setattr(
         sampling_mod,
         "resolve_filter_config",
-        lambda cfg: sampling_mod.FilterConfig(16, 4, 2, 8, False, False, 220, 25, 0.9),
+        lambda cfg: sampling_mod.FilterConfig(16, 4, 2, False, False, 220, 25, 0.9),
     )
     monkeypatch.setattr(sampling_mod.mp, "cpu_count", lambda: 8)
 
@@ -673,7 +669,7 @@ def test_sampling_main_rejects_explicit_inner_slide_workers_override(
     monkeypatch.setattr(
         sampling_mod,
         "resolve_filter_config",
-        lambda cfg: sampling_mod.FilterConfig(16, 4, 2, 8, False, False, 220, 25, 0.9),
+        lambda cfg: sampling_mod.FilterConfig(16, 4, 2, False, False, 220, 25, 0.9),
     )
     monkeypatch.setattr(sampling_mod.mp, "cpu_count", lambda: 8)
 
@@ -774,7 +770,6 @@ def test_save_sampling_coordinates_uses_annotation_threshold_and_sampling_mode(
         ref_tile_size=16,
         a_t=4,
         a_h=2,
-        max_n_holes=8,
         filter_white=False,
         filter_black=False,
         white_threshold=220,
@@ -854,7 +849,6 @@ def test_save_sampling_coordinates_writes_sampling_metadata_fields(tmp_path):
         ref_tile_size=16,
         a_t=4,
         a_h=2,
-        max_n_holes=8,
         filter_white=False,
         filter_black=False,
         white_threshold=220,
@@ -931,7 +925,6 @@ def test_validate_sampling_artifact_row_accepts_matching_metadata(tmp_path):
         ref_tile_size=16,
         a_t=4,
         a_h=2,
-        max_n_holes=8,
         filter_white=False,
         filter_black=False,
         white_threshold=220,
@@ -1025,7 +1018,6 @@ def test_validate_sampling_artifact_row_rejects_mismatched_tiling_config(tmp_pat
         ref_tile_size=16,
         a_t=4,
         a_h=2,
-        max_n_holes=8,
         filter_white=False,
         filter_black=False,
         white_threshold=220,

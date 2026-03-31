@@ -48,7 +48,6 @@ def _run_extract(wsi_path: Path, mask_path: Path, backend: str, tissue_pct: floa
             ref_tile_size=224,
             a_t=4,
             a_h=2,
-            max_n_holes=8,
             filter_white=False,
             filter_black=False,
             white_threshold=220,

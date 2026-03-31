@@ -65,7 +65,6 @@ def _make_result(
         ref_tile_size_px=tile_size_px,
         a_t=4,
         a_h=0,
-        max_n_holes=0,
         filter_white=False,
         filter_black=False,
         white_threshold=220,

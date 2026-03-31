@@ -138,7 +138,6 @@ def save_sampling_coordinates(
         ref_tile_size_px=filter_config.ref_tile_size,
         a_t=filter_config.a_t,
         a_h=filter_config.a_h,
-        max_n_holes=filter_config.max_n_holes,
         filter_white=filter_config.filter_white,
         filter_black=filter_config.filter_black,
         white_threshold=filter_config.white_threshold,
@@ -242,8 +241,6 @@ def validate_sampling_artifact_row(
         raise ValueError("sampling a_t mismatch")
     if result.a_h != filter_config.a_h:
         raise ValueError("sampling a_h mismatch")
-    if result.max_n_holes != filter_config.max_n_holes:
-        raise ValueError("sampling max_n_holes mismatch")
     if result.filter_white != filter_config.filter_white:
         raise ValueError("sampling filter_white mismatch")
     if result.filter_black != filter_config.filter_black:

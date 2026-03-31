@@ -48,7 +48,6 @@ class FilterConfig:
     ref_tile_size: int = int(_DEFAULT_FILTERING.ref_tile_size)
     a_t: int = int(_DEFAULT_FILTERING.a_t)
     a_h: int = int(_DEFAULT_FILTERING.a_h)
-    max_n_holes: int = int(_DEFAULT_FILTERING.max_n_holes)
     filter_white: bool = bool(_DEFAULT_FILTERING.filter_white)
     filter_black: bool = bool(_DEFAULT_FILTERING.filter_black)
     white_threshold: int = int(_DEFAULT_FILTERING.white_threshold)

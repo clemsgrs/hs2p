@@ -72,7 +72,6 @@ def filter_config() -> FilterConfig:
         ref_tile_size=224,
         a_t=4,
         a_h=2,
-        max_n_holes=8,
         filter_white=False,
         filter_black=False,
         white_threshold=220,
@@ -185,7 +184,6 @@ def _build_preprocessing_result(
         ref_tile_size_px=224,
         a_t=4,
         a_h=2,
-        max_n_holes=8,
         filter_white=False,
         filter_black=False,
         white_threshold=220,
@@ -384,7 +382,6 @@ def test_compute_tiling_result_uses_preprocessing_core(
     assert captured["ref_tile_size_px"] == filter_config.ref_tile_size
     assert captured["a_t"] == filter_config.a_t
     assert captured["a_h"] == filter_config.a_h
-    assert captured["max_n_holes"] == filter_config.max_n_holes
     assert captured["num_workers"] == 2
     assert (
         captured["selection_strategy"]
@@ -474,13 +471,11 @@ def test_save_tiling_result_writes_preprocessing_npz_and_json(tmp_path: Path):
     assert set(meta) == {
         "artifact",
         "filtering",
-        "format_version",
         "provenance",
         "segmentation",
         "slide",
         "tiling",
     }
-    assert meta["format_version"] == 2
     assert meta["provenance"] == {
         "sample_id": "slide-2",
         "image_path": "slide-2.svs",
@@ -625,7 +620,6 @@ def test_load_tiling_result_accepts_preprocessing_artifact(tmp_path: Path):
         ref_tile_size_px=224,
         a_t=4,
         a_h=2,
-        max_n_holes=8,
         filter_white=False,
         filter_black=False,
         white_threshold=220,
@@ -1018,7 +1012,7 @@ def test_compute_request_passes_inner_workers_to_tile_extraction(
             use_padding=True,
         ),
         segmentation=SegmentationConfig(64, 8, 255, 7, 4, False, True),
-        filtering=FilterConfig(224, 4, 2, 8, False, False, 220, 25, 0.9),
+        filtering=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
         mask_preview_path=None,
         output_dir=tmp_path,
         num_workers=6,
@@ -1224,7 +1218,7 @@ def test_validate_tiling_artifacts_rejects_mismatched_image_path(tmp_path: Path)
             compatibility=_artifact_compatibility(
                 tiling_config=TilingConfig(0.5, 224, 0.07, 0.0, 0.1, True, "asap"),
                 segmentation_config=SegmentationConfig(64, 8, 255, 7, 4, False, True),
-                filter_config=FilterConfig(224, 4, 2, 8, False, False, 220, 25, 0.9),
+                filter_config=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
             ),
         )
 
@@ -1249,7 +1243,7 @@ def test_validate_tiling_artifacts_rejects_mismatched_mask_path(tmp_path: Path):
             compatibility=_artifact_compatibility(
                 tiling_config=TilingConfig(0.5, 224, 0.07, 0.0, 0.1, True, "asap"),
                 segmentation_config=SegmentationConfig(64, 8, 255, 7, 4, False, True),
-                filter_config=FilterConfig(224, 4, 2, 8, False, False, 220, 25, 0.9),
+                filter_config=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
             ),
         )
 
@@ -1376,7 +1370,6 @@ def test_tile_slides_omits_tiling_preview_path_when_no_tiles(
             ref_tile_size_px=224,
             a_t=4,
             a_h=2,
-            max_n_holes=8,
             filter_white=False,
             filter_black=False,
             white_threshold=220,
@@ -1598,19 +1591,6 @@ def test_load_tiling_result_wraps_corrupt_npz_errors_with_path(tmp_path: Path):
         load_tiling_result(npz_path, meta_path)
 
 
-def test_load_tiling_result_rejects_missing_meta_keys(tmp_path: Path):
-    npz_path, meta_path = _save_valid_preprocessing_artifact(
-        tmp_path,
-        sample_id="broken-meta",
-    )
-    meta = json.loads(meta_path.read_text())
-    del meta["format_version"]
-    meta_path.write_text(json.dumps(meta))
-
-    with pytest.raises(ValueError, match="Unsupported tiling artifact format"):
-        load_tiling_result(npz_path, meta_path)
-
-
 def test_load_tiling_result_rejects_legacy_artifacts(tmp_path: Path):
     npz_path = tmp_path / "legacy.coordinates.npz"
     meta_path = tmp_path / "legacy.coordinates.meta.json"
@@ -1641,7 +1621,7 @@ def test_load_tiling_result_rejects_legacy_artifacts(tmp_path: Path):
         )
     )
 
-    with pytest.raises(ValueError, match="Unsupported tiling artifact format"):
+    with pytest.raises(ValueError, match="Invalid tiling metadata"):
         load_tiling_result(npz_path, meta_path)
 
 
@@ -1784,7 +1764,7 @@ def test_write_process_list_removes_temp_file_on_failure(monkeypatch, tmp_path: 
                 use_padding=True,
             ),
             segmentation=SegmentationConfig(64, 8, 255, 7, 4, False, True),
-            filtering=FilterConfig(224, 4, 2, 8, False, False, 220, 25, 0.9),
+            filtering=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
             output_dir=tmp_path,
         )
 
@@ -1813,7 +1793,6 @@ def test_config_dataclasses_apply_package_defaults_for_secondary_parameters():
     assert segmentation.close == default_config.tiling.seg_params.close
     assert segmentation.use_otsu == default_config.tiling.seg_params.use_otsu
     assert segmentation.use_hsv == default_config.tiling.seg_params.use_hsv
-    assert filtering.max_n_holes == default_config.tiling.filter_params.max_n_holes
     assert filtering.filter_white == default_config.tiling.filter_params.filter_white
     assert filtering.filter_black == default_config.tiling.filter_params.filter_black
     assert (

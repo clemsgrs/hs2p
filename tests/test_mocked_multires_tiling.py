@@ -28,7 +28,6 @@ def _filter_config() -> FilterConfig:
         ref_tile_size=4,
         a_t=0,
         a_h=0,
-        max_n_holes=8,
         filter_white=False,
         filter_black=False,
         white_threshold=220,

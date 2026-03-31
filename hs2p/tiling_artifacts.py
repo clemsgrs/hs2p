@@ -182,8 +182,6 @@ def validate_tiling_artifacts(
         raise ValueError("precomputed tiles a_t mismatch")
     if result.a_h != compatibility.filtering.a_h:
         raise ValueError("precomputed tiles a_h mismatch")
-    if result.max_n_holes != compatibility.filtering.max_n_holes:
-        raise ValueError("precomputed tiles max_n_holes mismatch")
     if result.filter_white != compatibility.filtering.filter_white:
         raise ValueError("precomputed tiles filter_white mismatch")
     if result.filter_black != compatibility.filtering.filter_black:

@@ -201,7 +201,7 @@ def _validate_geometry_arrays(
     return tile_index
 
 
-@dataclass(frozen=True)
+@dataclass
 class TileGeometry:
     """Core tile geometry returned by :func:`generate_tiles`.
 
@@ -228,13 +228,12 @@ class TileGeometry:
     tissue_mask: np.ndarray | None = None
 
     def __post_init__(self) -> None:
-        tile_index = _validate_geometry_arrays(
+        self.tile_index = _validate_geometry_arrays(
             self.coordinates, self.tissue_fractions, self.tile_index,
         )
-        object.__setattr__(self, "tile_index", tile_index)
 
 
-@dataclass(frozen=True)
+@dataclass
 class TilingResult:
     """Full provenance-enriched tiling result returned by :func:`preprocess_slide`.
 
@@ -267,7 +266,6 @@ class TilingResult:
     ref_tile_size_px: int
     a_t: float
     a_h: float
-    max_n_holes: int
     filter_white: bool
     filter_black: bool
     white_threshold: int
@@ -285,9 +283,9 @@ class TilingResult:
     output_mode: str | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "image_path", Path(self.image_path))
+        self.image_path = Path(self.image_path)
         if self.mask_path is not None:
-            object.__setattr__(self, "mask_path", Path(self.mask_path))
+            self.mask_path = Path(self.mask_path)
 
     def __getattr__(self, name: str) -> Any:
         """Delegate attribute access to the underlying TileGeometry."""
@@ -563,9 +561,7 @@ def _compute_tissue_fractions(
 
 COORDINATE_SPACE = "level0_px"
 TILE_ORDER = "x_then_y"
-FORMAT_VERSION = 2
 _TOP_LEVEL_META_KEYS = {
-    "format_version",
     "provenance",
     "slide",
     "tiling",
@@ -620,7 +616,6 @@ _SEGMENTATION_KEYS = {
 _FILTERING_KEYS = {
     "a_t",
     "a_h",
-    "max_n_holes",
     "filter_white",
     "filter_black",
     "white_threshold",
@@ -685,7 +680,6 @@ def _build_tiling_metadata(result: TilingResult) -> dict[str, Any]:
     filtering = {
         "a_t": result.a_t,
         "a_h": result.a_h,
-        "max_n_holes": result.max_n_holes,
         "filter_white": result.filter_white,
         "filter_black": result.filter_black,
         "white_threshold": result.white_threshold,
@@ -700,7 +694,6 @@ def _build_tiling_metadata(result: TilingResult) -> dict[str, Any]:
         "output_mode": result.output_mode,
     }
     return {
-        "format_version": FORMAT_VERSION,
         "provenance": provenance,
         "slide": slide,
         "tiling": tiling,
@@ -849,15 +842,10 @@ def save_tiling_result(
 
 def load_tiling_result(npz_path: Path, meta_path: Path) -> TilingResult:
     meta = json.loads(Path(meta_path).read_text())
-    if meta.get("format_version") != FORMAT_VERSION:
-        raise ValueError(
-            "Unsupported tiling artifact format; "
-            f"expected format_version {FORMAT_VERSION}"
-        )
-    return _load_v2_tiling_result(npz_path=npz_path, meta=meta)
+    return _load_tiling_result(npz_path=npz_path, meta=meta)
 
 
-def _load_v2_tiling_result(*, npz_path: Path, meta: dict[str, Any]) -> TilingResult:
+def _load_tiling_result(*, npz_path: Path, meta: dict[str, Any]) -> TilingResult:
     data = np.load(npz_path, allow_pickle=False)
     _validate_metadata_schema(meta)
 
@@ -919,7 +907,6 @@ def _load_v2_tiling_result(*, npz_path: Path, meta: dict[str, Any]) -> TilingRes
         ref_tile_size_px=segmentation["ref_tile_size_px"],
         a_t=filtering["a_t"],
         a_h=filtering["a_h"],
-        max_n_holes=filtering["max_n_holes"],
         filter_white=filtering["filter_white"],
         filter_black=filtering["filter_black"],
         white_threshold=filtering["white_threshold"],
@@ -1067,7 +1054,6 @@ def preprocess_slide(
     ref_tile_size_px: int = 16,
     a_t: int = 4,
     a_h: int = 0,
-    max_n_holes: int = 0,
     filter_white: bool = False,
     filter_black: bool = False,
     white_threshold: int = 220,
@@ -1149,7 +1135,7 @@ def preprocess_slide(
         return TilingResult(
             tiles=tiles,
             sample_id=sample_id,
-            image_path=str(image_path),
+            image_path=Path(image_path),
             backend=slide.backend_name,
             requested_backend=backend,
             tolerance=tolerance,
@@ -1165,7 +1151,6 @@ def preprocess_slide(
             ref_tile_size_px=ref_tile_size_px,
             a_t=a_t,
             a_h=a_h,
-            max_n_holes=max_n_holes,
             filter_white=filter_white,
             filter_black=filter_black,
             white_threshold=white_threshold,
@@ -1173,7 +1158,7 @@ def preprocess_slide(
             fraction_threshold=fraction_threshold,
             seg_use_otsu=use_otsu,
             seg_use_hsv=use_hsv,
-            mask_path=str(tissue_mask_path) if tissue_mask_path is not None else None,
+            mask_path=tissue_mask_path,
             tissue_mask_tissue_value=(
                 int(tissue_mask_tissue_value)
                 if tissue_mask_path is not None

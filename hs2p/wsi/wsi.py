@@ -411,7 +411,6 @@ class WholeSlideImage(object):
                 - "ref_tile_size" (int): Reference tile size for filtering. Defaults to 256.
                 - "a_t" (int): Contour area threshold for filtering. Defaults to 4.
                 - "a_h" (int): Hole area threshold for filtering. Defaults to 2.
-                - "max_n_holes" (int): Maximum number of holes allowed. Defaults to 8.
             num_workers (int, optional): Number of workers to use for parallel processing.
                 Defaults to 1.
 
@@ -678,22 +677,9 @@ class WholeSlideImage(object):
 
         hole_contours = []
         for hole_ids in all_holes:
-            unfiltered_holes = [contours[idx] for idx in hole_ids]
-            unfiltered_holes = sorted(
-                unfiltered_holes, key=cv2.contourArea, reverse=True
+            hole_contours.append(
+                [contours[idx] for idx in hole_ids if cv2.contourArea(contours[idx]) > filter_params.a_h]
             )
-            # take max_n_holes largest holes by area
-            unfiltered_holes = unfiltered_holes[
-                : filter_params.max_n_holes
-            ]  # Use named tuple
-            filtered_holes = []
-
-            # filter these holes
-            for hole in unfiltered_holes:
-                if cv2.contourArea(hole) > filter_params.a_h:  # Use named tuple
-                    filtered_holes.append(hole)
-
-            hole_contours.append(filtered_holes)
 
         return foreground_contours, hole_contours
 
@@ -717,7 +703,6 @@ class WholeSlideImage(object):
             filter_params (FilterConfig): Filtering parameters containing:
                 - "a_t" (int): Minimum area threshold for foreground contours.
                 - "a_h" (int): Minimum area threshold for holes within contours.
-                - "max_n_holes" (int): Maximum number of holes to retain per contour.
                 - "ref_tile_size" (int): Reference tile size for computing areas.
             annotation (str, optional): Specific annotation to use for contour detection.
 

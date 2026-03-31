@@ -8,7 +8,7 @@
     <a href="https://huggingface.co/spaces/waticlems/hs2p-demo"><img alt="HuggingFace Space" src="https://img.shields.io/badge/🤗%20demo-hs2p-blue"></a>
 </p>
 
-`hs2p` is a Python package for fast, scalable whole-slide tiling. You can request tiles at any spacing, whether or not that spacing is natively present in the image pyramid. It is designed for computational pathology workflows that need reproducible coordinates.
+`hs2p` is a Python package for fast, scalable whole-slide tiling and annotation-aware sampling. You can request tiles at any spacing, whether or not that spacing is natively present in the image pyramid. It is designed for computational pathology workflows that need reproducible coordinates, explicit artifacts, and backend-independent physical semantics.
 
 We support two main workflows:
 
@@ -18,44 +18,52 @@ We support two main workflows:
 ## Demo
 
 Try hs2p interactively: **[hs2p-demo on HuggingFace Spaces](https://huggingface.co/spaces/waticlems/hs2p-demo)**  
-You can adjust tiling parameters (spacing, tile size, tissue threshold, overlap) and instantly see a tiling preview and tissue mask overlay.  
+You can adjust tiling parameters and inspect the resulting grid and mask previews.  
 You can also upload your own pyramidal WSI (up to 1 GB).
 
 ## Installation
+
+Base install:
 
 ```bash
 pip install hs2p
 ```
 
-For GPU-accelerated tile reading via cuCIM:
+Optional backend extras:
 
 ```bash
+pip install "hs2p[openslide]"
+pip install "hs2p[asap]"
+pip install "hs2p[vips]"
 pip install "hs2p[cucim]"
+pip install "hs2p[all]"
 ```
 
-This pulls in `cucim-cu12`, `cupy-cuda12x`, and `nvidia-nvimgcodec-cu12` for optional batched GPU JPEG decoding during tar export when you opt in with `gpu_decode=True`. Use the cuCIM wheel that matches your CUDA runtime. The base `hs2p` install does not require cuCIM.
+The supported backend set is:
+
+- `auto`
+- `cucim`
+- `vips`
+- `openslide`
+- `asap`
+
+`auto` prefers `cucim -> vips -> openslide -> asap`.
 
 ## Workflows
 
 ### Tiling
 
-Tiling computes a reproducible grid of tile coordinates for each slide and saves them as named artifacts with extraction metadata, ready for downstream use.  
-When a precomputed tissue mask is not provided, `hs2p` segments tissue on-the-fly. If you want to precompute tissue masks, a [standalone script](docs/tissue-mask-generation.md) is available.
+Tiling computes a reproducible grid of tile coordinates for each slide and saves them as explicit named artifacts. When a precomputed tissue mask is not provided, `hs2p` segments tissue on the fly. If you want to create those masks ahead of time, a [standalone script](docs/tissue-mask-generation.md) is available.
 
 <img src="assets/tiling.png" alt="hs2p tiling workflow" width="1000" />
 
 ### Sampling
 
-Sampling filters or partitions tile coordinates by annotation coverage so you can keep only tiles relevant to a tissue class or label.
+Sampling filters or partitions tile coordinates by annotation coverage so you can keep only tiles relevant to a label or tissue class.
 
 <img src="illustrations/sampling_illu.png" alt="hs2p sampling workflow" width="1000" />
 
 ## Python API
-
-`hs2p` supports pre-extracted tissue masks. If you don't have such tissue masks, you can either:
-
-- use our standalone [tissue segmentation script](docs/tissue-mask-generation.md) (Recommended)
-- tune the SegmentationConfig parameters and let `hs2p` segments tissue on the fly
 
 Minimal tiling example:
 
@@ -65,9 +73,8 @@ from pathlib import Path
 from hs2p import (
     SlideSpec,
     TilingConfig,
-    overlay_mask_on_slide,
-    save_tiling_result,
     tile_slide,
+    save_tiling_result,
     write_tiling_preview,
 )
 
@@ -75,7 +82,7 @@ result = tile_slide(
     SlideSpec(
         sample_id="slide-1",
         image_path=Path("/data/wsi/slide-1.tif"),
-        mask_path=Path("/data/mask/slide-1.tif"),
+        mask_path=Path("/data/mask/slide-1-tissue-mask.tif"), # optional
     ),
     tiling=TilingConfig(
         backend="openslide",
@@ -87,53 +94,54 @@ result = tile_slide(
     ),
 )
 
+# save tiling results to disk
 artifacts = save_tiling_result(result, output_dir=Path("output"))
 
-print(artifacts.coordinates_npz_path)   # output/tiles/slide-1.coordinates.npz ; more info in docs/artifacts.md
-print(artifacts.coordinates_meta_path)  # output/tiles/slide-1.coordinates.meta.json ; more info in docs/artifacts.md
+print(artifacts.coordinates_npz_path)   # output/tiles/slide-1.coordinates.npz
+print(artifacts.coordinates_meta_path)  # output/tiles/slide-1.coordinates.meta.json
 
+# preview tile grid
 tiling_preview_path = write_tiling_preview(
     result=result,
     output_dir=Path("output"),
     downsample=32,
 )
-print(tiling_preview_path)  # output/preview/tiling/slide-1.jpg ; low resolution preview of tiling result, good for QC
-
-mask_overlay = overlay_mask_on_slide(
-    wsi_path=result.image_path,
-    annotation_mask_path=Path("/data/mask/slide-1.tif"),
-    downsample=32,
-    backend=result.backend,
-)
-mask_overlay.save("output/preview/mask/slide-1.jpg")
+print(tiling_preview_path)  # output/preview/tiling/slide-1.jpg
 ```
 
-`result` is a [`TilingResult`](hs2p/api.py#L144) for one slide. It gives downstream pipelines the tile coordinates plus the metadata needed to relate those coordinates back to the slide pyramid and persist them as reusable named artifacts.
+`result` is a canonical `hs2p.preprocessing.TilingResult`. Downstream code should use its structured fields such as:
+
+- `coordinates`
+- `tissue_fractions`
+- `tile_index`
+- `requested_*`
+- `effective_*`
+- `min_tissue_fraction`
 
 More API details: [docs/api.md](docs/api.md)
 
 ## CLI
 
-The CLI is intended for fast batch processing of multiple slides with the same config. Both CLI entrypoints expect the same input `csv` schema:
+The CLI is intended for fast batch processing of multiple slides with the same config.  
+Our CLI entrypoints expect slightly different input csv schema:
+
+Tiling csv (`tissue_mask_path` is optional):
 
 ```csv
-sample_id,image_path,mask_path
-slide-1,/data/wsi/slide-1.tif,/data/mask/slide-1.tif
+sample_id,image_path,tissue_mask_path
+slide-1,/data/wsi/slide-1.tif,/data/mask/slide-1-tissue-mask.tif
 slide-2,/data/wsi/slide-2.tif,
+...
 ```
 
-For a first run, start from [hs2p/configs/default.yaml](hs2p/configs/default.yaml) and edit only the essentials:
+Sampling csv (`annotation_mask_path` is mandatory):
 
-- `csv`
-- `output_dir`
-- `tiling.backend`
-- `tiling.params.target_spacing_um`
-- `tiling.params.target_tile_size_px`
-
-Optional:
-
-- `save_tiles`
-  - also write `tiles/{sample_id}.tiles.tar` archives; with `tiling.backend="cucim"` this uses batched CuCIM reads during tar extraction, and other backends coalesce dense `8x8` / `4x4` regions before slicing them back into tiles
+```csv
+sample_id,image_path,annotation_mask_path
+slide-1,/data/wsi/slide-1.tif,/data/mask/slide-1-annotations.tif
+slide-2,/data/wsi/slide-2.tif,/data/mask/slide-2-annotations.tif
+...
+```
 
 Run tiling:
 
@@ -147,22 +155,16 @@ Run sampling:
 python -m hs2p.sampling --config-file /path/to/config.yaml
 ```
 
-For sampling, add `tiling.sampling_params.pixel_mapping` and `tiling.sampling_params.tissue_percentage` for the annotations you want to keep.
+For a first run, start from [hs2p/configs/default.yaml](hs2p/configs/default.yaml) and edit only the essentials:
 
-### Progress UX
+- `csv`
+- `output_dir`
+- `tiling.backend`
+- `tiling.params.target_spacing_um`
+- `tiling.params.target_tile_size_px`
 
-When stdout is an interactive terminal, both CLI entrypoints show live `rich` progress with:
 
-- slide-level batch progress
-- elapsed and remaining time
-- live tile counts for tiling discovery or sampling retention
-- final summary panels with output and `process_list.csv` locations
-
-When stdout is redirected or otherwise non-interactive, `hs2p` falls back to concise plain-text stage updates.
-
-If a run fails, check `output_dir/logs/log.txt` for the full log stream.
-
-More CLI details: [docs/cli.md](docs/cli.md)
+More details about CLI: [docs/cli.md](docs/cli.md)
 
 ## Outputs
 
@@ -171,7 +173,7 @@ More CLI details: [docs/cli.md](docs/cli.md)
 - Tiling writes `tiles/{sample_id}.coordinates.npz` and `tiles/{sample_id}.coordinates.meta.json`
 - Sampling writes the same pair under `tiles/<annotation>/`
 - Batch runs also write `process_list.csv`
-- Saved coordinate arrays use a deterministic column-major order: numeric `x` first, then numeric `y` within each shared `x`
+- Saved coordinate arrays use a deterministic order: numeric `x` first, then numeric `y` within each shared `x`
 
 Artifact field reference: [docs/artifacts.md](docs/artifacts.md)
 
@@ -192,4 +194,5 @@ docker run --rm -it -v /path/to/your/data:/data waticlems/hs2p:latest
 - [Python API guide](docs/api.md)
 - [CLI guide](docs/cli.md)
 - [Artifact format reference](docs/artifacts.md)
+- [Benchmark notes](docs/benchmark.md)
 - [Tissue mask generation script](docs/tissue-mask-generation.md)

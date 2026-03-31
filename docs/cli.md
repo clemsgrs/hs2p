@@ -5,29 +5,37 @@ HS2P provides two batch entrypoints:
 - `python -m hs2p.tiling`
 - `python -m hs2p.sampling`
 
-Both consume the same input CSV schema and the same base tiling configuration.
+They share the same base tiling/segmentation/filtering config model, but they do not share the same public CSV mask column anymore.
 
-## Input CSV
+## Input CSV schemas
+
+### Tiling
 
 ```csv
-sample_id,image_path,mask_path
-slide-1,/data/slide-1.tif,/data/slide-1-mask.tif
+sample_id,image_path,tissue_mask_path
+slide-1,/data/slide-1.tif,/data/slide-1-tissue-mask.tif
 slide-2,/data/slide-2.tif,
+...
 ```
 
-- `sample_id`
-  - Stable identifier used to name output artifacts
-- `image_path`
-  - Path to the whole-slide image
-- `mask_path`
-  - Optional tissue or annotation mask path
-- `spacing_at_level_0` *(optional)*
-  - Override for the slide's native spacing at pyramid level 0 (µm/px). Use this when the embedded metadata is missing or incorrect. All other pyramid-level spacings are rescaled proportionally from this value. Leave the column empty or omit it entirely to use the spacing reported by the file.
+### Sampling
 
 ```csv
-sample_id,image_path,mask_path,spacing_at_level_0
+sample_id,image_path,annotation_mask_path
+slide-1,/data/slide-1.tif,/data/slide-1-annotations.tif
+slide-2,/data/slide-2.tif,/data/slide-2-annotations.tif
+...
+```
+
+### Optional spacing override
+
+Works in either mode:
+
+```csv
+sample_id,image_path,tissue_mask_path,spacing_at_level_0
 slide-1,/data/slide-1.tif,,0.25
-slide-2,/data/slide-2.tif,/data/slide-2-mask.tif,
+slide-2,/data/slide-2.tif,/data/slide-2-tissue-mask.tif,
+...
 ```
 
 ## Quick start
@@ -52,122 +60,111 @@ Run sampling:
 python -m hs2p.sampling --config-file /path/to/config.yaml
 ```
 
-Optional CuCIM install for faster tar export with `save_tiles: true` and
-`tiling.backend: cucim`:
+## Installation and backends
+
+Base install:
 
 ```bash
-pip install cucim-cu12
+pip install hs2p
 ```
 
-Use the CuCIM wheel that matches your CUDA runtime. Non-CuCIM backends continue to
-use the default sequential tile export path.
+Optional extras:
 
-## Progress UX
+```bash
+pip install "hs2p[openslide]"
+pip install "hs2p[asap]"
+pip install "hs2p[vips]"
+pip install "hs2p[cucim]"
+pip install "hs2p[all]"
+```
 
-When stdout is an interactive terminal, `hs2p` uses `rich` to show live progress for both CLI entrypoints.
+`tiling.backend` supports:
 
-- `hs2p.tiling`
-  - one slide-level progress bar for batch tiling
-  - discovered tile counts in the live task description
-  - a final summary panel with slide totals, failures, zero-tile successes, output directory, and `process_list.csv`
-- `hs2p.sampling`
-  - one slide-level progress bar for batch sampling
-  - cumulative kept-tile counts in the live task description
-  - a final summary panel with slide totals, failures, per-annotation zero-tile counts, output directory, and `process_list.csv`
+- `auto`
+- `cucim`
+- `vips`
+- `openslide`
+- `asap`
 
-When stdout is redirected or otherwise non-interactive, `hs2p` falls back to plain-text stage updates and summaries.
+`auto` prefers `cucim -> vips -> openslide -> asap`.
 
-Detailed logs still go to `output_dir/logs/log.txt`, which is the best place to look when a run fails.
-
-## Current config areas
+## Config areas
 
 - `tiling.read_coordinates_from`
-  - Optional directory containing precomputed `{sample_id}.coordinates.npz` and `{sample_id}.coordinates.meta.json`
+  - Reuse precomputed `{sample_id}.coordinates.*` artifacts
 - `tiling.params`
-  - Core tiling resolution, tile size, overlap, and tissue-threshold settings
+  - spacing, tile size, overlap, tolerance, padding, and minimum tissue fraction
 - `tiling.seg_params`
-  - Tissue segmentation settings
+  - tissue segmentation settings
 - `tiling.filter_params`
-  - Contour and white/black filtering settings
+  - contour and optional white/black filtering settings
 - `tiling.preview`
-  - Preview-rendering settings
+  - preview rendering settings
 - `tiling.sampling_params`
-  - Annotation-specific sampling rules for `hs2p.sampling`
+  - annotation-specific sampling rules for `hs2p.sampling`
 - `save_previews`
-  - Global switch for writing mask and tiling previews to disk
+  - write preview images
 - `save_tiles`
-  - Global switch for writing `tiles/{sample_id}.tiles.tar` alongside coordinate artifacts
+  - write `tiles/{sample_id}.tiles.tar`
 - `speed.num_workers`
-  - Parallelism for slide processing, and the per-slide worker budget reused by CuCIM batched tile extraction when `tiling.backend: cucim`
+  - slide-level batch parallelism
 
-## Sampling-specific settings
+## Sampling-specific config
 
-`hs2p.sampling` uses the same base tiling setup as `hs2p.tiling`, plus:
+`hs2p.sampling` adds:
 
 - `tiling.sampling_params.independent_sampling`
-  - Whether annotations are sampled independently or jointly
 - `tiling.sampling_params.pixel_mapping`
-  - Mapping from annotation names to mask pixel values
 - `tiling.sampling_params.color_mapping`
-  - Optional overlay colors used in previews
 - `tiling.sampling_params.tissue_percentage`
-  - Minimum annotation coverage required to keep a tile
-- `speed.num_workers`
-  - Controls how many slides `hs2p.sampling` processes in parallel. Each worker always uses one extraction thread, and the old `cfg.speed.inner_workers` override is no longer supported.
 
-## Performance notes
+Sampling config resolution is strict:
 
-### Segmentation downsample (`tiling.seg_params.downsample`)
+- explicit configs must include `background`
+- partial sampling configs are rejected
+- color mappings are validated centrally
 
-Tissue segmentation runs once per slide on a downsampled thumbnail. The `downsample` value controls which pyramid level is used:
+## Progress reporting
 
-- **Larger value** (e.g. `64`, the default) → smaller thumbnail → faster read and less memory per worker. At 64× downsample a 256 px tile maps to a 4×4 patch in the mask, which is coarse but sufficient for interior tiles.
-- **Smaller value** (e.g. `16` or `4`) → higher-resolution thumbnail → more precise tissue boundaries at tile edges, but the thumbnail read is proportionally larger and the in-memory mask grows as `1/downsample²`. Below `16`, segmentation quality rarely improves meaningfully while speed degrades noticeably.
+When stdout is interactive, both entrypoints use `rich` live progress:
 
-The tissue percentage check itself (`check_coordinates`) is entirely in-memory — it does not read any pixel data from the slide; it operates on the mask computed during segmentation.
+- tiling shows discovered tile totals during the run
+- sampling shows kept-tile totals during the run
+- both finish with summary panels including output locations and `process_list.csv`
 
-### Black/white tile filtering (`tiling.filter_params.filter_white` / `filter_black`)
+When stdout is non-interactive, `hs2p` falls back to concise plain-text progress and summary logs.
 
-These filters are **disabled by default** and should stay off unless your dataset contains a meaningful fraction of pen marks, blank regions, or background tiles that tissue segmentation does not catch.
-
-When enabled, every candidate tile that passes the tissue mask check is read from the slide at full resolution and its pixel values inspected. This is the **only step in the tiling pipeline that reads actual tile pixel data**. For slides with large internal JPEG tiles (common in some scanner formats), each read triggers a full JPEG decode of the underlying tile block — which can be an order of magnitude slower than the rest of the pipeline per slide.
-
-### GPU-accelerated tile decoding (`gpu_decode`)
-
-When `save_tiles: true` and `tiling.backend: cucim`, you can enable GPU-accelerated batch decoding by passing `gpu_decode=True` to `extract_tiles_to_tar` or `tile_slides` in the Python API:
-
-```python
-from hs2p.api import tile_slides, extract_tiles_to_tar
-
-# via tile_slides
-tile_slides(..., save_tiles=True, gpu_decode=True)
-
-# or directly
-extract_tiles_to_tar(result, output_dir, gpu_decode=True)
-```
-
-When enabled, two things happen:
-1. `ENABLE_CUSLIDE2=1` is set in the process environment before CuCIM is imported, activating NVIDIA's cuSlide2 GPU-accelerated SVS/TIFF reader.
-2. `device="cuda"` is passed to `read_region`, so batch JPEG decoding runs on the GPU via nvImageCodec.
-
-This can give a significant speedup (measured ~3.8× for batch decoding) on `.svs` and `.tif` files.
-
-**Requirements:** `libnuma1` must be installed and `nvImageCodec` must be available (included with `cucim-cu12`). If the installed CuCIM version does not support `device="cuda"`, hs2p falls back silently to CPU decoding.
-
-**Default:** `False` — opt in explicitly.
-
-### Saved tile export (`save_tiles`)
-
-When `save_tiles: true`, HS2P also writes a `tiles/{sample_id}.tiles.tar` archive with JPEG-encoded tile images.
-
-- For non-CuCIM backends, tar extraction still uses the `wholeslidedata` reader, but dense `8x8` and `4x4` tile blocks are coalesced into larger contiguous reads before slicing them back into tiles.
-- For `tiling.backend: cucim`, tar extraction uses a CuCIM batch-read fast path and reuses the per-slide worker count from `speed.num_workers`.
-- Installing CuCIM is optional. If `backend: cucim` is selected but CuCIM is not installed, HS2P falls back to the `wholeslidedata` export path and emits a warning.
+Detailed logs still go to `output_dir/logs/log.txt`.
 
 ## Resume and precomputed artifacts
 
-- `resume: true` expects the current `process_list.csv` schema and current-format artifacts
-- reused tiling artifacts are validated against `sample_id`, `config_hash`, `image_path`, and `mask_path`
-- `tiling.read_coordinates_from` is the supported way to reuse precomputed tiling outputs
+- `resume: true` expects the current process-list schema
+- reused artifacts are validated against structured metadata, not `config_hash`
+- `tiling.read_coordinates_from` is the supported way to reuse precomputed coordinate artifacts
 
-For the exact output files and field meanings, see [artifacts.md](artifacts.md).
+## Performance notes
+
+### Segmentation downsample
+
+`tiling.seg_params.downsample` controls the resolution used for tissue segmentation:
+
+- larger values are faster and coarser
+- smaller values improve edge precision but cost more time and memory
+
+### White/black filtering
+
+`tiling.filter_params.filter_white` and `filter_black` are disabled by default.
+
+When enabled, HS2P reads actual tile pixels for candidate tiles, which is much slower than mask-based filtering alone.
+
+### Tile tar export
+
+When `save_tiles: true`, HS2P also writes `tiles/{sample_id}.tiles.tar`.
+
+- non-CuCIM paths coalesce dense tile regions before slicing them back into tiles
+- CuCIM paths use batched reads
+- `gpu_decode=True` is opt-in in the Python API for CuCIM tar export
+
+## Outputs
+
+See [artifacts.md](artifacts.md) for the exact coordinate artifact schema and process-list columns.
