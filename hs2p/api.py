@@ -1,5 +1,4 @@
 import csv
-import importlib
 import io
 import itertools
 import multiprocessing as mp
@@ -29,17 +28,13 @@ from hs2p.wsi import (
     CoordinateOutputMode,
     CoordinateSelectionStrategy,
     extract_coordinates,
+    iter_tile_records_from_result,
+    open_reader_for_result,
     overlay_mask_on_slide as _overlay_mask_on_slide,
     write_coordinate_preview,
 )
-from hs2p.wsi.backend import coerce_wsd_path, resolve_backend
-from hs2p.wsi.read_plans import (
-    GroupedReadPlan,
-    iter_grouped_read_plans,
-    resolve_read_step_px,
-    resolve_step_px_lv0,
-)
-from hs2p.wsi.region_tiles import iter_plan_region_tile_views
+from hs2p.wsi.backend import resolve_backend
+from hs2p.wsi.reader import BatchRegionReader
 from hs2p.preprocessing import (
     TilingResult,
     preprocess_slide,
@@ -279,12 +274,12 @@ def extract_tiles_to_tar(
                 fieldnames=["tile_index", "x", "y"],
             )
             manifest_writer.writeheader()
-            tile_records = _iter_tile_records_for_tar_extraction(
-                    result=result,
-                    num_workers=num_workers,
-                    gpu_decode=gpu_decode,
-                    supertile_sizes=supertile_sizes,
-                )
+            tile_records = iter_tile_records_from_result(
+                result=result,
+                num_workers=num_workers,
+                gpu_decode=gpu_decode,
+                supertile_sizes=supertile_sizes,
+            )
             while True:
                 read_start = time.perf_counter()
                 try:
@@ -378,190 +373,6 @@ def extract_tiles_to_tar(
     )
     return tar_path, filtered_result
 
-
-def _iter_tile_arrays_for_tar_extraction(
-    *,
-    result: TilingResult,
-    num_workers: int,
-    gpu_decode: bool = False,
-    supertile_sizes: Sequence[int] | None = None,
-):
-    tile_records = _iter_tile_records_for_tar_extraction(
-        result=result,
-        num_workers=num_workers,
-        gpu_decode=gpu_decode,
-        supertile_sizes=supertile_sizes,
-    )
-    for record in tile_records:
-        yield record.tile_arr
-
-
-def _iter_tile_records_for_tar_extraction(
-    *,
-    result: TilingResult,
-    num_workers: int,
-    gpu_decode: bool = False,
-    supertile_sizes: Sequence[int] | None = None,
-):
-    tile_records = _iter_cucim_tile_records_for_tar_extraction(
-        result=result,
-        num_workers=num_workers,
-        gpu_decode=gpu_decode,
-        supertile_sizes=supertile_sizes,
-    )
-    if tile_records is not None:
-        yield from tile_records
-        return
-    yield from _iter_wsd_tile_records_for_tar_extraction(
-        result=result,
-        supertile_sizes=supertile_sizes,
-    )
-
-
-def _iter_cucim_tile_records_for_tar_extraction(
-    *,
-    result: TilingResult,
-    num_workers: int,
-    gpu_decode: bool = False,
-    supertile_sizes: Sequence[int] | None = None,
-):
-    if result.backend != "cucim":
-        return None
-    from hs2p.wsi.batched_reads import (
-        BatchedReadRequest,
-        iter_cucim_batched_read_regions,
-    )
-    try:
-        requests = []
-        read_step_px = resolve_read_step_px(result)
-        step_px_lv0 = resolve_step_px_lv0(result)
-        read_plans = list(
-            iter_grouped_read_plans(
-                result=result,
-                read_step_px=read_step_px,
-                step_px_lv0=step_px_lv0,
-                supertile_sizes=supertile_sizes,
-            )
-        )
-        for read_plan in read_plans:
-            requests.append(
-                BatchedReadRequest(
-                    location=(int(read_plan.x), int(read_plan.y)),
-                    size=(int(read_plan.read_size_px), int(read_plan.read_size_px)),
-                    payload=read_plan,
-                )
-            )
-        batched_regions = iter_cucim_batched_read_regions(
-            image_path=result.image_path,
-            requests=requests,
-            level=int(result.read_level),
-            num_workers=int(num_workers),
-            gpu_decode=gpu_decode,
-        )
-    except ModuleNotFoundError:
-        warnings.warn(
-            "CuCIM is unavailable for backend='cucim'; falling back to sequential wholeslidedata tile extraction.",
-            UserWarning,
-            stacklevel=2,
-        )
-        return None
-
-    def _iter_tiles():
-        for request, region in batched_regions:
-            read_plan = request.payload
-            yield from _iter_planned_tile_views_from_read_plan_region(
-                np.asarray(region),
-                read_plan=read_plan,
-                tile_size_px=int(result.effective_tile_size_px),
-                read_step_px=read_step_px,
-            )
-
-    return _iter_tiles()
-def _iter_cucim_tile_arrays_for_tar_extraction(
-    *,
-    result: TilingResult,
-    num_workers: int,
-    gpu_decode: bool = False,
-):
-    tile_records = _iter_cucim_tile_records_for_tar_extraction(
-        result=result,
-        num_workers=num_workers,
-        gpu_decode=gpu_decode,
-    )
-    if tile_records is None:
-        return None
-
-    def _iter_tiles():
-        for record in tile_records:
-            yield record.tile_arr
-
-    return _iter_tiles()
-
-
-def _iter_wsd_tile_records_for_tar_extraction(
-    *,
-    result: TilingResult,
-    supertile_sizes: Sequence[int] | None = None,
-):
-    import wholeslidedata as wsd
-
-    wsi = wsd.WholeSlideImage(
-        coerce_wsd_path(result.image_path, backend=result.backend),
-        backend=result.backend,
-    )
-    read_step_px = resolve_read_step_px(result)
-    step_px_lv0 = resolve_step_px_lv0(result)
-    for read_plan in iter_grouped_read_plans(
-        result=result,
-        read_step_px=read_step_px,
-        step_px_lv0=step_px_lv0,
-        supertile_sizes=supertile_sizes,
-    ):
-        region = wsi.get_patch(
-            int(read_plan.x),
-            int(read_plan.y),
-            int(read_plan.read_size_px),
-            int(read_plan.read_size_px),
-            spacing=float(result.effective_spacing_um),
-            center=False,
-        )
-        region = np.asarray(region)
-        yield from _iter_planned_tile_views_from_read_plan_region(
-            region,
-            read_plan=read_plan,
-            tile_size_px=int(result.effective_tile_size_px),
-            read_step_px=read_step_px,
-        )
-
-
-def _iter_wsd_tile_arrays_for_tar_extraction(
-    *,
-    result: TilingResult,
-):
-    tile_records = _iter_wsd_tile_records_for_tar_extraction(result=result)
-
-    def _iter_tiles():
-        for record in tile_records:
-            yield record.tile_arr
-
-    return _iter_tiles()
-
-def _iter_planned_tile_views_from_read_plan_region(
-    region: np.ndarray,
-    *,
-    read_plan: GroupedReadPlan,
-    tile_size_px: int,
-    read_step_px: int,
-):
-    for tile_view in iter_plan_region_tile_views(
-        region,
-        read_plan=read_plan,
-        tile_size_px=int(tile_size_px),
-        read_step_px=int(read_step_px),
-    ):
-        yield tile_view
-
-
 def _format_tar_member_name(tile_index: int) -> str:
     return f"{int(tile_index):06d}.jpg"
 
@@ -577,81 +388,42 @@ def _apply_qc_filtering_to_result(
     num_workers: int,
     gpu_decode: bool = False,
 ) -> TilingResult:
-    keep_flags: np.ndarray
-    if result.backend == "cucim":
-        from hs2p.wsi.reader import BatchRegionReader, open_slide
-
-        with open_slide(
-            result.image_path,
-            backend=result.backend,
-            spacing_override=result.base_spacing_um,
-            gpu_decode=gpu_decode,
-        ) as slide:
-            batch_read_windows = None
-            if isinstance(slide, BatchRegionReader):
-                batch_read_windows = (
-                    lambda locations, size, level, workers: slide.read_regions(
-                        locations,
-                        level,
-                        size,
-                        num_workers=workers,
-                        pad_missing=False,
-                    )
-                )
-            keep_flags = filter_coordinate_tiles(
-                coord_candidates=result.coordinates,
-                keep_flags=np.ones(len(result.coordinates), dtype=np.uint8),
-                level_dimensions=slide.level_dimensions,
-                level_downsamples=slide.level_downsamples,
-                target_tile_size_px=result.requested_tile_size_px,
-                target_spacing_um=result.requested_spacing_um,
-                base_spacing_um=result.base_spacing_um,
-                tolerance=result.tolerance,
-                filter_params=filter_params,
-                read_window=lambda x, y, width, height, level: slide.read_region(
-                    (x, y),
+    with open_reader_for_result(
+        result,
+        gpu_decode=gpu_decode,
+        allow_backend_fallback=True,
+    ) as slide:
+        batch_read_windows = None
+        if isinstance(slide, BatchRegionReader):
+            batch_read_windows = (
+                lambda locations, size, level, workers: slide.read_regions(
+                    locations,
                     level,
-                    (width, height),
+                    size,
+                    num_workers=workers,
                     pad_missing=False,
-                ),
-                batch_read_windows=batch_read_windows,
-                num_workers=num_workers,
-                source_label=str(result.image_path),
+                )
             )
-    else:
-        import wholeslidedata as wsd
-
-        wsi = wsd.WholeSlideImage(
-            coerce_wsd_path(result.image_path, backend=result.backend),
-            backend=result.backend,
+        keep_flags = filter_coordinate_tiles(
+            coord_candidates=result.coordinates,
+            keep_flags=np.ones(len(result.coordinates), dtype=np.uint8),
+            level_dimensions=slide.level_dimensions,
+            level_downsamples=slide.level_downsamples,
+            target_tile_size_px=result.requested_tile_size_px,
+            target_spacing_um=result.requested_spacing_um,
+            base_spacing_um=result.base_spacing_um,
+            tolerance=result.tolerance,
+            filter_params=filter_params,
+            read_window=lambda x, y, width, height, level: slide.read_region(
+                (x, y),
+                level,
+                (width, height),
+                pad_missing=False,
+            ),
+            batch_read_windows=batch_read_windows,
+            num_workers=num_workers,
+            source_label=str(result.image_path),
         )
-        try:
-            keep_flags = filter_coordinate_tiles(
-                coord_candidates=result.coordinates,
-                keep_flags=np.ones(len(result.coordinates), dtype=np.uint8),
-                level_dimensions=result.level_dimensions,
-                level_downsamples=result.level_downsamples,
-                target_tile_size_px=result.requested_tile_size_px,
-                target_spacing_um=result.requested_spacing_um,
-                base_spacing_um=result.base_spacing_um,
-                tolerance=result.tolerance,
-                filter_params=filter_params,
-                read_window=lambda x, y, width, height, level: wsi.get_patch(
-                    x,
-                    y,
-                    width,
-                    height,
-                    spacing=wsi.spacings[level],
-                    center=False,
-                ),
-                batch_read_windows=None,
-                num_workers=num_workers,
-                source_label=str(result.image_path),
-            )
-        finally:
-            close = getattr(wsi, "close", None)
-            if callable(close):
-                close()
     keep = np.asarray(keep_flags, dtype=bool)
     if int(keep.sum()) == len(result.coordinates):
         return replace(
