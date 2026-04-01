@@ -464,7 +464,7 @@ def execute_coordinate_request(
 def extract_coordinates(
     *,
     wsi_path: Path,
-    tissue_mask_path: Path | None,
+    mask_path: Path | None,
     backend: str,
     segment_params: SegmentationConfig,
     tiling_params: TilingConfig,
@@ -480,12 +480,12 @@ def extract_coordinates(
     num_workers: int = 1,
 ):
     resolved_sampling_spec = sampling_spec
-    if resolved_sampling_spec is None and tissue_mask_path is not None:
+    if resolved_sampling_spec is None and mask_path is not None:
         resolved_sampling_spec = _build_default_tissue_sampling_spec(tiling_params)
     response = execute_coordinate_request(
         UnifiedCoordinateRequest(
             wsi_path=wsi_path,
-            mask_path=tissue_mask_path,
+            mask_path=mask_path,
             backend=backend,
             segment_params=segment_params,
             tiling_params=tiling_params,
@@ -511,7 +511,7 @@ def extract_coordinates(
 def sample_coordinates(
     *,
     wsi_path: Path,
-    annotation_mask_path: Path | None,
+    mask_path: Path | None,
     backend: str,
     segment_params: SegmentationConfig,
     tiling_params: TilingConfig,
@@ -525,10 +525,12 @@ def sample_coordinates(
 ):
     if sampling_spec is None:
         raise ValueError("sampling_spec is required for sample_coordinates()")
+    if mask_path is None:
+        raise ValueError("mask_path is required for sample_coordinates()")
     response = execute_coordinate_request(
         UnifiedCoordinateRequest(
             wsi_path=wsi_path,
-            mask_path=annotation_mask_path,
+            mask_path=mask_path,
             backend=backend,
             segment_params=segment_params,
             tiling_params=tiling_params,
@@ -561,7 +563,7 @@ def sample_coordinates(
 def filter_coordinates(
     *,
     wsi_path: Path,
-    annotation_mask_path: Path | None,
+    mask_path: Path | None,
     backend: str,
     coordinates: list[tuple[int, int]],
     contour_indices: list[int],
@@ -570,13 +572,13 @@ def filter_coordinates(
     tiling_params: TilingConfig,
     sampling_spec: SamplingSpec | None = None,
 ):
-    if annotation_mask_path is None:
-        raise ValueError("annotation_mask_path is required for filter_coordinates()")
+    if mask_path is None:
+        raise ValueError("mask_path is required for filter_coordinates()")
     if sampling_spec is None:
         raise ValueError("sampling_spec is required for filter_coordinates()")
     wsi = WSI(
         path=wsi_path,
-        mask_path=annotation_mask_path,
+        mask_path=mask_path,
         backend=backend,
         segment=True,
         segment_params=segment_params,

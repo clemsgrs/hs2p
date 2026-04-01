@@ -94,7 +94,7 @@ def test_extract_coordinates_raises_when_target_spacing_is_below_level0_beyond_t
     with pytest.raises(ValueError, match="Desired spacing"):
         wsi_api.extract_coordinates(
             wsi_path=Path("synthetic-slide.tif"),
-            tissue_mask_path=Path("synthetic-mask.tif"),
+            mask_path=Path("synthetic-mask.tif"),
             backend="asap",
             segment_params=_segmentation_config(),
             tiling_params=_tiling_config(spacing=0.5, tolerance=0.05),

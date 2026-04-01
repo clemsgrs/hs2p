@@ -32,8 +32,8 @@ def resolve_preview_config(cfg: Any) -> PreviewConfig:
     preview_cfg = cfg.tiling.preview
     default_preview = default_config.tiling.preview
     return PreviewConfig(
-        save_mask_preview=bool(cfg.save_previews),
-        save_tiling_preview=bool(cfg.save_previews),
+        save_mask_preview=bool(preview_cfg.save),
+        save_tiling_preview=bool(preview_cfg.save),
         downsample=int(preview_cfg.downsample),
         mask_overlay_color=tuple(
             int(v)

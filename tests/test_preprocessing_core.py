@@ -136,9 +136,8 @@ def test_tiling_artifact_roundtrip_uses_strict_rich_metadata(tmp_path):
     assert meta["segmentation"]["mask_path"] == "/tmp/slide-001-mask.tif"
     assert meta["segmentation"]["mask_level"] == 1
     assert meta["segmentation"]["mask_spacing_um"] == 0.5
-    assert "requested_backend" not in meta
-    assert "seg_level" not in meta
-    assert "seg_spacing_um" not in meta
+    assert set(meta["provenance"].keys()) == preprocessing_mod._PROVENANCE_KEYS
+    assert set(meta["segmentation"].keys()) == preprocessing_mod._SEGMENTATION_KEYS
 
     loaded = load_tiling_result(paths["npz"], paths["meta"])
     np.testing.assert_array_equal(

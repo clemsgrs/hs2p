@@ -198,7 +198,7 @@ def build_sampling_process_rows(
                     "sample_id": slide.sample_id,
                     "annotation": annotation,
                     "image_path": str(slide.image_path),
-                    "annotation_mask_path": (
+                    "mask_path": (
                         str(slide.mask_path) if slide.mask_path is not None else None
                     ),
                     "sampling_status": "tbp",
@@ -382,6 +382,7 @@ def process_slide(
             progress.emit_progress_log(
                 f"[backend] {sample_id}: {backend_selection.reason}"
             )
+        preview_cfg = cfg.tiling.preview
         effective_tiling_config = (
             tiling_config
             if backend_selection.backend == tiling_config.backend
@@ -389,12 +390,12 @@ def process_slide(
         )
         preview_palette, color_mapping = build_sampling_preview_assets(
             resolved_sampling_spec,
-            save_previews=cfg.save_previews
+            save_previews=preview_cfg.save
             and (sampling_preview_dir is not None or mask_preview_dir is not None),
         )
         mask_preview_path = None
         mask_preview_paths_by_annotation = None
-        if cfg.save_previews and mask_preview_dir is not None:
+        if preview_cfg.save and mask_preview_dir is not None:
             if selection_strategy == CoordinateSelectionStrategy.INDEPENDENT_SAMPLING:
                 mask_preview_paths_by_annotation = {
                     annotation: mask_preview_dir / annotation / f"{wsi_name}.jpg"
@@ -416,7 +417,7 @@ def process_slide(
                 output_mode=CoordinateOutputMode.PER_ANNOTATION,
                 mask_preview_path=mask_preview_path,
                 mask_preview_paths_by_annotation=mask_preview_paths_by_annotation,
-                preview_downsample=cfg.tiling.preview.downsample,
+                preview_downsample=preview_cfg.downsample,
                 preview_palette=preview_palette,
                 preview_pixel_mapping=(
                     resolved_sampling_spec.pixel_mapping
@@ -451,14 +452,14 @@ def process_slide(
                     save_tiling_result=save_tiling_result,
                     selection_strategy=selection_strategy,
                 )
-                if cfg.save_previews and sampling_preview_dir is not None:
+                if preview_cfg.save and sampling_preview_dir is not None:
                     write_coordinate_preview(
                         wsi_path=wsi_path,
                         coordinates=coordinates,
                         tile_size_lv0=extraction.tile_size_lv0,
                         save_dir=sampling_preview_dir,
                         sample_id=sample_id,
-                        downsample=cfg.tiling.preview.downsample,
+                        downsample=preview_cfg.downsample,
                         backend=backend_selection.backend,
                         mask_path=mask_path,
                         annotation=annotation,
@@ -471,7 +472,7 @@ def process_slide(
                     "sample_id": sample_id,
                     "annotation": annotation,
                     "image_path": str(wsi_path),
-                    "annotation_mask_path": (
+                    "mask_path": (
                         str(mask_path) if mask_path is not None else None
                     ),
                     "sampling_status": "success",
@@ -503,7 +504,7 @@ def process_slide(
                     "sample_id": sample_id,
                     "annotation": annotation,
                     "image_path": str(wsi_path),
-                    "annotation_mask_path": (
+                    "mask_path": (
                         str(mask_path) if mask_path is not None else None
                     ),
                     "sampling_status": "failed",
@@ -525,12 +526,15 @@ def main(args):
             cfg = setup(args)
             output_dir = Path(cfg.output_dir)
 
-            whole_slides = load_csv(cfg, mask_column="annotation_mask_path")
+            whole_slides = load_csv(cfg, require_mask_column=True)
+            if any(slide.mask_path is None for slide in whole_slides):
+                raise ValueError("Sampling CSV requires mask_path for every row")
             tiling_config = resolve_tiling_config(cfg)
             segmentation_config = resolve_segmentation_config(cfg)
             filter_config = resolve_filter_config(cfg)
             resolved_sampling_spec = resolve_sampling_spec(cfg, tiling=tiling_config)
             selection_strategy = resolve_sampling_strategy(cfg)
+            preview_cfg = cfg.tiling.preview
             active_annotations = resolved_sampling_spec.active_annotations
             progress.emit_progress(
                 "run.started",
@@ -548,13 +552,24 @@ def main(args):
             process_list = output_dir / "process_list.csv"
             if process_list.is_file() and cfg.resume:
                 process_df = pd.read_csv(process_list)
+                legacy_mask_columns = [
+                    column
+                    for column in ("tissue_mask_path", "annotation_mask_path")
+                    if column in process_df.columns
+                ]
+                if legacy_mask_columns:
+                    raise ValueError(
+                        "Unsupported sampling process_list.csv schema in "
+                        f"{process_list}; deprecated mask columns present: "
+                        + ", ".join(sorted(legacy_mask_columns))
+                    )
                 validate_required_columns(
                     process_df,
                     required_columns={
                         "sample_id",
                         "annotation",
                         "image_path",
-                        "annotation_mask_path",
+                        "mask_path",
                         "sampling_status",
                         "num_tiles",
                         "coordinates_npz_path",
@@ -565,7 +580,7 @@ def main(args):
                     file_path=process_list,
                     file_label="sampling process_list.csv",
                 )
-                process_df["annotation_mask_path"] = process_df["annotation_mask_path"].apply(
+                process_df["mask_path"] = process_df["mask_path"].apply(
                     lambda x: str(x) if pd.notna(x) else None
                 )
             else:
@@ -578,7 +593,7 @@ def main(args):
                         "sample_id",
                         "annotation",
                         "image_path",
-                        "annotation_mask_path",
+                        "mask_path",
                         "sampling_status",
                         "num_tiles",
                         "coordinates_npz_path",
@@ -625,7 +640,7 @@ def main(args):
                 tiles_dir.mkdir(exist_ok=True, parents=True)
                 mask_preview_dir = None
                 sampling_preview_dir = None
-                if cfg.save_previews:
+                if preview_cfg.save:
                     preview_dir = output_dir / "preview"
                     mask_preview_dir = Path(preview_dir, "mask")
                     sampling_preview_dir = Path(preview_dir, "sampling")
@@ -642,7 +657,7 @@ def main(args):
                         {
                             "sample_id": slide.sample_id,
                             "wsi_path": slide.image_path,
-                            "annotation_mask_path": slide.mask_path,
+                            "mask_path": slide.mask_path,
                             "cfg": cfg,
                             "tiling_config": tiling_config,
                             "segmentation_config": segmentation_config,

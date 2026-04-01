@@ -119,7 +119,7 @@ The metadata file is structured into:
 
 - `sample_id`
 - `image_path`
-- `tissue_mask_path`
+- `mask_path`
 - `tiling_status`
 - `num_tiles`
 - `coordinates_npz_path`
@@ -133,7 +133,7 @@ The metadata file is structured into:
 - `sample_id`
 - `annotation`
 - `image_path`
-- `annotation_mask_path`
+- `mask_path`
 - `sampling_status`
 - `num_tiles`
 - `coordinates_npz_path`

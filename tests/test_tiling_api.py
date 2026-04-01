@@ -1350,7 +1350,7 @@ def test_tile_slides_writes_process_list_and_can_reuse_precomputed_tiles(
     assert list(process_df.columns) == [
         "sample_id",
         "image_path",
-        "tissue_mask_path",
+        "mask_path",
         "tiling_status",
         "num_tiles",
         "coordinates_npz_path",
@@ -1362,7 +1362,7 @@ def test_tile_slides_writes_process_list_and_can_reuse_precomputed_tiles(
     row = process_df.to_dict(orient="records")[0]
     assert row["sample_id"] == "slide-1"
     assert row["image_path"] == "slide-1.svs"
-    assert pd.isna(row["tissue_mask_path"])
+    assert pd.isna(row["mask_path"])
     assert row["tiling_status"] == "success"
     assert row["num_tiles"] == 2
     assert row["coordinates_npz_path"] == str(precomputed_artifacts.coordinates_npz_path)
@@ -1577,7 +1577,7 @@ def test_tile_slides_resume_marks_stale_artifact_as_failed(
             {
                 "sample_id": "slide-6",
                 "image_path": "stored-slide.svs",
-                "tissue_mask_path": np.nan,
+                "mask_path": np.nan,
                 "tiling_status": "success",
                 "num_tiles": 1,
                 "coordinates_npz_path": str(artifacts.coordinates_npz_path),
@@ -1670,14 +1670,26 @@ def test_tile_slides_resume_rejects_unsupported_process_list_schema(
 def test_load_csv_rejects_duplicate_sample_id(tmp_path: Path):
     csv_path = tmp_path / "slides.csv"
     csv_path.write_text(
-        "sample_id,image_path,tissue_mask_path\n"
+        "sample_id,image_path,mask_path\n"
         "slide-1,slide-1.svs,slide-1-mask.png\n"
         "slide-1,slide-2.svs,slide-2-mask.png\n"
     )
     cfg = SimpleNamespace(csv=str(csv_path))
 
     with pytest.raises(ValueError, match="Duplicate sample_id"):
-        load_csv(cfg, mask_column="tissue_mask_path")
+        load_csv(cfg)
+
+
+def test_load_csv_rejects_legacy_mask_columns(tmp_path: Path):
+    csv_path = tmp_path / "slides.csv"
+    csv_path.write_text(
+        "sample_id,image_path,tissue_mask_path\n"
+        "slide-1,slide-1.svs,slide-1-mask.png\n"
+    )
+    cfg = SimpleNamespace(csv=str(csv_path))
+
+    with pytest.raises(ValueError, match="deprecated mask columns"):
+        load_csv(cfg)
 
 
 def test_load_tiling_result_rejects_missing_npz_keys(tmp_path: Path):
@@ -1747,12 +1759,12 @@ def test_load_whole_slides_from_rows_parses_current_schema_rows():
             {
                 "sample_id": "slide-1",
                 "image_path": "slide-1.svs",
-                "tissue_mask_path": "slide-1-mask.png",
+                "mask_path": "slide-1-mask.png",
             },
         {
             "sample_id": "slide-2",
             "image_path": "slide-2.svs",
-            "tissue_mask_path": None,
+            "mask_path": None,
         },
     ]
 
@@ -1777,17 +1789,17 @@ def test_load_whole_slides_from_rows_treats_nan_like_mask_values_as_missing():
         {
             "sample_id": "slide-nan",
             "image_path": "slide-nan.svs",
-            "tissue_mask_path": np.nan,
+            "mask_path": np.nan,
         },
         {
             "sample_id": "slide-none-string",
             "image_path": "slide-none-string.svs",
-            "tissue_mask_path": "None",
+            "mask_path": "None",
         },
         {
             "sample_id": "slide-nan-string",
             "image_path": "slide-nan-string.svs",
-            "tissue_mask_path": "nan",
+            "mask_path": "nan",
         },
     ]
 
@@ -1810,6 +1822,19 @@ def test_load_whole_slides_from_rows_treats_nan_like_mask_values_as_missing():
             mask_path=None,
         ),
     ]
+
+
+def test_load_whole_slides_from_rows_rejects_legacy_mask_columns():
+    rows = [
+        {
+            "sample_id": "slide-1",
+            "image_path": "slide-1.svs",
+            "tissue_mask_path": "slide-1-mask.png",
+        }
+    ]
+
+    with pytest.raises(ValueError, match="deprecated mask columns"):
+        load_whole_slides_from_rows(rows)
 
 
 def test_coordinate_extraction_result_is_not_tuple_iterable():
@@ -1954,9 +1979,9 @@ def test_preview_config_rejects_invalid_mask_overlay_alpha():
 def test_resolve_preview_config_reads_mask_overlay_style():
     cfg = OmegaConf.create(
         {
-            "save_previews": True,
             "tiling": {
                 "preview": {
+                    "save": True,
                     "downsample": 64,
                     "mask_overlay_color": [1, 2, 3],
                     "mask_overlay_alpha": 0.25,

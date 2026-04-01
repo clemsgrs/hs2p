@@ -321,11 +321,22 @@ def write_process_list(process_rows: list[dict[str, Any]], process_list_path: Pa
 def load_whole_slides_from_rows(rows: Sequence[dict[str, Any]]) -> list[SlideSpec]:
     whole_slides: list[SlideSpec] = []
     for row in rows:
+        legacy_mask_columns = [
+            column
+            for column in ("tissue_mask_path", "annotation_mask_path")
+            if column in row
+        ]
+        if legacy_mask_columns:
+            raise ValueError(
+                "Process list rows use deprecated mask columns: "
+                + ", ".join(sorted(legacy_mask_columns))
+                + "; use 'mask_path' instead"
+            )
         whole_slides.append(
             SlideSpec(
                 sample_id=str(row["sample_id"]),
                 image_path=Path(row["image_path"]),
-                mask_path=optional_path(row.get("tissue_mask_path")),
+                mask_path=optional_path(row.get("mask_path")),
             )
         )
     return whole_slides

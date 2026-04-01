@@ -5,14 +5,15 @@ HS2P provides two batch entrypoints:
 - `python -m hs2p.cli.tiling`
 - `python -m hs2p.cli.sampling`
 
-They share the same base tiling/segmentation/filtering config model, but they do not share the same public CSV mask column anymore.
+They share the same base tiling/segmentation/filtering config model and the same public CSV mask column, `mask_path`.
+The entrypoint determines whether that path is interpreted as a tissue mask or an annotation mask.
 
 ## Input CSV schemas
 
 ### Tiling
 
 ```csv
-sample_id,image_path,tissue_mask_path
+sample_id,image_path,mask_path
 slide-1,/data/slide-1.tif,/data/slide-1-tissue-mask.tif
 slide-2,/data/slide-2.tif,
 ...
@@ -21,7 +22,7 @@ slide-2,/data/slide-2.tif,
 ### Sampling
 
 ```csv
-sample_id,image_path,annotation_mask_path
+sample_id,image_path,mask_path
 slide-1,/data/slide-1.tif,/data/slide-1-annotations.tif
 slide-2,/data/slide-2.tif,/data/slide-2-annotations.tif
 ...
@@ -32,7 +33,7 @@ slide-2,/data/slide-2.tif,/data/slide-2-annotations.tif
 Works in either mode:
 
 ```csv
-sample_id,image_path,tissue_mask_path,spacing_at_level_0
+sample_id,image_path,mask_path,spacing_at_level_0
 slide-1,/data/slide-1.tif,,0.25
 slide-2,/data/slide-2.tif,/data/slide-2-tissue-mask.tif,
 ...
@@ -100,13 +101,12 @@ pip install "hs2p[all]"
   - contour and optional white/black filtering settings
 - `tiling.preview`
   - preview rendering settings
+  - `save` enables both batch mask previews and tiling previews
   - `downsample` controls preview resolution
   - `mask_overlay_color` controls the RGB tint used for `preview/mask/*.jpg`
   - `mask_overlay_alpha` controls overlay opacity for `preview/mask/*.jpg`
 - `tiling.sampling_params`
   - annotation-specific sampling rules for `hs2p.cli.sampling`
-- `save_previews`
-  - write preview images
 - `save_tiles`
   - write `tiles/{sample_id}.tiles.tar`
 - `speed.num_workers`

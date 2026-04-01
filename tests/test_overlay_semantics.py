@@ -260,7 +260,7 @@ def test_extract_coordinates_uses_overlay_mask_preview_instead_of_line_rendering
     preview_path = tmp_path / "mask-preview.jpg"
     result = wsi_mod.extract_coordinates(
         wsi_path=Path("fake-wsi.tif"),
-        tissue_mask_path=None,
+        mask_path=None,
         backend="openslide",
         segment_params=SimpleNamespace(
             downsample=64,
@@ -369,7 +369,7 @@ def test_extract_coordinates_preview_uses_in_memory_annotation_labels_when_style
     palette = _build_palette({1: (255, 0, 0)})
     result = wsi_mod.extract_coordinates(
         wsi_path=Path("fake-wsi.tif"),
-        tissue_mask_path=Path("fake-mask.tif"),
+        mask_path=Path("fake-mask.tif"),
         backend="openslide",
         segment_params=SimpleNamespace(
             downsample=64,

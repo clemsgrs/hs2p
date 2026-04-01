@@ -170,7 +170,6 @@ def _base_cli_cfg(tmp_path: Path, *, resume: bool = False) -> SimpleNamespace:
     return SimpleNamespace(
         output_dir=str(tmp_path / "output"),
         resume=resume,
-        save_previews=False,
         speed=SimpleNamespace(num_workers=1, jpeg_backend="turbojpeg"),
         tiling=SimpleNamespace(
             backend="asap",
@@ -179,6 +178,7 @@ def _base_cli_cfg(tmp_path: Path, *, resume: bool = False) -> SimpleNamespace:
                 target_spacing_um=0.5,
                 target_tile_size_px=256,
             ),
+            preview=SimpleNamespace(save=False, downsample=32),
         ),
     )
 
@@ -290,7 +290,7 @@ def test_tiling_main_installs_progress_reporter_only_during_pipeline_run(
                 {
                     "sample_id": "slide-1",
                     "image_path": "slide-1.svs",
-                    "tissue_mask_path": np.nan,
+                    "mask_path": np.nan,
                     "tiling_status": "success",
                     "num_tiles": 2,
                     "coordinates_npz_path": str(output_dir / "tiles" / "slide-1.coordinates.npz"),
@@ -337,7 +337,7 @@ def test_tile_slides_emits_progress_for_reused_success_and_failure(
             {
                 "sample_id": "slide-a",
                 "image_path": "slide-a.svs",
-                "tissue_mask_path": np.nan,
+                "mask_path": np.nan,
                 "tiling_status": "success",
                 "num_tiles": 2,
                 "coordinates_npz_path": str(run_dir / "tiles" / "slide-a.coordinates.npz"),
@@ -454,10 +454,18 @@ def test_sampling_main_emits_progress_and_run_summary(monkeypatch, tmp_path: Pat
     reporter = RecordingReporter()
     cfg = _base_cli_cfg(tmp_path)
     cfg.resume = False
-    cfg.save_previews = False
+    cfg.tiling.preview.save = False
     slides = [
-        SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs")),
-        SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
+        SlideSpec(
+            sample_id="slide-1",
+            image_path=Path("slide-1.svs"),
+            mask_path=Path("slide-1-mask.png"),
+        ),
+        SlideSpec(
+            sample_id="slide-2",
+            image_path=Path("slide-2.svs"),
+            mask_path=Path("slide-2-mask.png"),
+        ),
     ]
     resolved_sampling_spec = sampling_mod.SamplingSpec(
         pixel_mapping={"background": 0, "tumor": 1},
@@ -508,7 +516,7 @@ def test_sampling_main_emits_progress_and_run_summary(monkeypatch, tmp_path: Pat
                     "sample_id": sample_id,
                     "annotation": "tumor",
                     "image_path": f"{sample_id}.svs",
-                    "annotation_mask_path": None,
+                    "mask_path": None,
                     "sampling_status": "success",
                     "num_tiles": 3,
                     "coordinates_npz_path": str(
@@ -533,7 +541,7 @@ def test_sampling_main_emits_progress_and_run_summary(monkeypatch, tmp_path: Pat
                 "sample_id": sample_id,
                 "annotation": "tumor",
                 "image_path": f"{sample_id}.svs",
-                "annotation_mask_path": None,
+                "mask_path": None,
                 "sampling_status": "failed",
                 "num_tiles": 0,
                 "coordinates_npz_path": np.nan,
@@ -592,6 +600,13 @@ def test_sampling_main_emits_finished_summary_when_resume_has_no_work(
     reporter = RecordingReporter()
     cfg = _base_cli_cfg(tmp_path, resume=True)
     slides = [SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs"))]
+    slides = [
+        SlideSpec(
+            sample_id="slide-1",
+            image_path=Path("slide-1.svs"),
+            mask_path=Path("slide-1-mask.png"),
+        )
+    ]
     resolved_sampling_spec = sampling_mod.SamplingSpec(
         pixel_mapping={"background": 0, "tumor": 1},
         color_mapping=None,
@@ -606,7 +621,7 @@ def test_sampling_main_emits_finished_summary_when_resume_has_no_work(
                 "sample_id": "slide-1",
                 "annotation": "tumor",
                 "image_path": "slide-1.svs",
-                "annotation_mask_path": np.nan,
+                "mask_path": np.nan,
                 "sampling_status": "success",
                 "num_tiles": 0,
                 "coordinates_npz_path": np.nan,

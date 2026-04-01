@@ -592,7 +592,7 @@ def _build_success_process_row(
     return {
         "sample_id": whole_slide.sample_id,
         "image_path": str(whole_slide.image_path),
-        "tissue_mask_path": (
+        "mask_path": (
             str(whole_slide.mask_path) if whole_slide.mask_path is not None else None
         ),
         "tiling_status": "success",
@@ -614,7 +614,7 @@ def _build_failure_process_row(
     return {
         "sample_id": whole_slide.sample_id,
         "image_path": str(whole_slide.image_path),
-        "tissue_mask_path": (
+        "mask_path": (
             str(whole_slide.mask_path) if whole_slide.mask_path is not None else None
         ),
         "tiling_status": "failed",
@@ -769,12 +769,23 @@ def tile_slides(
     existing_successes: dict[str, dict[str, Any]] = {}
     if resume and process_list_path.is_file():
         existing_df = pd.read_csv(process_list_path)
+        legacy_mask_columns = [
+            column
+            for column in ("tissue_mask_path", "annotation_mask_path")
+            if column in existing_df.columns
+        ]
+        if legacy_mask_columns:
+            raise ValueError(
+                "Unsupported tiling process_list.csv schema in "
+                f"{process_list_path}; deprecated mask columns present: "
+                + ", ".join(sorted(legacy_mask_columns))
+            )
         validate_required_columns(
             existing_df,
             required_columns={
                 "sample_id",
                 "image_path",
-                "tissue_mask_path",
+                "mask_path",
                 "tiling_status",
                 "num_tiles",
                 "coordinates_npz_path",

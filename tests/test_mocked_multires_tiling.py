@@ -71,7 +71,7 @@ def test_extract_coordinates_returns_exact_coordinates_for_rectangular_tissue(
 
     result = wsi_api.extract_coordinates(
         wsi_path=Path("synthetic-slide.tif"),
-        tissue_mask_path=Path("synthetic-mask.tif"),
+        mask_path=Path("synthetic-mask.tif"),
         backend="asap",
         segment_params=_segmentation_config(),
         tiling_params=_tiling_config(tissue_threshold=0.0),
@@ -100,7 +100,7 @@ def test_extract_coordinates_respects_50_vs_51_percent_tissue_threshold(fake_bac
 
     result_50 = wsi_api.extract_coordinates(
         wsi_path=Path("synthetic-slide.tif"),
-        tissue_mask_path=Path("synthetic-mask.tif"),
+        mask_path=Path("synthetic-mask.tif"),
         backend="asap",
         segment_params=_segmentation_config(),
         tiling_params=_tiling_config(tissue_threshold=0.50),
@@ -111,7 +111,7 @@ def test_extract_coordinates_respects_50_vs_51_percent_tissue_threshold(fake_bac
     )
     result_51 = wsi_api.extract_coordinates(
         wsi_path=Path("synthetic-slide.tif"),
-        tissue_mask_path=Path("synthetic-mask.tif"),
+        mask_path=Path("synthetic-mask.tif"),
         backend="asap",
         segment_params=_segmentation_config(),
         tiling_params=_tiling_config(tissue_threshold=0.51),
@@ -155,7 +155,7 @@ def test_extract_coordinates_match_expected_coordinates_across_spacings(fake_bac
     for spacing, exp in expected.items():
         result = wsi_api.extract_coordinates(
             wsi_path=Path("synthetic-slide.tif"),
-            tissue_mask_path=Path("synthetic-mask.tif"),
+            mask_path=Path("synthetic-mask.tif"),
             backend="asap",
             segment_params=_segmentation_config(),
             tiling_params=_tiling_config(
@@ -293,7 +293,7 @@ def test_extract_coordinates_segments_maskless_slides_without_annotation_pct_cra
 
     result = wsi_api.extract_coordinates(
         wsi_path=Path("synthetic-slide.tif"),
-        tissue_mask_path=None,
+        mask_path=None,
         backend="asap",
         segment_params=SegmentationConfig(
             downsample=2,
@@ -329,7 +329,7 @@ def test_extract_coordinates_returns_zero_tile_result_for_tissue_free_maskless_s
 
     result = wsi_api.extract_coordinates(
         wsi_path=Path("empty-slide.tif"),
-        tissue_mask_path=None,
+        mask_path=None,
         backend="asap",
         segment_params=_segmentation_config(),
         tiling_params=_tiling_config(tissue_threshold=0.01),
@@ -356,7 +356,7 @@ def test_sample_coordinates_returns_zero_tile_result_for_tissue_free_annotation(
 
     result = wsi_api.sample_coordinates(
         wsi_path=Path("synthetic-slide.tif"),
-        annotation_mask_path=Path("synthetic-mask.tif"),
+        mask_path=Path("synthetic-mask.tif"),
         backend="asap",
         segment_params=_segmentation_config(),
         tiling_params=_tiling_config(tissue_threshold=0.01),

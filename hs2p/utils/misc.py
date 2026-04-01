@@ -77,13 +77,29 @@ def initialize_wandb(
     return run
 
 
-def load_csv(cfg, *, mask_column: str | None = None):
+def load_csv(
+    cfg,
+    *,
+    mask_column: str = "mask_path",
+    require_mask_column: bool = False,
+):
     csv_path = Path(cfg.csv).resolve()
     df = pd.read_csv(csv_path)
     required = {"sample_id", "image_path"}
     missing = sorted(required - set(df.columns))
     if missing:
         raise ValueError("Input CSV is missing required columns: " + ", ".join(missing))
+    legacy_mask_columns = [
+        column
+        for column in ("tissue_mask_path", "annotation_mask_path")
+        if column in df.columns
+    ]
+    if legacy_mask_columns:
+        raise ValueError(
+            "Input CSV uses deprecated mask columns: "
+            + ", ".join(sorted(legacy_mask_columns))
+            + "; use 'mask_path' instead"
+        )
     if df["sample_id"].duplicated().any():
         duplicates = sorted(
             df.loc[df["sample_id"].duplicated(), "sample_id"].astype(str).unique()
@@ -91,15 +107,12 @@ def load_csv(cfg, *, mask_column: str | None = None):
         raise ValueError(
             "Duplicate sample_id values are not allowed: " + ", ".join(duplicates)
         )
-    if mask_column is not None and mask_column not in df.columns and "mask_path" in df.columns:
-        raise ValueError(
-            f"Input CSV uses deprecated 'mask_path'; use '{mask_column}' instead"
-        )
-    mask_series = (
-        df[mask_column]
-        if mask_column is not None and mask_column in df.columns
-        else pd.Series([None] * len(df))
-    )
+    if mask_column not in df.columns:
+        if require_mask_column:
+            raise ValueError(f"Input CSV is missing required column: {mask_column}")
+        mask_series = pd.Series([None] * len(df))
+    else:
+        mask_series = df[mask_column]
     spacing_series = (
         df["spacing_at_level_0"]
         if "spacing_at_level_0" in df.columns

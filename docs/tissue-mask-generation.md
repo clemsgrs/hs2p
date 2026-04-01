@@ -8,7 +8,7 @@ python scripts/generate_tissue_mask.py --help
 
 This script produces pyramidal tissue masks that can later be consumed by:
 
-- CLI tiling through the `tissue_mask_path` CSV column
+- CLI tiling through the `mask_path` CSV column
 - Python workflows through `SlideSpec(mask_path=...)`
 
 ## Installation
