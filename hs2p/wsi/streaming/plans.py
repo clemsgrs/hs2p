@@ -1,9 +1,17 @@
-from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Iterable, Sequence
 
 import numpy as np
+
+
+@dataclass(frozen=True)
+class GroupedReadPlan:
+    x: int
+    y: int
+    read_size_px: int
+    block_size: int
+    tile_indices: tuple[int, ...]
 
 
 @dataclass
@@ -24,15 +32,6 @@ class SupertileIndex:
     tile_crop_x: np.ndarray
     tile_crop_y: np.ndarray
     ordered_indices: np.ndarray
-
-
-@dataclass(frozen=True)
-class GroupedReadPlan:
-    x: int
-    y: int
-    read_size_px: int
-    block_size: int
-    tile_indices: tuple[int, ...]
 
 
 def resolve_read_step_px(result: Any) -> int:

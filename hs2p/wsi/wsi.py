@@ -422,7 +422,6 @@ class WSI(object):
             contours,
             holes,
             tiling_params=tiling_params,
-            filter_params=filter_params,
             annotation=annotation,
             disable_tqdm=disable_tqdm,
             num_workers=num_workers,
@@ -661,7 +660,6 @@ class WSI(object):
         contours,
         holes,
         tiling_params: TilingConfig,
-        filter_params: FilterConfig,
         annotation: str | None = None,
         disable_tqdm: bool = False,
         num_workers: int = 1,
@@ -674,7 +672,6 @@ class WSI(object):
             contours (list): List of contours representing tissue blobs in the wsi.
             holes (list): List of tissue holes in each contour.
             tiling_params: Tiling configuration for contour processing.
-            filter_params (FilterConfig): Parameters for filtering.
             annotation (str, optional): annotation type to use for tile extraction.
             num_workers (int, optional): Number of workers to use for parallel processing. Defaults to 1.
 
@@ -698,9 +695,7 @@ class WSI(object):
                 contours[i],
                 holes[i],
                 tiling_params,
-                filter_params,
                 annotation,
-                num_workers=num_workers,
             )
 
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
@@ -778,9 +773,7 @@ class WSI(object):
         contour,
         contour_holes,
         tiling_params: TilingConfig,
-        filter_params: FilterConfig,
         annotation: str | None = None,
-        num_workers: int = 1,
     ):
         """
         Processes a contour to generate tile coordinates and associated metadata.
@@ -789,7 +782,6 @@ class WSI(object):
             contour (numpy.ndarray): Contour to process, defined as a set of points.
             contour_holes (list): List of holes within the contour.
             tiling_params: Tiling configuration for contour processing.
-            filter_params (FilterConfig): Parameters for filtering.
             annotation (str, optional): Annotation type to use for tile extraction.
 
         Returns:
@@ -823,11 +815,6 @@ class WSI(object):
             int(self.level_downsamples[tile_level][0]),
             int(self.level_downsamples[tile_level][1]),
         )
-        tile_size_at_level_0 = (
-            tile_size_resized * tile_downsample[0],
-            tile_size_resized * tile_downsample[1],
-        )
-        img_w, img_h = self.level_dimensions[0]
         stop_y = int(start_y + h)
         stop_x = int(start_x + w)
 

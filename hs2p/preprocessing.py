@@ -1,6 +1,5 @@
 """Reusable low-level preprocessing primitives shared with downstream projects."""
 
-from __future__ import annotations
 
 import json
 import tempfile

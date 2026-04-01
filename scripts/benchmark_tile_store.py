@@ -5,7 +5,6 @@ Replicates the ``extract_tiles_to_tar`` pipeline from ``hs2p.api`` with
 per-phase timing instrumentation so that read, JPEG-encode, and tar-write
 costs can be measured independently.
 """
-from __future__ import annotations
 
 import argparse
 import sys
