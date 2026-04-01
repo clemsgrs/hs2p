@@ -12,6 +12,7 @@ from typing import Any, Sequence
 
 import numpy as np
 import pandas as pd
+from PIL import Image
 
 from hs2p.configs import (
     FilterConfig,
