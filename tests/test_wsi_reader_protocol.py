@@ -194,6 +194,35 @@ def test_cucim_reader_keeps_metadata_spacing_as_pyramid_baseline(monkeypatch):
     assert reader.spacings == [0.5, 1.0, 2.0]
 
 
+def test_cucim_reader_override_does_not_rescue_missing_spacing_metadata(monkeypatch):
+    from hs2p.wsi.backends.cucim import CuCIMReader
+    import hs2p.wsi.backends.cucim as cucim_reader_mod
+
+    mock_cu_image = MagicMock()
+    mock_cu_image.metadata = {
+        "cucim": {
+            "resolutions": {
+                "level_dimensions": [[400, 200], [200, 100]],
+                "level_downsamples": [1.0, 2.0],
+            }
+        },
+    }
+    fake_cucim = type(
+        "FakeCuCIMModule",
+        (),
+        {"CuImage": MagicMock(return_value=mock_cu_image)},
+    )()
+    original_import_module = cucim_reader_mod.importlib.import_module
+    monkeypatch.setattr(
+        cucim_reader_mod.importlib,
+        "import_module",
+        lambda name: fake_cucim if name == "cucim" else original_import_module(name),
+    )
+
+    with pytest.raises(ValueError, match="spacing"):
+        CuCIMReader("fake.svs", spacing_override=0.25)
+
+
 def test_vips_reader_import_guard():
     if importlib.util.find_spec("pyvips") is not None:
         pytest.skip("pyvips is installed")
