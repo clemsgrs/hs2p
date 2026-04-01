@@ -1,11 +1,13 @@
 import json
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
 import pytest
+from omegaconf import OmegaConf
 
 import hs2p.preprocessing as preprocessing_mod
 from hs2p.api import (
@@ -33,6 +35,7 @@ from hs2p.configs import (
     TilingConfig as ConfigsTilingConfig,
     default_config,
 )
+from hs2p.configs.resolvers import resolve_preview_config
 from hs2p.utils import load_csv
 from hs2p.wsi import CoordinateExtractionResult
 from hs2p.wsi.streaming.plans import resolve_read_step_px
@@ -699,9 +702,21 @@ def test_tile_slides_defers_preview_writes_until_after_next_slide_compute(
         segmentation,
         filtering,
         mask_preview_path,
+        preview_downsample=32,
+        mask_overlay_color=(157, 219, 129),
+        mask_overlay_alpha=0.5,
         num_workers,
     ):
-        del tiling, segmentation, filtering, mask_preview_path, num_workers
+        del (
+            tiling,
+            segmentation,
+            filtering,
+            mask_preview_path,
+            preview_downsample,
+            mask_overlay_color,
+            mask_overlay_alpha,
+            num_workers,
+        )
         events.append(f"compute:{whole_slide.sample_id}")
         return _build_result(
             sample_id=whole_slide.sample_id,
@@ -1460,7 +1475,13 @@ def test_tile_slides_writes_preview_paths_when_previews_are_saved(
         sample_id = kwargs.get("sample_id", "preview")
         (save_dir / f"{sample_id}.jpg").write_bytes(b"preview")
 
+    def _fake_save_overlay_preview(**kwargs):
+        preview_path = Path(kwargs["mask_preview_path"])
+        preview_path.parent.mkdir(parents=True, exist_ok=True)
+        preview_path.write_bytes(b"preview")
+
     monkeypatch.setattr("hs2p.api.write_coordinate_preview", _fake_write_coordinate_preview)
+    monkeypatch.setattr("hs2p.api.save_overlay_preview", _fake_save_overlay_preview)
 
     expected_mask_path = tmp_path / "preview" / "mask" / "slide-preview.jpg"
 
@@ -1481,6 +1502,71 @@ def test_tile_slides_writes_preview_paths_when_previews_are_saved(
         == tmp_path / "preview" / "tiling" / "slide-preview.jpg"
     )
     assert artifacts[0].tiling_preview_path.is_file()
+
+
+def test_tile_slides_mask_preview_uses_overlay_renderer_with_preview_style(
+    monkeypatch,
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    captured: dict[str, object] = {}
+    result = _build_preprocessing_result(
+        sample_id="slide-preview",
+        image_path="slide-preview.svs",
+    )
+    result.tiles = replace(
+        result.tiles,
+        tissue_mask=np.array([[0, 255], [255, 0]], dtype=np.uint8),
+    )
+
+    _patch_preprocess_slide(
+        monkeypatch,
+        result=result,
+    )
+
+    def _fake_save_overlay_preview(**kwargs):
+        captured.update(kwargs)
+        preview_path = Path(kwargs["mask_preview_path"])
+        preview_path.parent.mkdir(parents=True, exist_ok=True)
+        preview_path.write_bytes(b"preview")
+
+    monkeypatch.setattr(api_mod, "save_overlay_preview", _fake_save_overlay_preview)
+
+    artifacts = tile_slides(
+        [SlideSpec(sample_id="slide-preview", image_path=Path("slide-preview.svs"))],
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        preview=PreviewConfig(
+            save_mask_preview=True,
+            downsample=16,
+            mask_overlay_color=(10, 20, 30),
+            mask_overlay_alpha=0.35,
+        ),
+        output_dir=tmp_path,
+    )
+
+    assert len(artifacts) == 1
+    assert artifacts[0].mask_preview_path == (
+        tmp_path / "preview" / "mask" / "slide-preview.jpg"
+    )
+    assert artifacts[0].mask_preview_path.is_file()
+    assert captured["wsi_path"] == Path("slide-preview.svs")
+    assert captured["backend"] == "asap"
+    np.testing.assert_array_equal(
+        captured["mask_arr"],
+        np.array([[0, 1], [1, 0]], dtype=np.uint8),
+    )
+    assert captured["downsample"] == 16
+    assert captured["tile_size_lv0"] == result.tile_size_lv0
+    assert captured["pixel_mapping"] == {"background": 0, "tissue": 1}
+    assert captured["color_mapping"] == {
+        "background": None,
+        "tissue": [10, 20, 30],
+    }
+    assert captured["alpha"] == pytest.approx(0.35)
 
 
 def test_tile_slides_resume_marks_stale_artifact_as_failed(
@@ -1822,6 +1908,7 @@ def test_config_dataclasses_apply_package_defaults_for_secondary_parameters():
     )
     segmentation = SegmentationConfig(downsample=64)
     filtering = FilterConfig(ref_tile_size=224, a_t=4, a_h=2)
+    preview = PreviewConfig()
 
     assert not hasattr(tiling, "drop_holes")
     assert tiling.use_padding == default_config.tiling.params.use_padding
@@ -1860,6 +1947,43 @@ def test_config_dataclasses_apply_package_defaults_for_secondary_parameters():
     )
     assert filtering.qc_spacing_um == pytest.approx(
         default_config.tiling.filter_params.qc_spacing_um
+    )
+    assert preview.downsample == default_config.tiling.preview.downsample
+    assert preview.mask_overlay_color == tuple(
+        default_config.tiling.preview.mask_overlay_color
+    )
+    assert preview.mask_overlay_alpha == pytest.approx(
+        default_config.tiling.preview.mask_overlay_alpha
+    )
+
+
+def test_preview_config_rejects_invalid_mask_overlay_alpha():
+    with pytest.raises(ValueError, match="mask_overlay_alpha"):
+        PreviewConfig(mask_overlay_alpha=1.5)
+
+
+def test_resolve_preview_config_reads_mask_overlay_style():
+    cfg = OmegaConf.create(
+        {
+            "save_previews": True,
+            "tiling": {
+                "preview": {
+                    "downsample": 64,
+                    "mask_overlay_color": [1, 2, 3],
+                    "mask_overlay_alpha": 0.25,
+                }
+            },
+        }
+    )
+
+    preview = resolve_preview_config(cfg)
+
+    assert preview == PreviewConfig(
+        save_mask_preview=True,
+        save_tiling_preview=True,
+        downsample=64,
+        mask_overlay_color=(1, 2, 3),
+        mask_overlay_alpha=0.25,
     )
 
 
