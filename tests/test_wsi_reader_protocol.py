@@ -3,6 +3,7 @@ import importlib.util
 import numpy as np
 import pytest
 
+from hs2p.wsi.backends.common import make_white_canvas
 from hs2p.wsi.reader import BatchRegionReader, SlideReader, select_level
 
 
@@ -60,17 +61,14 @@ class SyntheticSlideReader:
         location: tuple[int, int],
         level: int,
         size: tuple[int, int],
-        *,
-        pad_missing: bool = True,
     ) -> np.ndarray:
-        del pad_missing
         x, y = location
         width, height = size
         downsample = int(self.level_downsamples[level][0])
         x1 = min(int(x + width * downsample), self._width)
         y1 = min(int(y + height * downsample), self._height)
         region = self._image[int(y) : y1 : downsample, int(x) : x1 : downsample]
-        padded = np.zeros((height, width, 3), dtype=np.uint8)
+        padded = make_white_canvas(width, height)
         padded[: region.shape[0], : region.shape[1]] = region[:height, :width]
         return padded
 
@@ -99,13 +97,9 @@ class SyntheticBatchSlideReader(SyntheticSlideReader):
         size: tuple[int, int],
         *,
         num_workers: int | None = None,
-        pad_missing: bool = False,
     ):
         del num_workers
-        return [
-            self.read_region(location, level, size, pad_missing=pad_missing)
-            for location in locations
-        ]
+        return [self.read_region(location, level, size) for location in locations]
 
 
 def test_synthetic_reader_conforms_to_slide_reader_protocol():
@@ -114,6 +108,15 @@ def test_synthetic_reader_conforms_to_slide_reader_protocol():
     region = reader.read_region((0, 0), 0, (64, 64))
     assert region.shape == (64, 64, 3)
     assert reader.level_dimensions[1] == (500, 400)
+
+
+def test_synthetic_reader_uses_white_padding_for_out_of_bounds_reads():
+    reader = SyntheticSlideReader(width=8, height=8, n_levels=1)
+
+    region = reader.read_region((4, 4), 0, (8, 8))
+
+    assert np.all(region[4:, :, :] == 255)
+    assert np.all(region[:, 4:, :] == 255)
 
 
 def test_synthetic_batch_reader_conforms_to_optional_batch_protocol():

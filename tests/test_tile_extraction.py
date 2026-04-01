@@ -49,7 +49,6 @@ def _make_tiling_result(
             level_downsamples=[1.0],
             overlap=overlap,
             min_tissue_fraction=0.1,
-            use_padding=True,
         ),
         sample_id=sample_id,
         image_path=Path("/data/slide-1.svs"),
@@ -120,7 +119,6 @@ def _make_grid_tiling_result(
             level_downsamples=[1.0],
             overlap=overlap,
             min_tissue_fraction=0.1,
-            use_padding=True,
         ),
         sample_id="grid-slide",
         image_path=Path("/data/grid-slide.svs"),
@@ -171,7 +169,6 @@ def _make_custom_tiling_result(
             level_downsamples=[1.0],
             overlap=0.0,
             min_tissue_fraction=0.1,
-            use_padding=True,
         ),
         sample_id=sample_id,
         image_path=Path("/data/custom-slide.svs"),
@@ -785,11 +782,14 @@ class TestExtractTilesToTar:
         result = replace(result, backend="cucim", requested_backend="cucim")
 
         import hs2p.wsi.backends.cucim as cucim_reader_mod
+        import importlib as stdlib_importlib
+
+        original_import_module = stdlib_importlib.import_module
 
         def _import_module(name):
             if name == "cucim":
                 raise ModuleNotFoundError("No module named 'cucim'")
-            raise AssertionError(f"unexpected module import: {name}")
+            return original_import_module(name)
 
         monkeypatch.setattr(cucim_reader_mod.importlib, "import_module", _import_module)
         with patch(
@@ -977,7 +977,6 @@ class TestExtractTilesToTar:
             (0, 0),
             0,
             (128, 128),
-            pad_missing=True,
         )
         assert int(tiles[0][0, 0, 0]) == 1
         assert int(tiles[1][0, 0, 0]) == 2
@@ -998,7 +997,6 @@ class TestExtractTilesToTar:
             (0, 0),
             0,
             (64, 64),
-            pad_missing=True,
         )
         assert int(tiles[0][0, 0, 0]) == 1
         assert int(tiles[-1][0, 0, 0]) == 16
@@ -1017,7 +1015,6 @@ class TestExtractTilesToTar:
             (0, 0),
             0,
             (104, 104),
-            pad_missing=True,
         )
 
     def test_reader_iterator_uses_2x2_blocks_for_incomplete_4x4_grid(self):

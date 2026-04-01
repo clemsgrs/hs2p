@@ -120,7 +120,6 @@ def _compute_tiling_result(
         close=segmentation.close,
         min_tissue_fraction=tiling.tissue_threshold,
         overlap=tiling.overlap,
-        use_padding=tiling.use_padding,
         seg_downsample=segmentation.downsample,
         tolerance=tiling.tolerance,
         ref_tile_size_px=filtering.ref_tile_size,
@@ -382,7 +381,6 @@ def _apply_qc_filtering_to_result(
                     level,
                     size,
                     num_workers=workers,
-                    pad_missing=False,
                 )
             )
         keep_flags = filter_coordinate_tiles(
@@ -399,7 +397,6 @@ def _apply_qc_filtering_to_result(
                 (x, y),
                 level,
                 (width, height),
-                pad_missing=False,
             ),
             batch_read_windows=batch_read_windows,
             num_workers=num_workers,

@@ -5,11 +5,8 @@ from typing import Any
 
 import numpy as np
 
+from hs2p.wsi.backends.common import paste_region, resolve_padded_read_bounds
 from hs2p.wsi.geometry import compute_level_spacings
-
-
-def _pad_canvas(width: int, height: int) -> np.ndarray:
-    return np.full((height, width, 3), 255, dtype=np.uint8)
 
 
 class OpenSlideReader:
@@ -85,50 +82,34 @@ class OpenSlideReader:
 
     def read_level(self, level: int) -> np.ndarray:
         width, height = self._level_dimensions[level]
-        return self.read_region((0, 0), level, (width, height), pad_missing=True)
+        return self.read_region((0, 0), level, (width, height))
 
     def read_region(
         self,
         location: tuple[int, int],
         level: int,
         size: tuple[int, int],
-        *,
-        pad_missing: bool = True,
     ) -> np.ndarray:
-        width, height = int(size[0]), int(size[1])
-        if not pad_missing:
-            return np.array(
-                self._slide.read_region(
-                    (int(location[0]), int(location[1])),
-                    int(level),
-                    (width, height),
-                ).convert("RGB")
-            )
+        bounds = resolve_padded_read_bounds(
+            location=location,
+            size=size,
+            level_dimensions=self._level_dimensions[level],
+            downsample=float(self._level_downsamples[level][0]),
+        )
+        read_width, read_height = bounds.read_size
+        if read_width <= 0 or read_height <= 0:
+            return bounds.canvas
 
-        canvas = _pad_canvas(width, height)
-        if width <= 0 or height <= 0:
-            return canvas
-
-        level_width, level_height = self._level_dimensions[level]
-        downsample = float(self._level_downsamples[level][0])
-        x_level = int(np.floor(location[0] / downsample))
-        y_level = int(np.floor(location[1] / downsample))
-        x1 = max(x_level, 0)
-        y1 = max(y_level, 0)
-        x2 = min(x_level + width, level_width)
-        y2 = min(y_level + height, level_height)
-        if x2 <= x1 or y2 <= y1:
-            return canvas
-
-        read_location = (int(round(x1 * downsample)), int(round(y1 * downsample)))
-        read_width = x2 - x1
-        read_height = y2 - y1
-        region = self._slide.read_region(read_location, int(level), (read_width, read_height))
-        region_rgb = np.array(region.convert("RGB"))
-        paste_x = x1 - x_level
-        paste_y = y1 - y_level
-        canvas[paste_y : paste_y + read_height, paste_x : paste_x + read_width] = region_rgb
-        return canvas
+        region = self._slide.read_region(
+            bounds.read_location,
+            int(level),
+            (int(read_width), int(read_height)),
+        )
+        return paste_region(
+            bounds.canvas,
+            np.array(region.convert("RGB")),
+            paste_offset=bounds.paste_offset,
+        )
 
     def get_thumbnail(self, size: tuple[int, int]) -> np.ndarray:
         return np.array(self._slide.get_thumbnail(size).convert("RGB"))

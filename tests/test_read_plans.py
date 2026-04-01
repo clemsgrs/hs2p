@@ -50,7 +50,6 @@ def _make_grid_result(
             level_downsamples=[1.0],
             overlap=overlap,
             min_tissue_fraction=0.1,
-            use_padding=True,
         ),
         sample_id="read-plan-slide",
         image_path=Path("/tmp/read-plan-slide.svs"),

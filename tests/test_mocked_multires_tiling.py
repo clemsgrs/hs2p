@@ -49,7 +49,6 @@ def _tiling_config(
         tolerance=tolerance,
         overlap=0.0,
         tissue_threshold=tissue_threshold,
-        use_padding=False,
         backend="asap",
     )
 

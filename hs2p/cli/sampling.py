@@ -143,7 +143,6 @@ def save_sampling_coordinates(
             level_downsamples=[1.0],
             overlap=tiling_config.overlap,
             min_tissue_fraction=annotation_threshold,
-            use_padding=tiling_config.use_padding,
         ),
         sample_id=sample_id,
         image_path=image_path,
@@ -248,8 +247,6 @@ def validate_sampling_artifact_row(
         raise ValueError("sampling overlap mismatch")
     if result.min_tissue_fraction != expected_tissue_threshold:
         raise ValueError("sampling tissue_threshold mismatch")
-    if result.use_padding != tiling_config.use_padding:
-        raise ValueError("sampling use_padding mismatch")
     if result.tolerance != tiling_config.tolerance:
         raise ValueError("sampling tolerance mismatch")
     if result.seg_downsample != segmentation_config.downsample:

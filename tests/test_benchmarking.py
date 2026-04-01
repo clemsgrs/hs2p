@@ -50,7 +50,6 @@ def _make_grid_result(
             level_downsamples=[1.0],
             overlap=overlap,
             min_tissue_fraction=0.1,
-            use_padding=True,
         ),
         sample_id="bench-slide",
         image_path=Path("/tmp/bench-slide.svs"),
@@ -100,7 +99,6 @@ def _make_custom_result(
             level_downsamples=[1.0],
             overlap=0.0,
             min_tissue_fraction=0.1,
-            use_padding=True,
         ),
         sample_id="bench-slide",
         image_path=Path("/tmp/bench-slide.svs"),
@@ -305,7 +303,6 @@ def test_load_single_slide_result_from_config_builds_fresh_tiling_result(tmp_pat
         "    tolerance: 0.05\n"
         "    overlap: 0.0\n"
         "    tissue_threshold: 0.1\n"
-        "    use_padding: true\n"
     )
 
     result = module.load_single_slide_result_from_config(

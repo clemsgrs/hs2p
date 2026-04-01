@@ -45,7 +45,6 @@ def _make_result(
             level_downsamples=[1.0],
             overlap=overlap,
             min_tissue_fraction=0.1,
-            use_padding=True,
         ),
         sample_id="region-tiles-slide",
         image_path=Path("/tmp/region-tiles-slide.svs"),

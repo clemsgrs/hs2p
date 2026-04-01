@@ -6,6 +6,8 @@ from typing import Any
 import cv2
 import numpy as np
 
+from hs2p.wsi.backends.common import paste_region, resolve_padded_read_bounds
+
 
 class ASAPReader:
     def __init__(self, path: str | Path, *, spacing_override: float | None = None):
@@ -69,19 +71,30 @@ class ASAPReader:
         location: tuple[int, int],
         level: int,
         size: tuple[int, int],
-        *,
-        pad_missing: bool = True,
     ) -> np.ndarray:
-        del pad_missing
-        return np.asarray(
+        bounds = resolve_padded_read_bounds(
+            location=location,
+            size=size,
+            level_dimensions=self._level_dimensions[level],
+            downsample=float(self._level_downsamples[level][0]),
+        )
+        read_width, read_height = bounds.read_size
+        if read_width <= 0 or read_height <= 0:
+            return bounds.canvas
+        region = np.asarray(
             self._wsi.get_patch(
-                int(location[0]),
-                int(location[1]),
-                int(size[0]),
-                int(size[1]),
+                int(bounds.read_location[0]),
+                int(bounds.read_location[1]),
+                int(read_width),
+                int(read_height),
                 spacing=float(self._spacings[level]),
                 center=False,
             )
+        )
+        return paste_region(
+            bounds.canvas,
+            region[..., :3] if region.ndim == 3 and region.shape[-1] > 3 else region,
+            paste_offset=bounds.paste_offset,
         )
 
     def get_thumbnail(self, size: tuple[int, int]) -> np.ndarray:

@@ -128,8 +128,8 @@ def test_wsi_opens_slide_and_mask_readers_with_resolved_backend(monkeypatch):
             del level
             return np.zeros((100, 100, 3), dtype=np.uint8)
 
-        def read_region(self, location, level, size, *, pad_missing=True):
-            del location, level, pad_missing
+        def read_region(self, location, level, size):
+            del location, level
             return np.zeros((size[1], size[0], 3), dtype=np.uint8)
 
         def get_thumbnail(self, size):
@@ -204,7 +204,6 @@ def test_tile_slide_uses_resolved_backend_for_hash_and_result(monkeypatch):
                 level_downsamples=[1.0],
                 overlap=0.0,
                 min_tissue_fraction=0.1,
-                use_padding=True,
             ),
             sample_id="slide-1",
             image_path=Path("slide.svs"),

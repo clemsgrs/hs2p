@@ -138,7 +138,6 @@ def _tiling_config() -> TilingConfig:
         tolerance=0.05,
         overlap=0.0,
         tissue_threshold=0.1,
-        use_padding=True,
     )
 
 

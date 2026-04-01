@@ -5,6 +5,7 @@ from typing import Any
 
 import numpy as np
 
+from hs2p.wsi.backends.common import paste_region, resolve_padded_read_bounds
 from hs2p.wsi.geometry import compute_level_spacings
 
 VIPS_SUPPORTED_SUFFIXES = {
@@ -35,21 +36,6 @@ def _vips_to_numpy(image) -> np.ndarray:
     if arr.shape[-1] >= 4:
         arr = arr[..., :3]
     return arr
-
-
-def _pad_crop(image, x: int, y: int, width: int, height: int):
-    bg = [255]
-    if x + width <= image.width and y + height <= image.height:
-        return image.crop(x, y, width, height)
-    if x + width > image.width and y + height <= image.height:
-        cropped = image.crop(x, y, max(0, image.width - x), height)
-        return cropped.gravity("west", width, height, background=bg)
-    if x + width <= image.width and y + height > image.height:
-        cropped = image.crop(x, y, width, max(0, image.height - y))
-        return cropped.gravity("north", width, height, background=bg)
-    cropped = image.crop(x, y, max(0, image.width - x), max(0, image.height - y))
-    return cropped.gravity("north-west", width, height, background=bg)
-
 
 class VIPSReader:
     def __init__(self, path: str | Path, *, spacing_override: float | None = None):
@@ -169,20 +155,22 @@ class VIPSReader:
         location: tuple[int, int],
         level: int,
         size: tuple[int, int],
-        *,
-        pad_missing: bool = True,
     ) -> np.ndarray:
         image = self._open_level_image(level)
-        downsample = self._level_downsamples[level][0]
-        x = int(location[0] / downsample)
-        y = int(location[1] / downsample)
-        width = int(size[0])
-        height = int(size[1])
-        if pad_missing:
-            region = _pad_crop(image, x, y, width, height)
-        else:
-            region = image.crop(x, y, width, height)
-        return _vips_to_numpy(region)
+        bounds = resolve_padded_read_bounds(
+            location=location,
+            size=size,
+            level_dimensions=self._level_dimensions[level],
+            downsample=float(self._level_downsamples[level][0]),
+        )
+        read_width, read_height = bounds.read_size
+        if read_width <= 0 or read_height <= 0:
+            return bounds.canvas
+
+        x = int(bounds.read_location[0] / self._level_downsamples[level][0])
+        y = int(bounds.read_location[1] / self._level_downsamples[level][0])
+        region = _vips_to_numpy(image.crop(x, y, int(read_width), int(read_height)))
+        return paste_region(bounds.canvas, region, paste_offset=bounds.paste_offset)
 
     def get_thumbnail(self, size: tuple[int, int]) -> np.ndarray:
         image = self._open_level_image(self.level_count - 1)

@@ -6,6 +6,26 @@ from typing import Any, Iterable, Sequence
 import numpy as np
 
 
+@dataclass
+class SupertileIndex:
+    """Random-access index over a set of grouped read plans.
+
+    Attributes:
+        plans: Ordered list of ``GroupedReadPlan`` objects (one per super-tile).
+        tile_to_st: ``(num_tiles,)`` int32 array mapping tile index → super-tile id.
+        tile_crop_x: ``(num_tiles,)`` int32 array of pixel X offset within the super-tile region.
+        tile_crop_y: ``(num_tiles,)`` int32 array of pixel Y offset within the super-tile region.
+        ordered_indices: ``(num_tiles,)`` int64 array of tile indices reordered so tiles
+            belonging to the same super-tile are contiguous.
+    """
+
+    plans: list[GroupedReadPlan]
+    tile_to_st: np.ndarray
+    tile_crop_x: np.ndarray
+    tile_crop_y: np.ndarray
+    ordered_indices: np.ndarray
+
+
 @dataclass(frozen=True)
 class GroupedReadPlan:
     x: int
@@ -132,3 +152,48 @@ def group_read_plans_by_size(
     for plan in read_plans:
         grouped.setdefault(int(plan.read_size_px), []).append(plan)
     return grouped
+
+
+def build_supertile_index(result: Any) -> SupertileIndex:
+    """Build a random-access index over the grouped read plans for *result*.
+
+    Returns a :class:`SupertileIndex` that maps every tile index to its
+    super-tile id and pixel crop offsets within that super-tile region.
+    This is the building block for random-access DataLoader tile reading.
+
+    The iteration order within each :class:`GroupedReadPlan` follows the
+    outer-X / inner-Y convention: ``tile_indices[pos]`` corresponds to
+    ``x_idx = pos // block_size``, ``y_idx = pos % block_size``.
+    """
+    read_step_px = resolve_read_step_px(result)
+    step_px_lv0 = resolve_step_px_lv0(result)
+
+    num_tiles = int(result.num_tiles)
+    tile_to_st = np.empty(num_tiles, dtype=np.int32)
+    tile_crop_x = np.empty(num_tiles, dtype=np.int32)
+    tile_crop_y = np.empty(num_tiles, dtype=np.int32)
+    plans: list[GroupedReadPlan] = []
+    ordered_indices: list[int] = []
+
+    for plan in iter_grouped_read_plans(
+        result=result,
+        read_step_px=read_step_px,
+        step_px_lv0=step_px_lv0,
+    ):
+        st_id = len(plans)
+        for pos, tile_idx in enumerate(plan.tile_indices):
+            x_idx = pos // plan.block_size
+            y_idx = pos % plan.block_size
+            tile_to_st[tile_idx] = st_id
+            tile_crop_x[tile_idx] = x_idx * read_step_px
+            tile_crop_y[tile_idx] = y_idx * read_step_px
+            ordered_indices.append(tile_idx)
+        plans.append(plan)
+
+    return SupertileIndex(
+        plans=plans,
+        tile_to_st=tile_to_st,
+        tile_crop_x=tile_crop_x,
+        tile_crop_y=tile_crop_y,
+        ordered_indices=np.array(ordered_indices, dtype=np.int64),
+    )
