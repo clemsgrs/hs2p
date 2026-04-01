@@ -112,16 +112,37 @@ def test_reader_backend_probe_uses_backend_openers(monkeypatch):
 
 
 
-def test_wholeslideimage_coerces_cucim_paths_to_strings(monkeypatch):
-    seen_paths: list[tuple[object, str]] = []
+def test_wsi_opens_slide_and_mask_readers_with_resolved_backend(monkeypatch):
+    seen_calls: list[tuple[object, str, float | None]] = []
 
-    class _FakeSlide:
+    class _FakeSlideReader:
+        backend_name = "cucim"
+        dimensions = (100, 100)
+        spacing = 0.5
         spacings = [0.5]
-        shapes = [(100, 100)]
+        level_dimensions = [(100, 100)]
+        level_downsamples = [(1.0, 1.0)]
+        level_count = 1
 
-    def _fake_wholeslideimage(path, *, backend: str):
-        seen_paths.append((path, backend))
-        return _FakeSlide()
+        def read_level(self, level: int):
+            del level
+            return np.zeros((100, 100, 3), dtype=np.uint8)
+
+        def read_region(self, location, level, size, *, pad_missing=True):
+            del location, level, pad_missing
+            return np.zeros((size[1], size[0], 3), dtype=np.uint8)
+
+        def get_thumbnail(self, size):
+            del size
+            return np.zeros((8, 8, 3), dtype=np.uint8)
+
+        def close(self):
+            return None
+
+    def _fake_open_slide(path, backend: str, *, spacing_override=None, gpu_decode=False):
+        del gpu_decode
+        seen_calls.append((path, backend, spacing_override))
+        return _FakeSlideReader()
 
     monkeypatch.setattr(
         wsi_mod,
@@ -131,7 +152,7 @@ def test_wholeslideimage_coerces_cucim_paths_to_strings(monkeypatch):
             tried=("cucim",),
         ),
     )
-    monkeypatch.setattr(wsi_mod.wsd, "WholeSlideImage", _fake_wholeslideimage)
+    monkeypatch.setattr(wsi_mod, "open_slide", _fake_open_slide)
     monkeypatch.setattr(wsi_mod.WSI, "load_segmentation", lambda *args, **kwargs: 0)
 
     wsi_mod.WSI(
@@ -147,9 +168,9 @@ def test_wholeslideimage_coerces_cucim_paths_to_strings(monkeypatch):
         segment_params=SimpleNamespace(),
     )
 
-    assert seen_paths == [
-        ("/tmp/slide.tiff", "cucim"),
-        ("/tmp/mask.tiff", "cucim"),
+    assert seen_calls == [
+        (Path("/tmp/slide.tiff"), "cucim", None),
+        (Path("/tmp/mask.tiff"), "cucim", None),
     ]
 
 

@@ -56,19 +56,32 @@ def test_overlay_mask_on_slide_matches_tile_semantics(monkeypatch):
     mask_labels = np.array([[0, 3], [4, 3]], dtype=np.uint8)
     mask_arr = np.stack([mask_labels, mask_labels, mask_labels], axis=-1)
 
+    class FakeReader:
+        spacings = [0.5]
+        level_downsamples = [(1.0, 1.0)]
+
+        def read_level(self, level):
+            del level
+            return mask_arr
+
     class FakeWSI:
         def __init__(self, path, backend="asap"):
+            del backend
             self.path = Path(path)
             self.spacings = [0.5]
             self.level_dimensions = [(2, 2)]
             self.level_downsamples = [(1.0, 1.0)]
+            self.reader = FakeReader()
 
         def get_best_level_for_downsample_custom(self, downsample):
             return 0
 
-        def get_slide(self, spacing):
-            if "mask" in self.path.name:
-                return mask_arr
+        def get_level_spacing(self, level):
+            del level
+            return 0.5
+
+        def get_slide(self, level):
+            del level
             return slide_arr
 
     monkeypatch.setattr(coordinate_api_mod, "WSI", FakeWSI)
@@ -109,6 +122,7 @@ def test_overlay_mask_on_slide_accepts_in_memory_mask_array(monkeypatch):
 
     class FakeWSI:
         def __init__(self, path, backend="asap"):
+            del backend
             self.path = Path(path)
             self.spacings = [0.5]
             self.level_dimensions = [(2, 2)]
@@ -117,7 +131,8 @@ def test_overlay_mask_on_slide_accepts_in_memory_mask_array(monkeypatch):
         def get_best_level_for_downsample_custom(self, downsample):
             return 0
 
-        def get_slide(self, spacing):
+        def get_slide(self, level):
+            del level
             return slide_arr
 
     monkeypatch.setattr(coordinate_api_mod, "WSI", FakeWSI)
@@ -150,6 +165,7 @@ def test_overlay_mask_on_slide_defaults_to_tissue_overlay_style(monkeypatch):
 
     class FakeWSI:
         def __init__(self, path, backend="asap"):
+            del backend
             self.path = Path(path)
             self.spacings = [0.5]
             self.level_dimensions = [(2, 2)]
@@ -158,7 +174,8 @@ def test_overlay_mask_on_slide_defaults_to_tissue_overlay_style(monkeypatch):
         def get_best_level_for_downsample_custom(self, downsample):
             return 0
 
-        def get_slide(self, spacing):
+        def get_slide(self, level):
+            del level
             return slide_arr
 
     monkeypatch.setattr(visualization_mod, "WSI", FakeWSI)

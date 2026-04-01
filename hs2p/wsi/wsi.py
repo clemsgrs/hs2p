@@ -7,16 +7,12 @@ from pathlib import Path
 import cv2
 import numpy as np
 import tqdm
-import wholeslidedata as wsd
 from PIL import Image
 
 from hs2p.configs import FilterConfig, SegmentationConfig, TilingConfig
-from hs2p.wsi.backend import coerce_wsd_path, resolve_backend
+from hs2p.wsi.backend import open_slide, resolve_backend
 from hs2p.wsi.types import SamplingSpec
 from hs2p.wsi.utils import TissueFilter, ResolvedGeometry
-
-# ignore all warnings from wholeslidedata
-warnings.filterwarnings("ignore", module="wholeslidedata")
 
 Image.MAX_IMAGE_PIXELS = 933120000
 
@@ -28,14 +24,14 @@ class WSI(object):
         path (Path): Full path to the wsi.
         name (str): Name of the wsi (stem of the path).
         fmt (str): File format of the wsi.
-        wsi (wsd.WholeSlideImage): wsi object.
+        reader: slide reader object.
         spacing_at_level_0 (float): Manually set spacing at level 0.
         spacings (list[float]): List of spacings for each level.
         level_dimensions (list[tuple[int, int]]): Dimensions at each level.
         level_downsamples (list[tuple[float, float]]): Downsample factors for each level.
         backend (str): Backend used for opening the wsi (default: "asap").
         mask_path (Path, optional): Path to the segmentation mask.
-        mask (wsd.WholeSlideImage, optional): Segmentation mask object.
+        mask_reader: Segmentation mask reader object.
         seg_level (int): Level for segmentation.
         binary_mask (np.ndarray): Binary segmentation mask as a numpy array.
     """
@@ -71,9 +67,10 @@ class WSI(object):
         self.requested_backend = backend
         selection = resolve_backend(backend, wsi_path=path, mask_path=mask_path)
         self.backend = selection.backend
-        self.wsi = wsd.WholeSlideImage(
-            coerce_wsd_path(path, backend=self.backend),
+        self.reader = open_slide(
+            path,
             backend=self.backend,
+            spacing_override=spacing_at_level_0,
         )
 
         self._scaled_contours_cache = {}  # add a cache for scaled contours
@@ -81,20 +78,21 @@ class WSI(object):
         self._level_spacing_cache = {}  # add a cache for level spacings
 
         self.spacing_at_level_0 = spacing_at_level_0  # manually set spacing at level 0
-        self.raw_spacings = list(self.wsi.spacings)  # native spacings from file metadata, never overridden
+        self.raw_spacings = list(self.reader.spacings)  # native spacings from file metadata, never overridden
         self.spacings = self.get_spacings()  # physical spacings, possibly overridden via spacing_at_level_0
-        self.level_dimensions = self.wsi.shapes
-        self.level_downsamples = self.get_downsamples()
+        self.level_dimensions = list(self.reader.level_dimensions)
+        self.level_downsamples = list(self.reader.level_downsamples)
         self.pixel_mapping = pixel_mapping
 
         self.mask_path = mask_path
+        self.mask_reader = None
         if mask_path is not None:
             if sampling_spec is None:
                 raise ValueError(
                     "sampling_spec is required when loading a mask-backed slide"
                 )
-            self.mask = wsd.WholeSlideImage(
-                coerce_wsd_path(mask_path, backend=self.backend),
+            self.mask_reader = open_slide(
+                mask_path,
                 backend=self.backend,
             )
             self.seg_level = self.load_segmentation(
@@ -110,10 +108,10 @@ class WSI(object):
     def get_slide(self, level: int) -> np.ndarray:
         """Return the full slide image at the given pyramid level.
 
-        Uses raw_spacings so the backend resolves to the correct level regardless
-        of any spacing_at_level_0 override.
+        Uses the selected reader level directly so backend selection stays
+        encapsulated behind the reader contract.
         """
-        return self.wsi.get_slide(spacing=self.raw_spacings[level])
+        return np.asarray(self.reader.read_level(level))
 
     def get_tile(self, x: int, y: int, width: int, height: int, level: int) -> np.ndarray:
         """
@@ -129,35 +127,14 @@ class WSI(object):
         Returns:
             numpy.ndarray: The extracted tile as a numpy array.
         """
-        return self.wsi.get_patch(
-            x,
-            y,
-            width,
-            height,
-            spacing=self.raw_spacings[level],
-            center=False,
+        return np.asarray(
+            self.reader.read_region(
+                (int(x), int(y)),
+                int(level),
+                (int(width), int(height)),
+                pad_missing=True,
+            )
         )
-
-    def get_downsamples(self):
-        """
-        Calculate the downsample factors for each level of the image pyramid.
-
-        This method computes the downsample factors for each level in the image
-        pyramid relative to the base level (level 0). The downsample factor for
-        each level is represented as a tuple of two values, corresponding to the
-        downsampling in the width and height dimensions.
-
-        Returns:
-            list of tuple: A list of tuples where each tuple contains two float
-            values representing the downsample factors (width_factor, height_factor)
-            for each level relative to the base level.
-        """
-        level_downsamples = []
-        dim_0 = self.level_dimensions[0]
-        for dim in self.level_dimensions:
-            level_downsample = (dim_0[0] / float(dim[0]), dim_0[1] / float(dim[1]))
-            level_downsamples.append(level_downsample)
-        return level_downsamples
 
     def get_spacings(self):
         """
@@ -268,23 +245,27 @@ class WSI(object):
         Returns:
             int: Level at which the tissue mask was loaded.
         """
-        mask_spacing_at_level_0 = self.mask.spacings[0]
+        if self.mask_reader is None:
+            raise ValueError("mask_reader is required for load_segmentation()")
+        mask_spacings = list(self.mask_reader.spacings)
+        mask_level_downsamples = list(self.mask_reader.level_downsamples)
+        mask_spacing_at_level_0 = mask_spacings[0]
         seg_level = self.get_best_level_for_downsample_custom(segment_params.downsample)
         seg_spacing = self.get_level_spacing(seg_level)
 
         mask_downsample = seg_spacing / mask_spacing_at_level_0
         mask_level = int(
-            np.argmin([abs(x - mask_downsample) for x in self.mask.downsamplings])
+            np.argmin([abs(x - mask_downsample) for x, _ in mask_level_downsamples])
         )
-        mask_spacing = self.mask.spacings[mask_level]
+        mask_spacing = mask_spacings[mask_level]
 
         scale = seg_spacing / mask_spacing
         while scale < 1 and mask_level > 0:
             mask_level -= 1
-            mask_spacing = self.mask.spacings[mask_level]
+            mask_spacing = mask_spacings[mask_level]
             scale = seg_spacing / mask_spacing
 
-        mask = self.mask.get_slide(spacing=mask_spacing)
+        mask = np.asarray(self.mask_reader.read_level(mask_level))
         if mask.ndim == 3:
             mask = mask[:, :, 0]
         # WSD/OpenSlide may return non-integer values when reading pyramid levels
