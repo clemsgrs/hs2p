@@ -292,6 +292,10 @@ class TilingResult:
         if self.mask_path is not None:
             self.mask_path = Path(self.mask_path)
 
+    @property
+    def num_tiles(self) -> int:
+        return len(self.tiles.x)
+
     def __getattr__(self, name: str) -> Any:
         """Delegate attribute access to the underlying TileGeometry."""
         try:
