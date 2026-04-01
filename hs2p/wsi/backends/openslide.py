@@ -81,7 +81,8 @@ class OpenSlideReader:
 
     def read_level(self, level: int) -> np.ndarray:
         width, height = self._level_dimensions[level]
-        return self.read_region((0, 0), level, (width, height))
+        region = self._slide.read_region((0, 0), int(level), (width, height))
+        return np.array(region.convert("RGB"))
 
     def read_region(
         self,
