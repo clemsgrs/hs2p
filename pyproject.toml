@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hs2p"
-version = "3.0.0"
+version = "3.0.1"
 description = "Optimized slide tiling library for histopathology"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -109,7 +109,7 @@ no_implicit_reexport = true
 max-line-length = 160
 
 [tool.bumpver]
-current_version = "3.0.0"
+current_version = "3.0.1"
 version_pattern = "MAJOR.MINOR.PATCH"
 commit = false       # We do version bumping in CI, not as a commit
 tag = false          # Git tag already exists — we don't auto-tag
