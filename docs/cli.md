@@ -2,8 +2,8 @@
 
 HS2P provides two batch entrypoints:
 
-- `python -m hs2p.tiling`
-- `python -m hs2p.sampling`
+- `python -m hs2p.cli.tiling`
+- `python -m hs2p.cli.sampling`
 
 They share the same base tiling/segmentation/filtering config model, but they do not share the same public CSV mask column anymore.
 
@@ -51,13 +51,13 @@ Start from [`hs2p/configs/default.yaml`](../hs2p/configs/default.yaml), then edi
 Run tiling:
 
 ```bash
-python -m hs2p.tiling --config-file /path/to/config.yaml
+python -m hs2p.cli.tiling --config-file /path/to/config.yaml
 ```
 
 Run sampling:
 
 ```bash
-python -m hs2p.sampling --config-file /path/to/config.yaml
+python -m hs2p.cli.sampling --config-file /path/to/config.yaml
 ```
 
 ## Installation and backends
@@ -104,7 +104,7 @@ pip install "hs2p[all]"
   - `mask_overlay_color` controls the RGB tint used for `preview/mask/*.jpg`
   - `mask_overlay_alpha` controls overlay opacity for `preview/mask/*.jpg`
 - `tiling.sampling_params`
-  - annotation-specific sampling rules for `hs2p.sampling`
+  - annotation-specific sampling rules for `hs2p.cli.sampling`
 - `save_previews`
   - write preview images
 - `save_tiles`
@@ -114,7 +114,7 @@ pip install "hs2p[all]"
 
 ## Sampling-specific config
 
-`hs2p.sampling` adds:
+`hs2p.cli.sampling` adds:
 
 - `tiling.sampling_params.independent_sampling`
 - `tiling.sampling_params.pixel_mapping`
