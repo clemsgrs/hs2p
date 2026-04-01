@@ -5,6 +5,7 @@ import numpy as np
 from PIL import Image
 
 from .masks import pad_array_to_shape
+from .masks import read_aligned_mask
 from .preview import (
     build_overlay_alpha,
     build_palette,
@@ -113,31 +114,13 @@ def overlay_mask_on_slide(
             path=annotation_mask_path,
             backend=backend,
         )
-        mask_width_at_level_0, _ = mask_object.level_dimensions[0]
-        mask_downsample = mask_width_at_level_0 / width
-        mask_level = int(
-            np.argmin(
-                [abs(x - mask_downsample) for x, _ in mask_object.level_downsamples]
-            )
+        mask_arr = read_aligned_mask(
+            mask_obj=mask_object.reader,
+            slide_spacing=wsi_object.get_level_spacing(vis_level),
+            slide_dimensions=(base_width, base_height),
         )
-        mask_spacing = mask_object.spacings[mask_level]
-        mask_width, _ = mask_object.level_dimensions[mask_level]
-
-        scale = mask_width / width
-        while scale < 1 and mask_level > 0:
-            mask_level -= 1
-            mask_spacing = mask_object.spacings[mask_level]
-            mask_width, _ = mask_object.level_dimensions[mask_level]
-            scale = mask_width / width
-
-        mask_arr = mask_object.get_slide(spacing=mask_spacing)
         if mask_arr.ndim == 3:
             mask_arr = mask_arr[:, :, 0]
-        mask_arr = cv2.resize(
-            mask_arr.astype(np.uint8),
-            (base_width, base_height),
-            interpolation=cv2.INTER_NEAREST,
-        )
     elif mask_arr is not None:
         if mask_arr.ndim == 3:
             mask_arr = mask_arr[:, :, 0]

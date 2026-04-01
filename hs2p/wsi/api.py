@@ -300,7 +300,7 @@ def _filter_coordinates_for_sampling_with_wsi(
     sampling_spec: SamplingSpec,
 ):
     mask = read_aligned_mask(
-        mask_obj=wsi.mask,
+        mask_obj=wsi.mask_reader,
         slide_spacing=wsi.get_level_spacing(tile_level),
         slide_dimensions=wsi.level_dimensions[tile_level],
     )

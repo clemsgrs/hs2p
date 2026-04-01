@@ -79,11 +79,11 @@ def test_filter_coordinates_reuses_loaded_mask_and_avoids_per_tile_mask_reads(
     class FakeMaskBackend:
         def __init__(self):
             self.spacings = [1.0]
-            self.downsamplings = [1.0]
-            self.shapes = [(4, 4)]
+            self.level_downsamples = [(1.0, 1.0)]
+            self.level_dimensions = [(4, 4)]
 
-        def get_slide(self, spacing):
-            assert spacing == 1.0
+        def read_level(self, level):
+            assert level == 0
             return np.array(
                 [
                     [[1], [1], [2], [2]],
@@ -92,11 +92,6 @@ def test_filter_coordinates_reuses_loaded_mask_and_avoids_per_tile_mask_reads(
                     [[0], [0], [2], [2]],
                 ],
                 dtype=np.uint8,
-            )
-
-        def get_patch(self, *args, **kwargs):
-            raise AssertionError(
-                "filter_coordinates should not read one mask patch per tile"
             )
 
     class FakeWSI:
@@ -126,7 +121,7 @@ def test_filter_coordinates_reuses_loaded_mask_and_avoids_per_tile_mask_reads(
             self.spacings = [1.0]
             self.level_dimensions = [(4, 4)]
             self.level_downsamples = [(1.0, 1.0)]
-            self.mask = FakeMaskBackend() if mask_path is not None else None
+            self.mask_reader = FakeMaskBackend() if mask_path is not None else None
 
         def get_level_spacing(self, level):
             assert level == 0
@@ -169,11 +164,11 @@ def test_filter_coordinates_vectorized_path_avoids_per_tile_crops_and_handles_bo
     class FakeMaskBackend:
         def __init__(self):
             self.spacings = [1.0]
-            self.downsamplings = [1.0]
-            self.shapes = [(3, 3)]
+            self.level_downsamples = [(1.0, 1.0)]
+            self.level_dimensions = [(3, 3)]
 
-        def get_slide(self, spacing):
-            assert spacing == 1.0
+        def read_level(self, level):
+            assert level == 0
             return np.array(
                 [
                     [[1], [1], [0]],
@@ -207,7 +202,7 @@ def test_filter_coordinates_vectorized_path_avoids_per_tile_crops_and_handles_bo
             self.spacings = [1.0]
             self.level_dimensions = [(3, 3)]
             self.level_downsamples = [(1.0, 1.0)]
-            self.mask = FakeMaskBackend() if mask_path is not None else None
+            self.mask_reader = FakeMaskBackend() if mask_path is not None else None
 
         def get_level_spacing(self, level):
             assert level == 0

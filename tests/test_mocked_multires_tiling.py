@@ -8,7 +8,7 @@ import hs2p.wsi as wsi_api
 from hs2p.wsi import api as wsi_api_mod
 import hs2p.wsi.wsi as wsimod
 from hs2p.wsi import SamplingSpec
-from tests.helpers.fake_wsi_backend import FakePyramidWSI, PyramidSpec
+from tests.helpers.fake_wsi_backend import FakePyramidWSI, FakeReaderFactory, PyramidSpec
 
 
 def _segmentation_config() -> SegmentationConfig:
@@ -279,18 +279,17 @@ def test_extract_coordinates_segments_maskless_slides_without_annotation_pct_cra
     tissue_mask = np.zeros((32, 32), dtype=np.uint8)
     tissue_mask[8:24, 8:24] = 255
 
-    def _fake_wholeslide(path: Path, backend: str = "asap"):
-        del path, backend
-        return FakePyramidWSI(
-            PyramidSpec(spacings=[1.0, 2.0], levels=[slide_l0, slide_l1])
-        )
+    fake_reader_factory = FakeReaderFactory(
+        slide_spec=PyramidSpec(spacings=[1.0, 2.0], levels=[slide_l0, slide_l1]),
+        mask_spec=PyramidSpec(spacings=[1.0, 2.0], levels=[slide_l0, slide_l1]),
+    )
 
     def _fake_segment_tissue(self, segment_params):
         del segment_params
         self.annotation_mask = {"tissue": tissue_mask}
         return 0
 
-    monkeypatch.setattr(wsimod.wsd, "WholeSlideImage", _fake_wholeslide)
+    monkeypatch.setattr(wsimod, "open_slide", fake_reader_factory)
     monkeypatch.setattr(wsimod.WSI, "segment_tissue", _fake_segment_tissue)
 
     result = wsi_api.extract_coordinates(
@@ -322,13 +321,12 @@ def test_extract_coordinates_returns_zero_tile_result_for_tissue_free_maskless_s
     slide_l0 = np.full((32, 32, 3), 255, dtype=np.uint8)
     slide_l1 = slide_l0[::2, ::2, :]
 
-    def _fake_wholeslide(path: Path, backend: str = "asap"):
-        del path, backend
-        return FakePyramidWSI(
-            PyramidSpec(spacings=[1.0, 2.0], levels=[slide_l0, slide_l1])
-        )
+    fake_reader_factory = FakeReaderFactory(
+        slide_spec=PyramidSpec(spacings=[1.0, 2.0], levels=[slide_l0, slide_l1]),
+        mask_spec=PyramidSpec(spacings=[1.0, 2.0], levels=[slide_l0, slide_l1]),
+    )
 
-    monkeypatch.setattr(wsimod.wsd, "WholeSlideImage", _fake_wholeslide)
+    monkeypatch.setattr(wsimod, "open_slide", fake_reader_factory)
 
     result = wsi_api.extract_coordinates(
         wsi_path=Path("empty-slide.tif"),

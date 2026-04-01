@@ -10,17 +10,17 @@ HELPERS_DIR = Path(__file__).resolve().parent / "helpers"
 if str(HELPERS_DIR) not in sys.path:
     sys.path.insert(0, str(HELPERS_DIR))
 
-from fake_wsi_backend import FakeWSDFactory, make_mask_spec, make_slide_spec
+from fake_wsi_backend import FakeReaderFactory, make_mask_spec, make_slide_spec
 
 
 @pytest.fixture
 def fake_backend(monkeypatch):
     def _apply(mask_l0: np.ndarray):
-        factory = FakeWSDFactory(
+        factory = FakeReaderFactory(
             slide_spec=make_slide_spec(),
             mask_spec=make_mask_spec(mask_l0),
         )
-        monkeypatch.setattr(wsimod.wsd, "WholeSlideImage", factory)
+        monkeypatch.setattr(wsimod, "open_slide", factory)
         return factory
 
     return _apply

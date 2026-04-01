@@ -11,11 +11,9 @@ def normalize_tissue_mask(mask_arr: np.ndarray) -> np.ndarray:
 
 
 def mask_level_downsamples(mask_obj) -> list[tuple[float, float]]:
-    if hasattr(mask_obj, "level_downsamples"):
-        return list(mask_obj.level_downsamples)
-    if hasattr(mask_obj, "downsamplings"):
-        return [(float(d), float(d)) for d in mask_obj.downsamplings]
-    raise AttributeError("Mask object must expose level_downsamples or downsamplings")
+    if not hasattr(mask_obj, "level_downsamples"):
+        raise AttributeError("Mask object must expose level_downsamples")
+    return list(mask_obj.level_downsamples)
 
 
 def read_aligned_mask(
@@ -36,10 +34,10 @@ def read_aligned_mask(
         mask_spacing = mask_spacings[mask_level]
         scale = slide_spacing / mask_spacing
 
-    mask_arr = mask_obj.get_slide(spacing=mask_spacing)
+    mask_arr = mask_obj.read_level(mask_level)
     target_width, target_height = slide_dimensions
     return cv2.resize(
-        mask_arr.astype(np.uint8),
+        np.asarray(mask_arr, dtype=np.uint8),
         (int(target_width), int(target_height)),
         interpolation=cv2.INTER_NEAREST,
     )
