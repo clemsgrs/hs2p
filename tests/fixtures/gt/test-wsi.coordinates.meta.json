@@ -67,7 +67,6 @@
     "requested_tile_size_px": 224,
     "step_px_lv0": 444,
     "tile_size_lv0": 444,
-    "tolerance": 0.05,
-    "use_padding": true
+    "tolerance": 0.05
   }
 }

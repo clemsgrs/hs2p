@@ -146,13 +146,13 @@ slide-2,/data/wsi/slide-2.tif,/data/mask/slide-2-annotations.tif
 Run tiling:
 
 ```bash
-python -m hs2p.tiling --config-file /path/to/config.yaml
+python -m hs2p.cli.tiling --config-file /path/to/config.yaml
 ```
 
 Run sampling:
 
 ```bash
-python -m hs2p.sampling --config-file /path/to/config.yaml
+python -m hs2p.cli.sampling --config-file /path/to/config.yaml
 ```
 
 For a first run, start from [hs2p/configs/default.yaml](hs2p/configs/default.yaml) and edit only the essentials:

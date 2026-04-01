@@ -51,7 +51,6 @@ def tiling_config() -> TilingConfig:
         tolerance=0.07,
         overlap=0.1,
         tissue_threshold=0.2,
-        use_padding=True,
         backend="asap",
     )
 
@@ -167,7 +166,6 @@ def _build_preprocessing_result(
             level_downsamples=[1.0, 4.0],
             overlap=overlap,
             min_tissue_fraction=tissue_threshold,
-            use_padding=True,
             tissue_mask=np.full((8, 8), 255, dtype=np.uint8),
         ),
         sample_id=sample_id,
@@ -379,7 +377,6 @@ def test_compute_tiling_result_uses_preprocessing_core(
     assert captured["requested_spacing_um"] == tiling_config.target_spacing_um
     assert captured["min_tissue_fraction"] == tiling_config.tissue_threshold
     assert captured["overlap"] == tiling_config.overlap
-    assert captured["use_padding"] == tiling_config.use_padding
     assert captured["seg_downsample"] == segmentation_config.downsample
     assert captured["tolerance"] == tiling_config.tolerance
     assert captured["ref_tile_size_px"] == filter_config.ref_tile_size
@@ -586,7 +583,6 @@ def test_load_tiling_result_accepts_preprocessing_artifact(tmp_path: Path):
             level_downsamples=[1.0, 4.0],
             overlap=0.1,
             min_tissue_fraction=0.2,
-            use_padding=True,
         ),
         sample_id="slide-preprocessing",
         image_path="slide-preprocessing.svs",
@@ -1006,7 +1002,6 @@ def test_compute_request_passes_inner_workers_to_tile_extraction(
             tolerance=0.07,
             overlap=0.0,
             tissue_threshold=0.1,
-            use_padding=True,
         ),
         segmentation=SegmentationConfig(64, 8, 255, 7, 4, False, True),
         filtering=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
@@ -1079,7 +1074,6 @@ def test_tile_slides_defaults_gpu_decode_to_disabled_for_saved_tiles(
             tolerance=0.07,
             overlap=0.1,
             tissue_threshold=0.2,
-            use_padding=True,
         ),
         segmentation=segmentation_config,
         filtering=filter_config,
@@ -1184,7 +1178,6 @@ def test_validate_tiling_artifacts_rejects_mismatched_tiling_config(
         tolerance=tiling_config.tolerance,
         overlap=tiling_config.overlap,
         tissue_threshold=tiling_config.tissue_threshold,
-        use_padding=tiling_config.use_padding,
         backend=tiling_config.backend,
     )
 
@@ -1212,7 +1205,6 @@ def test_validate_tiling_artifacts_ignores_disabled_filter_threshold_mismatches(
         tolerance=result.tolerance,
         overlap=result.overlap,
         tissue_threshold=result.min_tissue_fraction,
-        use_padding=result.use_padding,
         backend=result.backend,
     )
     matching_segmentation = SegmentationConfig(
@@ -1265,17 +1257,17 @@ def test_validate_tiling_artifacts_rejects_mismatched_image_path(tmp_path: Path)
 
     with pytest.raises(ValueError, match="image_path mismatch"):
         validate_tiling_artifacts(
-            whole_slide=SlideSpec(
-                sample_id="slide-4", image_path=Path("requested-slide.svs")
-            ),
-            coordinates_npz_path=artifacts.coordinates_npz_path,
-            coordinates_meta_path=artifacts.coordinates_meta_path,
-            compatibility=_artifact_compatibility(
-                tiling_config=TilingConfig(0.5, 224, 0.07, 0.0, 0.1, True, "asap"),
-                segmentation_config=SegmentationConfig(64, 8, 255, 7, 4, False, True),
-                filter_config=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
-            ),
-        )
+                whole_slide=SlideSpec(
+                    sample_id="slide-4", image_path=Path("requested-slide.svs")
+                ),
+                coordinates_npz_path=artifacts.coordinates_npz_path,
+                coordinates_meta_path=artifacts.coordinates_meta_path,
+                compatibility=_artifact_compatibility(
+                    tiling_config=TilingConfig(0.5, 224, 0.07, 0.0, 0.1, "asap"),
+                    segmentation_config=SegmentationConfig(64, 8, 255, 7, 4, False, True),
+                    filter_config=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
+                ),
+            )
 
 
 def test_validate_tiling_artifacts_rejects_mismatched_mask_path(tmp_path: Path):
@@ -1292,15 +1284,15 @@ def test_validate_tiling_artifacts_rejects_mismatched_mask_path(tmp_path: Path):
                 sample_id="slide-5",
                 image_path=Path("slide-5.svs"),
                 mask_path=Path("requested-mask.png"),
-            ),
-            coordinates_npz_path=artifacts.coordinates_npz_path,
-            coordinates_meta_path=artifacts.coordinates_meta_path,
-            compatibility=_artifact_compatibility(
-                tiling_config=TilingConfig(0.5, 224, 0.07, 0.0, 0.1, True, "asap"),
-                segmentation_config=SegmentationConfig(64, 8, 255, 7, 4, False, True),
-                filter_config=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
-            ),
-        )
+                ),
+                coordinates_npz_path=artifacts.coordinates_npz_path,
+                coordinates_meta_path=artifacts.coordinates_meta_path,
+                compatibility=_artifact_compatibility(
+                    tiling_config=TilingConfig(0.5, 224, 0.07, 0.0, 0.1, "asap"),
+                    segmentation_config=SegmentationConfig(64, 8, 255, 7, 4, False, True),
+                    filter_config=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
+                ),
+            )
 
 
 def test_tile_slides_writes_process_list_and_can_reuse_precomputed_tiles(
@@ -1405,7 +1397,6 @@ def test_tile_slides_omits_tiling_preview_path_when_no_tiles(
                 level_downsamples=[1.0],
                 overlap=0.1,
                 min_tissue_fraction=0.2,
-                use_padding=True,
                 tissue_mask=np.zeros((8, 8), dtype=np.uint8),
             ),
             sample_id="slide-0",
@@ -1887,7 +1878,6 @@ def test_write_process_list_removes_temp_file_on_failure(monkeypatch, tmp_path: 
                 tolerance=0.07,
                 overlap=0.1,
                 tissue_threshold=0.2,
-                use_padding=True,
             ),
             segmentation=SegmentationConfig(64, 8, 255, 7, 4, False, True),
             filtering=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
@@ -1911,7 +1901,6 @@ def test_config_dataclasses_apply_package_defaults_for_secondary_parameters():
     preview = PreviewConfig()
 
     assert not hasattr(tiling, "drop_holes")
-    assert tiling.use_padding == default_config.tiling.params.use_padding
     assert tiling.backend == "auto"
     assert tiling.requested_backend == "auto"
     assert segmentation.sthresh == default_config.tiling.seg_params.sthresh

@@ -1,4 +1,3 @@
-from __future__ import annotations
 from collections.abc import Iterator, Sequence
 from typing import Any
 
@@ -119,7 +118,6 @@ def _iter_tile_records_from_reader_plans(
             (int(read_plan.x), int(read_plan.y)),
             int(read_level),
             (int(read_plan.read_size_px), int(read_plan.read_size_px)),
-            pad_missing=True,
         )
         yield from _iter_tile_records_from_region(
             np.asarray(region),
@@ -159,6 +157,7 @@ def _iter_cucim_tile_records_from_result(
         requests=requests,
         level=int(result.read_level),
         num_workers=int(num_workers),
+        spacing_override=float(result.base_spacing_um),
         gpu_decode=gpu_decode,
     )
 

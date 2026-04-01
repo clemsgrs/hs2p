@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 import importlib
 import os
@@ -8,6 +7,7 @@ from typing import Any, Iterable
 import cv2
 import numpy as np
 
+from hs2p.wsi.backends.common import paste_region, resolve_padded_read_bounds
 from hs2p.wsi.geometry import compute_level_spacings
 
 CUCIM_SUPPORTED_SUFFIXES = {".svs", ".tif", ".tiff"}
@@ -34,34 +34,6 @@ def _as_rgb_uint8(region: Any) -> np.ndarray:
                 arr = np.clip(arr, 0.0, 255.0)
         arr = arr.astype(np.uint8)
     return arr
-
-
-def _read_bounds_with_padding(
-    *,
-    location: tuple[int, int],
-    size: tuple[int, int],
-    level_dimensions: tuple[int, int],
-    downsample: float,
-) -> tuple[np.ndarray, tuple[int, int], tuple[int, int], tuple[int, int]]:
-    width, height = int(size[0]), int(size[1])
-    canvas = np.full((height, width, 3), 255, dtype=np.uint8)
-    if width <= 0 or height <= 0:
-        return canvas, (0, 0), (0, 0), (0, 0)
-
-    x_level = int(np.floor(location[0] / downsample))
-    y_level = int(np.floor(location[1] / downsample))
-    x1 = max(x_level, 0)
-    y1 = max(y_level, 0)
-    x2 = min(x_level + width, int(level_dimensions[0]))
-    y2 = min(y_level + height, int(level_dimensions[1]))
-    if x2 <= x1 or y2 <= y1:
-        return canvas, (0, 0), (0, 0), (0, 0)
-
-    read_width = x2 - x1
-    read_height = y2 - y1
-    read_location = (int(round(x1 * downsample)), int(round(y1 * downsample)))
-    paste_offset = (x1 - x_level, y1 - y_level)
-    return canvas, read_location, (read_width, read_height), paste_offset
 
 
 def _extract_spacing_from_metadata(metadata: dict[str, Any]) -> float:
@@ -208,33 +180,28 @@ class CuCIMReader:
 
     def read_level(self, level: int) -> np.ndarray:
         dims = self._level_dimensions[level]
-        return self.read_region((0, 0), level, dims, pad_missing=True)
+        return self.read_region((0, 0), level, dims)
 
     def read_region(
         self,
         location: tuple[int, int],
         level: int,
         size: tuple[int, int],
-        *,
-        pad_missing: bool = True,
     ) -> np.ndarray:
-        if not pad_missing:
-            return _as_rgb_uint8(self._read_region(location, size, level=int(level)))
-
-        canvas, read_location, read_size, paste_offset = _read_bounds_with_padding(
+        bounds = resolve_padded_read_bounds(
             location=location,
             size=size,
             level_dimensions=self._level_dimensions[level],
             downsample=float(self._level_downsamples[level][0]),
         )
-        read_width, read_height = read_size
+        read_width, read_height = bounds.read_size
         if read_width <= 0 or read_height <= 0:
-            return canvas
+            return bounds.canvas
 
-        region = _as_rgb_uint8(self._read_region(read_location, read_size, level=int(level)))
-        paste_x, paste_y = paste_offset
-        canvas[paste_y : paste_y + read_height, paste_x : paste_x + read_width] = region
-        return canvas
+        region = _as_rgb_uint8(
+            self._read_region(bounds.read_location, bounds.read_size, level=int(level))
+        )
+        return paste_region(bounds.canvas, region, paste_offset=bounds.paste_offset)
 
     def read_regions(
         self,
@@ -243,16 +210,28 @@ class CuCIMReader:
         size: tuple[int, int],
         *,
         num_workers: int | None = None,
-        pad_missing: bool = False,
     ) -> Iterable[np.ndarray]:
-        if pad_missing:
+        requested_size = (int(size[0]), int(size[1]))
+        bounds_per_location = [
+            resolve_padded_read_bounds(
+                location=location,
+                size=requested_size,
+                level_dimensions=self._level_dimensions[level],
+                downsample=float(self._level_downsamples[level][0]),
+            )
+            for location in locations
+        ]
+        if any(
+            bounds.read_size != requested_size or bounds.paste_offset != (0, 0)
+            for bounds in bounds_per_location
+        ):
             for location in locations:
-                yield self.read_region(location, level, size, pad_missing=True)
+                yield self.read_region(location, level, requested_size)
             return
 
         kwargs: dict[str, Any] = {
             "location": [(int(x), int(y)) for x, y in locations],
-            "size": (int(size[0]), int(size[1])),
+            "size": requested_size,
             "level": int(level),
             "num_workers": max(1, int(num_workers or 1)),
         }
@@ -263,8 +242,9 @@ class CuCIMReader:
         except TypeError:
             kwargs.pop("device", None)
             regions = self._slide.read_region(**kwargs)
-        for region in regions:
-            yield _as_rgb_uint8(region)
+        for bounds, region in zip(bounds_per_location, regions):
+            arr = _as_rgb_uint8(region)
+            yield paste_region(bounds.canvas, arr, paste_offset=bounds.paste_offset)
 
     def get_thumbnail(self, size: tuple[int, int]) -> np.ndarray:
         level = self.level_count - 1
@@ -288,47 +268,3 @@ class CuCIMReader:
 
     def __exit__(self, *args: Any) -> None:
         self.close()
-
-
-class CuImageReader:
-    """Thin wrapper around cucim.CuImage that handles lazy opening and gpu_decode.
-
-    Encapsulates:
-    - setting ENABLE_CUSLIDE2=1 before importing cucim when gpu_decode=True
-    - lazy CuImage construction (open on first read_region call)
-    - passing device="cuda" to read_region with a TypeError fallback for older
-      cucim versions that do not support the device kwarg
-    """
-
-    def __init__(self, image_path: Path, *, gpu_decode: bool = False):
-        self._image_path = str(image_path)
-        self._gpu_decode = gpu_decode
-        self._cu_image = None
-
-    def _ensure_open(self):
-        if self._cu_image is not None:
-            return
-        if self._gpu_decode:
-            os.environ["ENABLE_CUSLIDE2"] = "1"
-        try:
-            cucim = importlib.import_module("cucim")
-        except ModuleNotFoundError as exc:
-            raise ModuleNotFoundError(
-                "cucim is required for GPU-accelerated tile reading. "
-                "Install it with: pip install cucim-cuXX (where XX matches your CUDA version)"
-            ) from exc
-        self._cu_image = cucim.CuImage(self._image_path)
-
-    def read_region(self, locations, size, *, level: int, num_workers: int):
-        self._ensure_open()
-        kwargs: dict = {
-            "level": level,
-            "num_workers": max(1, num_workers),
-        }
-        if self._gpu_decode:
-            kwargs["device"] = "cuda"
-        try:
-            return self._cu_image.read_region(locations, size, **kwargs)
-        except TypeError:
-            kwargs.pop("device", None)
-            return self._cu_image.read_region(locations, size, **kwargs)

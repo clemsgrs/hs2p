@@ -33,7 +33,6 @@ def _make_result(
             level_downsamples=[1.0],
             overlap=0.0,
             min_tissue_fraction=0.1,
-            use_padding=True,
         ),
         sample_id="stream-slide",
         image_path=Path("/data/stream-slide.svs"),
@@ -89,7 +88,7 @@ def test_iter_tile_records_from_reader_preserves_tile_index_and_coordinates():
         (3, 16, 16),
     ]
     assert [int(record.tile_arr[0, 0, 0]) for record in records] == [1, 2, 3, 4]
-    reader.read_region.assert_called_once_with((0, 0), 0, (32, 32), pad_missing=True)
+    reader.read_region.assert_called_once_with((0, 0), 0, (32, 32))
 
 
 def test_iter_tile_records_from_result_uses_open_slide_for_generic_backends():

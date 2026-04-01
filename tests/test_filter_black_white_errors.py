@@ -117,6 +117,15 @@ def test_filter_black_and_white_tiles_uses_cucim_batched_read_region(monkeypatch
     )
     mock_cu_image = MagicMock()
     mock_cu_image.read_region.return_value = iter([canvas])
+    mock_cu_image.metadata = {
+        "openslide": {"MPP": 1.0},
+        "cucim": {
+            "resolutions": {
+                "level_dimensions": [[4, 4]],
+                "level_downsamples": [1.0],
+            }
+        },
+    }
     fake_cucim = types.SimpleNamespace(CuImage=MagicMock(return_value=mock_cu_image))
 
     import hs2p.wsi.backends.cucim as cucim_reader_mod
@@ -152,9 +161,9 @@ def test_filter_black_and_white_tiles_uses_cucim_batched_read_region(monkeypatch
 
     assert filtered == [0, 1, 0, 1]
     fake_cucim.CuImage.assert_called_once_with(str(wsi.path))
-    mock_cu_image.read_region.assert_called_once_with(
-        [(0, 0)],
-        (4, 4),
-        level=0,
-        num_workers=3,
-    )
+    assert mock_cu_image.read_region.call_args.kwargs == {
+        "location": [(0, 0)],
+        "size": (4, 4),
+        "level": 0,
+        "num_workers": 3,
+    }

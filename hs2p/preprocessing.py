@@ -1,6 +1,5 @@
 """Reusable low-level preprocessing primitives shared with downstream projects."""
 
-from __future__ import annotations
 
 import json
 import tempfile
@@ -225,7 +224,6 @@ class TileGeometry:
     level_downsamples: list[float]
     overlap: float
     min_tissue_fraction: float
-    use_padding: bool = True
     tile_index: np.ndarray | None = None
     tissue_mask: np.ndarray | None = None
 
@@ -340,7 +338,6 @@ def generate_tiles(
     base_spacing_um: float,
     level_downsamples: list[float] | list[tuple[float, float]],
     overlap: float = 0.0,
-    use_padding: bool = True,
     min_tissue_fraction: float = 0.5,
     tolerance: float = 0.05,
     num_workers: int = 1,
@@ -387,7 +384,6 @@ def generate_tiles(
             effective_spacing_um=level_sel.effective_spacing_um,
             tile_size_lv0=tile_size_lv0,
             is_within_tolerance=level_sel.is_within_tolerance,
-            use_padding=use_padding,
             tissue_mask=contours.mask,
             base_spacing_um=base_spacing_um,
             slide_dimensions=list(slide_dimensions),
@@ -397,8 +393,6 @@ def generate_tiles(
         )
 
     if len(contours.contours) == 0:
-        return _empty_result()
-    if not use_padding and (tile_size_lv0 > slide_w or tile_size_lv0 > slide_h):
         return _empty_result()
 
     def _process_contour(idx: int) -> tuple[np.ndarray, np.ndarray]:
@@ -410,7 +404,6 @@ def generate_tiles(
             slide_dimensions=slide_dimensions,
             tile_size_lv0=tile_size_lv0,
             step_lv0=step_lv0,
-            use_padding=use_padding,
             min_tissue_fraction=min_tissue_fraction,
         )
 
@@ -443,7 +436,6 @@ def generate_tiles(
             effective_spacing_um=level_sel.effective_spacing_um,
             tile_size_lv0=tile_size_lv0,
             is_within_tolerance=level_sel.is_within_tolerance,
-            use_padding=use_padding,
             tissue_mask=contours.mask,
             base_spacing_um=base_spacing_um,
             slide_dimensions=list(slide_dimensions),
@@ -461,19 +453,14 @@ def _tiles_for_contour(
     slide_dimensions: tuple[int, int],
     tile_size_lv0: int,
     step_lv0: int,
-    use_padding: bool,
     min_tissue_fraction: float,
 ) -> tuple[np.ndarray, np.ndarray]:
     slide_w, slide_h = slide_dimensions
     x_cont, y_cont, w_cont, h_cont = cv2.boundingRect(contour)
     x_start = max(x_cont, 0)
     y_start = max(y_cont, 0)
-    if use_padding:
-        x_end = min(x_cont + w_cont, slide_w)
-        y_end = min(y_cont + h_cont, slide_h)
-    else:
-        x_end = min(x_cont + w_cont, slide_w - tile_size_lv0 + 1)
-        y_end = min(y_cont + h_cont, slide_h - tile_size_lv0 + 1)
+    x_end = min(x_cont + w_cont, slide_w)
+    y_end = min(y_cont + h_cont, slide_h)
 
     if x_end <= x_start or y_end <= y_start:
         return np.empty((0, 2), dtype=np.int64), np.empty(0, dtype=np.float32)
@@ -496,7 +483,6 @@ def _tiles_for_contour(
         tissue_mask=contour_mask,
         tile_size_lv0=tile_size_lv0,
         slide_dimensions=slide_dimensions,
-        use_padding=use_padding,
     )
     keep = fractions >= min_tissue_fraction
     return candidates[keep], fractions[keep]
@@ -537,7 +523,6 @@ def _compute_tissue_fractions(
     tissue_mask: np.ndarray,
     tile_size_lv0: int,
     slide_dimensions: tuple[int, int],
-    use_padding: bool,
 ) -> np.ndarray:
     mask_h, mask_w = tissue_mask.shape[:2]
     slide_w, slide_h = slide_dimensions
@@ -596,7 +581,6 @@ _TILING_KEYS = {
     "effective_tile_size_px",
     "effective_spacing_um",
     "tile_size_lv0",
-    "use_padding",
     "tolerance",
     "step_px_lv0",
     "overlap",
@@ -667,7 +651,6 @@ def _build_tiling_metadata(result: TilingResult) -> dict[str, Any]:
         "effective_tile_size_px": result.effective_tile_size_px,
         "effective_spacing_um": result.effective_spacing_um,
         "tile_size_lv0": result.tile_size_lv0,
-        "use_padding": result.use_padding,
         "tolerance": result.tolerance,
         "step_px_lv0": result.step_px_lv0,
         "overlap": result.overlap,
@@ -896,7 +879,6 @@ def _load_tiling_result(*, npz_path: Path, meta: dict[str, Any]) -> TilingResult
         effective_spacing_um=float(tiling["effective_spacing_um"]),
         tile_size_lv0=int(tiling["tile_size_lv0"]),
         is_within_tolerance=bool(tiling["is_within_tolerance"]),
-        use_padding=bool(tiling["use_padding"]),
         base_spacing_um=(
             float(slide["base_spacing_um"])
             if slide["base_spacing_um"] is not None
@@ -1073,7 +1055,6 @@ def preprocess_slide(
     close: int = 4,
     min_tissue_fraction: float = 0.1,
     overlap: float = 0.0,
-    use_padding: bool = True,
     seg_downsample: int = 64,
     tolerance: float = 0.05,
     ref_tile_size_px: int = 16,
@@ -1116,7 +1097,7 @@ def preprocess_slide(
             resolved_tissue_method = "precomputed_mask"
         else:
             seg_size = slide.level_dimensions[seg_level]
-            seg_image = slide.read_region((0, 0), seg_level, seg_size, pad_missing=True)
+            seg_image = slide.read_region((0, 0), seg_level, seg_size)
             if use_hsv is None:
                 use_hsv = tissue_method == "hsv"
             if use_otsu is None:
@@ -1157,7 +1138,6 @@ def preprocess_slide(
             base_spacing_um=float(slide.spacing),
             level_downsamples=normalized_downsamples,
             overlap=overlap,
-            use_padding=use_padding,
             min_tissue_fraction=min_tissue_fraction,
             tolerance=tolerance,
             num_workers=num_workers,
@@ -1190,7 +1170,6 @@ def preprocess_slide(
                     (x, y),
                     level,
                     (width, height),
-                    pad_missing=False,
                 ),
                 batch_read_windows=None,
                 num_workers=num_workers,

@@ -20,7 +20,6 @@ class TilingConfig:
     tolerance: float
     overlap: float
     tissue_threshold: float
-    use_padding: bool = bool(_DEFAULT_TILING_PARAMS.use_padding)
     backend: str = AUTO_BACKEND
 
     @property

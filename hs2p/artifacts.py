@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 import pandas as pd
 import tempfile
@@ -188,8 +187,6 @@ def validate_tiling_artifacts(
         raise ValueError("precomputed tiles overlap mismatch")
     if result.min_tissue_fraction != compatibility.tiling.tissue_threshold:
         raise ValueError("precomputed tiles tissue_threshold mismatch")
-    if result.use_padding != compatibility.tiling.use_padding:
-        raise ValueError("precomputed tiles use_padding mismatch")
     if result.tolerance != compatibility.tiling.tolerance:
         raise ValueError("precomputed tiles tolerance mismatch")
     if result.seg_downsample != compatibility.segmentation.downsample:

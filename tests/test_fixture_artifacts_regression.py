@@ -38,7 +38,6 @@ def _build_tiling_configs(
         tolerance=0.07,
         overlap=0.0,
         tissue_threshold=tissue_pct,
-        use_padding=True,
         backend=backend,
     )
     segmentation = SegmentationConfig(

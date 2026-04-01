@@ -277,7 +277,6 @@ def test_extract_coordinates_uses_overlay_mask_preview_instead_of_line_rendering
             target_tile_size_px=224,
             overlap=0.0,
             tissue_threshold=0.1,
-            use_padding=True,
         ),
         filter_params=SimpleNamespace(
             ref_tile_size=16,
@@ -387,7 +386,6 @@ def test_extract_coordinates_preview_uses_in_memory_annotation_labels_when_style
             target_tile_size_px=224,
             overlap=0.0,
             tissue_threshold=0.1,
-            use_padding=True,
         ),
         filter_params=SimpleNamespace(
             ref_tile_size=16,

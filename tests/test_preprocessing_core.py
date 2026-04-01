@@ -53,7 +53,6 @@ def test_compute_tissue_fractions_normalizes_padded_tiles_over_full_tile_area():
         tissue_mask=tissue_mask,
         tile_size_lv0=80,
         slide_dimensions=(100, 100),
-        use_padding=True,
     )
 
     np.testing.assert_array_equal(fractions, np.array([0.0625], dtype=np.float32))
@@ -69,7 +68,6 @@ def test_compute_tissue_fractions_truncates_projected_tile_origins():
         tissue_mask=tissue_mask,
         tile_size_lv0=10,
         slide_dimensions=(30, 30),
-        use_padding=True,
     )
 
     np.testing.assert_array_equal(fractions, np.array([1.0], dtype=np.float32))
@@ -89,7 +87,6 @@ def _make_tiling_result(n_tiles: int = 4) -> TilingResult:
         effective_spacing_um=0.5,
         tile_size_lv0=512,
         is_within_tolerance=True,
-        use_padding=True,
         base_spacing_um=0.25,
         slide_dimensions=[1000, 800],
         level_downsamples=[1.0, 2.0, 4.0],

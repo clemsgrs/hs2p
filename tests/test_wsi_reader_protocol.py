@@ -1,8 +1,10 @@
 import importlib.util
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 
+from hs2p.wsi.backends.common import make_white_canvas
 from hs2p.wsi.reader import BatchRegionReader, SlideReader, select_level
 
 
@@ -60,17 +62,14 @@ class SyntheticSlideReader:
         location: tuple[int, int],
         level: int,
         size: tuple[int, int],
-        *,
-        pad_missing: bool = True,
     ) -> np.ndarray:
-        del pad_missing
         x, y = location
         width, height = size
         downsample = int(self.level_downsamples[level][0])
         x1 = min(int(x + width * downsample), self._width)
         y1 = min(int(y + height * downsample), self._height)
         region = self._image[int(y) : y1 : downsample, int(x) : x1 : downsample]
-        padded = np.zeros((height, width, 3), dtype=np.uint8)
+        padded = make_white_canvas(width, height)
         padded[: region.shape[0], : region.shape[1]] = region[:height, :width]
         return padded
 
@@ -99,13 +98,9 @@ class SyntheticBatchSlideReader(SyntheticSlideReader):
         size: tuple[int, int],
         *,
         num_workers: int | None = None,
-        pad_missing: bool = False,
     ):
         del num_workers
-        return [
-            self.read_region(location, level, size, pad_missing=pad_missing)
-            for location in locations
-        ]
+        return [self.read_region(location, level, size) for location in locations]
 
 
 def test_synthetic_reader_conforms_to_slide_reader_protocol():
@@ -114,6 +109,15 @@ def test_synthetic_reader_conforms_to_slide_reader_protocol():
     region = reader.read_region((0, 0), 0, (64, 64))
     assert region.shape == (64, 64, 3)
     assert reader.level_dimensions[1] == (500, 400)
+
+
+def test_synthetic_reader_uses_white_padding_for_out_of_bounds_reads():
+    reader = SyntheticSlideReader(width=8, height=8, n_levels=1)
+
+    region = reader.read_region((4, 4), 0, (8, 8))
+
+    assert np.all(region[4:, :, :] == 255)
+    assert np.all(region[:, 4:, :] == 255)
 
 
 def test_synthetic_batch_reader_conforms_to_optional_batch_protocol():
@@ -155,6 +159,68 @@ def test_cucim_reader_import_guard():
 
     with pytest.raises(ImportError, match="cucim"):
         CuCIMReader("fake.svs")
+
+
+def test_cucim_reader_keeps_metadata_spacing_as_pyramid_baseline(monkeypatch):
+    from hs2p.wsi.backends.cucim import CuCIMReader
+    import hs2p.wsi.backends.cucim as cucim_reader_mod
+
+    mock_cu_image = MagicMock()
+    mock_cu_image.metadata = {
+        "openslide": {"MPP": 0.5},
+        "cucim": {
+            "resolutions": {
+                "level_dimensions": [[400, 200], [200, 100], [100, 50]],
+                "level_downsamples": [1.0, 2.0, 4.0],
+            }
+        },
+    }
+    fake_cucim = type(
+        "FakeCuCIMModule",
+        (),
+        {"CuImage": MagicMock(return_value=mock_cu_image)},
+    )()
+    original_import_module = cucim_reader_mod.importlib.import_module
+    monkeypatch.setattr(
+        cucim_reader_mod.importlib,
+        "import_module",
+        lambda name: fake_cucim if name == "cucim" else original_import_module(name),
+    )
+
+    reader = CuCIMReader("fake.svs", spacing_override=0.25)
+
+    assert reader.native_spacing == 0.5
+    assert reader.spacing == 0.25
+    assert reader.spacings == [0.5, 1.0, 2.0]
+
+
+def test_cucim_reader_override_does_not_rescue_missing_spacing_metadata(monkeypatch):
+    from hs2p.wsi.backends.cucim import CuCIMReader
+    import hs2p.wsi.backends.cucim as cucim_reader_mod
+
+    mock_cu_image = MagicMock()
+    mock_cu_image.metadata = {
+        "cucim": {
+            "resolutions": {
+                "level_dimensions": [[400, 200], [200, 100]],
+                "level_downsamples": [1.0, 2.0],
+            }
+        },
+    }
+    fake_cucim = type(
+        "FakeCuCIMModule",
+        (),
+        {"CuImage": MagicMock(return_value=mock_cu_image)},
+    )()
+    original_import_module = cucim_reader_mod.importlib.import_module
+    monkeypatch.setattr(
+        cucim_reader_mod.importlib,
+        "import_module",
+        lambda name: fake_cucim if name == "cucim" else original_import_module(name),
+    )
+
+    with pytest.raises(ValueError, match="spacing"):
+        CuCIMReader("fake.svs", spacing_override=0.25)
 
 
 def test_vips_reader_import_guard():

@@ -5,6 +5,7 @@ import numpy as np
 from PIL import Image
 
 import hs2p.wsi.wsi as wsi_mod
+from hs2p.wsi.backends.common import make_white_canvas
 
 
 class _FakeReader:
@@ -44,17 +45,14 @@ class _FakeReader:
         location: tuple[int, int],
         level: int,
         size: tuple[int, int],
-        *,
-        pad_missing: bool = True,
     ) -> np.ndarray:
-        del pad_missing
         downsample = float(self.level_downsamples[level][0])
         arr = self._levels[level]
         x_level = int(round(location[0] / downsample))
         y_level = int(round(location[1] / downsample))
         width = int(size[0])
         height = int(size[1])
-        patch = np.zeros((height, width, arr.shape[2]), dtype=arr.dtype)
+        patch = make_white_canvas(width, height)
         src = arr[y_level : y_level + height, x_level : x_level + width, :]
         patch[: src.shape[0], : src.shape[1], :] = src
         return patch

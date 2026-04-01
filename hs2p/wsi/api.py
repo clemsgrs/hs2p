@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
@@ -47,12 +46,6 @@ class UnifiedCoordinateRequest:
     spacing_at_level_0: float | None = None
     disable_tqdm: bool = False
     num_workers: int = 1
-
-
-@dataclass(frozen=True)
-class UnifiedCoordinateResponse:
-    merged_result: CoordinateExtractionResult | None = None
-    per_annotation_results: dict[str, CoordinateExtractionResult] | None = None
 
 
 @dataclass(init=False)
@@ -120,6 +113,12 @@ class CoordinateExtractionResult:
     @property
     def coordinates(self) -> list[tuple[int, int]]:
         return list(zip(self.x.tolist(), self.y.tolist()))
+
+
+@dataclass(frozen=True)
+class UnifiedCoordinateResponse:
+    merged_result: CoordinateExtractionResult | None = None
+    per_annotation_results: dict[str, CoordinateExtractionResult] | None = None
 
 
 def sort_coordinates_with_tissue(coordinates, tissue_percentages, contour_indices):

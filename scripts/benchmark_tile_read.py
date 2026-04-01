@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-from __future__ import annotations
 
 import argparse
 import importlib
@@ -138,21 +137,25 @@ def benchmark_cucim_batch_mode(
     gpu_decode: bool = False,
     progress_callback: ProgressCallback | None = None,
 ) -> tuple[float, int, int]:
-    from hs2p.wsi.backends.cucim import CuImageReader
+    from hs2p.wsi.backends.cucim import CuCIMReader
     from scripts.benchmark_tile_utils import group_read_plans_by_read_size
 
     _require_cucim()
-    reader = CuImageReader(result.image_path, gpu_decode=gpu_decode)
+    reader = CuCIMReader(
+        str(result.image_path),
+        spacing_override=float(result.base_spacing_um),
+        gpu_decode=gpu_decode,
+    )
     tile_size_px = int(result.effective_tile_size_px)
     checksum = 0
     tile_count = 0
     start = time.perf_counter()
     for read_size_px, size_plans in group_read_plans_by_read_size(plans).items():
         locations = [(int(plan.x), int(plan.y)) for plan in size_plans]
-        regions = reader.read_region(
+        regions = reader.read_regions(
             locations,
+            int(result.read_level),
             (int(read_size_px), int(read_size_px)),
-            level=int(result.read_level),
             num_workers=int(num_workers),
         )
         for plan, region in zip(size_plans, regions):

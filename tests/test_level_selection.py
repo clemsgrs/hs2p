@@ -40,7 +40,6 @@ def _tiling_config(*, spacing: float = 1.0, tolerance: float = 0.01) -> TilingCo
         tolerance=tolerance,
         overlap=0.0,
         tissue_threshold=0.0,
-        use_padding=False,
         backend="asap",
     )
 

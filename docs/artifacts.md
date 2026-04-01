@@ -64,7 +64,6 @@ The metadata file is structured into:
 - `effective_tile_size_px`
 - `effective_spacing_um`
 - `tile_size_lv0`
-- `use_padding`
 - `tolerance`
 - `step_px_lv0`
 - `overlap`

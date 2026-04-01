@@ -39,7 +39,7 @@ class TissueFilter(object):
         contour_holes,
         tissue_mask,
         geometry: ResolvedGeometry,
-        pct=0.01,
+        pct: float,
     ):
         self.cont = contour
         self.holes = contour_holes

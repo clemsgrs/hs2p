@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
@@ -49,8 +48,6 @@ class SlideReader(Protocol):
         location: tuple[int, int],
         level: int,
         size: tuple[int, int],
-        *,
-        pad_missing: bool = True,
     ) -> np.ndarray: ...
 
     def read_level(self, level: int) -> np.ndarray: ...
@@ -69,7 +66,6 @@ class BatchRegionReader(SlideReader, Protocol):
         size: tuple[int, int],
         *,
         num_workers: int | None = None,
-        pad_missing: bool = False,
     ) -> Iterable[np.ndarray]: ...
 
 

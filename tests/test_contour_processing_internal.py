@@ -16,11 +16,9 @@ def test_process_contours_concatenates_numpy_outputs_without_list_roundtrip():
             contour,
             contour_holes,
             tiling_params,
-            filter_params,
             annotation,
-            num_workers=1,
         ):
-            del contour_holes, tiling_params, filter_params, annotation, num_workers
+            del contour_holes, tiling_params, annotation
             if contour == "empty":
                 return (
                     np.array([], dtype=np.int64),
@@ -51,7 +49,6 @@ def test_process_contours_concatenates_numpy_outputs_without_list_roundtrip():
             contours=["first", "empty", "second"],
             holes=[[], [], []],
             tiling_params=SimpleNamespace(),
-            filter_params=SimpleNamespace(),
             annotation=None,
             disable_tqdm=True,
             num_workers=1,

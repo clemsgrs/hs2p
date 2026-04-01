@@ -78,7 +78,7 @@ class WSI(object):
         self._level_spacing_cache = {}  # add a cache for level spacings
 
         self.spacing_at_level_0 = spacing_at_level_0  # manually set spacing at level 0
-        self.raw_spacings = list(self.reader.spacings)  # native spacings from file metadata, never overridden
+        self.raw_spacings = list(self.reader.spacings)  # baseline reader pyramid spacings; metadata-derived when available
         self.spacings = self.get_spacings()  # physical spacings, possibly overridden via spacing_at_level_0
         self.level_dimensions = list(self.reader.level_dimensions)
         self.level_downsamples = list(self.reader.level_downsamples)
@@ -132,7 +132,6 @@ class WSI(object):
                 (int(x), int(y)),
                 int(level),
                 (int(width), int(height)),
-                pad_missing=True,
             )
         )
 
@@ -377,14 +376,13 @@ class WSI(object):
 
         Args:
             tiling_params: Tiling configuration with spacing, tile size, overlap,
-                tissue threshold, and padding controls.
+                tissue threshold, and edge-inclusive tile extraction.
                 - target_spacing (float): Desired spacing of the tiles.
                 - tolerance (float): Tolerance for matching the target_spacing, deciding how much
                     target_spacing can deviate from those specified in the slide metadata.
                 - target_tile_size (int): Desired size of the tiles at the target spacing.
                 - overlap (float, optional): Overlap between adjacent tiles. Defaults to 0.0.
                 - "tissue_percentage" (dict[str, float]): Minimum amount pixels covered with tissue required for a tile for a given annotation.
-                - "use_padding" (bool): Whether to use padding for tiles at the edges. Defaults to True.
             filter_params (NamedTuple): Parameters for filtering contours, including:
                 - "ref_tile_size" (int): Reference tile size for filtering. Defaults to 256.
                 - "a_t" (int): Contour area threshold for filtering. Defaults to 4.
@@ -424,7 +422,6 @@ class WSI(object):
             contours,
             holes,
             tiling_params=tiling_params,
-            filter_params=filter_params,
             annotation=annotation,
             disable_tqdm=disable_tqdm,
             num_workers=num_workers,
@@ -472,19 +469,22 @@ class WSI(object):
         batch_read_windows = None
         if self.backend == "cucim":
             try:
-                from hs2p.wsi.backends.cucim import CuImageReader
+                from hs2p.wsi.backends.cucim import CuCIMReader
 
-                reader = CuImageReader(self.path, gpu_decode=False)
-                reader._ensure_open()
-                batch_read_windows = (
-                    lambda locations, size, level, workers: reader.read_region(
-                        locations,
-                        size,
-                        level=int(level),
-                        num_workers=max(1, int(workers)),
-                    )
+                reader = CuCIMReader(
+                    str(self.path),
+                    spacing_override=float(self.get_level_spacing(0)),
+                    gpu_decode=False,
                 )
-            except ModuleNotFoundError:
+                batch_read_windows = (
+                    lambda locations, size, level, workers: list(reader.read_regions(
+                        locations,
+                        int(level),
+                        size,
+                        num_workers=max(1, int(workers)),
+                    ))
+                )
+            except ImportError:
                 warnings.warn(
                     "CuCIM is unavailable for backend='cucim'; falling back to sequential tile filtering reads.",
                     UserWarning,
@@ -660,7 +660,6 @@ class WSI(object):
         contours,
         holes,
         tiling_params: TilingConfig,
-        filter_params: FilterConfig,
         annotation: str | None = None,
         disable_tqdm: bool = False,
         num_workers: int = 1,
@@ -673,7 +672,6 @@ class WSI(object):
             contours (list): List of contours representing tissue blobs in the wsi.
             holes (list): List of tissue holes in each contour.
             tiling_params: Tiling configuration for contour processing.
-            filter_params (FilterConfig): Parameters for filtering.
             annotation (str, optional): annotation type to use for tile extraction.
             num_workers (int, optional): Number of workers to use for parallel processing. Defaults to 1.
 
@@ -697,9 +695,7 @@ class WSI(object):
                 contours[i],
                 holes[i],
                 tiling_params,
-                filter_params,
                 annotation,
-                num_workers=num_workers,
             )
 
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
@@ -777,9 +773,7 @@ class WSI(object):
         contour,
         contour_holes,
         tiling_params: TilingConfig,
-        filter_params: FilterConfig,
         annotation: str | None = None,
-        num_workers: int = 1,
     ):
         """
         Processes a contour to generate tile coordinates and associated metadata.
@@ -788,7 +782,6 @@ class WSI(object):
             contour (numpy.ndarray): Contour to process, defined as a set of points.
             contour_holes (list): List of holes within the contour.
             tiling_params: Tiling configuration for contour processing.
-            filter_params (FilterConfig): Parameters for filtering.
             annotation (str, optional): Annotation type to use for tile extraction.
 
         Returns:
@@ -801,7 +794,6 @@ class WSI(object):
         """
         target_tile_size = tiling_params.target_tile_size_px
         overlap = tiling_params.overlap
-        use_padding = tiling_params.use_padding
 
         tile_level, tile_spacing, resize_factor = self._resolve_tile_read_metadata(
             tiling_params
@@ -823,17 +815,8 @@ class WSI(object):
             int(self.level_downsamples[tile_level][0]),
             int(self.level_downsamples[tile_level][1]),
         )
-        tile_size_at_level_0 = (
-            tile_size_resized * tile_downsample[0],
-            tile_size_resized * tile_downsample[1],
-        )
-        img_w, img_h = self.level_dimensions[0]
-        if use_padding:
-            stop_y = int(start_y + h)
-            stop_x = int(start_x + w)
-        else:
-            stop_y = min(start_y + h, img_h - tile_size_at_level_0[1] + 1)
-            stop_x = min(start_x + w, img_w - tile_size_at_level_0[0] + 1)
+        stop_y = int(start_y + h)
+        stop_x = int(start_x + w)
 
         scale = self.level_downsamples[self.seg_level]
         cont = self.scaleContourDim([contour], (1.0 / scale[0], 1.0 / scale[1]))[0]
