@@ -5,6 +5,7 @@ import numpy as np
 
 from hs2p.wsi.types import CoordinateSelectionStrategy, SamplingSpec
 
+from .loader import default_config
 from .models import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig
 
 
@@ -29,10 +30,27 @@ def resolve_filter_config(cfg: Any) -> FilterConfig:
 
 
 def resolve_preview_config(cfg: Any) -> PreviewConfig:
+    preview_cfg = cfg.tiling.preview
+    default_preview = default_config.tiling.preview
     return PreviewConfig(
         save_mask_preview=bool(cfg.save_previews),
         save_tiling_preview=bool(cfg.save_previews),
-        downsample=int(cfg.tiling.preview.downsample),
+        downsample=int(preview_cfg.downsample),
+        mask_overlay_color=tuple(
+            int(v)
+            for v in getattr(
+                preview_cfg,
+                "mask_overlay_color",
+                default_preview.mask_overlay_color,
+            )
+        ),
+        mask_overlay_alpha=float(
+            getattr(
+                preview_cfg,
+                "mask_overlay_alpha",
+                default_preview.mask_overlay_alpha,
+            )
+        ),
     )
 
 

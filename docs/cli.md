@@ -100,6 +100,9 @@ pip install "hs2p[all]"
   - contour and optional white/black filtering settings
 - `tiling.preview`
   - preview rendering settings
+  - `downsample` controls preview resolution
+  - `mask_overlay_color` controls the RGB tint used for `preview/mask/*.jpg`
+  - `mask_overlay_alpha` controls overlay opacity for `preview/mask/*.jpg`
 - `tiling.sampling_params`
   - annotation-specific sampling rules for `hs2p.sampling`
 - `save_previews`

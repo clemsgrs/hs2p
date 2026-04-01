@@ -51,6 +51,7 @@ def save_overlay_preview(
     palette: np.ndarray | None = None,
     pixel_mapping: dict[str, int] | None = None,
     color_mapping: dict[str, list[int] | None] | None = None,
+    alpha: float = 0.5,
     tile_size_lv0: int | None = None,
 ) -> None:
     mask_preview_path.parent.mkdir(parents=True, exist_ok=True)
@@ -63,6 +64,7 @@ def save_overlay_preview(
         palette=palette,
         pixel_mapping=pixel_mapping,
         color_mapping=color_mapping,
+        alpha=alpha,
         tile_size_lv0=tile_size_lv0,
     )
     overlay.save(mask_preview_path)

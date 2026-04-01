@@ -25,10 +25,13 @@ from hs2p.tile_qc import filter_coordinate_tiles, needs_pixel_qc
 from hs2p.wsi import (
     CoordinateOutputMode,
     CoordinateSelectionStrategy,
+    build_palette,
     extract_coordinates,
     iter_tile_records_from_result,
+    normalize_tissue_mask,
     open_reader_for_result,
     overlay_mask_on_slide as _overlay_mask_on_slide,
+    save_overlay_preview,
     write_coordinate_preview,
 )
 from hs2p.wsi.backend import resolve_backend
@@ -54,20 +57,38 @@ from hs2p.artifacts import (
 
 def _write_mask_preview(
     *,
+    wsi_path: Path,
+    backend: str,
     mask_preview_path: Path | None,
     tissue_mask: np.ndarray | None,
+    downsample: int,
+    tile_size_lv0: int,
+    mask_overlay_color: tuple[int, int, int],
+    mask_overlay_alpha: float,
 ) -> None:
     if mask_preview_path is None or tissue_mask is None:
         return
-    mask_preview_path.parent.mkdir(parents=True, exist_ok=True)
-    mask = np.asarray(tissue_mask)
-    if mask.ndim == 3:
-        mask = mask[:, :, 0]
-    if mask.dtype != np.uint8:
-        mask = mask.astype(np.uint8, copy=False)
-    if mask.max(initial=0) <= 1:
-        mask = mask * 255
-    Image.fromarray(mask).save(mask_preview_path)
+    pixel_mapping = {"background": 0, "tissue": 1}
+    color_mapping = {
+        "background": None,
+        "tissue": list(mask_overlay_color),
+    }
+    palette = build_palette(
+        pixel_mapping=pixel_mapping,
+        color_mapping=color_mapping,
+    )
+    save_overlay_preview(
+        wsi_path=wsi_path,
+        backend=backend,
+        mask_arr=normalize_tissue_mask(np.asarray(tissue_mask)),
+        mask_preview_path=mask_preview_path,
+        downsample=downsample,
+        palette=palette,
+        pixel_mapping=pixel_mapping,
+        color_mapping=color_mapping,
+        alpha=mask_overlay_alpha,
+        tile_size_lv0=tile_size_lv0,
+    )
 
 
 def _compute_tiling_result(
@@ -77,6 +98,9 @@ def _compute_tiling_result(
     segmentation: SegmentationConfig,
     filtering: FilterConfig,
     mask_preview_path: Path | None,
+    preview_downsample: int = 32,
+    mask_overlay_color: tuple[int, int, int] = (157, 219, 129),
+    mask_overlay_alpha: float = 0.5,
     num_workers: int,
 ) -> TilingResult:
     has_mask = whole_slide.mask_path is not None
@@ -122,8 +146,14 @@ def _compute_tiling_result(
         ),
     )
     _write_mask_preview(
+        wsi_path=preprocessing_result.image_path,
+        backend=preprocessing_result.backend,
         mask_preview_path=mask_preview_path,
         tissue_mask=preprocessing_result.tissue_mask,
+        downsample=preview_downsample,
+        tile_size_lv0=preprocessing_result.tile_size_lv0,
+        mask_overlay_color=mask_overlay_color,
+        mask_overlay_alpha=mask_overlay_alpha,
     )
     return preprocessing_result
 
@@ -156,6 +186,9 @@ def tile_slide(
         segmentation=segmentation,
         filtering=filtering,
         mask_preview_path=None,
+        preview_downsample=32,
+        mask_overlay_color=(157, 219, 129),
+        mask_overlay_alpha=0.5,
         num_workers=num_workers,
     )
 
@@ -516,6 +549,9 @@ class _ComputeRequest:
     mask_preview_path: Path | None
     output_dir: Path
     num_workers: int
+    preview_downsample: int = 32
+    mask_overlay_color: tuple[int, int, int] = (157, 219, 129)
+    mask_overlay_alpha: float = 0.5
     jpeg_backend: str = "turbojpeg"
     gpu_decode: bool = False
     include_result: bool = False
@@ -638,6 +674,9 @@ def _compute_and_save_tiling_artifacts_from_request(
             segmentation=request.segmentation,
             filtering=effective_filtering,
             mask_preview_path=request.mask_preview_path,
+            preview_downsample=request.preview_downsample,
+            mask_overlay_color=request.mask_overlay_color,
+            mask_overlay_alpha=request.mask_overlay_alpha,
             num_workers=request.num_workers,
         )
         tiles_tar_path: Path | None = None
@@ -826,6 +865,17 @@ def tile_slides(
                 segmentation=segmentation,
                 filtering=filtering,
                 mask_preview_path=mask_preview_path,
+                preview_downsample=(
+                    preview.downsample if preview is not None else 32
+                ),
+                mask_overlay_color=(
+                    preview.mask_overlay_color
+                    if preview is not None
+                    else (157, 219, 129)
+                ),
+                mask_overlay_alpha=(
+                    preview.mask_overlay_alpha if preview is not None else 0.5
+                ),
                 output_dir=output_dir,
                 num_workers=1,
                 jpeg_backend=str(jpeg_backend),
@@ -1030,6 +1080,9 @@ def tile_slides(
                     segmentation=request.segmentation,
                     filtering=request.filtering,
                     mask_preview_path=request.mask_preview_path,
+                    preview_downsample=request.preview_downsample,
+                    mask_overlay_color=request.mask_overlay_color,
+                    mask_overlay_alpha=request.mask_overlay_alpha,
                     output_dir=request.output_dir,
                     num_workers=worker_inner_workers,
                     jpeg_backend=request.jpeg_backend,
@@ -1057,6 +1110,9 @@ def tile_slides(
                     segmentation=request.segmentation,
                     filtering=request.filtering,
                     mask_preview_path=request.mask_preview_path,
+                    preview_downsample=request.preview_downsample,
+                    mask_overlay_color=request.mask_overlay_color,
+                    mask_overlay_alpha=request.mask_overlay_alpha,
                     output_dir=request.output_dir,
                     num_workers=worker_inner_workers,
                     jpeg_backend=request.jpeg_backend,

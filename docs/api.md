@@ -18,7 +18,7 @@ The Python API is the best entrypoint when you want to integrate `hs2p` into you
 - `FilterConfig`
   - Contour filtering plus optional coarse tile QC for white-space, black-space, grayspace, and blur
 - `PreviewConfig`
-  - Batch preview toggles and preview downsample
+  - Batch preview toggles, preview downsample, and tissue-overlay styling for mask previews
 - `TilingResult`
   - Canonical in-memory result model from `hs2p.preprocessing`
 - `TileGeometry`
@@ -122,11 +122,17 @@ artifacts = tile_slides(
         save_mask_preview=True,
         save_tiling_preview=True,
         downsample=32,
+        mask_overlay_color=(157, 219, 129),
+        mask_overlay_alpha=0.5,
     ),
     output_dir=Path("output"),
     num_workers=4,
 )
 ```
+
+When `save_mask_preview=True`, `tile_slides()` writes `preview/mask/{sample_id}.jpg`
+as a slide preview with the binary tissue mask overlaid on top. `mask_overlay_color`
+and `mask_overlay_alpha` control that overlay style.
 
 ## Saving and loading artifacts
 

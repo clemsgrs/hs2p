@@ -54,6 +54,8 @@ tiling:
     qc_spacing_um: 2.0 # spacing at which pixel-based QC is evaluated
   preview:
     downsample: 32 # downsample to use for preview rendering
+    mask_overlay_color: [157, 219, 129] # RGB color used for tissue overlays in batch mask previews
+    mask_overlay_alpha: 0.5 # alpha used for tissue overlays in batch mask previews
   sampling_params:
     independent_sampling: false # whether or not to sample tiles independently for each category (if false, tiles will be sampled jointly across all categories, ensuring no overlap between tiles of different categories)
     pixel_mapping: # map annotated categories to their corresponding pixel values
