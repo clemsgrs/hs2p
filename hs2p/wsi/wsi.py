@@ -78,7 +78,7 @@ class WSI(object):
         self._level_spacing_cache = {}  # add a cache for level spacings
 
         self.spacing_at_level_0 = spacing_at_level_0  # manually set spacing at level 0
-        self.raw_spacings = list(self.reader.spacings)  # native spacings from file metadata, never overridden
+        self.raw_spacings = list(self.reader.spacings)  # baseline reader pyramid spacings; metadata-derived when available
         self.spacings = self.get_spacings()  # physical spacings, possibly overridden via spacing_at_level_0
         self.level_dimensions = list(self.reader.level_dimensions)
         self.level_downsamples = list(self.reader.level_downsamples)
@@ -472,7 +472,11 @@ class WSI(object):
             try:
                 from hs2p.wsi.backends.cucim import CuCIMReader
 
-                reader = CuCIMReader(str(self.path), gpu_decode=False)
+                reader = CuCIMReader(
+                    str(self.path),
+                    spacing_override=float(self.get_level_spacing(0)),
+                    gpu_decode=False,
+                )
                 batch_read_windows = (
                     lambda locations, size, level, workers: list(reader.read_regions(
                         locations,
@@ -481,7 +485,7 @@ class WSI(object):
                         num_workers=max(1, int(workers)),
                     ))
                 )
-            except ModuleNotFoundError:
+            except ImportError:
                 warnings.warn(
                     "CuCIM is unavailable for backend='cucim'; falling back to sequential tile filtering reads.",
                     UserWarning,

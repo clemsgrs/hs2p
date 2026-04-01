@@ -230,6 +230,25 @@ def _make_mock_reader(
 
 def _monkeypatch_cucim_import(monkeypatch, fake_cucim):
     import hs2p.wsi.backends.cucim as cucim_reader_mod
+
+    cu_image = getattr(fake_cucim, "CuImage", None)
+    if cu_image is not None and hasattr(cu_image, "return_value"):
+        mock_cu_image = cu_image.return_value
+        mock_cu_image.metadata = {
+            "openslide": {"MPP": 0.5},
+            "cucim": {
+                "resolutions": {
+                    "level_dimensions": [
+                        [4096, 4096],
+                        [2048, 2048],
+                        [1024, 1024],
+                        [512, 512],
+                    ],
+                    "level_downsamples": [1.0, 2.0, 4.0, 8.0],
+                }
+            },
+        }
+
     original_cucim_reader_import = cucim_reader_mod.importlib.import_module
     monkeypatch.setattr(
         cucim_reader_mod.importlib,
@@ -736,12 +755,12 @@ class TestExtractTilesToTar:
         assert tar_path.is_file()
         assert out_result is result
         fake_cucim.CuImage.assert_called_once_with(str(result.image_path))
-        mock_cu_image.read_region.assert_called_once_with(
-            [(0, 0), (256, 0)],
-            (128, 128),
-            level=3,
-            num_workers=5,
-        )
+        assert mock_cu_image.read_region.call_args.kwargs == {
+            "location": [(0, 0), (256, 0)],
+            "size": (128, 128),
+            "level": 3,
+            "num_workers": 5,
+        }
         mock_open_slide.assert_not_called()
 
     def test_cucim_backend_defaults_gpu_decode_to_disabled(
@@ -767,12 +786,58 @@ class TestExtractTilesToTar:
         assert tar_path.is_file()
         assert out_result is result
         fake_cucim.CuImage.assert_called_once_with(str(result.image_path))
-        mock_cu_image.read_region.assert_called_once_with(
-            [(0, 0)],
-            (256, 256),
-            level=0,
-            num_workers=2,
+        assert mock_cu_image.read_region.call_args.kwargs == {
+            "location": [(0, 0)],
+            "size": (256, 256),
+            "level": 0,
+            "num_workers": 2,
+        }
+        mock_open_slide.assert_not_called()
+
+    def test_cucim_iterator_does_not_require_level_dimensions_metadata(
+        self, monkeypatch
+    ):
+        result = _make_tiling_result(num_tiles=2, tile_size=128, step_px=128)
+        result = replace(
+            result,
+            backend="cucim",
+            requested_backend="cucim",
+            tiles=replace(
+                result.tiles,
+                read_level=1,
+                effective_tile_size_px=128,
+                slide_dimensions=[1024, 512],
+                level_downsamples=[1.0, 2.0],
+            ),
         )
+
+        regions = [
+            _solid_patch((10, 20, 30), size=128),
+            _solid_patch((40, 50, 60), size=128),
+        ]
+        mock_cu_image = MagicMock()
+        mock_cu_image.read_region.return_value = iter(regions)
+        fake_cucim = types.SimpleNamespace(CuImage=MagicMock(return_value=mock_cu_image))
+
+        _monkeypatch_cucim_import(monkeypatch, fake_cucim)
+
+        with patch("hs2p.wsi.streaming.stream.open_slide") as mock_open_slide:
+            tiles = list(
+                iter_tile_arrays_from_result(
+                    result=result,
+                    num_workers=4,
+                    gpu_decode=False,
+                )
+            )
+
+        assert len(tiles) == 2
+        fake_cucim.CuImage.assert_called_once_with(str(result.image_path))
+        assert mock_cu_image.read_region.call_args.kwargs == {
+            "location": [(0, 0), (128, 0)],
+            "size": (128, 128),
+            "level": 1,
+            "num_workers": 4,
+        }
         mock_open_slide.assert_not_called()
 
     def test_cucim_backend_raises_when_cucim_is_unavailable(
@@ -795,7 +860,7 @@ class TestExtractTilesToTar:
         with patch(
             "hs2p.wsi.streaming.stream.open_slide",
         ) as mock_open_slide:
-            with pytest.raises(ModuleNotFoundError, match="cucim"):
+            with pytest.raises(ImportError, match="cucim"):
                 extract_tiles_to_tar(
                     result,
                     output_dir=tmp_path,
@@ -827,12 +892,12 @@ class TestExtractTilesToTar:
 
         assert len(tiles) == 16
         fake_cucim.CuImage.assert_called_once_with(str(result.image_path))
-        mock_cu_image.read_region.assert_called_once_with(
-            [(0, 0)],
-            (64, 64),
-            level=0,
-            num_workers=7,
-        )
+        assert mock_cu_image.read_region.call_args.kwargs == {
+            "location": [(0, 0)],
+            "size": (64, 64),
+            "level": 0,
+            "num_workers": 7,
+        }
         assert int(tiles[0][0, 0, 0]) == 1
         assert int(tiles[1][0, 0, 0]) == 2
         assert int(tiles[4][0, 0, 0]) == 5
@@ -881,17 +946,17 @@ class TestExtractTilesToTar:
         assert len(tiles) == 9
         assert mock_cu_image.read_region.call_count == 2
         assert mock_cu_image.read_region.call_args_list[0].kwargs == {
+            "location": [(0, 0), (100, 0)],
+            "size": (32, 32),
             "level": 0,
             "num_workers": 3,
         }
-        assert mock_cu_image.read_region.call_args_list[0].args == (
-            [(0, 0), (100, 0)],
-            (32, 32),
-        )
-        assert mock_cu_image.read_region.call_args_list[1].args == (
-            [(300, 0)],
-            (16, 16),
-        )
+        assert mock_cu_image.read_region.call_args_list[1].kwargs == {
+            "location": [(300, 0)],
+            "size": (16, 16),
+            "level": 0,
+            "num_workers": 3,
+        }
 
     def test_cucim_iterator_groups_same_size_plans_even_when_interleaved(
         self, monkeypatch
@@ -953,14 +1018,18 @@ class TestExtractTilesToTar:
 
         assert len(tiles) == 9
         assert mock_cu_image.read_region.call_count == 2
-        assert mock_cu_image.read_region.call_args_list[0].args == (
-            [(0, 0), (100, 0)],
-            (32, 32),
-        )
-        assert mock_cu_image.read_region.call_args_list[1].args == (
-            [(200, 0)],
-            (16, 16),
-        )
+        assert mock_cu_image.read_region.call_args_list[0].kwargs == {
+            "location": [(0, 0), (100, 0)],
+            "size": (32, 32),
+            "level": 0,
+            "num_workers": 2,
+        }
+        assert mock_cu_image.read_region.call_args_list[1].kwargs == {
+            "location": [(200, 0)],
+            "size": (16, 16),
+            "level": 0,
+            "num_workers": 2,
+        }
 
     def test_reader_iterator_groups_dense_8x8_grid_into_one_read(self):
         result = _make_grid_tiling_result(columns=8, rows=8, tile_size=16, step_px=16)

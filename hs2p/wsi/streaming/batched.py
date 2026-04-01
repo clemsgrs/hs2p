@@ -28,11 +28,16 @@ def iter_cucim_batched_read_regions(
     requests: Sequence[BatchedReadRequest],
     level: int,
     num_workers: int,
+    spacing_override: float | None = None,
     gpu_decode: bool = False,
 ):
     from hs2p.wsi.backends.cucim import CuCIMReader
 
-    reader = CuCIMReader(str(image_path), gpu_decode=gpu_decode)
+    reader = CuCIMReader(
+        str(image_path),
+        spacing_override=spacing_override,
+        gpu_decode=gpu_decode,
+    )
     grouped_requests = group_batched_read_requests_by_size(requests)
 
     def _iter_regions():

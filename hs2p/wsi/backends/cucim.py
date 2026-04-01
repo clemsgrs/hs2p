@@ -124,7 +124,18 @@ class CuCIMReader:
                 )
                 for width, height in self._level_dimensions
             ]
-        self.native_spacing = _extract_spacing_from_metadata(self._metadata)
+        metadata_spacing: float | None = None
+        try:
+            metadata_spacing = _extract_spacing_from_metadata(self._metadata)
+        except ValueError:
+            if spacing_override is None:
+                raise
+
+        self.native_spacing = (
+            float(metadata_spacing)
+            if metadata_spacing is not None
+            else float(spacing_override)
+        )
         self._spacing = (
             float(spacing_override)
             if spacing_override is not None
@@ -269,5 +280,3 @@ class CuCIMReader:
 
     def __exit__(self, *args: Any) -> None:
         self.close()
-
-

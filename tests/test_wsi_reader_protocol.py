@@ -1,4 +1,5 @@
 import importlib.util
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -158,6 +159,39 @@ def test_cucim_reader_import_guard():
 
     with pytest.raises(ImportError, match="cucim"):
         CuCIMReader("fake.svs")
+
+
+def test_cucim_reader_keeps_metadata_spacing_as_pyramid_baseline(monkeypatch):
+    from hs2p.wsi.backends.cucim import CuCIMReader
+    import hs2p.wsi.backends.cucim as cucim_reader_mod
+
+    mock_cu_image = MagicMock()
+    mock_cu_image.metadata = {
+        "openslide": {"MPP": 0.5},
+        "cucim": {
+            "resolutions": {
+                "level_dimensions": [[400, 200], [200, 100], [100, 50]],
+                "level_downsamples": [1.0, 2.0, 4.0],
+            }
+        },
+    }
+    fake_cucim = type(
+        "FakeCuCIMModule",
+        (),
+        {"CuImage": MagicMock(return_value=mock_cu_image)},
+    )()
+    original_import_module = cucim_reader_mod.importlib.import_module
+    monkeypatch.setattr(
+        cucim_reader_mod.importlib,
+        "import_module",
+        lambda name: fake_cucim if name == "cucim" else original_import_module(name),
+    )
+
+    reader = CuCIMReader("fake.svs", spacing_override=0.25)
+
+    assert reader.native_spacing == 0.5
+    assert reader.spacing == 0.25
+    assert reader.spacings == [0.5, 1.0, 2.0]
 
 
 def test_vips_reader_import_guard():

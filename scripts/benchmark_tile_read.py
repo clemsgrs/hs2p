@@ -142,7 +142,11 @@ def benchmark_cucim_batch_mode(
     from scripts.benchmark_tile_utils import group_read_plans_by_read_size
 
     _require_cucim()
-    reader = CuCIMReader(str(result.image_path), gpu_decode=gpu_decode)
+    reader = CuCIMReader(
+        str(result.image_path),
+        spacing_override=float(result.base_spacing_um),
+        gpu_decode=gpu_decode,
+    )
     tile_size_px = int(result.effective_tile_size_px)
     checksum = 0
     tile_count = 0
