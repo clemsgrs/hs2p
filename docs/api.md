@@ -148,11 +148,11 @@ loaded = load_tiling_result(
 - `write_tiling_preview(result=..., output_dir=..., downsample=...)`
 - `overlay_mask_on_slide(...)`
 
-The lower-level WSI helpers use explicit public mask names:
+The lower-level WSI helpers use a single public mask name:
 
-- `extract_coordinates(..., tissue_mask_path=...)`
-- `sample_coordinates(..., annotation_mask_path=...)`
-- `filter_coordinates(..., annotation_mask_path=...)`
+- `extract_coordinates(..., mask_path=...)`
+- `sample_coordinates(..., mask_path=...)`
+- `filter_coordinates(..., mask_path=...)`
 
 Internally, the shared coordinate engine still uses a generic `mask_path`.
 

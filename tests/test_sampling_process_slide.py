@@ -46,7 +46,6 @@ def _resolved_sampling_spec(
 
 def test_independent_sampling_without_previews_does_not_crash(monkeypatch, tmp_path):
     cfg = SimpleNamespace(
-        save_previews=False,
         output_dir=str(tmp_path),
         tiling=SimpleNamespace(
             backend="asap",
@@ -58,7 +57,7 @@ def test_independent_sampling_without_previews_does_not_crash(monkeypatch, tmp_p
             ),
             seg_params=SimpleNamespace(),
             filter_params=SimpleNamespace(),
-            preview=SimpleNamespace(downsample=32),
+            preview=SimpleNamespace(save=False, downsample=32),
             sampling_params=SimpleNamespace(independent_sampling=True),
         ),
     )
@@ -130,7 +129,6 @@ def test_independent_sampling_without_previews_does_not_crash(monkeypatch, tmp_p
 
 def test_process_slide_accepts_resolved_sampling_spec(monkeypatch, tmp_path):
     cfg = SimpleNamespace(
-        save_previews=False,
         output_dir=str(tmp_path),
         tiling=SimpleNamespace(
             backend="asap",
@@ -142,7 +140,7 @@ def test_process_slide_accepts_resolved_sampling_spec(monkeypatch, tmp_path):
             ),
             seg_params=SimpleNamespace(),
             filter_params=SimpleNamespace(),
-            preview=SimpleNamespace(downsample=32),
+            preview=SimpleNamespace(save=False, downsample=32),
             sampling_params=SimpleNamespace(independent_sampling=True),
         ),
     )
@@ -219,7 +217,6 @@ def test_sampling_main_uses_shared_config_resolvers(monkeypatch, tmp_path):
         output_dir=str(tmp_path),
         speed=SimpleNamespace(num_workers=1),
         resume=False,
-        save_previews=False,
         tiling=SimpleNamespace(
             backend="asap",
             params=SimpleNamespace(
@@ -231,7 +228,7 @@ def test_sampling_main_uses_shared_config_resolvers(monkeypatch, tmp_path):
             ),
             seg_params={},
             filter_params={},
-            preview=SimpleNamespace(downsample=32),
+            preview=SimpleNamespace(save=False, downsample=32),
             sampling_params=SimpleNamespace(
                 pixel_mapping=[{"background": 0}, {"tumor": 1}],
                 tissue_percentage=[{"background": None}, {"tumor": 0.1}],
@@ -299,7 +296,6 @@ def test_sampling_main_rejects_partial_sampling_config(monkeypatch, tmp_path):
         output_dir=str(tmp_path),
         speed=SimpleNamespace(num_workers=1),
         resume=False,
-        save_previews=False,
         tiling=SimpleNamespace(
             backend="asap",
             params=SimpleNamespace(
@@ -311,7 +307,7 @@ def test_sampling_main_rejects_partial_sampling_config(monkeypatch, tmp_path):
             ),
             seg_params={},
             filter_params={},
-            preview=SimpleNamespace(downsample=32),
+            preview=SimpleNamespace(save=False, downsample=32),
             sampling_params=SimpleNamespace(
                 pixel_mapping=[{"background": 0}, {"tumor": 1}],
                 tissue_percentage=None,
@@ -344,7 +340,6 @@ def test_sampling_main_rejects_missing_background_label(monkeypatch, tmp_path):
         output_dir=str(tmp_path),
         speed=SimpleNamespace(num_workers=1),
         resume=False,
-        save_previews=False,
         tiling=SimpleNamespace(
             backend="asap",
             params=SimpleNamespace(
@@ -356,7 +351,7 @@ def test_sampling_main_rejects_missing_background_label(monkeypatch, tmp_path):
             ),
             seg_params={},
             filter_params={},
-            preview=SimpleNamespace(downsample=32),
+            preview=SimpleNamespace(save=False, downsample=32),
             sampling_params=SimpleNamespace(
                 pixel_mapping=[{"tumor": 1}],
                 tissue_percentage=[{"tumor": 0.1}],
@@ -389,7 +384,6 @@ def test_process_slide_uses_extraction_preview_instead_of_reopening_overlay(
 ):
     captured = {}
     cfg = SimpleNamespace(
-        save_previews=True,
         output_dir=str(tmp_path),
         tiling=SimpleNamespace(
             backend="asap",
@@ -401,7 +395,7 @@ def test_process_slide_uses_extraction_preview_instead_of_reopening_overlay(
             ),
             seg_params=SimpleNamespace(),
             filter_params=SimpleNamespace(),
-            preview=SimpleNamespace(downsample=32),
+            preview=SimpleNamespace(save=True, downsample=32),
             sampling_params=SimpleNamespace(independent_sampling=False),
         ),
     )
@@ -489,7 +483,6 @@ def test_sampling_main_defaults_inner_slide_workers_to_one(monkeypatch, tmp_path
         output_dir=str(tmp_path),
         speed=SimpleNamespace(num_workers=4),
         resume=False,
-        save_previews=False,
         tiling=SimpleNamespace(
             backend="asap",
             params=SimpleNamespace(
@@ -501,7 +494,7 @@ def test_sampling_main_defaults_inner_slide_workers_to_one(monkeypatch, tmp_path
             ),
             seg_params={},
             filter_params={},
-            preview=SimpleNamespace(downsample=32),
+            preview=SimpleNamespace(save=False, downsample=32),
             sampling_params=SimpleNamespace(
                 pixel_mapping=[{"background": 0}, {"tumor": 1}],
                 tissue_percentage=[{"background": None}, {"tumor": 0.1}],
@@ -518,7 +511,9 @@ def test_sampling_main_defaults_inner_slide_workers_to_one(monkeypatch, tmp_path
         "load_csv",
         lambda cfg, **kwargs: [
             SimpleNamespace(
-                sample_id="slide-1", image_path=Path("slide-1.svs"), mask_path=None
+                sample_id="slide-1",
+                image_path=Path("slide-1.svs"),
+                mask_path=Path("slide-1-mask.png"),
             ),
         ],
     )
@@ -574,18 +569,18 @@ def test_sampling_main_defaults_inner_slide_workers_to_one(monkeypatch, tmp_path
                         "sample_id": kwargs["sample_id"],
                         "annotation": "tumor",
                         "image_path": str(kwargs["wsi_path"]),
-                        "annotation_mask_path": (
-                            str(kwargs["annotation_mask_path"])
-                            if kwargs["annotation_mask_path"] is not None
+                        "mask_path": (
+                            str(kwargs["mask_path"])
+                            if kwargs["mask_path"] is not None
                             else None
                         ),
-                    "sampling_status": "success",
-                    "num_tiles": 0,
-                    "coordinates_npz_path": np.nan,
-                    "coordinates_meta_path": np.nan,
-                    "error": np.nan,
-                    "traceback": np.nan,
-                }
+                        "sampling_status": "success",
+                        "num_tiles": 0,
+                        "coordinates_npz_path": np.nan,
+                        "coordinates_meta_path": np.nan,
+                        "error": np.nan,
+                        "traceback": np.nan,
+                    }
                 ],
             },
         ),
@@ -605,7 +600,6 @@ def test_sampling_main_rejects_explicit_inner_slide_workers_override(
         output_dir=str(tmp_path),
         speed=SimpleNamespace(num_workers=4, inner_workers=2),
         resume=False,
-        save_previews=False,
         tiling=SimpleNamespace(
             backend="asap",
             params=SimpleNamespace(
@@ -617,7 +611,7 @@ def test_sampling_main_rejects_explicit_inner_slide_workers_override(
             ),
             seg_params={},
             filter_params={},
-            preview=SimpleNamespace(downsample=32),
+            preview=SimpleNamespace(save=False, downsample=32),
             sampling_params=SimpleNamespace(
                 pixel_mapping=[{"background": 0}, {"tumor": 1}],
                 tissue_percentage=[{"background": None}, {"tumor": 0.1}],
@@ -634,7 +628,9 @@ def test_sampling_main_rejects_explicit_inner_slide_workers_override(
         "load_csv",
         lambda cfg, **kwargs: [
             SimpleNamespace(
-                sample_id="slide-1", image_path=Path("slide-1.svs"), mask_path=None
+                sample_id="slide-1",
+                image_path=Path("slide-1.svs"),
+                mask_path=Path("slide-1-mask.png"),
             ),
         ],
     )
@@ -690,18 +686,18 @@ def test_sampling_main_rejects_explicit_inner_slide_workers_override(
                         "sample_id": kwargs["sample_id"],
                         "annotation": "tumor",
                         "image_path": str(kwargs["wsi_path"]),
-                        "annotation_mask_path": (
-                            str(kwargs["annotation_mask_path"])
-                            if kwargs["annotation_mask_path"] is not None
+                        "mask_path": (
+                            str(kwargs["mask_path"])
+                            if kwargs["mask_path"] is not None
                             else None
                         ),
-                    "sampling_status": "success",
-                    "num_tiles": 0,
-                    "coordinates_npz_path": np.nan,
-                    "coordinates_meta_path": np.nan,
-                    "error": np.nan,
-                    "traceback": np.nan,
-                }
+                        "sampling_status": "success",
+                        "num_tiles": 0,
+                        "coordinates_npz_path": np.nan,
+                        "coordinates_meta_path": np.nan,
+                        "error": np.nan,
+                        "traceback": np.nan,
+                    }
                 ],
             },
         ),
@@ -956,7 +952,7 @@ def test_validate_sampling_artifact_row_accepts_matching_metadata(tmp_path):
             "sample_id": "sample-1",
             "annotation": "tumor",
             "image_path": "slide.svs",
-            "annotation_mask_path": "mask.tif",
+            "mask_path": "mask.tif",
             "sampling_status": "success",
             "num_tiles": 1,
             "coordinates_npz_path": str(artifacts.coordinates_npz_path),
@@ -1066,7 +1062,7 @@ def test_validate_sampling_artifact_row_ignores_disabled_filter_threshold_mismat
             "sample_id": "sample-1",
             "annotation": "tumor",
             "image_path": "slide.svs",
-            "annotation_mask_path": "mask.tif",
+            "mask_path": "mask.tif",
             "sampling_status": "success",
             "num_tiles": 1,
             "coordinates_npz_path": str(artifacts.coordinates_npz_path),
@@ -1167,7 +1163,7 @@ def test_validate_sampling_artifact_row_rejects_mismatched_tiling_config(tmp_pat
                 "sample_id": "sample-1",
                 "annotation": "tumor",
                 "image_path": "slide.svs",
-                "annotation_mask_path": "mask.tif",
+                "mask_path": "mask.tif",
                 "sampling_status": "success",
                 "num_tiles": 1,
                 "coordinates_npz_path": str(artifacts.coordinates_npz_path),
@@ -1199,3 +1195,41 @@ def test_coordinate_extraction_result_requires_stride_metadata():
             resize_factor=1.0,
             tile_size_lv0=256,
         )
+
+
+def test_sampling_load_csv_rejects_legacy_mask_columns(tmp_path):
+    csv_path = tmp_path / "slides.csv"
+    csv_path.write_text(
+        "sample_id,image_path,annotation_mask_path\n"
+        "slide-1,slide-1.svs,slide-1-mask.png\n"
+    )
+    cfg = SimpleNamespace(csv=str(csv_path))
+
+    with pytest.raises(ValueError, match="deprecated mask columns"):
+        sampling_mod.load_csv(cfg, require_mask_column=True)
+
+
+def test_sampling_main_rejects_rows_missing_mask_path(monkeypatch, tmp_path):
+    csv_path = tmp_path / "slides.csv"
+    csv_path.write_text(
+        "sample_id,image_path,mask_path\n"
+        "slide-1,slide-1.svs,\n"
+    )
+    cfg = SimpleNamespace(
+        csv=str(csv_path),
+        seed=0,
+        output_dir=str(tmp_path / "output"),
+        resume=False,
+        speed=SimpleNamespace(num_workers=1),
+        tiling=SimpleNamespace(),
+    )
+
+    monkeypatch.setattr(sampling_mod, "setup", lambda args: cfg)
+    monkeypatch.setattr(
+        sampling_mod,
+        "resolve_tiling_config",
+        lambda cfg: (_ for _ in ()).throw(AssertionError("should not resolve tiling config")),
+    )
+
+    with pytest.raises(ValueError, match="requires mask_path for every row"):
+        sampling_mod.main(SimpleNamespace())

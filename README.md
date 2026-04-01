@@ -123,21 +123,21 @@ More API details: [docs/api.md](docs/api.md)
 ## CLI
 
 The CLI is intended for fast batch processing of multiple slides with the same config.  
-Our CLI entrypoints expect slightly different input csv schema:
+Both entrypoints read the same public `mask_path` column, and the command determines whether that path is treated as a tissue mask or an annotation mask:
 
-Tiling csv (`tissue_mask_path` is optional):
+Tiling csv (`mask_path` is optional and means a tissue mask here):
 
 ```csv
-sample_id,image_path,tissue_mask_path
+sample_id,image_path,mask_path
 slide-1,/data/wsi/slide-1.tif,/data/mask/slide-1-tissue-mask.tif
 slide-2,/data/wsi/slide-2.tif,
 ...
 ```
 
-Sampling csv (`annotation_mask_path` is mandatory):
+Sampling csv (`mask_path` is mandatory and means an annotation mask here):
 
 ```csv
-sample_id,image_path,annotation_mask_path
+sample_id,image_path,mask_path
 slide-1,/data/wsi/slide-1.tif,/data/mask/slide-1-annotations.tif
 slide-2,/data/wsi/slide-2.tif,/data/mask/slide-2-annotations.tif
 ...
