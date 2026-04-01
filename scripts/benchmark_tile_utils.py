@@ -35,7 +35,7 @@ def build_read_plans(
                 read_size_px=tile_size_px,
                 block_size=1,
             )
-            for x, y in np.asarray(result.coordinates, dtype=np.int64).tolist()
+            for x, y in zip(np.asarray(result.x, dtype=np.int64), np.asarray(result.y, dtype=np.int64))
         ]
 
     read_step_px = resolve_read_step_px(result)
@@ -87,14 +87,15 @@ def limit_tiling_result(
     *,
     max_tiles: int,
 ) -> preprocessing_mod.TilingResult:
-    if max_tiles <= 0 or max_tiles >= len(result.coordinates):
+    if max_tiles <= 0 or max_tiles >= len(result.x):
         return result
     kept = slice(0, int(max_tiles))
     return replace(
         result,
         tiles=replace(
             result.tiles,
-            coordinates=result.coordinates[kept],
+            x=result.x[kept],
+            y=result.y[kept],
             tissue_fractions=result.tissue_fractions[kept],
             tile_index=np.arange(int(max_tiles), dtype=np.int32),
         ),

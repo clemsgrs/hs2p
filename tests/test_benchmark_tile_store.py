@@ -102,7 +102,8 @@ def test_benchmark_tile_store_accumulates_per_phase_times(tmp_path, monkeypatch)
     result_stub = MagicMock()
     result_stub.effective_tile_size_px = 64
     result_stub.requested_tile_size_px = 64
-    result_stub.coordinates = np.empty((0, 2), dtype=np.int64)
+    result_stub.x = np.empty(0, dtype=np.int64)
+    result_stub.y = np.empty(0, dtype=np.int64)
     result_stub.sample_id = "slide-1"
 
     def _fake_extract_tiles_to_tar(*args, **kwargs):
@@ -152,7 +153,8 @@ def test_benchmark_tile_store_forwards_supertile_sizes(tmp_path, monkeypatch):
     result_stub = MagicMock()
     result_stub.effective_tile_size_px = 64
     result_stub.requested_tile_size_px = 64
-    result_stub.coordinates = np.empty((0, 2), dtype=np.int64)
+    result_stub.x = np.empty(0, dtype=np.int64)
+    result_stub.y = np.empty(0, dtype=np.int64)
     result_stub.sample_id = "slide-1"
 
     mod.benchmark_tile_store(
@@ -182,7 +184,8 @@ def test_benchmark_tile_store_handles_empty_iterator(tmp_path, monkeypatch):
     result_stub = MagicMock()
     result_stub.effective_tile_size_px = 64
     result_stub.requested_tile_size_px = 64
-    result_stub.coordinates = np.empty((0, 2), dtype=np.int64)
+    result_stub.x = np.empty(0, dtype=np.int64)
+    result_stub.y = np.empty(0, dtype=np.int64)
     result_stub.sample_id = "slide-1"
 
     metrics = mod.benchmark_tile_store(
@@ -206,7 +209,8 @@ def test_progress_callback_called_per_tile(tmp_path, monkeypatch):
     result_stub = MagicMock()
     result_stub.effective_tile_size_px = 64
     result_stub.requested_tile_size_px = 64
-    result_stub.coordinates = np.empty((0, 2), dtype=np.int64)
+    result_stub.x = np.empty(0, dtype=np.int64)
+    result_stub.y = np.empty(0, dtype=np.int64)
     result_stub.sample_id = "slide-1"
 
     def _fake_extract_tiles_to_tar(*args, **kwargs):
