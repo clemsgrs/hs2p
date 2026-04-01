@@ -292,7 +292,6 @@ def test_load_single_slide_result_from_config_builds_fresh_tiling_result(tmp_pat
     config_path.write_text(
         f"csv: {csv_path}\n"
         f"output_dir: {tmp_path / 'output'}\n"
-        "save_previews: false\n"
         "save_tiles: false\n"
         "resume: false\n"
         "tiling:\n"
@@ -303,6 +302,8 @@ def test_load_single_slide_result_from_config_builds_fresh_tiling_result(tmp_pat
         "    tolerance: 0.05\n"
         "    overlap: 0.0\n"
         "    tissue_threshold: 0.1\n"
+        "  preview:\n"
+        "    save: false\n"
     )
 
     result = module.load_single_slide_result_from_config(

@@ -4,7 +4,6 @@ output_dir: "output" # output directory
 resume: false # resume from a previous run
 resume_dirname: # directory name to resume from
 
-save_previews: true # save preview images of slide tiling and mask overlays
 save_tiles: false # save extracted tiles as {sample_id}.tiles.tar in addition to coordinate artifacts
 
 seed: 0 # seed for reproducibility
@@ -52,6 +51,7 @@ tiling:
     blur_threshold: 50.0 # minimum blur score (higher is sharper)
     qc_spacing_um: 2.0 # spacing at which pixel-based QC is evaluated
   preview:
+    save: true # save preview images of slide tiling and mask overlays
     downsample: 32 # downsample to use for preview rendering
     mask_overlay_color: [157, 219, 129] # RGB color used for tissue overlays in batch mask previews
     mask_overlay_alpha: 0.5 # alpha used for tissue overlays in batch mask previews

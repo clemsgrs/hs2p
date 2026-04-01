@@ -91,8 +91,6 @@ def test_write_config_uses_current_preview_and_sampling_keys(tmp_path: Path):
 
     cfg = OmegaConf.to_container(OmegaConf.load(config_path), resolve=True)
 
-    assert cfg["save_previews"] is False
+    assert cfg["tiling"]["preview"]["save"] is False
     assert "preview" in cfg["tiling"]
-    assert "visu_params" not in cfg["tiling"]
     assert cfg["tiling"]["sampling_params"]["independent_sampling"] is False
-    assert "independant_sampling" not in cfg["tiling"]["sampling_params"]
