@@ -47,14 +47,15 @@ def resolve_read_step_px(result: Any) -> int:
 def resolve_step_px_lv0(result: Any) -> int:
     if result.step_px_lv0 is not None:
         return int(result.step_px_lv0)
-    coordinates = np.asarray(result.coordinates, dtype=np.int64)
-    if coordinates.shape[0] > 1:
-        unique_x = np.unique(np.sort(coordinates[:, 0]))
+    x = np.asarray(result.x, dtype=np.int64)
+    y = np.asarray(result.y, dtype=np.int64)
+    if x.shape[0] > 1:
+        unique_x = np.unique(np.sort(x))
         diffs = np.diff(unique_x)
         diffs = diffs[diffs > 0]
         if diffs.size > 0:
             return int(diffs.min())
-        unique_y = np.unique(np.sort(coordinates[:, 1]))
+        unique_y = np.unique(np.sort(y))
         diffs = np.diff(unique_y)
         diffs = diffs[diffs > 0]
         if diffs.size > 0:
@@ -79,7 +80,9 @@ def iter_grouped_read_plans(
     )
     if step_px_lv0 <= 0:
         step_px_lv0 = int(result.tile_size_lv0)
-    coordinates = np.asarray(result.coordinates, dtype=np.int64)
+    x = np.asarray(result.x, dtype=np.int64)
+    y = np.asarray(result.y, dtype=np.int64)
+    coordinates = np.column_stack((x, y))
     coord_to_index = {
         (int(x), int(y)): idx
         for idx, (x, y) in enumerate(coordinates.tolist())

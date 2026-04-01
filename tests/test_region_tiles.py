@@ -25,12 +25,14 @@ def _make_result(
     step_px: int,
 ) -> preprocessing_mod.TilingResult:
     overlap = 0.0 if step_px == tile_size_px else 1.0 - (step_px / tile_size_px)
+    coords = np.array(
+        [[0, 0], [0, step_px], [step_px, 0], [step_px, step_px]],
+        dtype=np.int64,
+    )
     return preprocessing_mod.TilingResult(
         tiles=preprocessing_mod.TileGeometry(
-            coordinates=np.array(
-                [[0, 0], [0, step_px], [step_px, 0], [step_px, step_px]],
-                dtype=np.int64,
-            ),
+            x=coords[:, 0],
+            y=coords[:, 1],
             tissue_fractions=np.zeros(4, dtype=np.float32),
             tile_index=np.arange(4, dtype=np.int32),
             requested_tile_size_px=tile_size_px,

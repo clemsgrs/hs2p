@@ -16,9 +16,11 @@ def _make_result(
     tile_size: int = 16,
     backend: str = "openslide",
 ) -> preprocessing_mod.TilingResult:
+    coords = np.asarray(coords, dtype=np.int64)
     return preprocessing_mod.TilingResult(
         tiles=preprocessing_mod.TileGeometry(
-            coordinates=np.asarray(coords, dtype=np.int64),
+            x=coords[:, 0],
+            y=coords[:, 1],
             tissue_fractions=np.zeros(len(coords), dtype=np.float32),
             tile_index=np.arange(len(coords), dtype=np.int32),
             requested_tile_size_px=tile_size,

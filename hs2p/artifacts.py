@@ -57,19 +57,19 @@ def _validate_vector(name: str, value: np.ndarray | None) -> int | None:
 
 
 def validate_result_consistency(result: TilingResult) -> None:
-    coordinates = np.asarray(result.coordinates)
+    x = np.asarray(result.x)
+    y = np.asarray(result.y)
     lengths = {
-        "coordinates": int(coordinates.shape[0]),
+        "x": int(x.shape[0]),
+        "y": int(y.shape[0]),
         "tile_index": _validate_vector("tile_index", result.tile_index),
     }
-    if coordinates.ndim != 2 or coordinates.shape[1] != 2:
-        raise ValueError(
-            f"coordinates must have shape (N, 2), got {coordinates.shape}"
-        )
+    if x.ndim != 1 or y.ndim != 1 or x.shape != y.shape:
+        raise ValueError(f"x and y must have shape (N,), got {x.shape} and {y.shape}")
     lengths["tissue_fractions"] = _validate_vector(
         "tissue_fractions", result.tissue_fractions
     )
-    expected = int(coordinates.shape[0])
+    expected = int(x.shape[0])
     mismatched = [name for name, length in lengths.items() if length != expected]
     if mismatched:
         raise ValueError(
@@ -106,7 +106,7 @@ def save_tiling_result(
         sample_id=result.sample_id,
         coordinates_npz_path=artifact_paths["npz"],
         coordinates_meta_path=artifact_paths["meta"],
-        num_tiles=len(result.coordinates),
+        num_tiles=len(result.x),
     )
 
 
@@ -273,7 +273,7 @@ def validate_tiling_artifacts(
         sample_id=result.sample_id,
         coordinates_npz_path=coordinates_npz_path,
         coordinates_meta_path=coordinates_meta_path,
-        num_tiles=len(result.coordinates),
+        num_tiles=len(result.x),
     )
 
 

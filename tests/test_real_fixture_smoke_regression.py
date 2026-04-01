@@ -76,10 +76,10 @@ def test_real_fixture_is_deterministic_and_matches_expected_counts(real_fixture_
     assert run1.read_tile_size_px == run2.read_tile_size_px
     assert run1.resize_factor == pytest.approx(run2.resize_factor)
     assert run1.tile_size_lv0 == run2.tile_size_lv0
-    assert run1.coordinates == run2.coordinates
+    assert list(zip(run1.x.tolist(), run1.y.tolist())) == list(zip(run2.x.tolist(), run2.y.tolist()))
     assert run1.contour_indices == run2.contour_indices
-    assert len(run1.tissue_percentages) == len(run1.coordinates)
-    assert len(run2.tissue_percentages) == len(run2.coordinates)
+    assert len(run1.tissue_percentages) == len(run1.x)
+    assert len(run2.tissue_percentages) == len(run2.x)
     assert all(0.0 <= value <= 1.0 for value in run1.tissue_percentages)
     assert all(0.0 <= value <= 1.0 for value in run2.tissue_percentages)
     np.testing.assert_array_equal(run1.x, run2.x)
@@ -92,10 +92,11 @@ def test_real_fixture_outputs_sane_level0_coordinates(real_fixture_paths):
 
     result = _run_extract(wsi_path, mask_path, backend, tissue_pct=0.10)
 
-    assert len(result.coordinates) > 0
-    assert len(result.coordinates) == len(result.contour_indices)
-    assert len(result.coordinates) == len(result.tissue_percentages)
-    assert len(result.coordinates) == len(set(result.coordinates))
+    coords = list(zip(result.x.tolist(), result.y.tolist()))
+    assert len(coords) > 0
+    assert len(coords) == len(result.contour_indices)
+    assert len(coords) == len(result.tissue_percentages)
+    assert len(coords) == len(set(coords))
     assert result.read_level >= 0
     assert result.read_spacing_um > 0
     assert result.read_tile_size_px > 0
@@ -103,9 +104,9 @@ def test_real_fixture_outputs_sane_level0_coordinates(real_fixture_paths):
     assert result.tile_size_lv0 > 0
     np.testing.assert_array_equal(
         result.x,
-        np.array([x for x, _ in result.coordinates], dtype=np.int64),
+        np.array([x for x, _ in coords], dtype=np.int64),
     )
     np.testing.assert_array_equal(
         result.y,
-        np.array([y for _, y in result.coordinates], dtype=np.int64),
+        np.array([y for _, y in coords], dtype=np.int64),
     )

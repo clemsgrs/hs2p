@@ -23,11 +23,14 @@ The NPZ contains the canonical geometry arrays:
 
 - `tile_index`
   - contiguous tile ids from `0` to `n_tiles - 1`
-- `coordinates`
-  - shape `(N, 2)`
-  - level-0 tile origins in `[x, y]` order
+- `x`
+  - shape `(N,)`
+  - level-0 tile origin x-coordinates
+- `y`
+  - shape `(N,)`
+  - level-0 tile origin y-coordinates
 - `tissue_fractions`
-  - per-tile tissue or annotation coverage values aligned with `coordinates`
+  - per-tile tissue or annotation coverage values aligned with `x` and `y`
 
 Tile order is deterministic: numeric `x` first, then numeric `y` within each shared `x`.
 

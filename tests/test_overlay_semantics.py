@@ -293,7 +293,7 @@ def test_extract_coordinates_uses_overlay_mask_preview_instead_of_line_rendering
         num_workers=1,
     )
 
-    assert result.coordinates == [(0, 0)]
+    assert list(zip(result.x.tolist(), result.y.tolist())) == [(0, 0)]
     assert preview_path.is_file()
     assert len(preview_calls) == 1
     np.testing.assert_array_equal(
@@ -412,7 +412,7 @@ def test_extract_coordinates_preview_uses_in_memory_annotation_labels_when_style
         num_workers=1,
     )
 
-    assert result.coordinates == [(0, 0)]
+    assert list(zip(result.x.tolist(), result.y.tolist())) == [(0, 0)]
     assert preview_path.is_file()
     assert len(preview_calls) == 1
     np.testing.assert_array_equal(

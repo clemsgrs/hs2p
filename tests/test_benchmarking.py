@@ -28,14 +28,12 @@ def _make_grid_result(
             x_coords.append(x_idx * step_px)
             y_coords.append(y_idx * step_px)
     overlap = 0.0 if step_px == tile_size_px else 1.0 - (step_px / tile_size_px)
+    x = np.asarray(x_coords, dtype=np.int64)
+    y = np.asarray(y_coords, dtype=np.int64)
     return preprocessing_mod.TilingResult(
         tiles=preprocessing_mod.TileGeometry(
-            coordinates=np.column_stack(
-                [
-                    np.asarray(x_coords, dtype=np.int64),
-                    np.asarray(y_coords, dtype=np.int64),
-                ]
-            ),
+            x=x,
+            y=y,
             tissue_fractions=np.zeros(columns * rows, dtype=np.float32),
             tile_index=np.arange(columns * rows, dtype=np.int32),
             requested_tile_size_px=tile_size_px,
@@ -84,7 +82,8 @@ def _make_custom_result(
 ) -> preprocessing_mod.TilingResult:
     return preprocessing_mod.TilingResult(
         tiles=preprocessing_mod.TileGeometry(
-            coordinates=np.asarray(coords, dtype=np.int64),
+            x=np.asarray(coords, dtype=np.int64)[:, 0],
+            y=np.asarray(coords, dtype=np.int64)[:, 1],
             tissue_fractions=np.zeros(len(coords), dtype=np.float32),
             tile_index=np.arange(len(coords), dtype=np.int32),
             requested_tile_size_px=tile_size_px,
@@ -272,9 +271,9 @@ def test_limit_tiling_result_trims_arrays_and_reindexes_tiles():
     limited = mod.limit_tiling_result(result, max_tiles=4)
 
     assert isinstance(limited, preprocessing_mod.TilingResult)
-    assert len(limited.coordinates) == 4
+    assert len(limited.x) == 4
     np.testing.assert_array_equal(
-        limited.coordinates,
+        np.column_stack((limited.x, limited.y)),
         np.array([[0, 0], [0, 16], [16, 0], [16, 16]], dtype=np.int64),
     )
     np.testing.assert_array_equal(limited.tile_index, np.array([0, 1, 2, 3], dtype=np.int32))
@@ -314,7 +313,7 @@ def test_load_single_slide_result_from_config_builds_fresh_tiling_result(tmp_pat
     assert result.sample_id == "test-wsi"
     assert resolve_read_step_px(result) > 0
     assert result.step_px_lv0 > 0
-    assert len(result.coordinates) > 0
+    assert len(result.x) > 0
 
 
 def test_benchmark_wsd_mode_reports_region_and_tile_progress(monkeypatch):

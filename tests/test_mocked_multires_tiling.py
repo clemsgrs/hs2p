@@ -81,7 +81,7 @@ def test_extract_coordinates_returns_exact_coordinates_for_rectangular_tissue(
         num_workers=1,
     )
 
-    assert result.coordinates == [(8, 8), (8, 16), (16, 8), (16, 16)]
+    assert list(zip(result.x.tolist(), result.y.tolist())) == [(8, 8), (8, 16), (16, 8), (16, 16)]
     assert result.contour_indices == [0, 0, 0, 0]
     assert result.read_level == 0
     assert result.resize_factor == 1.0
@@ -121,9 +121,9 @@ def test_extract_coordinates_respects_50_vs_51_percent_tissue_threshold(fake_bac
         num_workers=1,
     )
 
-    assert result_50.coordinates == [(8, 8), (8, 16), (16, 8), (16, 16)]
-    assert result_51.coordinates == [(8, 8), (8, 16)]
-    assert len(result_51.coordinates) < len(result_50.coordinates)
+    assert list(zip(result_50.x.tolist(), result_50.y.tolist())) == [(8, 8), (8, 16), (16, 8), (16, 16)]
+    assert list(zip(result_51.x.tolist(), result_51.y.tolist())) == [(8, 8), (8, 16)]
+    assert len(result_51.x) < len(result_50.x)
 
 
 def test_extract_coordinates_match_expected_coordinates_across_spacings(fake_backend):
@@ -170,8 +170,8 @@ def test_extract_coordinates_match_expected_coordinates_across_spacings(fake_bac
             num_workers=1,
         )
 
-        assert result.coordinates == exp["coordinates"]
-        assert len(result.coordinates) == len(exp["coordinates"])
+        assert list(zip(result.x.tolist(), result.y.tolist())) == exp["coordinates"]
+        assert len(result.x) == len(exp["coordinates"])
         assert result.read_level == exp["tile_level"]
         assert result.resize_factor == exp["resize_factor"]
         assert result.tile_size_lv0 == exp["tile_size_lv0"]
@@ -310,8 +310,8 @@ def test_extract_coordinates_segments_maskless_slides_without_annotation_pct_cra
         num_workers=1,
     )
 
-    assert len(result.coordinates) > 0
-    assert len(result.coordinates) == len(result.tissue_percentages)
+    assert len(result.x) > 0
+    assert len(result.x) == len(result.tissue_percentages)
 
 
 def test_extract_coordinates_returns_zero_tile_result_for_tissue_free_maskless_slide(
@@ -338,7 +338,7 @@ def test_extract_coordinates_returns_zero_tile_result_for_tissue_free_maskless_s
         num_workers=1,
     )
 
-    assert result.coordinates == []
+    assert len(result.x) == 0
     assert result.contour_indices == []
     assert result.tissue_percentages == []
     assert result.read_level == 0
@@ -367,7 +367,7 @@ def test_sample_coordinates_returns_zero_tile_result_for_tissue_free_annotation(
         num_workers=1,
     )
 
-    assert result.coordinates == []
+    assert len(result.x) == 0
     assert result.contour_indices == []
     assert result.tissue_percentages == []
     assert result.read_level == 0

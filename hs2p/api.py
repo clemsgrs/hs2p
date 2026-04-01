@@ -339,7 +339,7 @@ def extract_tiles_to_tar(
         if temp_manifest_path is not None:
             temp_manifest_path.unlink(missing_ok=True)
 
-    if len(kept_indices) == len(result.coordinates):
+    if len(kept_indices) == len(result.x):
         return tar_path, result
 
     kept = np.asarray(sorted(kept_indices), dtype=np.int64)
@@ -347,7 +347,8 @@ def extract_tiles_to_tar(
         result,
         tiles=replace(
             result.tiles,
-            coordinates=result.coordinates[kept],
+            x=result.x[kept],
+            y=result.y[kept],
             tissue_fractions=result.tissue_fractions[kept],
             tile_index=np.arange(len(kept), dtype=np.int32),
         ),
@@ -384,8 +385,8 @@ def _apply_qc_filtering_to_result(
                 )
             )
         keep_flags = filter_coordinate_tiles(
-            coord_candidates=result.coordinates,
-            keep_flags=np.ones(len(result.coordinates), dtype=np.uint8),
+            coord_candidates=np.column_stack((result.x, result.y)),
+            keep_flags=np.ones(len(result.x), dtype=np.uint8),
             level_dimensions=slide.level_dimensions,
             level_downsamples=slide.level_downsamples,
             target_tile_size_px=result.requested_tile_size_px,
@@ -403,7 +404,7 @@ def _apply_qc_filtering_to_result(
             source_label=str(result.image_path),
         )
     keep = np.asarray(keep_flags, dtype=bool)
-    if int(keep.sum()) == len(result.coordinates):
+    if int(keep.sum()) == len(result.x):
         return replace(
             result,
             filter_white=filter_params.filter_white,
@@ -423,7 +424,8 @@ def _apply_qc_filtering_to_result(
         result,
         tiles=replace(
             result.tiles,
-            coordinates=result.coordinates[keep],
+            x=result.x[keep],
+            y=result.y[keep],
             tissue_fractions=result.tissue_fractions[keep],
             tile_index=np.arange(int(keep.sum()), dtype=np.int32),
         ),
@@ -471,11 +473,11 @@ def write_tiling_preview(
     Returns:
         Path to the rendered preview image, or ``None`` when there are no tiles.
     """
-    if len(result.coordinates) == 0:
+    if len(result.x) == 0:
         return None
     save_dir = output_dir / "preview" / "tiling"
     save_dir.mkdir(parents=True, exist_ok=True)
-    coordinates = [tuple(coord) for coord in result.coordinates.tolist()]
+    coordinates = list(zip(result.x.tolist(), result.y.tolist()))
     write_coordinate_preview(
         wsi_path=result.image_path,
         coordinates=coordinates,
