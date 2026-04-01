@@ -311,8 +311,8 @@ def main() -> int:
                     mode=mode_label,
                     iteration_index=warmup_idx,
                     iteration_total=int(args.warmup),
-                    total_read_calls=len(result.coordinates),
-                    total_tiles=len(result.coordinates),
+                    total_read_calls=len(result.x),
+                    total_tiles=len(result.x),
                 )
                 benchmark_tile_store(
                     result=result,
@@ -333,8 +333,8 @@ def main() -> int:
                     mode=mode_label,
                     iteration_index=repeat_index,
                     iteration_total=int(args.repeat),
-                    total_read_calls=len(result.coordinates),
-                    total_tiles=len(result.coordinates),
+                    total_read_calls=len(result.x),
+                    total_tiles=len(result.x),
                 )
                 metrics = benchmark_tile_store(
                     result=result,

@@ -71,8 +71,9 @@ def test_independent_sampling_without_previews_does_not_crash(monkeypatch, tmp_p
         return SimpleNamespace(
             per_annotation_results={
                 "tumor": SimpleNamespace(
-                    coordinates=[(0, 0)],
                     contour_indices=[0],
+                    x=np.array([0], dtype=np.int64),
+                    y=np.array([0], dtype=np.int64),
                     read_level=0,
                     read_spacing_um=0.5,
                     read_tile_size_px=256,
@@ -155,8 +156,9 @@ def test_process_slide_accepts_resolved_sampling_spec(monkeypatch, tmp_path):
         return SimpleNamespace(
             per_annotation_results={
                 "tumor": SimpleNamespace(
-                    coordinates=[(0, 0)],
                     contour_indices=[0],
+                    x=np.array([0], dtype=np.int64),
+                    y=np.array([0], dtype=np.int64),
                     read_level=0,
                     read_spacing_um=0.5,
                     read_tile_size_px=256,
@@ -415,9 +417,10 @@ def test_process_slide_uses_extraction_preview_instead_of_reopening_overlay(
         return SimpleNamespace(
             per_annotation_results={
                 "tissue": SimpleNamespace(
-                    coordinates=[(0, 0)],
                     contour_indices=[0],
                     tissue_percentages=[1.0],
+                    x=np.array([0], dtype=np.int64),
+                    y=np.array([0], dtype=np.int64),
                     read_level=0,
                     read_spacing_um=0.5,
                     read_tile_size_px=256,
@@ -728,7 +731,7 @@ def test_save_sampling_coordinates_uses_annotation_threshold_and_sampling_mode(
             coordinates_npz_path=Path(tiles_dir) / f"{result.sample_id}.coordinates.npz",
             coordinates_meta_path=Path(tiles_dir)
             / f"{result.sample_id}.coordinates.meta.json",
-            num_tiles=len(result.coordinates),
+            num_tiles=len(result.x),
         )
 
     monkeypatch.setattr(sampling_mod, "save_tiling_result", _fake_save_tiling_result)

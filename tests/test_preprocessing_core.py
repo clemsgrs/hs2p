@@ -76,9 +76,12 @@ def test_compute_tissue_fractions_truncates_projected_tile_origins():
 def _make_tiling_result(n_tiles: int = 4) -> TilingResult:
     rng = np.random.RandomState(42)
     coords = rng.randint(0, 1000, size=(n_tiles, 2)).astype(np.int64)
+    x = coords[:, 0]
+    y = coords[:, 1]
     fracs = rng.uniform(0.5, 1.0, size=n_tiles).astype(np.float32)
     tiles = TileGeometry(
-        coordinates=coords,
+        x=x,
+        y=y,
         tissue_fractions=fracs,
         requested_tile_size_px=256,
         requested_spacing_um=0.5,
@@ -142,11 +145,13 @@ def test_tiling_artifact_roundtrip_uses_strict_rich_metadata(tmp_path):
     loaded = load_tiling_result(paths["npz"], paths["meta"])
     np.testing.assert_array_equal(
         loaded.tile_index,
-        np.arange(len(result.coordinates), dtype=np.int32),
+        np.arange(len(result.x), dtype=np.int32),
     )
     np.testing.assert_array_equal(
-        loaded.coordinates,
-        result.coordinates[np.lexsort((result.coordinates[:, 1], result.coordinates[:, 0]))],
+        np.column_stack((loaded.x, loaded.y)),
+        np.column_stack((result.x, result.y))[
+            np.lexsort((result.y, result.x))
+        ],
     )
     assert loaded.requested_backend == "auto"
     assert loaded.base_spacing_um == pytest.approx(0.25)
@@ -174,14 +179,10 @@ def test_top_level_package_reexports_preprocessing_core_surface():
 def test_preprocessing_result_uses_canonical_geometry_fields():
     result = _make_tiling_result()
 
-    np.testing.assert_array_equal(
-        result.coordinates[:, 0], result.tiles.coordinates[:, 0]
-    )
-    np.testing.assert_array_equal(
-        result.coordinates[:, 1], result.tiles.coordinates[:, 1]
-    )
+    np.testing.assert_array_equal(result.x, result.tiles.x)
+    np.testing.assert_array_equal(result.y, result.tiles.y)
     np.testing.assert_array_equal(result.tissue_fractions, result.tiles.tissue_fractions)
-    assert len(result.coordinates) == len(result.tiles.coordinates)
+    assert len(result.x) == len(result.tiles.x)
     assert result.requested_spacing_um == pytest.approx(result.tiles.requested_spacing_um)
     assert result.requested_tile_size_px == result.tiles.requested_tile_size_px
     assert result.effective_spacing_um == pytest.approx(result.tiles.effective_spacing_um)

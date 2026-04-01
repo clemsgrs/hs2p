@@ -111,7 +111,8 @@ print(tiling_preview_path)  # output/preview/tiling/slide-1.jpg
 
 `result` is a canonical `hs2p.preprocessing.TilingResult`. Downstream code should use its structured fields such as:
 
-- `coordinates`
+- `x`
+- `y`
 - `tissue_fractions`
 - `tile_index`
 - `requested_*`

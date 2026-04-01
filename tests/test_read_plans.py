@@ -28,14 +28,12 @@ def _make_grid_result(
             x_coords.append(x_idx * step_px)
             y_coords.append(y_idx * step_px)
     overlap = 0.0 if step_px == tile_size_px else 1.0 - (step_px / tile_size_px)
+    x = np.asarray(x_coords, dtype=np.int64)
+    y = np.asarray(y_coords, dtype=np.int64)
     return preprocessing_mod.TilingResult(
         tiles=preprocessing_mod.TileGeometry(
-            coordinates=np.column_stack(
-                [
-                    np.asarray(x_coords, dtype=np.int64),
-                    np.asarray(y_coords, dtype=np.int64),
-                ]
-            ),
+            x=x,
+            y=y,
             tissue_fractions=np.zeros(columns * rows, dtype=np.float32),
             tile_index=np.arange(columns * rows, dtype=np.int32),
             requested_tile_size_px=tile_size_px,

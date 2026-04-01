@@ -137,10 +137,13 @@ def test_generated_tiles_match_checked_in_ground_truth_outputs(
     assert generated_loaded.tile_size_lv0 == golden.tile_size_lv0
     assert generated_loaded.overlap == pytest.approx(golden.overlap)
     assert generated_loaded.min_tissue_fraction == pytest.approx(golden.min_tissue_fraction)
-    assert len(generated_loaded.coordinates) == len(golden.coordinates) == 459
-    assert artifacts.num_tiles == len(golden.coordinates)
+    assert len(generated_loaded.x) == len(golden.x) == 459
+    assert artifacts.num_tiles == len(golden.x)
     np.testing.assert_array_equal(generated_loaded.tile_index, golden.tile_index)
-    np.testing.assert_array_equal(generated_loaded.coordinates, golden.coordinates)
+    np.testing.assert_array_equal(
+        np.column_stack((generated_loaded.x, generated_loaded.y)),
+        np.column_stack((golden.x, golden.y)),
+    )
     assert generated_loaded.tissue_fractions.shape == golden.tissue_fractions.shape
     assert np.all(generated_loaded.tissue_fractions >= 0.0)
     assert np.all(generated_loaded.tissue_fractions <= 1.0)

@@ -127,7 +127,8 @@ def save_sampling_coordinates(
         coordinate_array = np.empty((0, 2), dtype=np.int64)
     result = TilingResult(
         tiles=TileGeometry(
-            coordinates=coordinate_array,
+            x=coordinate_array[:, 0],
+            y=coordinate_array[:, 1],
             tissue_fractions=np.zeros(len(coordinates), dtype=np.float32),
             tile_index=np.arange(len(coordinates), dtype=np.int32),
             requested_tile_size_px=tiling_config.target_tile_size_px,
@@ -433,7 +434,11 @@ def process_slide(
         rows: list[dict[str, object]] = []
         for annotation in resolved_sampling_spec.active_annotations:
             extraction = per_annotation_results.get(annotation)
-            coordinates = extraction.coordinates if extraction is not None else []
+            coordinates = (
+                list(zip(extraction.x.tolist(), extraction.y.tolist()))
+                if extraction is not None
+                else []
+            )
             artifacts = None
             if len(coordinates) > 0:
                 artifacts = save_sampling_coordinates(

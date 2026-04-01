@@ -82,9 +82,25 @@ def filter_config() -> FilterConfig:
     )
 
 
+def _coords_array(result) -> np.ndarray:
+    x = np.asarray(result.x, dtype=np.int64)
+    y = np.asarray(result.y, dtype=np.int64)
+    return np.column_stack((x, y))
+
+
+def _coords_list(result) -> list[tuple[int, int]]:
+    return list(zip(result.x, result.y))
+
+
+def _split_coords(coords: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    coords = np.asarray(coords, dtype=np.int64)
+    if coords.ndim != 2 or coords.shape[1] != 2:
+        raise ValueError("coords must have shape (N, 2)")
+    return coords[:, 0], coords[:, 1]
+
+
 def _fake_extraction() -> CoordinateExtractionResult:
     return CoordinateExtractionResult(
-        coordinates=[(100, 200), (300, 400)],
         contour_indices=[0, 0],
         tissue_percentages=[0.25, 0.75],
         x=np.array([100, 300], dtype=np.int64),
@@ -149,9 +165,11 @@ def _build_preprocessing_result(
     tissue_fractions = np.asarray(tissue_fractions, dtype=np.float32)
     if coords.shape[0] != tissue_fractions.shape[0]:
         raise ValueError("coords and tissue_fractions must be aligned")
+    x, y = _split_coords(coords)
     return preprocessing_mod.TilingResult(
         tiles=preprocessing_mod.TileGeometry(
-            coordinates=coords,
+            x=x,
+            y=y,
             tissue_fractions=tissue_fractions,
             tile_index=np.arange(coords.shape[0], dtype=np.int32),
             requested_tile_size_px=224,
@@ -316,7 +334,7 @@ def test_tile_slide_returns_named_arrays(
 
     assert isinstance(result, preprocessing_mod.TilingResult)
     np.testing.assert_array_equal(
-        result.coordinates, np.array([[100, 200], [300, 400]], dtype=np.int64)
+        _coords_array(result), np.array([[100, 200], [300, 400]], dtype=np.int64)
     )
     np.testing.assert_array_equal(result.tile_index, np.array([0, 1], dtype=np.int32))
     np.testing.assert_array_equal(
@@ -334,7 +352,7 @@ def test_tile_slide_returns_named_arrays(
     assert result.requested_tile_size_px == tiling_config.target_tile_size_px
     assert result.overlap == tiling_config.overlap
     assert result.min_tissue_fraction == tiling_config.tissue_threshold
-    assert len(result.coordinates) == 2
+    assert len(result.x) == 2
 
 
 def test_compute_tiling_result_uses_preprocessing_core(
@@ -393,11 +411,11 @@ def test_compute_tiling_result_uses_preprocessing_core(
     assert result.image_path == Path("slide-1.svs")
     assert result.mask_path == Path("slide-1-mask.png")
     assert result.backend == "asap"
-    assert len(result.coordinates) == 2
+    assert len(result.x) == 2
     assert result.selection_strategy == CoordinateSelectionStrategy.MERGED_DEFAULT_TILING
     assert result.output_mode == CoordinateOutputMode.SINGLE_OUTPUT
     np.testing.assert_array_equal(
-        result.coordinates, np.array([[100, 200], [300, 400]], dtype=np.int64)
+        _coords_array(result), np.array([[100, 200], [300, 400]], dtype=np.int64)
     )
     np.testing.assert_array_equal(
         result.tissue_fractions,
@@ -432,10 +450,10 @@ def test_save_tiling_result_writes_preprocessing_npz_and_json(tmp_path: Path):
     )
 
     tiles = np.load(artifacts.coordinates_npz_path, allow_pickle=False)
-    assert set(tiles.files) == {"tile_index", "coordinates", "tissue_fractions"}
+    assert set(tiles.files) == {"tile_index", "x", "y", "tissue_fractions"}
     np.testing.assert_array_equal(tiles["tile_index"], np.array([0, 1], dtype=np.int32))
     np.testing.assert_array_equal(
-        tiles["coordinates"],
+        np.column_stack((tiles["x"], tiles["y"])),
         np.array([[10, 20], [30, 40]], dtype=np.int64),
     )
     np.testing.assert_array_equal(
@@ -509,8 +527,9 @@ def test_save_and_load_tiling_result_round_trip(tmp_path: Path):
     assert loaded.tile_size_lv0 == result.tile_size_lv0
     assert loaded.overlap == result.overlap
     assert loaded.min_tissue_fraction == result.min_tissue_fraction
-    assert len(loaded.coordinates) == len(result.coordinates)
-    np.testing.assert_array_equal(loaded.coordinates, result.coordinates)
+    assert len(loaded.x) == len(result.x)
+    np.testing.assert_array_equal(loaded.x, result.x)
+    np.testing.assert_array_equal(loaded.y, result.y)
     np.testing.assert_array_equal(loaded.tile_index, result.tile_index)
     np.testing.assert_array_equal(loaded.tissue_fractions, result.tissue_fractions)
 
@@ -551,12 +570,12 @@ def test_preprocessing_result_builder_preserves_core_fields():
     assert result.tile_size_lv0 == 448
     assert result.overlap == 0.1
     assert result.min_tissue_fraction == 0.2
-    assert len(result.coordinates) == 2
+    assert len(result.x) == 2
     assert result.annotation == "tumor"
     assert result.selection_strategy == "per_annotation"
     assert result.output_mode == "multi_output"
     np.testing.assert_array_equal(
-        result.coordinates, np.array([[10, 20], [30, 40]], dtype=np.int64)
+        _coords_array(result), np.array([[10, 20], [30, 40]], dtype=np.int64)
     )
     np.testing.assert_array_equal(result.tile_index, np.array([0, 1], dtype=np.int32))
     np.testing.assert_array_equal(
@@ -568,7 +587,8 @@ def test_preprocessing_result_builder_preserves_core_fields():
 def test_load_tiling_result_accepts_preprocessing_artifact(tmp_path: Path):
     preprocessing_result = preprocessing_mod.TilingResult(
         tiles=preprocessing_mod.TileGeometry(
-            coordinates=np.array([[10, 20], [30, 40]], dtype=np.int64),
+            x=np.array([10, 30], dtype=np.int64),
+            y=np.array([20, 40], dtype=np.int64),
             tissue_fractions=np.array([0.25, 0.75], dtype=np.float32),
             tile_index=np.array([0, 1], dtype=np.int32),
             requested_tile_size_px=224,
@@ -636,12 +656,12 @@ def test_load_tiling_result_accepts_preprocessing_artifact(tmp_path: Path):
     assert loaded.tile_size_lv0 == 448
     assert loaded.overlap == pytest.approx(0.1)
     assert loaded.min_tissue_fraction == pytest.approx(0.2)
-    assert len(loaded.coordinates) == 2
+    assert len(loaded.x) == 2
     assert loaded.annotation == "tumor"
     assert loaded.selection_strategy == "per_annotation"
     assert loaded.output_mode == "multi_output"
     np.testing.assert_array_equal(
-        loaded.coordinates, np.array([[10, 20], [30, 40]], dtype=np.int64)
+        _coords_array(loaded), np.array([[10, 20], [30, 40]], dtype=np.int64)
     )
     np.testing.assert_array_equal(loaded.tile_index, np.array([0, 1], dtype=np.int32))
     np.testing.assert_array_equal(
@@ -731,7 +751,7 @@ def test_tile_slides_defers_preview_writes_until_after_next_slide_compute(
             sample_id=result.sample_id,
             coordinates_npz_path=npz_path,
             coordinates_meta_path=meta_path,
-            num_tiles=len(result.coordinates),
+            num_tiles=len(result.x),
         )
 
     def _fake_write_tiling_preview(*, result, output_dir, downsample):
@@ -989,7 +1009,7 @@ def test_compute_request_passes_inner_workers_to_tile_extraction(
             sample_id=result.sample_id,
             coordinates_npz_path=npz_path,
             coordinates_meta_path=meta_path,
-            num_tiles=len(result.coordinates),
+            num_tiles=len(result.x),
         )
 
     request = api_mod._ComputeRequest(
@@ -1088,7 +1108,8 @@ def test_tile_slides_defaults_gpu_decode_to_disabled_for_saved_tiles(
 def test_save_tiling_result_rejects_invalid_tile_index(tmp_path: Path):
     with pytest.raises(ValueError, match="tile_index must be a 1D array aligned"):
         preprocessing_mod.TileGeometry(
-            coordinates=np.array([[10, 20]], dtype=np.int64),
+            x=np.array([10], dtype=np.int64),
+            y=np.array([20], dtype=np.int64),
             tissue_fractions=np.array([0.0], dtype=np.float32),
             tile_index=np.array([3, 4], dtype=np.int32),
             requested_tile_size_px=224,
@@ -1107,9 +1128,10 @@ def test_save_tiling_result_rejects_invalid_tile_index(tmp_path: Path):
 
 
 def test_save_tiling_result_rejects_non_vector_arrays(tmp_path: Path):
-    with pytest.raises(ValueError, match="coordinates must have shape"):
+    with pytest.raises(ValueError, match="x and y must be 1D arrays"):
         preprocessing_mod.TileGeometry(
-            coordinates=np.array([10, 11], dtype=np.int64),
+            x=np.array([[10, 11]], dtype=np.int64),
+            y=np.array([20], dtype=np.int64),
             tissue_fractions=np.array([0.0], dtype=np.float32),
             tile_index=np.array([0], dtype=np.int32),
             requested_tile_size_px=224,
@@ -1382,7 +1404,8 @@ def test_tile_slides_omits_tiling_preview_path_when_no_tiles(
         monkeypatch,
         result=preprocessing_mod.TilingResult(
             tiles=preprocessing_mod.TileGeometry(
-                coordinates=np.empty((0, 2), dtype=np.int64),
+                x=np.empty(0, dtype=np.int64),
+                y=np.empty(0, dtype=np.int64),
                 tissue_fractions=np.empty(0, dtype=np.float32),
                 tile_index=np.empty(0, dtype=np.int32),
                 requested_tile_size_px=224,
@@ -1703,7 +1726,7 @@ def test_load_tiling_result_rejects_missing_npz_keys(tmp_path: Path):
         tissue_fractions=np.array([0.5], dtype=np.float32),
     )
 
-    with pytest.raises(ValueError, match="missing coordinates"):
+    with pytest.raises(ValueError, match="missing x"):
         load_tiling_result(npz_path, meta_path)
 
 
@@ -1839,7 +1862,6 @@ def test_load_whole_slides_from_rows_rejects_legacy_mask_columns():
 
 def test_coordinate_extraction_result_is_not_tuple_iterable():
     result = CoordinateExtractionResult(
-        coordinates=[(1, 2)],
         contour_indices=[0],
         tissue_percentages=[0.5],
         x=np.array([1], dtype=np.int64),
@@ -1857,7 +1879,7 @@ def test_coordinate_extraction_result_is_not_tuple_iterable():
         tuple(result)
 
 
-def test_coordinate_extraction_result_rebuilds_coordinates_from_x_and_y_arrays():
+def test_coordinate_extraction_result_preserves_x_and_y_arrays():
     result = CoordinateExtractionResult(
         contour_indices=[0, 1],
         tissue_percentages=[0.25, 0.75],
@@ -1872,7 +1894,8 @@ def test_coordinate_extraction_result_rebuilds_coordinates_from_x_and_y_arrays()
         step_px_lv0=224,
     )
 
-    assert result.coordinates == [(10, 20), (30, 40)]
+    np.testing.assert_array_equal(result.x, np.array([10, 30], dtype=np.int64))
+    np.testing.assert_array_equal(result.y, np.array([20, 40], dtype=np.int64))
 
 
 def test_write_process_list_removes_temp_file_on_failure(monkeypatch, tmp_path: Path):

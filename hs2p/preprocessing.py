@@ -180,25 +180,24 @@ def detect_contours(
 
 
 def _validate_geometry_arrays(
-    coordinates: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
     tissue_fractions: np.ndarray,
     tile_index: np.ndarray | None,
 ) -> np.ndarray:
     """Validate geometry arrays and return a canonical tile_index."""
-    n_tiles = int(coordinates.shape[0])
-    if coordinates.ndim != 2 or coordinates.shape[1] != 2:
-        raise ValueError(
-            f"coordinates must have shape (N, 2), got {coordinates.shape}"
-        )
+    x = np.asarray(x, dtype=np.int64)
+    y = np.asarray(y, dtype=np.int64)
+    n_tiles = int(x.shape[0])
+    if x.ndim != 1 or y.ndim != 1 or x.shape != y.shape:
+        raise ValueError(f"x and y must be 1D arrays of equal length, got {x.shape} and {y.shape}")
     if tissue_fractions.ndim != 1 or tissue_fractions.shape[0] != n_tiles:
-        raise ValueError(
-            "tissue_fractions must be a 1D array aligned with coordinates"
-        )
+        raise ValueError("tissue_fractions must be a 1D array aligned with x/y")
     if tile_index is None:
         return np.arange(n_tiles, dtype=np.int32)
     tile_index = np.asarray(tile_index, dtype=np.int32)
     if tile_index.ndim != 1 or tile_index.shape[0] != n_tiles:
-        raise ValueError("tile_index must be a 1D array aligned with coordinates")
+        raise ValueError("tile_index must be a 1D array aligned with x/y")
     return tile_index
 
 
@@ -210,7 +209,8 @@ class TileGeometry:
     knows the exact tile layout after generation.
     """
 
-    coordinates: np.ndarray
+    x: np.ndarray
+    y: np.ndarray
     tissue_fractions: np.ndarray
     requested_tile_size_px: int
     requested_spacing_um: float
@@ -229,7 +229,7 @@ class TileGeometry:
 
     def __post_init__(self) -> None:
         self.tile_index = _validate_geometry_arrays(
-            self.coordinates, self.tissue_fractions, self.tile_index,
+            self.x, self.y, self.tissue_fractions, self.tile_index,
         )
 
 
@@ -240,8 +240,7 @@ class TilingResult:
     Composes a :class:`TileGeometry` (accessible via ``tiles``) with
     provenance, segmentation, and filtering metadata.  Geometry fields
     are also accessible directly on this object via ``__getattr__``
-    delegation, so ``result.coordinates`` and ``result.tiles.coordinates``
-    are equivalent.
+    delegation, so ``result.x`` and ``result.tiles.x`` are equivalent.
     """
 
     tiles: TileGeometry
@@ -304,7 +303,7 @@ class TilingResult:
 
 def canonicalize_tiling_result(tiles: TileGeometry) -> TileGeometry:
     """Deduplicate and sort tile coordinates in column-major order."""
-    coords = tiles.coordinates
+    coords = np.column_stack((tiles.x, tiles.y))
     fracs = tiles.tissue_fractions
     if len(coords) > 1:
         _, unique_idx = np.unique(coords, axis=0, return_index=True)
@@ -317,7 +316,8 @@ def canonicalize_tiling_result(tiles: TileGeometry) -> TileGeometry:
 
     return replace(
         tiles,
-        coordinates=coords,
+        x=coords[:, 0],
+        y=coords[:, 1],
         tissue_fractions=fracs,
         tile_index=np.arange(len(coords), dtype=np.int32),
     )
@@ -375,7 +375,8 @@ def generate_tiles(
 
     def _empty_result() -> TileGeometry:
         return TileGeometry(
-            coordinates=np.empty((0, 2), dtype=np.int64),
+            x=np.empty(0, dtype=np.int64),
+            y=np.empty(0, dtype=np.int64),
             tissue_fractions=np.empty(0, dtype=np.float32),
             requested_tile_size_px=requested_tile_size_px,
             requested_spacing_um=requested_spacing_um,
@@ -427,7 +428,8 @@ def generate_tiles(
     merged_fracs = np.concatenate(all_fracs, axis=0)
     return canonicalize_tiling_result(
         TileGeometry(
-            coordinates=merged_coords,
+            x=merged_coords[:, 0],
+            y=merged_coords[:, 1],
             tissue_fractions=merged_fracs,
             requested_tile_size_px=requested_tile_size_px,
             requested_spacing_um=requested_spacing_um,
@@ -631,7 +633,7 @@ _ARTIFACT_KEYS = {
 
 
 def _build_tiling_metadata(result: TilingResult) -> dict[str, Any]:
-    n_tiles = len(result.coordinates)
+    n_tiles = len(result.x)
     provenance = {
         "sample_id": result.sample_id,
         "image_path": str(result.image_path),
@@ -710,7 +712,7 @@ def _build_tiling_metadata(result: TilingResult) -> dict[str, Any]:
 def _validate_tile_index(tile_index: np.ndarray, n_tiles: int) -> np.ndarray:
     tile_index = np.asarray(tile_index, dtype=np.int32)
     if tile_index.ndim != 1 or tile_index.shape[0] != n_tiles:
-        raise ValueError("tile_index must be a 1D array aligned with coordinates")
+        raise ValueError("tile_index must be a 1D array aligned with x/y")
     expected = np.arange(n_tiles, dtype=np.int32)
     if not np.array_equal(tile_index, expected):
         raise ValueError("tile_index must be a contiguous range from 0 to n_tiles-1")
@@ -816,7 +818,8 @@ def _save_tiling_result(
             np.savez_compressed(
                 handle,
                 tile_index=canonical.tile_index.astype(np.int32, copy=False),
-                coordinates=canonical.coordinates.astype(np.int64, copy=False),
+                x=canonical.x.astype(np.int64, copy=False),
+                y=canonical.y.astype(np.int64, copy=False),
                 tissue_fractions=canonical.tissue_fractions.astype(np.float32, copy=False),
             )
             handle.flush()
@@ -853,14 +856,17 @@ def _load_tiling_result(*, npz_path: Path, meta: dict[str, Any]) -> TilingResult
 
     if "tile_index" not in data:
         raise ValueError("Invalid tiling artifact: missing tile_index")
-    if "coordinates" not in data:
-        raise ValueError("Invalid tiling artifact: missing coordinates")
+    if "x" not in data:
+        raise ValueError("Invalid tiling artifact: missing x")
+    if "y" not in data:
+        raise ValueError("Invalid tiling artifact: missing y")
     if "tissue_fractions" not in data:
         raise ValueError("Invalid tiling artifact: missing tissue_fractions")
 
-    coordinates = np.asarray(data["coordinates"], dtype=np.int64)
+    x = np.asarray(data["x"], dtype=np.int64)
+    y = np.asarray(data["y"], dtype=np.int64)
     tissue_fractions = np.asarray(data["tissue_fractions"], dtype=np.float32)
-    tile_index = _validate_tile_index(np.asarray(data["tile_index"]), len(coordinates))
+    tile_index = _validate_tile_index(np.asarray(data["tile_index"]), len(x))
     provenance = meta["provenance"]
     slide = meta["slide"]
     tiling = meta["tiling"]
@@ -869,7 +875,8 @@ def _load_tiling_result(*, npz_path: Path, meta: dict[str, Any]) -> TilingResult
     artifact = meta["artifact"]
 
     tiles = TileGeometry(
-        coordinates=coordinates,
+        x=x,
+        y=y,
         tissue_fractions=tissue_fractions,
         tile_index=tile_index,
         requested_tile_size_px=int(tiling["requested_tile_size_px"]),
@@ -1156,9 +1163,10 @@ def preprocess_slide(
             qc_spacing_um=qc_spacing_um,
         )
         if needs_pixel_qc(filter_params):
+            coord_candidates = np.column_stack((tiles.x, tiles.y))
             keep_flags = filter_coordinate_tiles(
-                coord_candidates=tiles.coordinates,
-                keep_flags=np.ones(len(tiles.coordinates), dtype=np.uint8),
+                coord_candidates=coord_candidates,
+                keep_flags=np.ones(len(coord_candidates), dtype=np.uint8),
                 level_dimensions=slide.level_dimensions,
                 level_downsamples=slide.level_downsamples,
                 target_tile_size_px=requested_tile_size_px,
@@ -1178,7 +1186,8 @@ def preprocess_slide(
             keep = np.asarray(keep_flags, dtype=bool)
             tiles = replace(
                 tiles,
-                coordinates=tiles.coordinates[keep],
+                x=tiles.x[keep],
+                y=tiles.y[keep],
                 tissue_fractions=tiles.tissue_fractions[keep],
                 tile_index=np.arange(int(keep.sum()), dtype=np.int32),
             )

@@ -189,7 +189,8 @@ def test_tile_slide_uses_resolved_backend_for_hash_and_result(monkeypatch):
         captured["backend"] = kwargs["backend"]
         return preprocessing_mod.TilingResult(
             tiles=preprocessing_mod.TileGeometry(
-                coordinates=np.array([[0, 0]], dtype=np.int64),
+                x=np.array([0], dtype=np.int64),
+                y=np.array([0], dtype=np.int64),
                 tissue_fractions=np.array([0.0], dtype=np.float32),
                 tile_index=np.array([0], dtype=np.int32),
                 requested_tile_size_px=256,

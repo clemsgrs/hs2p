@@ -20,6 +20,14 @@ from hs2p.wsi import iter_tile_arrays_from_result
 from hs2p.wsi.streaming.plans import GroupedReadPlan, iter_grouped_read_plans
 
 
+_extract_tiles_to_tar = extract_tiles_to_tar
+
+
+def extract_tiles_to_tar(*args, **kwargs):
+    kwargs.setdefault("jpeg_backend", "pil")
+    return _extract_tiles_to_tar(*args, **kwargs)
+
+
 def _make_tiling_result(
     num_tiles: int = 3,
     tile_size: int = 256,
@@ -34,7 +42,8 @@ def _make_tiling_result(
     y = np.zeros(num_tiles, dtype=np.int64)
     return preprocessing_mod.TilingResult(
         tiles=preprocessing_mod.TileGeometry(
-            coordinates=np.column_stack([x, y]),
+            x=x,
+            y=y,
             tissue_fractions=np.zeros(num_tiles, dtype=np.float32),
             tile_index=np.arange(num_tiles, dtype=np.int32),
             requested_tile_size_px=tile_size,
@@ -97,14 +106,12 @@ def _make_grid_tiling_result(
             x_coords.append(x_idx * step_px)
             y_coords.append(y_idx * step_px)
     overlap = 0.0 if step_px == tile_size else 1.0 - (step_px / tile_size)
+    x = np.asarray(x_coords, dtype=np.int64)
+    y = np.asarray(y_coords, dtype=np.int64)
     return preprocessing_mod.TilingResult(
         tiles=preprocessing_mod.TileGeometry(
-            coordinates=np.column_stack(
-                [
-                    np.asarray(x_coords, dtype=np.int64),
-                    np.asarray(y_coords, dtype=np.int64),
-                ]
-            ),
+            x=x,
+            y=y,
             tissue_fractions=np.zeros(columns * rows, dtype=np.float32),
             tile_index=np.arange(columns * rows, dtype=np.int32),
             requested_tile_size_px=tile_size,
@@ -152,9 +159,11 @@ def _make_custom_tiling_result(
     tile_size: int,
     sample_id: str = "custom-slide",
 ) -> preprocessing_mod.TilingResult:
+    coords_array = np.asarray(coords, dtype=np.int64)
     return preprocessing_mod.TilingResult(
         tiles=preprocessing_mod.TileGeometry(
-            coordinates=np.asarray(coords, dtype=np.int64),
+            x=coords_array[:, 0],
+            y=coords_array[:, 1],
             tissue_fractions=np.zeros(len(coords), dtype=np.float32),
             tile_index=np.arange(len(coords), dtype=np.int32),
             requested_tile_size_px=tile_size,
@@ -404,7 +413,7 @@ class TestExtractTilesToTar:
         )
 
         with patch("hs2p.wsi.streaming.stream.open_slide", return_value=mock_reader):
-            tar_path, _ = extract_tiles_to_tar(result, output_dir=tmp_path)
+            tar_path, _ = _extract_tiles_to_tar(result, output_dir=tmp_path)
 
         assert tar_path.is_file()
         assert captured == {
@@ -491,8 +500,10 @@ class TestExtractTilesToTar:
             assert len(tf.getmembers()) == 2
 
         # Result should reflect filtering
-        assert len(filtered.coordinates) == 2
-        np.testing.assert_array_equal(filtered.coordinates, [[0, 0], [512, 0]])
+        assert len(filtered.x) == 2
+        np.testing.assert_array_equal(
+            np.column_stack((filtered.x, filtered.y)), [[0, 0], [512, 0]]
+        )
         assert len(filtered.tile_index) == 2
         np.testing.assert_array_equal(filtered.tile_index, [0, 1])
 
@@ -535,8 +546,10 @@ class TestExtractTilesToTar:
         with tarfile.open(tar_path, "r") as tf:
             assert len(tf.getmembers()) == 1
 
-        assert len(filtered.coordinates) == 1
-        np.testing.assert_array_equal(filtered.coordinates, [[256, 0]])
+        assert len(filtered.x) == 1
+        np.testing.assert_array_equal(
+            np.column_stack((filtered.x, filtered.y)), [[256, 0]]
+        )
 
     def test_filtered_preprocessing_results_keep_preprocessing_type(self, tmp_path: Path):
         result = _make_tiling_result(num_tiles=2)
@@ -575,8 +588,10 @@ class TestExtractTilesToTar:
             )
 
         assert isinstance(filtered, preprocessing_mod.TilingResult)
-        assert len(filtered.coordinates) == 1
-        np.testing.assert_array_equal(filtered.coordinates, [[256, 0]])
+        assert len(filtered.x) == 1
+        np.testing.assert_array_equal(
+            np.column_stack((filtered.x, filtered.y)), [[256, 0]]
+        )
         np.testing.assert_array_equal(filtered.tile_index, [0])
 
     def test_all_tiles_filtered_produces_empty_tar(self, tmp_path: Path):
@@ -605,7 +620,7 @@ class TestExtractTilesToTar:
         with tarfile.open(tar_path, "r") as tf:
             assert len(tf.getmembers()) == 0
 
-        assert len(filtered.coordinates) == 0
+        assert len(filtered.x) == 0
 
     def test_resizes_when_read_and_target_sizes_differ(self, tmp_path: Path):
         result = _make_tiling_result(num_tiles=1, tile_size=224)
@@ -1088,13 +1103,14 @@ class TestExtractTilesToTar:
 
     def test_reader_iterator_uses_2x2_blocks_for_incomplete_4x4_grid(self):
         result = _make_grid_tiling_result(columns=4, rows=4, tile_size=16, step_px=16)
-        keep_mask = np.ones(len(result.coordinates), dtype=bool)
+        keep_mask = np.ones(len(result.x), dtype=bool)
         keep_mask[-1] = False
         result = replace(
             result,
             tiles=replace(
                 result.tiles,
-                coordinates=result.coordinates[keep_mask],
+                x=result.x[keep_mask],
+                y=result.y[keep_mask],
                 tissue_fractions=result.tissue_fractions[keep_mask],
                 tile_index=np.arange(15, dtype=np.int32),
             ),

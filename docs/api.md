@@ -22,7 +22,7 @@ The Python API is the best entrypoint when you want to integrate `hs2p` into you
 - `TilingResult`
   - Canonical in-memory result model from `hs2p.preprocessing`
 - `TileGeometry`
-  - Canonical geometry container with `coordinates`, `tissue_fractions`, and `tile_index`
+  - Canonical geometry container with `x`, `y`, `tissue_fractions`, and `tile_index`
 - `TilingArtifacts`
   - Lightweight record of saved artifact paths and optional preview/tar outputs
 
@@ -30,7 +30,8 @@ The Python API is the best entrypoint when you want to integrate `hs2p` into you
 
 `TilingResult` is the only supported tiling-result model. Downstream code should use:
 
-- `coordinates`
+- `x`
+- `y`
 - `tissue_fractions`
 - `tile_index`
 - `requested_tile_size_px`

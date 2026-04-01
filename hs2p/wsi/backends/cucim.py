@@ -180,7 +180,7 @@ class CuCIMReader:
 
     def read_level(self, level: int) -> np.ndarray:
         dims = self._level_dimensions[level]
-        return self.read_region((0, 0), level, dims)
+        return _as_rgb_uint8(self._read_region((0, 0), dims, level=level))
 
     def read_region(
         self,

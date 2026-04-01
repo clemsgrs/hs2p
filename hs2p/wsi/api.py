@@ -67,8 +67,8 @@ class CoordinateExtractionResult:
         *,
         contour_indices: list[int],
         tissue_percentages: list[float],
-        x: np.ndarray | None = None,
-        y: np.ndarray | None = None,
+        x: np.ndarray,
+        y: np.ndarray,
         read_level: int,
         read_spacing_um: float,
         read_tile_size_px: int,
@@ -76,23 +76,11 @@ class CoordinateExtractionResult:
         resize_factor: float,
         tile_size_lv0: int,
         step_px_lv0: int,
-        coordinates: list[tuple[int, int]] | None = None,
     ):
-        if x is None or y is None:
-            if coordinates is None:
-                raise TypeError("Provide x and y arrays or coordinates")
-            x = np.array([coord[0] for coord in coordinates], dtype=np.int64)
-            y = np.array([coord[1] for coord in coordinates], dtype=np.int64)
-        else:
-            x = np.asarray(x, dtype=np.int64)
-            y = np.asarray(y, dtype=np.int64)
+        x = np.asarray(x, dtype=np.int64)
+        y = np.asarray(y, dtype=np.int64)
         if x.ndim != 1 or y.ndim != 1 or x.shape != y.shape:
             raise ValueError("x and y must be one-dimensional arrays of equal length")
-        if coordinates is not None:
-            expected_x = np.array([coord[0] for coord in coordinates], dtype=np.int64)
-            expected_y = np.array([coord[1] for coord in coordinates], dtype=np.int64)
-            if not np.array_equal(x, expected_x) or not np.array_equal(y, expected_y):
-                raise ValueError("coordinates must match the provided x and y arrays")
         if int(read_step_px) <= 0:
             raise ValueError(f"read_step_px must be > 0, got {read_step_px}")
         if int(step_px_lv0) <= 0:
@@ -109,10 +97,6 @@ class CoordinateExtractionResult:
         self.resize_factor = resize_factor
         self.tile_size_lv0 = tile_size_lv0
         self.step_px_lv0 = int(step_px_lv0)
-
-    @property
-    def coordinates(self) -> list[tuple[int, int]]:
-        return list(zip(self.x.tolist(), self.y.tolist()))
 
 
 @dataclass(frozen=True)
@@ -433,7 +417,7 @@ def execute_coordinate_request(
     filtered_coordinates, filtered_contour_indices, filtered_tissue_percentages = (
         _filter_coordinates_for_sampling_with_wsi(
             wsi=wsi,
-            coordinates=merged_result.coordinates,
+            coordinates=list(zip(merged_result.x.tolist(), merged_result.y.tolist())),
             contour_indices=merged_result.contour_indices,
             tissue_percentages=merged_result.tissue_percentages,
             tile_level=merged_result.read_level,
@@ -446,8 +430,16 @@ def execute_coordinate_request(
         coordinates = filtered_coordinates.get(annotation, [])
         contour_indices = filtered_contour_indices.get(annotation, [])
         tissue_percentages = filtered_tissue_percentages.get(annotation, [])
+        if coordinates:
+            coord_array = np.asarray(coordinates, dtype=np.int64)
+            x = coord_array[:, 0]
+            y = coord_array[:, 1]
+        else:
+            x = np.empty(0, dtype=np.int64)
+            y = np.empty(0, dtype=np.int64)
         per_annotation_results[annotation] = CoordinateExtractionResult(
-            coordinates=coordinates,
+            x=x,
+            y=y,
             contour_indices=contour_indices,
             tissue_percentages=tissue_percentages,
             read_level=merged_result.read_level,
