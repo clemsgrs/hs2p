@@ -30,7 +30,7 @@ class TilingArtifacts:
     """Named on-disk artifacts produced by a tiling run."""
 
     sample_id: str
-    coordinates_npz_path: Path
+    coordinates_npz_path: Path | None
     coordinates_meta_path: Path
     num_tiles: int
     tiles_tar_path: Path | None = None
@@ -111,7 +111,7 @@ def save_tiling_result(
 
 
 def load_tiling_result(
-    coordinates_npz_path: Path,
+    coordinates_npz_path: Path | None,
     coordinates_meta_path: Path,
 ) -> TilingResult:
     try:
@@ -155,7 +155,7 @@ def validate_required_columns(
 def validate_tiling_artifacts(
     *,
     whole_slide: SlideSpec,
-    coordinates_npz_path: Path,
+    coordinates_npz_path: Path | None,
     coordinates_meta_path: Path,
     compatibility: CompatibilitySpec,
 ) -> TilingArtifacts:
@@ -287,13 +287,21 @@ def maybe_load_existing_artifacts(
     meta_path = read_coordinates_from / f"{whole_slide.sample_id}.coordinates.meta.json"
     if not npz_path.is_file() and not meta_path.is_file():
         return None
-    if not npz_path.is_file() or not meta_path.is_file():
+    if not meta_path.is_file():
         raise ValueError(
             f"Missing tiling sidecar for sample_id={whole_slide.sample_id} in {read_coordinates_from}"
         )
+    resolved_npz: Path | None = npz_path if npz_path.is_file() else None
+    if resolved_npz is None:
+        import json as _json
+        n_tiles = _json.loads(meta_path.read_text()).get("tiling", {}).get("n_tiles", -1)
+        if n_tiles != 0:
+            raise ValueError(
+                f"Missing tiling sidecar for sample_id={whole_slide.sample_id} in {read_coordinates_from}"
+            )
     return validate_tiling_artifacts(
         whole_slide=whole_slide,
-        coordinates_npz_path=npz_path,
+        coordinates_npz_path=resolved_npz,
         coordinates_meta_path=meta_path,
         compatibility=compatibility,
     )

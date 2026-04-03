@@ -255,6 +255,54 @@ def test_rich_tiling_summary_uses_zero_tile_label_without_process_list(monkeypat
     ]
 
 
+def test_rich_sampling_summary_shows_zero_tile_and_total_tiles(monkeypatch):
+    import hs2p.progress as progress
+
+    _install_fake_rich_console(monkeypatch, is_terminal=True)
+    _install_fake_rich_progress(monkeypatch)
+    _install_fake_rich_summary_types(monkeypatch)
+
+    captured = {}
+
+    class FakeConsole:
+        def print(self, *args, **kwargs):
+            captured["printed"] = args
+
+    reporter = progress.RichReporter(output_dir="out", console=FakeConsole())
+    monkeypatch.setattr(
+        reporter,
+        "_print_summary",
+        lambda title, rows: captured.update({"title": title, "rows": rows}),
+    )
+
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="sampling.finished",
+            payload={
+                "total": 3,
+                "completed": 2,
+                "failed": 1,
+                "sampled_tiles": 10,
+                "output_dir": "out",
+                "process_list_path": "out/process_list.csv",
+                "zero_tile_successes_by_annotation": {"tumor": 1, "stroma": 2},
+            },
+        )
+    )
+
+    assert captured["title"] == "Sampling Summary"
+    assert captured["rows"] == [
+        ("Slides", "3"),
+        ("Completed", "2"),
+        ("Failed", "1"),
+        ("Zero-tile", "3"),
+        ("Total tiles", "10"),
+        ("Process list", "out/process_list.csv"),
+        ("Zero-tile stroma", "2"),
+        ("Zero-tile tumor", "1"),
+    ]
+
+
 def test_tiling_main_installs_progress_reporter_only_during_pipeline_run(
     monkeypatch, tmp_path: Path
 ):

@@ -22,6 +22,7 @@ from hs2p.api import (
     TilingConfig,
     load_tiling_result,
     load_whole_slides_from_rows,
+    maybe_load_existing_artifacts,
     save_tiling_result,
     tile_slide,
     tile_slides,
@@ -2029,3 +2030,97 @@ def test_hs2p_configs_reexports_runtime_config_models():
     assert ConfigsSegmentationConfig is SegmentationConfig
     assert ConfigsFilterConfig is FilterConfig
     assert ConfigsPreviewConfig is PreviewConfig
+
+
+# --- zero-tile npz skip ---
+
+
+def test_save_tiling_result_zero_tiles_skips_npz(tmp_path: Path):
+    result = _build_preprocessing_result(
+        sample_id="zero-tile",
+        image_path="zero-tile.svs",
+        coords=np.empty((0, 2), dtype=np.int64),
+        tissue_fractions=np.empty(0, dtype=np.float32),
+    )
+
+    artifacts = save_tiling_result(result, output_dir=tmp_path)
+
+    assert artifacts.coordinates_npz_path is None
+    assert artifacts.num_tiles == 0
+    assert artifacts.coordinates_meta_path.exists()
+    meta = json.loads(artifacts.coordinates_meta_path.read_text())
+    assert meta["tiling"]["n_tiles"] == 0
+    npz_path = tmp_path / "tiles" / "zero-tile.coordinates.npz"
+    assert not npz_path.exists()
+
+
+def test_load_tiling_result_zero_tiles_from_meta_only(tmp_path: Path):
+    result = _build_preprocessing_result(
+        sample_id="zero-tile-load",
+        image_path="zero-tile-load.svs",
+        coords=np.empty((0, 2), dtype=np.int64),
+        tissue_fractions=np.empty(0, dtype=np.float32),
+    )
+    artifacts = save_tiling_result(result, output_dir=tmp_path)
+    assert artifacts.coordinates_npz_path is None
+
+    loaded = load_tiling_result(None, artifacts.coordinates_meta_path)
+
+    assert loaded.num_tiles == 0
+    assert loaded.sample_id == "zero-tile-load"
+    assert str(loaded.image_path) == "zero-tile-load.svs"
+    np.testing.assert_array_equal(loaded.x, np.empty(0, dtype=np.int64))
+    np.testing.assert_array_equal(loaded.y, np.empty(0, dtype=np.int64))
+
+
+def test_maybe_load_existing_artifacts_zero_tiles_meta_only(tmp_path: Path):
+    result = _build_preprocessing_result(
+        sample_id="zero-tile-maybe",
+        image_path="zero-tile-maybe.svs",
+        coords=np.empty((0, 2), dtype=np.int64),
+        tissue_fractions=np.empty(0, dtype=np.float32),
+    )
+    artifacts = save_tiling_result(result, output_dir=tmp_path / "tiles")
+    assert artifacts.coordinates_npz_path is None
+    tiles_dir = tmp_path / "tiles" / "tiles"
+
+    loaded = maybe_load_existing_artifacts(
+        whole_slide=SlideSpec(
+            sample_id="zero-tile-maybe",
+            image_path=Path("zero-tile-maybe.svs"),
+        ),
+        read_coordinates_from=tiles_dir,
+        compatibility=_artifact_compatibility(
+            tiling_config=TilingConfig(0.5, 224, 0.07, 0.1, 0.2, "asap"),
+            segmentation_config=SegmentationConfig(64, 8, 255, 7, 4, False, True),
+            filter_config=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
+        ),
+    )
+
+    assert loaded is not None
+    assert loaded.num_tiles == 0
+    assert loaded.coordinates_npz_path is None
+    assert loaded.coordinates_meta_path.exists()
+
+
+def test_build_success_process_row_zero_tiles_has_nan_npz_path(
+    tmp_path: Path,
+):
+    result = _build_preprocessing_result(
+        sample_id="zero-tile-row",
+        image_path="zero-tile-row.svs",
+        coords=np.empty((0, 2), dtype=np.int64),
+        tissue_fractions=np.empty(0, dtype=np.float32),
+    )
+    artifacts = save_tiling_result(result, output_dir=tmp_path)
+    assert artifacts.coordinates_npz_path is None
+
+    whole_slide = SlideSpec(sample_id="zero-tile-row", image_path=Path("zero-tile-row.svs"))
+
+    row = api_mod._build_success_process_row(
+        whole_slide=whole_slide,
+        artifact=artifacts,
+    )
+
+    assert pd.isna(row["coordinates_npz_path"])
+    assert row["num_tiles"] == 0
