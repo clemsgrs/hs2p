@@ -26,7 +26,6 @@ from hs2p.wsi import (
     CoordinateOutputMode,
     CoordinateSelectionStrategy,
     build_palette,
-    extract_coordinates,
     iter_tile_records_from_result,
     normalize_tissue_mask,
     open_reader_for_result,
@@ -45,11 +44,10 @@ from hs2p.artifacts import (
     SlideSpec,
     TilingArtifacts,
     load_tiling_result,
-    load_whole_slides_from_rows,
     maybe_load_existing_artifacts,
+    optional_path,
     save_tiling_result,
     validate_required_columns,
-    validate_result_consistency,
     validate_tiling_artifacts,
     write_process_list,
 )
@@ -599,7 +597,7 @@ def _build_success_process_row(
         ),
         "tiling_status": "success",
         "num_tiles": artifact.num_tiles,
-        "coordinates_npz_path": str(artifact.coordinates_npz_path),
+        "coordinates_npz_path": str(artifact.coordinates_npz_path) if artifact.coordinates_npz_path is not None else np.nan,
         "coordinates_meta_path": str(artifact.coordinates_meta_path),
         "tiles_tar_path": str(artifact.tiles_tar_path) if artifact.tiles_tar_path is not None else np.nan,
         "error": np.nan,
@@ -842,7 +840,7 @@ def tile_slides(
             artifact: TilingArtifacts | None = None
             if whole_slide.sample_id in existing_successes:
                 row = existing_successes[whole_slide.sample_id]
-                npz_path = Path(str(row["coordinates_npz_path"]))
+                npz_path = optional_path(row["coordinates_npz_path"])
                 meta_path = Path(str(row["coordinates_meta_path"]))
                 artifact = validate_tiling_artifacts(
                     whole_slide=whole_slide,

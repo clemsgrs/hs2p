@@ -9,7 +9,6 @@ import numpy as np
 
 from hs2p.configs import FilterConfig, SegmentationConfig, TilingConfig
 from hs2p.wsi.visualization import (
-    DEFAULT_TISSUE_COLOR_MAPPING,
     DEFAULT_TISSUE_PIXEL_MAPPING,
     save_overlay_preview,
 )

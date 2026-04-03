@@ -798,7 +798,7 @@ def _save_tiling_result(
     result: TilingResult,
     output_dir: Path,
     sample_id: str | None = None,
-) -> dict[str, Path]:
+) -> dict[str, "Path | None"]:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     canonical = replace(result, tiles=canonicalize_tiling_result(result.tiles))
@@ -806,27 +806,35 @@ def _save_tiling_result(
     if artifact_name is None:
         raise ValueError("sample_id is required when saving a TilingResult")
 
-    npz_path = output_dir / f"{artifact_name}.coordinates.npz"
     meta_path = output_dir / f"{artifact_name}.coordinates.meta.json"
 
+    committed_npz_path: Path | None = None
     temp_npz_path: Path | None = None
     temp_meta_path: Path | None = None
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="wb",
-            suffix=".npz",
-            dir=output_dir,
-            delete=False,
-        ) as handle:
-            temp_npz_path = Path(handle.name)
-            np.savez_compressed(
-                handle,
-                tile_index=canonical.tile_index.astype(np.int32, copy=False),
-                x=canonical.x.astype(np.int64, copy=False),
-                y=canonical.y.astype(np.int64, copy=False),
-                tissue_fractions=canonical.tissue_fractions.astype(np.float32, copy=False),
-            )
-            handle.flush()
+        if len(canonical.x) > 0:
+            npz_path: Path | None = output_dir / f"{artifact_name}.coordinates.npz"
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                suffix=".npz",
+                dir=output_dir,
+                delete=False,
+            ) as handle:
+                temp_npz_path = Path(handle.name)
+                np.savez_compressed(
+                    handle,
+                    tile_index=canonical.tile_index.astype(np.int32, copy=False),
+                    x=canonical.x.astype(np.int64, copy=False),
+                    y=canonical.y.astype(np.int64, copy=False),
+                    tissue_fractions=canonical.tissue_fractions.astype(np.float32, copy=False),
+                )
+                handle.flush()
+            temp_npz_path.replace(npz_path)
+            temp_npz_path = None
+            committed_npz_path = npz_path
+        else:
+            npz_path = None
+
         with tempfile.NamedTemporaryFile(
             mode="w",
             suffix=".json",
@@ -836,41 +844,49 @@ def _save_tiling_result(
             temp_meta_path = Path(handle.name)
             handle.write(json.dumps(_build_tiling_metadata(canonical), indent=2, sort_keys=True) + "\n")
             handle.flush()
-        temp_npz_path.replace(npz_path)
-        temp_npz_path = None
         temp_meta_path.replace(meta_path)
         temp_meta_path = None
+        committed_npz_path = None
     finally:
         if temp_npz_path is not None:
             temp_npz_path.unlink(missing_ok=True)
         if temp_meta_path is not None:
             temp_meta_path.unlink(missing_ok=True)
+        if committed_npz_path is not None:
+            committed_npz_path.unlink(missing_ok=True)
 
     return {"npz": npz_path, "meta": meta_path}
 
 
-def _load_tiling_result_from_paths(npz_path: Path, meta_path: Path) -> TilingResult:
+def _load_tiling_result_from_paths(npz_path: "Path | None", meta_path: Path) -> TilingResult:
     meta = json.loads(Path(meta_path).read_text())
     return _load_tiling_result(npz_path=npz_path, meta=meta)
 
 
-def _load_tiling_result(*, npz_path: Path, meta: dict[str, Any]) -> TilingResult:
-    data = np.load(npz_path, allow_pickle=False)
+def _load_tiling_result(*, npz_path: "Path | None", meta: dict[str, Any]) -> TilingResult:
     _validate_metadata_schema(meta)
 
-    if "tile_index" not in data:
-        raise ValueError("Invalid tiling artifact: missing tile_index")
-    if "x" not in data:
-        raise ValueError("Invalid tiling artifact: missing x")
-    if "y" not in data:
-        raise ValueError("Invalid tiling artifact: missing y")
-    if "tissue_fractions" not in data:
-        raise ValueError("Invalid tiling artifact: missing tissue_fractions")
-
-    x = np.asarray(data["x"], dtype=np.int64)
-    y = np.asarray(data["y"], dtype=np.int64)
-    tissue_fractions = np.asarray(data["tissue_fractions"], dtype=np.float32)
-    tile_index = _validate_tile_index(np.asarray(data["tile_index"]), len(x))
+    if meta["tiling"]["n_tiles"] == 0:
+        x = np.empty(0, dtype=np.int64)
+        y = np.empty(0, dtype=np.int64)
+        tissue_fractions = np.empty(0, dtype=np.float32)
+        tile_index = np.empty(0, dtype=np.int32)
+    else:
+        if npz_path is None:
+            raise ValueError("npz_path is required when n_tiles > 0")
+        data = np.load(npz_path, allow_pickle=False)
+        if "tile_index" not in data:
+            raise ValueError("Invalid tiling artifact: missing tile_index")
+        if "x" not in data:
+            raise ValueError("Invalid tiling artifact: missing x")
+        if "y" not in data:
+            raise ValueError("Invalid tiling artifact: missing y")
+        if "tissue_fractions" not in data:
+            raise ValueError("Invalid tiling artifact: missing tissue_fractions")
+        x = np.asarray(data["x"], dtype=np.int64)
+        y = np.asarray(data["y"], dtype=np.int64)
+        tissue_fractions = np.asarray(data["tissue_fractions"], dtype=np.float32)
+        tile_index = _validate_tile_index(np.asarray(data["tile_index"]), len(x))
     provenance = meta["provenance"]
     slide = meta["slide"]
     tiling = meta["tiling"]

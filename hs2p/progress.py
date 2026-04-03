@@ -174,11 +174,13 @@ class RichReporter:
                 )
             return
         if kind == "sampling.finished":
+            zero_tile_total = sum(payload["zero_tile_successes_by_annotation"].values())
             rows = [
                 ("Slides", str(payload["total"])),
                 ("Completed", str(payload["completed"])),
                 ("Failed", str(payload["failed"])),
-                ("Tiles", str(payload["sampled_tiles"])),
+                ("Zero-tile", str(zero_tile_total)),
+                ("Total tiles", str(payload["sampled_tiles"])),
                 ("Process list", payload["process_list_path"]),
             ]
             for annotation, count in sorted(
