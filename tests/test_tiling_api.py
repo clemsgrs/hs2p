@@ -21,7 +21,6 @@ from hs2p.api import (
     TilingArtifacts,
     TilingConfig,
     load_tiling_result,
-    load_whole_slides_from_rows,
     maybe_load_existing_artifacts,
     save_tiling_result,
     tile_slide,
@@ -29,6 +28,7 @@ from hs2p.api import (
     validate_tiling_artifacts,
     write_tiling_preview,
 )
+from hs2p.artifacts import load_whole_slides_from_rows
 from hs2p.configs import (
     FilterConfig as ConfigsFilterConfig,
     PreviewConfig as ConfigsPreviewConfig,
