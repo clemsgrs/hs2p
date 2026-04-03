@@ -43,7 +43,7 @@ openslide = [
     "openslide-bin",
 ]
 asap = [
-    "wholeslidedata<0.0.16",
+    "wholeslidedata==0.0.15",
 ]
 cucim = [
     "cucim-cu12>=26.02.00",
@@ -56,7 +56,7 @@ vips = [
 all = [
     "openslide-python",
     "openslide-bin",
-    "wholeslidedata<0.0.16",
+    "wholeslidedata==0.0.15",
     "cucim-cu12>=26.02.00",
     "cupy-cuda12x",
     "nvidia-nvimgcodec-cu12>=0.7.0",
