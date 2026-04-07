@@ -910,11 +910,11 @@ def tile_slides(
         compute_count=len(compute_requests),
     )
     preview_executor = (
-        ThreadPoolExecutor(max_workers=1)
+        ThreadPoolExecutor(max_workers=max(1, pool_processes))
         if preview is not None and preview.save_tiling_preview
         else None
     )
-    pending_preview: _PendingPreview | None = None
+    pending_previews: list[_PendingPreview] = []
     total_slides = len(planned_work)
 
     def _progress_snapshot() -> dict[str, int]:
@@ -955,35 +955,30 @@ def tile_slides(
 
     emit_progress("tiling.started", total=total_slides)
 
-    def _finalize_pending_preview_if_any() -> None:
-        nonlocal pending_preview
-        if pending_preview is None:
-            return
-        previous_pending = pending_preview
-        pending_preview = None
-        try:
-            finalized_artifact, finalized_row = _finalize_pending_tiling_preview(
-                pending=previous_pending
-            )
-            if finalized_artifact is not None:
-                artifacts.append(finalized_artifact)
-            _record_process_row(finalized_row)
-        except Exception as exc:
-            emit_progress_log(
-                f"[tile_slides] FAILED {previous_pending.whole_slide.sample_id}: {exc}",
-            )
-            _record_process_row(
-                _build_failure_process_row(
-                    whole_slide=previous_pending.whole_slide,
-                    error=str(exc),
-                    traceback_text=traceback.format_exc(),
+    def _finalize_all_pending_previews() -> None:
+        for previous_pending in pending_previews:
+            try:
+                finalized_artifact, finalized_row = _finalize_pending_tiling_preview(
+                    pending=previous_pending
                 )
-            )
+                if finalized_artifact is not None:
+                    artifacts.append(finalized_artifact)
+                _record_process_row(finalized_row)
+            except Exception as exc:
+                emit_progress_log(
+                    f"[tile_slides] FAILED {previous_pending.whole_slide.sample_id}: {exc}",
+                )
+                _record_process_row(
+                    _build_failure_process_row(
+                        whole_slide=previous_pending.whole_slide,
+                        error=str(exc),
+                        traceback_text=traceback.format_exc(),
+                    )
+                )
+        pending_previews.clear()
 
     def _process_compute_response(response: _ComputeResponse) -> None:
-        nonlocal pending_preview
         if not response.ok:
-            _finalize_pending_preview_if_any()
             emit_progress_log(
                 f"[tile_slides] FAILED {response.whole_slide.sample_id}: {response.error}",
             )
@@ -998,7 +993,6 @@ def tile_slides(
 
         assert response.artifact is not None
         base_artifact = response.artifact
-        _finalize_pending_preview_if_any()
         if (
             preview_executor is not None
             and preview is not None
@@ -1020,12 +1014,12 @@ def tile_slides(
                     output_dir=output_dir,
                     downsample=preview.downsample,
                 )
-            pending_preview = _PendingPreview(
+            pending_previews.append(_PendingPreview(
                 whole_slide=response.whole_slide,
                 base_artifact=base_artifact,
                 mask_preview_path=response.mask_preview_path,
                 future=future,
-            )
+            ))
             return
 
         artifact = _build_success_artifact(
@@ -1052,7 +1046,6 @@ def tile_slides(
 
         for planned in planned_work:
             if planned.artifact is not None:
-                _finalize_pending_preview_if_any()
                 artifacts.append(planned.artifact)
                 _record_process_row(
                     _build_success_process_row(
@@ -1062,7 +1055,6 @@ def tile_slides(
                 )
                 continue
             if planned.error is not None:
-                _finalize_pending_preview_if_any()
                 emit_progress_log(
                     f"[tile_slides] FAILED {planned.whole_slide.sample_id}: {planned.error}",
                 )
@@ -1136,7 +1128,7 @@ def tile_slides(
                     for request in serial_requests
                 )
             )
-        _finalize_pending_preview_if_any()
+        _finalize_all_pending_previews()
     finally:
         if preview_executor is not None:
             preview_executor.shutdown(wait=True)
