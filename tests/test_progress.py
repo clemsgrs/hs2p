@@ -435,6 +435,8 @@ def test_tile_slides_emits_progress_for_reused_success_and_failure(
             ok=False,
             artifact=None,
             mask_preview_path=None,
+            requested_backend=None,
+            backend=None,
             error="boom",
             traceback_text="traceback",
         )
