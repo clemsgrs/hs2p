@@ -22,7 +22,7 @@ classifiers = [
 ]
 dependencies = [
     "omegaconf",
-    "numpy<2",
+    "numpy",
     "pandas",
     "h5py",
     "tqdm",
@@ -44,6 +44,7 @@ openslide = [
 ]
 asap = [
     "wholeslidedata==0.0.15",
+    "numpy<2",
 ]
 cucim = [
     "cucim-cu12>=26.02.00",
@@ -57,6 +58,7 @@ all = [
     "openslide-python",
     "openslide-bin",
     "wholeslidedata==0.0.15",
+    "numpy<2",
     "cucim-cu12>=26.02.00",
     "cupy-cuda12x",
     "nvidia-nvimgcodec-cu12>=0.7.0",

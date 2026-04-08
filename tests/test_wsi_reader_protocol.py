@@ -1,4 +1,8 @@
 import importlib.util
+import os
+import subprocess
+import sys
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -221,6 +225,87 @@ def test_cucim_reader_override_does_not_rescue_missing_spacing_metadata(monkeypa
 
     with pytest.raises(ValueError, match="spacing"):
         CuCIMReader("fake.svs", spacing_override=0.25)
+
+
+def test_cucim_reader_batched_reads_suppress_native_stderr():
+    repo_root = Path(__file__).resolve().parents[1]
+    script = """
+import os
+import numpy as np
+from unittest.mock import MagicMock
+import hs2p.wsi.backends.cucim as m
+
+mock_cu_image = MagicMock()
+mock_cu_image.metadata = {
+    "openslide": {"MPP": 0.5},
+    "cucim": {"resolutions": {"level_dimensions": [[400, 200]], "level_downsamples": [1.0]}},
+}
+
+def _fake_read_region(**kwargs):
+    del kwargs
+    os.write(2, b"cuFile initialization failed\\n")
+    return [
+        np.zeros((16, 16, 3), dtype=np.uint8),
+        np.zeros((16, 16, 3), dtype=np.uint8),
+    ]
+
+mock_cu_image.read_region.side_effect = _fake_read_region
+fake_cucim = type("FakeCuCIMModule", (), {"CuImage": MagicMock(return_value=mock_cu_image)})()
+original_import_module = m.importlib.import_module
+m.importlib.import_module = lambda name: fake_cucim if name == "cucim" else original_import_module(name)
+reader = m.CuCIMReader("fake.svs")
+list(reader.read_regions([(0, 0), (16, 0)], 0, (16, 16), num_workers=2))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+
+
+def test_cucim_reader_repeated_single_reads_suppress_native_stderr():
+    repo_root = Path(__file__).resolve().parents[1]
+    script = """
+import os
+import numpy as np
+from unittest.mock import MagicMock
+import hs2p.wsi.backends.cucim as m
+
+mock_cu_image = MagicMock()
+mock_cu_image.metadata = {
+    "openslide": {"MPP": 0.5},
+    "cucim": {"resolutions": {"level_dimensions": [[400, 200]], "level_downsamples": [1.0]}},
+}
+
+def _fake_read_region(**kwargs):
+    del kwargs
+    os.write(2, b"cuInit Failed, error CUDA_ERROR_NOT_INITIALIZED\\n")
+    os.write(2, b"cuFile initialization failed\\n")
+    return np.zeros((16, 16, 3), dtype=np.uint8)
+
+mock_cu_image.read_region.side_effect = _fake_read_region
+fake_cucim = type("FakeCuCIMModule", (), {"CuImage": MagicMock(return_value=mock_cu_image)})()
+original_import_module = m.importlib.import_module
+m.importlib.import_module = lambda name: fake_cucim if name == "cucim" else original_import_module(name)
+reader = m.CuCIMReader("fake.svs")
+reader.read_region((0, 0), 0, (16, 16))
+reader.read_region((16, 0), 0, (16, 16))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stderr == ""
 
 
 def test_vips_reader_import_guard():

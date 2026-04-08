@@ -123,6 +123,8 @@ The metadata file is structured into:
 - `sample_id`
 - `image_path`
 - `mask_path`
+- `requested_backend`
+- `backend`
 - `tiling_status`
 - `num_tiles`
 - `coordinates_npz_path`
@@ -137,6 +139,8 @@ The metadata file is structured into:
 - `annotation`
 - `image_path`
 - `mask_path`
+- `requested_backend`
+- `backend`
 - `sampling_status`
 - `num_tiles`
 - `coordinates_npz_path`

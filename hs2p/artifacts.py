@@ -36,6 +36,8 @@ class TilingArtifacts:
     tiles_tar_path: Path | None = None
     mask_preview_path: Path | None = None
     tiling_preview_path: Path | None = None
+    backend: str | None = None
+    requested_backend: str | None = None
 
 
 @dataclass(frozen=True)
@@ -107,6 +109,8 @@ def save_tiling_result(
         coordinates_npz_path=artifact_paths["npz"],
         coordinates_meta_path=artifact_paths["meta"],
         num_tiles=len(result.x),
+        backend=result.backend,
+        requested_backend=result.requested_backend,
     )
 
 
@@ -274,6 +278,8 @@ def validate_tiling_artifacts(
         coordinates_npz_path=coordinates_npz_path,
         coordinates_meta_path=coordinates_meta_path,
         num_tiles=len(result.x),
+        backend=result.backend,
+        requested_backend=result.requested_backend,
     )
 
 

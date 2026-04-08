@@ -202,6 +202,8 @@ def build_sampling_process_rows(
                     "mask_path": (
                         str(slide.mask_path) if slide.mask_path is not None else None
                     ),
+                    "requested_backend": None,
+                    "backend": None,
                     "sampling_status": "tbp",
                     "num_tiles": 0,
                     "coordinates_npz_path": np.nan,
@@ -371,14 +373,17 @@ def process_slide(
     Process a single slide: sample tile coordinates and write previews if needed.
     """
     wsi_name = sample_id
+    requested_backend = cfg.tiling.backend
+    actual_backend = None
     if selection_strategy is None:
         selection_strategy = resolve_sampling_strategy(cfg)
     try:
         backend_selection = resolve_backend(
-            cfg.tiling.backend,
+            requested_backend,
             wsi_path=wsi_path,
             mask_path=mask_path,
         )
+        actual_backend = backend_selection.backend
         if backend_selection.reason is not None:
             progress.emit_progress_log(
                 f"[backend] {sample_id}: {backend_selection.reason}"
@@ -480,6 +485,8 @@ def process_slide(
                     "mask_path": (
                         str(mask_path) if mask_path is not None else None
                     ),
+                    "requested_backend": requested_backend,
+                    "backend": actual_backend,
                     "sampling_status": "success",
                     "num_tiles": len(coordinates),
                     "coordinates_npz_path": (
@@ -512,6 +519,8 @@ def process_slide(
                     "mask_path": (
                         str(mask_path) if mask_path is not None else None
                     ),
+                    "requested_backend": requested_backend,
+                    "backend": actual_backend,
                     "sampling_status": "failed",
                     "num_tiles": 0,
                     "coordinates_npz_path": np.nan,
@@ -575,6 +584,8 @@ def main(args):
                         "annotation",
                         "image_path",
                         "mask_path",
+                        "requested_backend",
+                        "backend",
                         "sampling_status",
                         "num_tiles",
                         "coordinates_npz_path",
@@ -599,6 +610,8 @@ def main(args):
                         "annotation",
                         "image_path",
                         "mask_path",
+                        "requested_backend",
+                        "backend",
                         "sampling_status",
                         "num_tiles",
                         "coordinates_npz_path",

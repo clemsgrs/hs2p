@@ -213,6 +213,179 @@ def test_process_slide_accepts_resolved_sampling_spec(monkeypatch, tmp_path):
     assert status_info["status"] == "success"
 
 
+def test_process_slide_success_rows_include_backend_provenance(monkeypatch, tmp_path):
+    cfg = SimpleNamespace(
+        output_dir=str(tmp_path),
+        tiling=SimpleNamespace(
+            backend="auto",
+            params=SimpleNamespace(
+                target_spacing_um=0.5,
+                target_tile_size_px=256,
+                overlap=0.0,
+                tissue_threshold=0.1,
+            ),
+            seg_params=SimpleNamespace(),
+            filter_params=SimpleNamespace(),
+            preview=SimpleNamespace(save=False, downsample=32),
+            sampling_params=SimpleNamespace(independent_sampling=True),
+        ),
+    )
+    resolved_sampling_spec = _resolved_sampling_spec(
+        pixel_mapping={"background": 0, "tumor": 1},
+        color_mapping=None,
+        tissue_percentage={"background": None, "tumor": 0.1},
+    )
+
+    monkeypatch.setattr(
+        sampling_mod,
+        "resolve_backend",
+        lambda requested_backend, *, wsi_path, mask_path: SimpleNamespace(
+            backend="openslide",
+            reason=None,
+        ),
+    )
+    monkeypatch.setattr(
+        sampling_mod,
+        "execute_coordinate_request",
+        lambda request: SimpleNamespace(
+            per_annotation_results={
+                "tumor": SimpleNamespace(
+                    contour_indices=[0],
+                    x=np.array([0], dtype=np.int64),
+                    y=np.array([0], dtype=np.int64),
+                    read_level=0,
+                    read_spacing_um=0.5,
+                    read_tile_size_px=256,
+                    tile_size_lv0=256,
+                )
+            }
+        ),
+    )
+    monkeypatch.setattr(sampling_mod, "save_sampling_coordinates", lambda **kwargs: None)
+    monkeypatch.setattr(sampling_mod, "write_coordinate_preview", lambda **kwargs: None)
+
+    _, status_info = sampling_mod.process_slide(
+        sample_id="sample-1",
+        wsi_path=Path("fake-wsi.tif"),
+        mask_path=Path("fake-mask.tif"),
+        cfg=cfg,
+        tiling_config=sampling_mod.TilingConfig(
+            target_spacing_um=0.5,
+            target_tile_size_px=256,
+            tolerance=0.05,
+            overlap=0.0,
+            tissue_threshold=0.1,
+            backend="auto",
+        ),
+        segmentation_config=sampling_mod.SegmentationConfig(
+            downsample=64,
+            sthresh=8,
+            sthresh_up=255,
+            mthresh=7,
+            close=4,
+            use_otsu=False,
+            use_hsv=True,
+        ),
+        filter_config=sampling_mod.FilterConfig(
+            ref_tile_size=16,
+            a_t=4,
+            a_h=2,
+            filter_white=False,
+            filter_black=False,
+            white_threshold=220,
+            black_threshold=25,
+            fraction_threshold=0.9,
+        ),
+        mask_preview_dir=None,
+        sampling_preview_dir=None,
+        resolved_sampling_spec=resolved_sampling_spec,
+    )
+
+    row = status_info["rows"][0]
+    assert row["requested_backend"] == "auto"
+    assert row["backend"] == "openslide"
+
+
+def test_process_slide_failure_rows_include_backend_provenance(monkeypatch, tmp_path):
+    cfg = SimpleNamespace(
+        output_dir=str(tmp_path),
+        tiling=SimpleNamespace(
+            backend="auto",
+            params=SimpleNamespace(
+                target_spacing_um=0.5,
+                target_tile_size_px=256,
+                overlap=0.0,
+                tissue_threshold=0.1,
+            ),
+            seg_params=SimpleNamespace(),
+            filter_params=SimpleNamespace(),
+            preview=SimpleNamespace(save=False, downsample=32),
+            sampling_params=SimpleNamespace(independent_sampling=True),
+        ),
+    )
+    resolved_sampling_spec = _resolved_sampling_spec(
+        pixel_mapping={"background": 0, "tumor": 1},
+        color_mapping=None,
+        tissue_percentage={"background": None, "tumor": 0.1},
+    )
+
+    monkeypatch.setattr(
+        sampling_mod,
+        "resolve_backend",
+        lambda requested_backend, *, wsi_path, mask_path: SimpleNamespace(
+            backend="openslide",
+            reason=None,
+        ),
+    )
+    monkeypatch.setattr(
+        sampling_mod,
+        "execute_coordinate_request",
+        lambda request: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    _, status_info = sampling_mod.process_slide(
+        sample_id="sample-1",
+        wsi_path=Path("fake-wsi.tif"),
+        mask_path=Path("fake-mask.tif"),
+        cfg=cfg,
+        tiling_config=sampling_mod.TilingConfig(
+            target_spacing_um=0.5,
+            target_tile_size_px=256,
+            tolerance=0.05,
+            overlap=0.0,
+            tissue_threshold=0.1,
+            backend="auto",
+        ),
+        segmentation_config=sampling_mod.SegmentationConfig(
+            downsample=64,
+            sthresh=8,
+            sthresh_up=255,
+            mthresh=7,
+            close=4,
+            use_otsu=False,
+            use_hsv=True,
+        ),
+        filter_config=sampling_mod.FilterConfig(
+            ref_tile_size=16,
+            a_t=4,
+            a_h=2,
+            filter_white=False,
+            filter_black=False,
+            white_threshold=220,
+            black_threshold=25,
+            fraction_threshold=0.9,
+        ),
+        mask_preview_dir=None,
+        sampling_preview_dir=None,
+        resolved_sampling_spec=resolved_sampling_spec,
+    )
+
+    row = status_info["rows"][0]
+    assert row["requested_backend"] == "auto"
+    assert row["backend"] == "openslide"
+    assert row["sampling_status"] == "failed"
+
+
 def test_sampling_main_uses_shared_config_resolvers(monkeypatch, tmp_path):
     cfg = SimpleNamespace(
         seed=0,

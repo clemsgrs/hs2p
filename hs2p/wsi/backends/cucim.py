@@ -1,4 +1,3 @@
-
 import importlib
 import os
 from pathlib import Path
@@ -9,6 +8,29 @@ import numpy as np
 
 from hs2p.wsi.backends.common import paste_region, resolve_padded_read_bounds
 from hs2p.wsi.geometry import compute_level_spacings
+
+
+class _suppress_native_stderr:
+    """Context manager that silences native (C/C++) stderr output.
+
+    cuCIM's cuFile/cuInit layers print warnings like ``cuInit Failed`` and
+    ``cuFile initialization failed`` directly to file-descriptor 2.  No
+    Python-level logging filter can catch these, so we temporarily point
+    fd 2 at ``/dev/null`` and restore it on exit.
+    """
+
+    def __enter__(self):
+        self._devnull_fd = os.open(os.devnull, os.O_WRONLY)
+        self._original_fd = os.dup(2)
+        os.dup2(self._devnull_fd, 2)
+        return self
+
+    def __exit__(self, *exc):
+        os.dup2(self._original_fd, 2)
+        os.close(self._original_fd)
+        os.close(self._devnull_fd)
+        return False
+
 
 CUCIM_SUPPORTED_SUFFIXES = {".svs", ".tif", ".tiff"}
 
@@ -86,15 +108,15 @@ class CuCIMReader:
     ):
         if gpu_decode:
             os.environ["ENABLE_CUSLIDE2"] = "1"
-        try:
-            cucim = importlib.import_module("cucim")
-        except ImportError as exc:
-            raise ImportError(
-                "cucim is required for the cucim backend. "
-                "Install it with: pip install cucim-cuXX"
-            ) from exc
-
-        self._slide = cucim.CuImage(str(path))
+        with _suppress_native_stderr():
+            try:
+                cucim = importlib.import_module("cucim")
+            except ImportError as exc:
+                raise ImportError(
+                    "cucim is required for the cucim backend. "
+                    "Install it with: pip install cucim-cuXX"
+                ) from exc
+            self._slide = cucim.CuImage(str(path))
         self._gpu_decode = bool(gpu_decode)
         self._metadata = getattr(self._slide, "metadata", {}) or {}
         cucim_meta = (
@@ -172,11 +194,12 @@ class CuCIMReader:
             kwargs["num_workers"] = max(1, int(num_workers))
         if self._gpu_decode:
             kwargs["device"] = "cuda"
-        try:
-            return self._slide.read_region(**kwargs)
-        except TypeError:
-            kwargs.pop("device", None)
-            return self._slide.read_region(**kwargs)
+        with _suppress_native_stderr():
+            try:
+                return self._slide.read_region(**kwargs)
+            except TypeError:
+                kwargs.pop("device", None)
+                return self._slide.read_region(**kwargs)
 
     def read_level(self, level: int) -> np.ndarray:
         dims = self._level_dimensions[level]
@@ -237,11 +260,12 @@ class CuCIMReader:
         }
         if self._gpu_decode:
             kwargs["device"] = "cuda"
-        try:
-            regions = self._slide.read_region(**kwargs)
-        except TypeError:
-            kwargs.pop("device", None)
-            regions = self._slide.read_region(**kwargs)
+        with _suppress_native_stderr():
+            try:
+                regions = self._slide.read_region(**kwargs)
+            except TypeError:
+                kwargs.pop("device", None)
+                regions = self._slide.read_region(**kwargs)
         for bounds, region in zip(bounds_per_location, regions):
             arr = _as_rgb_uint8(region)
             yield paste_region(bounds.canvas, arr, paste_offset=bounds.paste_offset)
