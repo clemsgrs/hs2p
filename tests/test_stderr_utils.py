@@ -27,3 +27,19 @@ def test_run_with_filtered_stderr_forwards_unrelated_stderr(capfd):
 
     assert result == 7
     assert captured.err == "unrelated warning\n"
+
+
+def test_run_with_filtered_stderr_suppresses_interleaved_cucim_noise(capfd):
+    def _write_noise():
+        os.write(
+            2,
+            b" cuInit Failed, errorcuFile initialization failed \nCUDA_ERROR_NOT_INITIALIZED\n",
+        )
+        os.write(2, b"kept line\n")
+        return 11
+
+    result = run_with_filtered_stderr(_write_noise)
+    captured = capfd.readouterr()
+
+    assert result == 11
+    assert captured.err == "kept line\n"

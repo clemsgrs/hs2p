@@ -7,9 +7,10 @@ from typing import Callable, TypeVar
 T = TypeVar("T")
 
 CUCIM_NO_GPU_STDERR_PATTERNS = (
-    "cuInit Failed",
+    "cuInit Failed, error",
     "CUDA_ERROR_NO_DEVICE",
     "CUDA_ERROR_OPERATING_SYSTEM",
+    "CUDA_ERROR_NOT_INITIALIZED",
     "cuFile initialization failed",
 )
 
@@ -20,9 +21,14 @@ def _filter_stderr_text(
 ) -> str:
     if not text:
         return text
+    filtered_text = text
+    for pattern in suppress_patterns:
+        filtered_text = filtered_text.replace(pattern, "")
     kept_lines: list[str] = []
-    for line in text.splitlines(keepends=True):
+    for line in filtered_text.splitlines(keepends=True):
         if any(pattern in line for pattern in suppress_patterns):
+            continue
+        if not line.strip():
             continue
         kept_lines.append(line)
     return "".join(kept_lines)
