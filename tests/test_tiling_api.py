@@ -448,6 +448,8 @@ def test_save_tiling_result_writes_preprocessing_npz_and_json(tmp_path: Path):
         num_tiles=2,
         mask_preview_path=None,
         tiling_preview_path=None,
+        backend="asap",
+        requested_backend="asap",
     )
 
     tiles = np.load(artifacts.coordinates_npz_path, allow_pickle=False)
@@ -1374,6 +1376,8 @@ def test_tile_slides_writes_process_list_and_can_reuse_precomputed_tiles(
         "sample_id",
         "image_path",
         "mask_path",
+        "requested_backend",
+        "backend",
         "tiling_status",
         "num_tiles",
         "coordinates_npz_path",
@@ -1602,6 +1606,8 @@ def test_tile_slides_resume_marks_stale_artifact_as_failed(
                 "sample_id": "slide-6",
                 "image_path": "stored-slide.svs",
                 "mask_path": np.nan,
+                "requested_backend": "asap",
+                "backend": "asap",
                 "tiling_status": "success",
                 "num_tiles": 1,
                 "coordinates_npz_path": str(artifacts.coordinates_npz_path),
@@ -1675,6 +1681,8 @@ def test_tile_slides_resume_rejects_unsupported_process_list_schema(
             {
                 "wsi_name": "slide-7",
                 "wsi_path": "slide-7.svs",
+                "requested_backend": "asap",
+                "backend": "asap",
                 "tiling_status": "success",
             }
         ]
@@ -2122,5 +2130,21 @@ def test_build_success_process_row_zero_tiles_has_nan_npz_path(
         artifact=artifacts,
     )
 
+    assert row["requested_backend"] == "asap"
+    assert row["backend"] == "asap"
     assert pd.isna(row["coordinates_npz_path"])
     assert row["num_tiles"] == 0
+
+
+def test_build_failure_process_row_records_backend_provenance():
+    row = api_mod._build_failure_process_row(
+        whole_slide=SlideSpec(sample_id="failed", image_path=Path("failed.svs")),
+        requested_backend="auto",
+        backend="openslide",
+        error="boom",
+        traceback_text="traceback",
+    )
+
+    assert row["requested_backend"] == "auto"
+    assert row["backend"] == "openslide"
+    assert row["tiling_status"] == "failed"

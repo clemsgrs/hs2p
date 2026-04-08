@@ -562,6 +562,8 @@ class _ComputeResponse:
     ok: bool
     artifact: TilingArtifacts | None = None
     result: TilingResult | None = None
+    requested_backend: str | None = None
+    backend: str | None = None
     mask_preview_path: Path | None = None
     error: str | None = None
     traceback_text: str | None = None
@@ -581,6 +583,8 @@ def _build_success_artifact(
         tiles_tar_path=base_artifact.tiles_tar_path,
         mask_preview_path=mask_preview_path,
         tiling_preview_path=tiling_preview_path,
+        backend=base_artifact.backend,
+        requested_backend=base_artifact.requested_backend,
     )
 
 
@@ -595,6 +599,8 @@ def _build_success_process_row(
         "mask_path": (
             str(whole_slide.mask_path) if whole_slide.mask_path is not None else None
         ),
+        "requested_backend": artifact.requested_backend,
+        "backend": artifact.backend,
         "tiling_status": "success",
         "num_tiles": artifact.num_tiles,
         "coordinates_npz_path": str(artifact.coordinates_npz_path) if artifact.coordinates_npz_path is not None else np.nan,
@@ -610,6 +616,8 @@ def _build_failure_process_row(
     whole_slide: SlideSpec,
     error: str,
     traceback_text: str,
+    requested_backend: str | None = None,
+    backend: str | None = None,
 ) -> dict[str, Any]:
     return {
         "sample_id": whole_slide.sample_id,
@@ -617,6 +625,8 @@ def _build_failure_process_row(
         "mask_path": (
             str(whole_slide.mask_path) if whole_slide.mask_path is not None else None
         ),
+        "requested_backend": requested_backend,
+        "backend": backend,
         "tiling_status": "failed",
         "num_tiles": 0,
         "coordinates_npz_path": np.nan,
@@ -647,6 +657,7 @@ def _finalize_pending_tiling_preview(
         artifact=artifact,
     )
     return artifact, row
+
 
 def _compute_and_save_tiling_artifacts_from_request(
     request: _ComputeRequest,
@@ -693,6 +704,10 @@ def _compute_and_save_tiling_artifacts_from_request(
             coordinates_meta_path=artifact.coordinates_meta_path,
             num_tiles=artifact.num_tiles,
             tiles_tar_path=tiles_tar_path,
+            mask_preview_path=artifact.mask_preview_path,
+            tiling_preview_path=artifact.tiling_preview_path,
+            backend=artifact.backend,
+            requested_backend=artifact.requested_backend,
         )
         mask_preview_path = (
             request.mask_preview_path
@@ -706,6 +721,8 @@ def _compute_and_save_tiling_artifacts_from_request(
             ok=True,
             artifact=artifact,
             result=result if request.include_result else None,
+            requested_backend=request.tiling.requested_backend,
+            backend=effective_tiling.backend,
             mask_preview_path=mask_preview_path,
         )
     except Exception as exc:
@@ -713,6 +730,8 @@ def _compute_and_save_tiling_artifacts_from_request(
             input_index=request.input_index,
             whole_slide=request.whole_slide,
             ok=False,
+            requested_backend=request.tiling.requested_backend,
+            backend=request.tiling.backend,
             error=str(exc),
             traceback_text=traceback.format_exc(),
         )
@@ -786,6 +805,8 @@ def tile_slides(
                 "sample_id",
                 "image_path",
                 "mask_path",
+                "requested_backend",
+                "backend",
                 "tiling_status",
                 "num_tiles",
                 "coordinates_npz_path",
@@ -973,6 +994,8 @@ def tile_slides(
                         whole_slide=previous_pending.whole_slide,
                         error=str(exc),
                         traceback_text=traceback.format_exc(),
+                        requested_backend=None,
+                        backend=None,
                     )
                 )
         pending_previews.clear()
@@ -987,6 +1010,8 @@ def tile_slides(
                     whole_slide=response.whole_slide,
                     error=response.error or "unknown error",
                     traceback_text=response.traceback_text or "",
+                    requested_backend=response.requested_backend,
+                    backend=response.backend,
                 )
             )
             return
@@ -1063,6 +1088,8 @@ def tile_slides(
                         whole_slide=planned.whole_slide,
                         error=planned.error,
                         traceback_text=planned.traceback_text or "",
+                        requested_backend=None,
+                        backend=None,
                     )
                 )
                 continue
