@@ -1,4 +1,6 @@
 from pathlib import Path
+import subprocess
+import sys
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -105,3 +107,63 @@ def test_iter_tile_records_from_result_uses_open_slide_for_generic_backends():
 
     assert [int(record.tile_arr[0, 0, 0]) for record in records] == [10, 20]
     mock_open.assert_called_once()
+
+
+def test_iter_cucim_batched_read_regions_suppresses_native_stderr():
+    repo_root = Path(__file__).resolve().parents[1]
+    module_path = repo_root / "hs2p" / "wsi" / "streaming" / "batched.py"
+
+    script = f"""
+import os
+import sys
+import types
+import importlib.util
+from pathlib import Path
+import numpy as np
+
+class _FakeCuCIMReader:
+    def __init__(self, *args, **kwargs):
+        del args, kwargs
+        os.write(2, b"cuFile initialization failed\\n")
+
+    def read_regions(self, locations, level, size, *, num_workers=None):
+        del locations, level, size, num_workers
+        os.write(2, b"cuInit Failed, error CUDA_ERROR_NOT_INITIALIZED\\n")
+        return [
+            np.zeros((16, 16, 3), dtype=np.uint8),
+            np.zeros((16, 16, 3), dtype=np.uint8),
+        ]
+
+sys.modules["hs2p.wsi.backends.cucim"] = types.SimpleNamespace(CuCIMReader=_FakeCuCIMReader)
+spec = importlib.util.spec_from_file_location("hs2p_streaming_batched_test", Path({str(module_path)!r}))
+m = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(m)
+
+requests = [
+    m.BatchedReadRequest(location=(0, 0), size=(16, 16)),
+    m.BatchedReadRequest(location=(16, 0), size=(16, 16)),
+]
+regions = list(
+    m.iter_cucim_batched_read_regions(
+        image_path="/tmp/fake.svs",
+        requests=requests,
+        level=0,
+        num_workers=2,
+        spacing_override=None,
+        gpu_decode=False,
+    )
+)
+assert len(regions) == 2
+assert [request.location for request, _region in regions] == [(0, 0), (16, 0)]
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stderr == ""
