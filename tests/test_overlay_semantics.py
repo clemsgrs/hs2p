@@ -272,9 +272,9 @@ def test_extract_coordinates_uses_overlay_mask_preview_instead_of_line_rendering
             use_hsv=True,
         ),
         tiling_params=SimpleNamespace(
-            target_spacing_um=0.5,
+            requested_spacing_um=0.5,
             tolerance=0.05,
-            target_tile_size_px=224,
+            requested_tile_size_px=224,
             overlap=0.0,
             tissue_threshold=0.1,
         ),
@@ -381,9 +381,9 @@ def test_extract_coordinates_preview_uses_in_memory_annotation_labels_when_style
             use_hsv=True,
         ),
         tiling_params=SimpleNamespace(
-            target_spacing_um=0.5,
+            requested_spacing_um=0.5,
             tolerance=0.05,
-            target_tile_size_px=224,
+            requested_tile_size_px=224,
             overlap=0.0,
             tissue_threshold=0.1,
         ),

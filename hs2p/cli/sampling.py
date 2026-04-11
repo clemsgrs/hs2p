@@ -131,11 +131,11 @@ def save_sampling_coordinates(
             y=coordinate_array[:, 1],
             tissue_fractions=np.zeros(len(coordinates), dtype=np.float32),
             tile_index=np.arange(len(coordinates), dtype=np.int32),
-            requested_tile_size_px=tiling_config.target_tile_size_px,
-            requested_spacing_um=tiling_config.target_spacing_um,
+            requested_tile_size_px=tiling_config.requested_tile_size_px,
+            requested_spacing_um=tiling_config.requested_spacing_um,
             read_level=extraction.read_level,
-            effective_tile_size_px=extraction.read_tile_size_px,
-            effective_spacing_um=extraction.read_spacing_um,
+            read_tile_size_px=extraction.read_tile_size_px,
+            read_spacing_um=extraction.read_spacing_um,
             tile_size_lv0=extraction.tile_size_lv0,
             is_within_tolerance=True,
             base_spacing_um=extraction.read_spacing_um,
@@ -241,10 +241,10 @@ def validate_sampling_artifact_row(
         raise ValueError("sampling mask_path mismatch")
     if result.backend != tiling_config.backend:
         raise ValueError("sampling backend mismatch")
-    if result.requested_spacing_um != tiling_config.target_spacing_um:
-        raise ValueError("sampling target_spacing_um mismatch")
-    if result.requested_tile_size_px != tiling_config.target_tile_size_px:
-        raise ValueError("sampling target_tile_size_px mismatch")
+    if result.requested_spacing_um != tiling_config.requested_spacing_um:
+        raise ValueError("sampling requested_spacing_um mismatch")
+    if result.requested_tile_size_px != tiling_config.requested_tile_size_px:
+        raise ValueError("sampling requested_tile_size_px mismatch")
     if result.overlap != tiling_config.overlap:
         raise ValueError("sampling overlap mismatch")
     if result.min_tissue_fraction != expected_tissue_threshold:
@@ -555,8 +555,8 @@ def main(args):
                 command="sampling",
                 slide_count=len(whole_slides),
                 backend=tiling_config.backend,
-                target_spacing_um=tiling_config.target_spacing_um,
-                target_tile_size_px=tiling_config.target_tile_size_px,
+                requested_spacing_um=tiling_config.requested_spacing_um,
+                requested_tile_size_px=tiling_config.requested_tile_size_px,
                 output_dir=str(output_dir),
                 num_workers=int(cfg.speed.num_workers),
                 resume=bool(cfg.resume),

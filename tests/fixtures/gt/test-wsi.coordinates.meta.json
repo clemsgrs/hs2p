@@ -56,8 +56,8 @@
     ]
   },
   "tiling": {
-    "effective_spacing_um": 0.25200000393750005,
-    "effective_tile_size_px": 444,
+    "read_spacing_um": 0.25200000393750005,
+    "read_tile_size_px": 444,
     "is_within_tolerance": true,
     "min_tissue_fraction": 0.1,
     "n_tiles": 459,

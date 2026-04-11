@@ -50,8 +50,8 @@ def test_independent_sampling_without_previews_does_not_crash(monkeypatch, tmp_p
         tiling=SimpleNamespace(
             backend="asap",
             params=SimpleNamespace(
-                target_spacing_um=0.5,
-                target_tile_size_px=256,
+                requested_spacing_um=0.5,
+                requested_tile_size_px=256,
                 overlap=0.0,
                 tissue_threshold=0.1,
             ),
@@ -94,8 +94,8 @@ def test_independent_sampling_without_previews_does_not_crash(monkeypatch, tmp_p
         mask_path=Path("fake-mask.tif"),
         cfg=cfg,
         tiling_config=sampling_mod.TilingConfig(
-            target_spacing_um=0.5,
-            target_tile_size_px=256,
+            requested_spacing_um=0.5,
+            requested_tile_size_px=256,
             tolerance=0.05,
             overlap=0.0,
             tissue_threshold=0.1,
@@ -134,8 +134,8 @@ def test_process_slide_accepts_resolved_sampling_spec(monkeypatch, tmp_path):
         tiling=SimpleNamespace(
             backend="asap",
             params=SimpleNamespace(
-                target_spacing_um=0.5,
-                target_tile_size_px=256,
+                requested_spacing_um=0.5,
+                requested_tile_size_px=256,
                 overlap=0.0,
                 tissue_threshold=0.1,
             ),
@@ -179,8 +179,8 @@ def test_process_slide_accepts_resolved_sampling_spec(monkeypatch, tmp_path):
         mask_path=Path("fake-mask.tif"),
         cfg=cfg,
         tiling_config=sampling_mod.TilingConfig(
-            target_spacing_um=0.5,
-            target_tile_size_px=256,
+            requested_spacing_um=0.5,
+            requested_tile_size_px=256,
             tolerance=0.05,
             overlap=0.0,
             tissue_threshold=0.1,
@@ -219,8 +219,8 @@ def test_process_slide_success_rows_include_backend_provenance(monkeypatch, tmp_
         tiling=SimpleNamespace(
             backend="auto",
             params=SimpleNamespace(
-                target_spacing_um=0.5,
-                target_tile_size_px=256,
+                requested_spacing_um=0.5,
+                requested_tile_size_px=256,
                 overlap=0.0,
                 tissue_threshold=0.1,
             ),
@@ -270,8 +270,8 @@ def test_process_slide_success_rows_include_backend_provenance(monkeypatch, tmp_
         mask_path=Path("fake-mask.tif"),
         cfg=cfg,
         tiling_config=sampling_mod.TilingConfig(
-            target_spacing_um=0.5,
-            target_tile_size_px=256,
+            requested_spacing_um=0.5,
+            requested_tile_size_px=256,
             tolerance=0.05,
             overlap=0.0,
             tissue_threshold=0.1,
@@ -312,8 +312,8 @@ def test_process_slide_failure_rows_include_backend_provenance(monkeypatch, tmp_
         tiling=SimpleNamespace(
             backend="auto",
             params=SimpleNamespace(
-                target_spacing_um=0.5,
-                target_tile_size_px=256,
+                requested_spacing_um=0.5,
+                requested_tile_size_px=256,
                 overlap=0.0,
                 tissue_threshold=0.1,
             ),
@@ -349,8 +349,8 @@ def test_process_slide_failure_rows_include_backend_provenance(monkeypatch, tmp_
         mask_path=Path("fake-mask.tif"),
         cfg=cfg,
         tiling_config=sampling_mod.TilingConfig(
-            target_spacing_um=0.5,
-            target_tile_size_px=256,
+            requested_spacing_um=0.5,
+            requested_tile_size_px=256,
             tolerance=0.05,
             overlap=0.0,
             tissue_threshold=0.1,
@@ -395,8 +395,8 @@ def test_sampling_main_uses_shared_config_resolvers(monkeypatch, tmp_path):
         tiling=SimpleNamespace(
             backend="asap",
             params=SimpleNamespace(
-                target_spacing_um=0.5,
-                target_tile_size_px=256,
+                requested_spacing_um=0.5,
+                requested_tile_size_px=256,
                 tolerance=0.05,
                 overlap=0.0,
                 tissue_threshold=0.1,
@@ -421,8 +421,8 @@ def test_sampling_main_uses_shared_config_resolvers(monkeypatch, tmp_path):
     def _fake_resolve_tiling_config(seen_cfg):
         called["cfg"] = seen_cfg
         return sampling_mod.TilingConfig(
-            target_spacing_um=0.5,
-            target_tile_size_px=256,
+            requested_spacing_um=0.5,
+            requested_tile_size_px=256,
             tolerance=0.05,
             overlap=0.0,
             tissue_threshold=0.1,
@@ -474,8 +474,8 @@ def test_sampling_main_rejects_partial_sampling_config(monkeypatch, tmp_path):
         tiling=SimpleNamespace(
             backend="asap",
             params=SimpleNamespace(
-                target_spacing_um=0.5,
-                target_tile_size_px=256,
+                requested_spacing_um=0.5,
+                requested_tile_size_px=256,
                 tolerance=0.05,
                 overlap=0.0,
                 tissue_threshold=0.1,
@@ -518,8 +518,8 @@ def test_sampling_main_rejects_missing_background_label(monkeypatch, tmp_path):
         tiling=SimpleNamespace(
             backend="asap",
             params=SimpleNamespace(
-                target_spacing_um=0.5,
-                target_tile_size_px=256,
+                requested_spacing_um=0.5,
+                requested_tile_size_px=256,
                 tolerance=0.05,
                 overlap=0.0,
                 tissue_threshold=0.1,
@@ -563,8 +563,8 @@ def test_process_slide_uses_extraction_preview_instead_of_reopening_overlay(
         tiling=SimpleNamespace(
             backend="asap",
             params=SimpleNamespace(
-                target_spacing_um=0.5,
-                target_tile_size_px=256,
+                requested_spacing_um=0.5,
+                requested_tile_size_px=256,
                 overlap=0.0,
                 tissue_threshold=0.1,
             ),
@@ -614,8 +614,8 @@ def test_process_slide_uses_extraction_preview_instead_of_reopening_overlay(
         mask_path=Path("fake-mask.tif"),
         cfg=cfg,
         tiling_config=sampling_mod.TilingConfig(
-            target_spacing_um=0.5,
-            target_tile_size_px=256,
+            requested_spacing_um=0.5,
+            requested_tile_size_px=256,
             tolerance=0.05,
             overlap=0.0,
             tissue_threshold=0.1,
@@ -662,8 +662,8 @@ def test_sampling_main_defaults_inner_slide_workers_to_one(monkeypatch, tmp_path
         tiling=SimpleNamespace(
             backend="asap",
             params=SimpleNamespace(
-                target_spacing_um=0.5,
-                target_tile_size_px=256,
+                requested_spacing_um=0.5,
+                requested_tile_size_px=256,
                 tolerance=0.05,
                 overlap=0.0,
                 tissue_threshold=0.1,
@@ -697,8 +697,8 @@ def test_sampling_main_defaults_inner_slide_workers_to_one(monkeypatch, tmp_path
         sampling_mod,
         "resolve_tiling_config",
         lambda cfg: sampling_mod.TilingConfig(
-            target_spacing_um=0.5,
-            target_tile_size_px=256,
+            requested_spacing_um=0.5,
+            requested_tile_size_px=256,
             tolerance=0.05,
             overlap=0.0,
             tissue_threshold=0.1,
@@ -779,8 +779,8 @@ def test_sampling_main_rejects_explicit_inner_slide_workers_override(
         tiling=SimpleNamespace(
             backend="asap",
             params=SimpleNamespace(
-                target_spacing_um=0.5,
-                target_tile_size_px=256,
+                requested_spacing_um=0.5,
+                requested_tile_size_px=256,
                 tolerance=0.05,
                 overlap=0.0,
                 tissue_threshold=0.1,
@@ -814,8 +814,8 @@ def test_sampling_main_rejects_explicit_inner_slide_workers_override(
         sampling_mod,
         "resolve_tiling_config",
         lambda cfg: sampling_mod.TilingConfig(
-            target_spacing_um=0.5,
-            target_tile_size_px=256,
+            requested_spacing_um=0.5,
+            requested_tile_size_px=256,
             tolerance=0.05,
             overlap=0.0,
             tissue_threshold=0.1,
@@ -910,8 +910,8 @@ def test_save_sampling_coordinates_uses_annotation_threshold_and_sampling_mode(
     monkeypatch.setattr(sampling_mod, "save_tiling_result", _fake_save_tiling_result)
 
     tiling_config = sampling_mod.TilingConfig(
-        target_spacing_um=0.5,
-        target_tile_size_px=256,
+        requested_spacing_um=0.5,
+        requested_tile_size_px=256,
         tolerance=0.05,
         overlap=0.0,
         tissue_threshold=0.1,
@@ -988,8 +988,8 @@ def test_save_sampling_coordinates_writes_sampling_metadata_fields(tmp_path):
         ),
     )
     tiling_config = sampling_mod.TilingConfig(
-        target_spacing_um=0.5,
-        target_tile_size_px=256,
+        requested_spacing_um=0.5,
+        requested_tile_size_px=256,
         tolerance=0.05,
         overlap=0.0,
         tissue_threshold=0.1,
@@ -1063,8 +1063,8 @@ def test_validate_sampling_artifact_row_accepts_matching_metadata(tmp_path):
         ),
     )
     tiling_config = sampling_mod.TilingConfig(
-        target_spacing_um=0.5,
-        target_tile_size_px=256,
+        requested_spacing_um=0.5,
+        requested_tile_size_px=256,
         tolerance=0.05,
         overlap=0.0,
         tissue_threshold=0.1,
@@ -1157,8 +1157,8 @@ def test_validate_sampling_artifact_row_ignores_disabled_filter_threshold_mismat
         ),
     )
     tiling_config = sampling_mod.TilingConfig(
-        target_spacing_um=0.5,
-        target_tile_size_px=256,
+        requested_spacing_um=0.5,
+        requested_tile_size_px=256,
         tolerance=0.05,
         overlap=0.0,
         tissue_threshold=0.1,
@@ -1265,8 +1265,8 @@ def test_validate_sampling_artifact_row_rejects_mismatched_tiling_config(tmp_pat
         ),
     )
     tiling_config = sampling_mod.TilingConfig(
-        target_spacing_um=0.5,
-        target_tile_size_px=256,
+        requested_spacing_um=0.5,
+        requested_tile_size_px=256,
         tolerance=0.05,
         overlap=0.0,
         tissue_threshold=0.1,
@@ -1325,15 +1325,15 @@ def test_validate_sampling_artifact_row_rejects_mismatched_tiling_config(tmp_pat
         save_tiling_result=sampling_mod.save_tiling_result,
     )
     incompatible_tiling = sampling_mod.TilingConfig(
-        target_spacing_um=0.75,
-        target_tile_size_px=256,
+        requested_spacing_um=0.75,
+        requested_tile_size_px=256,
         tolerance=0.05,
         overlap=0.0,
         tissue_threshold=0.1,
         backend="asap",
     )
 
-    with pytest.raises(ValueError, match="target_spacing_um mismatch"):
+    with pytest.raises(ValueError, match="requested_spacing_um mismatch"):
         sampling_support_mod.validate_sampling_artifact_row(
             row={
                 "sample_id": "sample-1",

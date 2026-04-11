@@ -15,8 +15,8 @@ _DEFAULT_PREVIEW = _DEFAULT_TILING.preview
 class TilingConfig:
     """Control tile extraction at a target physical resolution."""
 
-    target_spacing_um: float
-    target_tile_size_px: int
+    requested_spacing_um: float
+    requested_tile_size_px: int
     tolerance: float
     overlap: float
     tissue_threshold: float

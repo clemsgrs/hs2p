@@ -11,8 +11,8 @@ from .models import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfi
 
 def resolve_tiling_config(cfg: Any) -> TilingConfig:
     return TilingConfig(
-        target_spacing_um=cfg.tiling.params.target_spacing_um,
-        target_tile_size_px=cfg.tiling.params.target_tile_size_px,
+        requested_spacing_um=cfg.tiling.params.requested_spacing_um,
+        requested_tile_size_px=cfg.tiling.params.requested_tile_size_px,
         tolerance=cfg.tiling.params.tolerance,
         overlap=cfg.tiling.params.overlap,
         tissue_threshold=cfg.tiling.params.tissue_threshold,

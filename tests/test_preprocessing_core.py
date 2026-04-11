@@ -73,6 +73,36 @@ def test_compute_tissue_fractions_truncates_projected_tile_origins():
     np.testing.assert_array_equal(fractions, np.array([1.0], dtype=np.float32))
 
 
+def test_generate_tiles_uses_actual_read_geometry_when_spacing_is_within_tolerance():
+    contour = np.array(
+        [[[0, 0]], [[0, 1999]], [[1999, 1999]], [[1999, 0]]],
+        dtype=np.int32,
+    )
+    contours = ContourResult(
+        contours=[contour],
+        holes=[[]],
+        mask=np.full((2000, 2000), 255, dtype=np.uint8),
+    )
+
+    result = generate_tiles(
+        slide_dimensions=(2000, 2000),
+        contours=contours,
+        requested_tile_size_px=448,
+        requested_spacing_um=0.5,
+        base_spacing_um=0.486187607049942,
+        level_downsamples=[1.0],
+        overlap=0.0,
+        min_tissue_fraction=0.1,
+        tolerance=0.07,
+    )
+
+    assert result.is_within_tolerance is True
+    assert result.read_tile_size_px == 448
+    assert result.tile_size_lv0 == 448
+    assert np.unique(result.x)[1] == 448
+    assert np.unique(result.y)[1] == 448
+
+
 def _make_tiling_result(n_tiles: int = 4) -> TilingResult:
     rng = np.random.RandomState(42)
     coords = rng.randint(0, 1000, size=(n_tiles, 2)).astype(np.int64)
@@ -86,8 +116,8 @@ def _make_tiling_result(n_tiles: int = 4) -> TilingResult:
         requested_tile_size_px=256,
         requested_spacing_um=0.5,
         read_level=1,
-        effective_tile_size_px=256,
-        effective_spacing_um=0.5,
+        read_tile_size_px=256,
+        read_spacing_um=0.5,
         tile_size_lv0=512,
         is_within_tolerance=True,
         base_spacing_um=0.25,
@@ -185,8 +215,8 @@ def test_preprocessing_result_uses_canonical_geometry_fields():
     assert len(result.x) == len(result.tiles.x)
     assert result.requested_spacing_um == pytest.approx(result.tiles.requested_spacing_um)
     assert result.requested_tile_size_px == result.tiles.requested_tile_size_px
-    assert result.effective_spacing_um == pytest.approx(result.tiles.effective_spacing_um)
-    assert result.effective_tile_size_px == result.tiles.effective_tile_size_px
+    assert result.read_spacing_um == pytest.approx(result.tiles.read_spacing_um)
+    assert result.read_tile_size_px == result.tiles.read_tile_size_px
     assert resolve_read_step_px(result) == 192
     assert result.min_tissue_fraction == pytest.approx(result.tiles.min_tissue_fraction)
     assert result.mask_path == Path("/tmp/slide-001-mask.tif")

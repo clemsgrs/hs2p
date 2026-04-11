@@ -178,12 +178,12 @@ def _validate_requested_spacing(
 ) -> None:
     tolerance = tiling_params.tolerance
     starting_spacing = wsi.spacings[0]
-    target_spacing = tiling_params.target_spacing_um
-    if target_spacing < starting_spacing:
-        relative_diff = abs(starting_spacing - target_spacing) / target_spacing
+    requested_spacing_um = tiling_params.requested_spacing_um
+    if requested_spacing_um < starting_spacing:
+        relative_diff = abs(starting_spacing - requested_spacing_um) / requested_spacing_um
         if relative_diff > tolerance:
             raise ValueError(
-                f"Desired spacing ({target_spacing}) is smaller than the whole-slide image starting spacing ({starting_spacing}) and does not fall within tolerance ({tolerance:.0%})"
+                f"Desired spacing ({requested_spacing_um}) is smaller than the whole-slide image starting spacing ({starting_spacing}) and does not fall within tolerance ({tolerance:.0%})"
             )
 
 
@@ -215,7 +215,7 @@ def _extract_coordinate_result_from_wsi(
     )
     tile_spacing = wsi.get_level_spacing(tile_level)
     read_tile_size_px = int(
-        round(tiling_params.target_tile_size_px * resize_factor, 0)
+        round(tiling_params.requested_tile_size_px * resize_factor, 0)
     )
     x = np.array([x for x, _ in sorted_coordinates], dtype=np.int64)
     y = np.array([y for _, y in sorted_coordinates], dtype=np.int64)
@@ -296,9 +296,9 @@ def _filter_coordinates_for_sampling_with_wsi(
         return defaultdict(list), defaultdict(list), defaultdict(list)
 
     tile_spacing = wsi.get_level_spacing(tile_level)
-    resize_factor = tiling_params.target_spacing_um / tile_spacing
+    resize_factor = tiling_params.requested_spacing_um / tile_spacing
     tile_size_resized = int(
-        round(tiling_params.target_tile_size_px * resize_factor, 0)
+        round(tiling_params.requested_tile_size_px * resize_factor, 0)
     )
     slide_downsample_x, slide_downsample_y = wsi.level_downsamples[tile_level]
     tile_area = float(tile_size_resized * tile_size_resized)

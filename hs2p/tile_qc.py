@@ -134,8 +134,8 @@ def needs_pixel_qc(filter_params) -> bool:
 
 def resolve_qc_read_geometry(
     *,
-    target_tile_size_px: int,
-    target_spacing_um: float,
+    requested_tile_size_px: int,
+    requested_spacing_um: float,
     qc_spacing_um: float,
     base_spacing_um: float,
     level_downsamples: list[float] | list[tuple[float, float]],
@@ -153,15 +153,15 @@ def resolve_qc_read_geometry(
         level_downsamples=normalized_downsamples,
         tolerance=float(tolerance),
     )
-    physical_tile_um = float(target_tile_size_px) * float(target_spacing_um)
+    physical_tile_um = float(requested_tile_size_px) * float(requested_spacing_um)
     qc_tile_size_px = max(1, int(round(physical_tile_um / float(qc_spacing_um))))
     read_tile_size_px = max(
         1,
-        int(round(physical_tile_um / float(selection.effective_spacing_um))),
+        int(round(physical_tile_um / float(selection.read_spacing_um))),
     )
     return QCReadGeometry(
         level=int(selection.level),
-        read_spacing_um=float(selection.effective_spacing_um),
+        read_spacing_um=float(selection.read_spacing_um),
         requested_spacing_um=float(qc_spacing_um),
         read_tile_size_px=read_tile_size_px,
         qc_tile_size_px=qc_tile_size_px,
@@ -207,8 +207,8 @@ def filter_coordinate_tiles(
     keep_flags,
     level_dimensions: list[tuple[int, int]],
     level_downsamples: list[float] | list[tuple[float, float]],
-    target_tile_size_px: int,
-    target_spacing_um: float,
+    requested_tile_size_px: int,
+    requested_spacing_um: float,
     base_spacing_um: float,
     tolerance: float,
     filter_params,
@@ -229,8 +229,8 @@ def filter_coordinate_tiles(
         return keep_array
 
     geometry = resolve_qc_read_geometry(
-        target_tile_size_px=int(target_tile_size_px),
-        target_spacing_um=float(target_spacing_um),
+        requested_tile_size_px=int(requested_tile_size_px),
+        requested_spacing_um=float(requested_spacing_um),
         qc_spacing_um=float(filter_params.qc_spacing_um),
         base_spacing_um=float(base_spacing_um),
         level_downsamples=level_downsamples,

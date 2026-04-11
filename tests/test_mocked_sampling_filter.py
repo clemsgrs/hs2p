@@ -23,8 +23,8 @@ def _segmentation_config(*, downsample: int = 2) -> SegmentationConfig:
 
 def _tiling_config() -> TilingConfig:
     return TilingConfig(
-        target_spacing_um=1.0,
-        target_tile_size_px=8,
+        requested_spacing_um=1.0,
+        requested_tile_size_px=8,
         tolerance=0.01,
         overlap=0.0,
         tissue_threshold=0.0,
@@ -137,8 +137,8 @@ def test_filter_coordinates_reuses_loaded_mask_and_avoids_per_tile_mask_reads(
         tile_level=0,
         segment_params=_segmentation_config(),
         tiling_params=TilingConfig(
-            target_spacing_um=1.0,
-            target_tile_size_px=2,
+            requested_spacing_um=1.0,
+            requested_tile_size_px=2,
             tolerance=0.01,
             overlap=0.0,
             tissue_threshold=0.0,
@@ -224,8 +224,8 @@ def test_filter_coordinates_vectorized_path_avoids_per_tile_crops_and_handles_bo
         tile_level=0,
         segment_params=_segmentation_config(),
         tiling_params=TilingConfig(
-            target_spacing_um=1.0,
-            target_tile_size_px=2,
+            requested_spacing_um=1.0,
+            requested_tile_size_px=2,
             tolerance=0.01,
             overlap=0.0,
             tissue_threshold=0.0,

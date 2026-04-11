@@ -128,7 +128,7 @@ def detect_contours(
             ],
             tolerance=tolerance,
         )
-        current_scale = level_sel.effective_spacing_um / base_spacing_um
+        current_scale = level_sel.read_spacing_um / base_spacing_um
         ref_tile_mask_w = ref_tile_size_px * current_scale / scale_x
         ref_tile_mask_h = ref_tile_size_px * current_scale / scale_y
         scaled_ref_tile_area = int(ref_tile_mask_w * ref_tile_mask_h)
@@ -215,8 +215,8 @@ class TileGeometry:
     requested_tile_size_px: int
     requested_spacing_um: float
     read_level: int
-    effective_tile_size_px: int
-    effective_spacing_um: float
+    read_tile_size_px: int
+    read_spacing_um: float
     tile_size_lv0: int
     is_within_tolerance: bool
     base_spacing_um: float
@@ -366,13 +366,15 @@ def generate_tiles(
         tolerance=tolerance,
     )
     if level_sel.is_within_tolerance:
-        effective_tile_size_px = requested_tile_size_px
+        read_tile_size_px = requested_tile_size_px
     else:
-        effective_tile_size_px = round(
-            requested_tile_size_px * requested_spacing_um / level_sel.effective_spacing_um
+        read_tile_size_px = round(
+            requested_tile_size_px * requested_spacing_um / level_sel.read_spacing_um
         )
+    # The level-0 footprint should reflect the actual read geometry that
+    # produced the tile crop, not the nominal requested spacing contract.
     tile_size_lv0 = round(
-        requested_tile_size_px * requested_spacing_um / base_spacing_um
+        read_tile_size_px * level_sel.read_spacing_um / base_spacing_um
     )
     step_lv0 = max(1, round(tile_size_lv0 * (1.0 - overlap)))
     slide_w, slide_h = slide_dimensions
@@ -385,8 +387,8 @@ def generate_tiles(
             requested_tile_size_px=requested_tile_size_px,
             requested_spacing_um=requested_spacing_um,
             read_level=level_sel.level,
-            effective_tile_size_px=effective_tile_size_px,
-            effective_spacing_um=level_sel.effective_spacing_um,
+            read_tile_size_px=read_tile_size_px,
+            read_spacing_um=level_sel.read_spacing_um,
             tile_size_lv0=tile_size_lv0,
             is_within_tolerance=level_sel.is_within_tolerance,
             tissue_mask=contours.mask,
@@ -438,8 +440,8 @@ def generate_tiles(
             requested_tile_size_px=requested_tile_size_px,
             requested_spacing_um=requested_spacing_um,
             read_level=level_sel.level,
-            effective_tile_size_px=effective_tile_size_px,
-            effective_spacing_um=level_sel.effective_spacing_um,
+            read_tile_size_px=read_tile_size_px,
+            read_spacing_um=level_sel.read_spacing_um,
             tile_size_lv0=tile_size_lv0,
             is_within_tolerance=level_sel.is_within_tolerance,
             tissue_mask=contours.mask,
@@ -584,8 +586,8 @@ _TILING_KEYS = {
     "requested_tile_size_px",
     "requested_spacing_um",
     "read_level",
-    "effective_tile_size_px",
-    "effective_spacing_um",
+    "read_tile_size_px",
+    "read_spacing_um",
     "tile_size_lv0",
     "tolerance",
     "step_px_lv0",
@@ -654,8 +656,8 @@ def _build_tiling_metadata(result: TilingResult) -> dict[str, Any]:
         "requested_tile_size_px": result.requested_tile_size_px,
         "requested_spacing_um": result.requested_spacing_um,
         "read_level": result.read_level,
-        "effective_tile_size_px": result.effective_tile_size_px,
-        "effective_spacing_um": result.effective_spacing_um,
+        "read_tile_size_px": result.read_tile_size_px,
+        "read_spacing_um": result.read_spacing_um,
         "tile_size_lv0": result.tile_size_lv0,
         "tolerance": result.tolerance,
         "step_px_lv0": result.step_px_lv0,
@@ -902,8 +904,8 @@ def _load_tiling_result(*, npz_path: "Path | None", meta: dict[str, Any]) -> Til
         requested_tile_size_px=int(tiling["requested_tile_size_px"]),
         requested_spacing_um=float(tiling["requested_spacing_um"]),
         read_level=int(tiling["read_level"]),
-        effective_tile_size_px=int(tiling["effective_tile_size_px"]),
-        effective_spacing_um=float(tiling["effective_spacing_um"]),
+        read_tile_size_px=int(tiling["read_tile_size_px"]),
+        read_spacing_um=float(tiling["read_spacing_um"]),
         tile_size_lv0=int(tiling["tile_size_lv0"]),
         is_within_tolerance=bool(tiling["is_within_tolerance"]),
         base_spacing_um=(
@@ -1012,17 +1014,17 @@ def _read_mask_level(
 def _select_mask_level(
     *,
     mask_slide,
-    target_spacing_um: float,
+    requested_spacing_um: float,
 ) -> tuple[int, float]:
-    effective_spacings = [
+    read_spacings = [
         float(mask_slide.spacing) * float(downsample[0] if isinstance(downsample, tuple) else downsample)
         for downsample in mask_slide.level_downsamples
     ]
-    level = int(np.argmin([abs(spacing_um - target_spacing_um) for spacing_um in effective_spacings]))
-    spacing_um = effective_spacings[level]
-    while level > 0 and spacing_um > target_spacing_um:
+    level = int(np.argmin([abs(spacing_um - requested_spacing_um) for spacing_um in read_spacings]))
+    spacing_um = read_spacings[level]
+    while level > 0 and spacing_um > requested_spacing_um:
         level -= 1
-        spacing_um = effective_spacings[level]
+        spacing_um = read_spacings[level]
     return level, spacing_um
 
 
@@ -1041,7 +1043,7 @@ def load_precomputed_tissue_mask(
         )
         mask_level, mask_spacing_um = _select_mask_level(
             mask_slide=mask_slide,
-            target_spacing_um=seg_spacing_um,
+            requested_spacing_um=seg_spacing_um,
         )
         raw_mask = _read_mask_level(
             mask_path=mask_path,
@@ -1189,8 +1191,8 @@ def preprocess_slide(
                 keep_flags=np.ones(len(coord_candidates), dtype=np.uint8),
                 level_dimensions=slide.level_dimensions,
                 level_downsamples=slide.level_downsamples,
-                target_tile_size_px=requested_tile_size_px,
-                target_spacing_um=requested_spacing_um,
+                requested_tile_size_px=requested_tile_size_px,
+                requested_spacing_um=requested_spacing_um,
                 base_spacing_um=float(slide.spacing),
                 tolerance=tolerance,
                 filter_params=filter_params,

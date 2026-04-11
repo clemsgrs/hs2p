@@ -86,8 +86,8 @@ result = tile_slide(
     ),
     tiling=TilingConfig(
         backend="openslide",
-        target_spacing_um=0.5,
-        target_tile_size_px=224,
+        requested_spacing_um=0.5,
+        requested_tile_size_px=224,
         tolerance=0.07,
         overlap=0.0,
         tissue_threshold=0.1,
@@ -161,8 +161,8 @@ For a first run, start from [hs2p/configs/default.yaml](hs2p/configs/default.yam
 - `csv`
 - `output_dir`
 - `tiling.backend`
-- `tiling.params.target_spacing_um`
-- `tiling.params.target_tile_size_px`
+- `tiling.params.requested_spacing_um`
+- `tiling.params.requested_tile_size_px`
 
 
 More details about CLI: [docs/cli.md](docs/cli.md)

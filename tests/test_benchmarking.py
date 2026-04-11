@@ -39,8 +39,8 @@ def _make_grid_result(
             requested_tile_size_px=tile_size_px,
             requested_spacing_um=0.5,
             read_level=0,
-            effective_tile_size_px=tile_size_px,
-            effective_spacing_um=0.5,
+            read_tile_size_px=tile_size_px,
+            read_spacing_um=0.5,
             tile_size_lv0=tile_size_px,
             is_within_tolerance=True,
             base_spacing_um=0.5,
@@ -89,8 +89,8 @@ def _make_custom_result(
             requested_tile_size_px=tile_size_px,
             requested_spacing_um=0.5,
             read_level=0,
-            effective_tile_size_px=tile_size_px,
-            effective_spacing_um=0.5,
+            read_tile_size_px=tile_size_px,
+            read_spacing_um=0.5,
             tile_size_lv0=tile_size_px,
             is_within_tolerance=True,
             base_spacing_um=0.5,
@@ -296,8 +296,8 @@ def test_load_single_slide_result_from_config_builds_fresh_tiling_result(tmp_pat
         "tiling:\n"
         "  backend: asap\n"
         "  params:\n"
-        "    target_spacing_um: 0.5\n"
-        "    target_tile_size_px: 224\n"
+        "    requested_spacing_um: 0.5\n"
+        "    requested_tile_size_px: 224\n"
         "    tolerance: 0.05\n"
         "    overlap: 0.0\n"
         "    tissue_threshold: 0.1\n"

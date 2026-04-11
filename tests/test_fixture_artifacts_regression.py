@@ -33,8 +33,8 @@ def _build_tiling_configs(
     *, backend: str, tissue_pct: float
 ) -> tuple[TilingConfig, SegmentationConfig, FilterConfig]:
     tiling = TilingConfig(
-        target_spacing_um=0.5,
-        target_tile_size_px=224,
+        requested_spacing_um=0.5,
+        requested_tile_size_px=224,
         tolerance=0.07,
         overlap=0.0,
         tissue_threshold=tissue_pct,
@@ -130,9 +130,9 @@ def test_generated_tiles_match_checked_in_ground_truth_outputs(
     assert generated_loaded.requested_spacing_um == pytest.approx(golden.requested_spacing_um)
     assert generated_loaded.requested_tile_size_px == golden.requested_tile_size_px
     assert generated_loaded.read_level == golden.read_level
-    assert generated_loaded.effective_spacing_um == pytest.approx(golden.effective_spacing_um)
-    assert resolve_read_step_px(generated_loaded) == generated_loaded.effective_tile_size_px
-    assert generated_loaded.effective_tile_size_px == golden.effective_tile_size_px
+    assert generated_loaded.read_spacing_um == pytest.approx(golden.read_spacing_um)
+    assert resolve_read_step_px(generated_loaded) == generated_loaded.read_tile_size_px
+    assert generated_loaded.read_tile_size_px == golden.read_tile_size_px
     assert generated_loaded.step_px_lv0 == generated_loaded.tile_size_lv0
     assert generated_loaded.tile_size_lv0 == golden.tile_size_lv0
     assert generated_loaded.overlap == pytest.approx(golden.overlap)

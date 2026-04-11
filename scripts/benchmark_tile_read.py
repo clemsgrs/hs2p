@@ -92,7 +92,7 @@ def benchmark_wsd_mode(
         coerce_wsd_path(result.image_path, backend=result.backend),
         backend=result.backend,
     )
-    tile_size_px = int(result.effective_tile_size_px)
+    tile_size_px = int(result.read_tile_size_px)
     checksum = 0
     tile_count = 0
     start = time.perf_counter()
@@ -102,7 +102,7 @@ def benchmark_wsd_mode(
             int(plan.y),
             int(plan.read_size_px),
             int(plan.read_size_px),
-            spacing=float(result.effective_spacing_um),
+            spacing=float(result.read_spacing_um),
             center=False,
         )
         region_checksum, region_tiles = consume_region_tiles(
@@ -146,7 +146,7 @@ def benchmark_cucim_batch_mode(
         spacing_override=float(result.base_spacing_um),
         gpu_decode=gpu_decode,
     )
-    tile_size_px = int(result.effective_tile_size_px)
+    tile_size_px = int(result.read_tile_size_px)
     checksum = 0
     tile_count = 0
     start = time.perf_counter()
@@ -217,7 +217,7 @@ def run_mode(
         "read_calls": len(plans),
         "tiles_per_read": round(tile_count / max(len(plans), 1), 6),
         "read_level": int(result.read_level),
-        "effective_tile_size_px": int(result.effective_tile_size_px),
+        "read_tile_size_px": int(result.read_tile_size_px),
         "read_step_px": int(read_step_px),
         "step_px_lv0": int(result.step_px_lv0 or result.tile_size_lv0),
         "elapsed_s": round(elapsed, 6),

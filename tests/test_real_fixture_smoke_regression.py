@@ -36,8 +36,8 @@ def _run_extract(wsi_path: Path, mask_path: Path, backend: str, tissue_pct: floa
             use_hsv=True,
         ),
         tiling_params=TilingConfig(
-            target_spacing_um=0.5,
-            target_tile_size_px=224,
+            requested_spacing_um=0.5,
+            requested_tile_size_px=224,
             tolerance=0.07,
             overlap=0.0,
             tissue_threshold=tissue_pct,

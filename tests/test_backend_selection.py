@@ -196,8 +196,8 @@ def test_tile_slide_uses_resolved_backend_for_hash_and_result(monkeypatch):
                 requested_tile_size_px=256,
                 requested_spacing_um=0.5,
                 read_level=0,
-                effective_tile_size_px=256,
-                effective_spacing_um=0.5,
+                read_tile_size_px=256,
+                read_spacing_um=0.5,
                 tile_size_lv0=256,
                 is_within_tolerance=True,
                 base_spacing_um=0.5,
@@ -236,8 +236,8 @@ def test_tile_slide_uses_resolved_backend_for_hash_and_result(monkeypatch):
     result = api_mod.tile_slide(
         api_mod.SlideSpec(sample_id="slide-1", image_path=Path("slide.svs")),
         tiling=api_mod.TilingConfig(
-            target_spacing_um=0.5,
-            target_tile_size_px=256,
+            requested_spacing_um=0.5,
+            requested_tile_size_px=256,
             tolerance=0.05,
             overlap=0.0,
             tissue_threshold=0.1,

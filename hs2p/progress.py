@@ -52,8 +52,8 @@ class TextReporter:
         if kind == "run.started":
             return (
                 f"Starting hs2p {payload['command']}: {payload['slide_count']} slide(s), "
-                f"backend={payload['backend']} spacing={payload['target_spacing_um']}um "
-                f"tile_size={payload['target_tile_size_px']}px workers={payload['num_workers']} "
+                f"backend={payload['backend']} spacing={payload['requested_spacing_um']}um "
+                f"tile_size={payload['requested_tile_size_px']}px workers={payload['num_workers']} "
                 f"output={payload['output_dir']}"
             )
         if kind == "tiling.started":
@@ -123,8 +123,8 @@ class RichReporter:
         if kind == "run.started":
             self.console.print(
                 f"[bold]hs2p[/bold] {payload['command']} on {payload['slide_count']} slide(s) "
-                f"backend={payload['backend']} spacing={payload['target_spacing_um']}um "
-                f"tile_size={payload['target_tile_size_px']}px workers={payload['num_workers']}"
+                f"backend={payload['backend']} spacing={payload['requested_spacing_um']}um "
+                f"tile_size={payload['requested_tile_size_px']}px workers={payload['num_workers']}"
             )
             self.console.print(f"Output: {payload['output_dir']}")
             return

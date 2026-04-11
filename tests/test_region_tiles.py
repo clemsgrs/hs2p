@@ -38,8 +38,8 @@ def _make_result(
             requested_tile_size_px=tile_size_px,
             requested_spacing_um=0.5,
             read_level=0,
-            effective_tile_size_px=tile_size_px,
-            effective_spacing_um=0.5,
+            read_tile_size_px=tile_size_px,
+            read_spacing_um=0.5,
             tile_size_lv0=tile_size_px,
             is_within_tolerance=True,
             base_spacing_um=0.5,
@@ -133,7 +133,7 @@ def test_iter_plan_region_tile_views_attaches_tile_indices_in_slice_order():
         iter_plan_region_tile_views(
             region,
             read_plan=plan,
-            tile_size_px=int(result.effective_tile_size_px),
+            tile_size_px=int(result.read_tile_size_px),
             read_step_px=resolve_read_step_px(result),
         )
     )

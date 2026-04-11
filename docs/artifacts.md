@@ -64,8 +64,8 @@ The metadata file is structured into:
 - `requested_tile_size_px`
 - `requested_spacing_um`
 - `read_level`
-- `effective_tile_size_px`
-- `effective_spacing_um`
+- `read_tile_size_px`
+- `read_spacing_um`
 - `tile_size_lv0`
 - `tolerance`
 - `step_px_lv0`
@@ -73,6 +73,8 @@ The metadata file is structured into:
 - `min_tissue_fraction`
 - `is_within_tolerance`
 - `n_tiles`
+
+When `is_within_tolerance` is true, `tile_size_lv0` and `step_px_lv0` reflect the actual read-level crop geometry, so a slide read at level 0 keeps the level-0 footprint aligned with the crop size rather than the nominal requested-spacing projection.
 
 ### `segmentation`
 

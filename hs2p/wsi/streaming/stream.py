@@ -45,7 +45,7 @@ def iter_tile_records_from_reader(
         reader,
         read_plans=read_plans,
         read_level=int(result.read_level),
-        tile_size_px=int(result.effective_tile_size_px),
+        tile_size_px=int(result.read_tile_size_px),
         read_step_px=int(read_step_px),
     )
 
@@ -165,7 +165,7 @@ def _iter_cucim_tile_records_from_result(
         yield from _iter_tile_records_from_region(
             np.asarray(region),
             read_plan=request.payload,
-            tile_size_px=int(result.effective_tile_size_px),
+            tile_size_px=int(result.read_tile_size_px),
             read_step_px=int(read_step_px),
         )
 

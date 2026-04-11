@@ -27,7 +27,7 @@ def build_read_plans(
     use_supertiles: bool,
 ) -> list[TileReadPlan]:
     if not use_supertiles:
-        tile_size_px = int(result.effective_tile_size_px)
+        tile_size_px = int(result.read_tile_size_px)
         return [
             TileReadPlan(
                 x=int(x),

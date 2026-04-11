@@ -44,8 +44,8 @@ def _tiling_config(
     tissue_threshold: float = 0.0,
 ) -> TilingConfig:
     return TilingConfig(
-        target_spacing_um=spacing,
-        target_tile_size_px=tile_size,
+        requested_spacing_um=spacing,
+        requested_tile_size_px=tile_size,
         tolerance=tolerance,
         overlap=0.0,
         tissue_threshold=tissue_threshold,
@@ -213,7 +213,7 @@ def test_extract_coordinate_result_preserves_stride_when_contours_have_offset_or
     result = wsi_api_mod._extract_coordinate_result_from_wsi(
         wsi=FakeWSI(),
         tiling_params=SimpleNamespace(
-            target_tile_size_px=224,
+            requested_tile_size_px=224,
             overlap=0.0,
         ),
         filter_params=SimpleNamespace(),
@@ -258,7 +258,7 @@ def test_extract_coordinate_result_uses_actual_overlap_stride_in_level0_pixels()
     result = wsi_api_mod._extract_coordinate_result_from_wsi(
         wsi=FakeWSI(),
         tiling_params=SimpleNamespace(
-            target_tile_size_px=224,
+            requested_tile_size_px=224,
             overlap=0.1,
         ),
         filter_params=SimpleNamespace(),

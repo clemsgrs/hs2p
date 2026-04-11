@@ -35,12 +35,12 @@ class SupertileIndex:
 
 
 def resolve_read_step_px(result: Any) -> int:
-    effective_tile_size_px = int(result.effective_tile_size_px)
-    if effective_tile_size_px <= 0:
-        raise ValueError("effective_tile_size_px must be > 0")
+    read_tile_size_px = int(result.read_tile_size_px)
+    if read_tile_size_px <= 0:
+        raise ValueError("read_tile_size_px must be > 0")
     return max(
         1,
-        int(round(effective_tile_size_px * (1.0 - float(result.overlap)), 0)),
+        int(round(read_tile_size_px * (1.0 - float(result.overlap)), 0)),
     )
 
 
@@ -88,7 +88,7 @@ def iter_grouped_read_plans(
         for idx, (x, y) in enumerate(coordinates.tolist())
     }
     consumed = np.zeros(len(coordinates), dtype=bool)
-    tile_size_px = int(result.effective_tile_size_px)
+    tile_size_px = int(result.read_tile_size_px)
     grouped_plans: dict[int, list[GroupedReadPlan]] = {size: [] for size in grouped_sizes}
     grouped_plans[1] = []
 

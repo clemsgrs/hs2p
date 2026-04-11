@@ -66,7 +66,7 @@ def test_benchmark_records_worker_sweep_without_workload_label(
         repeat=1,
         python_executable="python",
         backend="asap",
-        target_spacing=0.5,
+        requested_spacing_um=0.5,
         tile_size=256,
         output_root=tmp_path,
     )
@@ -84,7 +84,7 @@ def test_write_config_uses_current_preview_and_sampling_keys(tmp_path: Path):
         output_dir=tmp_path / "output",
         num_workers=4,
         backend="asap",
-        target_spacing=0.5,
+        requested_spacing_um=0.5,
         tile_size=256,
         config_path=config_path,
     )

@@ -141,7 +141,7 @@ def test_select_level_prefers_finer_level_when_closest_match_is_too_coarse():
     )
 
     assert selection.level == 1
-    assert selection.effective_spacing_um == 1.0
+    assert selection.read_spacing_um == 1.0
     assert not selection.is_within_tolerance
 
 

@@ -19,7 +19,7 @@ def _load_script_module():
     return module
 
 
-def test_coarse_roi_shortcut_preserves_spatial_alignment(monkeypatch, tmp_path):
+def test_coarse_roi_shortcut_preserves_read_spatial_alignment(monkeypatch, tmp_path):
     script = _load_script_module()
 
     level0 = np.full((64, 64, 3), 255, dtype=np.uint8)
@@ -34,9 +34,9 @@ def test_coarse_roi_shortcut_preserves_spatial_alignment(monkeypatch, tmp_path):
 
     monkeypatch.setattr(script.wsd, "WholeSlideImage", fake_wsi_factory)
 
-    mask_l0, effective_spacing, mode = script._compute_level0_mask_with_coarse_roi_shortcut(
+    mask_l0, read_spacing_um, mode = script._compute_level0_mask_with_coarse_roi_shortcut(
         wsi_path=tmp_path / "slide.tif",
-        target_spacing=0.5,
+        requested_spacing_um=0.5,
         tolerance=0.01,
         backend="asap",
         spacing_at_level_0=None,
@@ -53,6 +53,6 @@ def test_coarse_roi_shortcut_preserves_spatial_alignment(monkeypatch, tmp_path):
     expected = script.segment_tissue_hsv(level1, gaussian_sigma_px=0.0)
 
     assert mode == "coarse-roi"
-    assert effective_spacing == 0.5
+    assert read_spacing_um == 0.5
     assert mask_l0.shape == expected.shape
     assert np.array_equal(mask_l0, expected)

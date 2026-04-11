@@ -21,7 +21,7 @@ def test_precomputed_mask_subtracts_all_holes():
         contour_holes=holes,
         tissue_mask=tissue_mask,
         geometry=utils_mod.ResolvedGeometry(
-            target_tile_size_px=4,
+            requested_tile_size_px=4,
             read_spacing_um=1.0,
             resize_factor=1.0,
             seg_spacing_um=1.0,
@@ -48,7 +48,7 @@ def test_check_coordinates_returns_vectorized_outputs_with_expected_coverages():
         contour_holes=holes,
         tissue_mask=tissue_mask,
         geometry=utils_mod.ResolvedGeometry(
-            target_tile_size_px=4,
+            requested_tile_size_px=4,
             read_spacing_um=1.0,
             resize_factor=1.0,
             seg_spacing_um=1.0,

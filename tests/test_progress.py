@@ -133,8 +133,8 @@ def _install_fake_rich_summary_types(monkeypatch):
 def _tiling_config() -> TilingConfig:
     return TilingConfig(
         backend="asap",
-        target_spacing_um=0.5,
-        target_tile_size_px=256,
+        requested_spacing_um=0.5,
+        requested_tile_size_px=256,
         tolerance=0.05,
         overlap=0.0,
         tissue_threshold=0.1,
@@ -175,8 +175,8 @@ def _base_cli_cfg(tmp_path: Path, *, resume: bool = False) -> SimpleNamespace:
             backend="asap",
             read_coordinates_from=None,
             params=SimpleNamespace(
-                target_spacing_um=0.5,
-                target_tile_size_px=256,
+                requested_spacing_um=0.5,
+                requested_tile_size_px=256,
             ),
             preview=SimpleNamespace(save=False, downsample=32),
         ),

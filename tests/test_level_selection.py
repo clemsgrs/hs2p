@@ -35,8 +35,8 @@ def _filter_config() -> FilterConfig:
 
 def _tiling_config(*, spacing: float = 1.0, tolerance: float = 0.01) -> TilingConfig:
     return TilingConfig(
-        target_spacing_um=spacing,
-        target_tile_size_px=8,
+        requested_spacing_um=spacing,
+        requested_tile_size_px=8,
         tolerance=tolerance,
         overlap=0.0,
         tissue_threshold=0.0,
@@ -59,7 +59,7 @@ def test_get_best_level_for_spacing_returns_within_tolerance_level(fake_backend)
     wsi = WSI(path=Path("synthetic-slide.tif"), backend="asap")
 
     level, within_tolerance = wsi.get_best_level_for_spacing(
-        target_spacing=2.1, tolerance=0.10
+        requested_spacing_um=2.1, tolerance=0.10
     )
 
     assert level == 1
@@ -74,7 +74,7 @@ def test_get_best_level_for_spacing_falls_back_to_finer_level_when_closest_is_to
     wsi = WSI(path=Path("synthetic-slide.tif"), backend="asap")
 
     level, within_tolerance = wsi.get_best_level_for_spacing(
-        target_spacing=3.5, tolerance=0.01
+        requested_spacing_um=3.5, tolerance=0.01
     )
 
     assert level == 1
@@ -82,7 +82,7 @@ def test_get_best_level_for_spacing_falls_back_to_finer_level_when_closest_is_to
     assert wsi.get_level_spacing(level) <= 3.5
 
 
-def test_extract_coordinates_raises_when_target_spacing_is_below_level0_beyond_tolerance(
+def test_extract_coordinates_raises_when_requested_spacing_is_below_level0_beyond_tolerance(
     monkeypatch,
 ):
     class GuardOnlyWSI:
