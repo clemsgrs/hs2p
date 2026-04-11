@@ -8,24 +8,24 @@ from hs2p.wsi.geometry import project_discrete_grid_origins
 
 @dataclass(frozen=True)
 class ResolvedGeometry:
-    target_tile_size_px: int
+    requested_tile_size_px: int
     read_spacing_um: float
     resize_factor: float
     seg_spacing_um: float
     level0_spacing_um: float
 
     @property
-    def target_spacing_um(self) -> float:
+    def requested_spacing_um(self) -> float:
         return self.read_spacing_um * self.resize_factor
 
     @property
     def downsampled_tile_size_px(self) -> int:
-        scale = self.seg_spacing_um / self.target_spacing_um
-        return int(round(self.target_tile_size_px / scale, 0))
+        scale = self.seg_spacing_um / self.requested_spacing_um
+        return int(round(self.requested_tile_size_px / scale, 0))
 
     @property
     def resized_tile_size_px(self) -> int:
-        return int(round(self.target_tile_size_px * self.resize_factor, 0))
+        return int(round(self.requested_tile_size_px * self.resize_factor, 0))
 
     @property
     def level0_to_seg_scale(self) -> float:

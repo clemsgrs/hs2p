@@ -88,8 +88,8 @@ def test_apply_tile_qc_keeps_empty_valid_mask():
 
 def test_resolve_qc_read_geometry_prefers_coarser_qc_spacing_level():
     geometry = resolve_qc_read_geometry(
-        target_tile_size_px=256,
-        target_spacing_um=0.5,
+        requested_tile_size_px=256,
+        requested_spacing_um=0.5,
         qc_spacing_um=2.0,
         base_spacing_um=0.5,
         level_downsamples=[(1.0, 1.0), (2.0, 2.0), (4.0, 4.0)],

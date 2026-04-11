@@ -100,7 +100,7 @@ def test_benchmark_tile_store_accumulates_per_phase_times(tmp_path, monkeypatch)
     mod = _load_benchmark_module()
 
     result_stub = MagicMock()
-    result_stub.effective_tile_size_px = 64
+    result_stub.read_tile_size_px = 64
     result_stub.requested_tile_size_px = 64
     result_stub.x = np.empty(0, dtype=np.int64)
     result_stub.y = np.empty(0, dtype=np.int64)
@@ -151,7 +151,7 @@ def test_benchmark_tile_store_forwards_supertile_sizes(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "extract_tiles_to_tar", _fake_extract_tiles_to_tar)
 
     result_stub = MagicMock()
-    result_stub.effective_tile_size_px = 64
+    result_stub.read_tile_size_px = 64
     result_stub.requested_tile_size_px = 64
     result_stub.x = np.empty(0, dtype=np.int64)
     result_stub.y = np.empty(0, dtype=np.int64)
@@ -182,7 +182,7 @@ def test_benchmark_tile_store_handles_empty_iterator(tmp_path, monkeypatch):
     )
 
     result_stub = MagicMock()
-    result_stub.effective_tile_size_px = 64
+    result_stub.read_tile_size_px = 64
     result_stub.requested_tile_size_px = 64
     result_stub.x = np.empty(0, dtype=np.int64)
     result_stub.y = np.empty(0, dtype=np.int64)
@@ -207,7 +207,7 @@ def test_progress_callback_called_per_tile(tmp_path, monkeypatch):
     mod = _load_benchmark_module()
 
     result_stub = MagicMock()
-    result_stub.effective_tile_size_px = 64
+    result_stub.read_tile_size_px = 64
     result_stub.requested_tile_size_px = 64
     result_stub.x = np.empty(0, dtype=np.int64)
     result_stub.y = np.empty(0, dtype=np.int64)

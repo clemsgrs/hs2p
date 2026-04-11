@@ -168,7 +168,7 @@ class WSI(object):
             self._level_spacing_cache[level] = self.spacings[level]
         return self._level_spacing_cache[level]
 
-    def get_best_level_for_spacing(self, target_spacing: float, tolerance: float):
+    def get_best_level_for_spacing(self, requested_spacing_um: float, tolerance: float):
         """
         Determines the best level in a multi-resolution image pyramid for a given target spacing.
 
@@ -176,7 +176,7 @@ class WSI(object):
         spacing or smaller than the target spacing to avoid upsampling.
 
         Args:
-            target_spacing (float): Desired spacing.
+            requested_spacing_um (float): Desired spacing.
             tolerance (float, optional): Tolerance for matching the spacing, deciding how much
                 spacing can deviate from those specified in the slide metadata.
 
@@ -184,29 +184,29 @@ class WSI(object):
             level (int): Index of the best matching level in the image pyramid.
         """
         spacing = self.get_level_spacing(0)
-        target_downsample = target_spacing / spacing
-        level = self.get_best_level_for_downsample_custom(target_downsample)
+        requested_downsample = requested_spacing_um / spacing
+        level = self.get_best_level_for_downsample_custom(requested_downsample)
         level_spacing = self.get_level_spacing(level)
 
-        # check if the level_spacing is within the tolerance of the target_spacing
+        # check if the level_spacing is within the tolerance of the requested_spacing
         is_within_tolerance = False
-        if abs(level_spacing - target_spacing) / target_spacing <= tolerance:
+        if abs(level_spacing - requested_spacing_um) / requested_spacing_um <= tolerance:
             is_within_tolerance = True
             return level, is_within_tolerance
 
-        # otherwise, look for a spacing smaller than or equal to the target_spacing
+        # otherwise, look for a spacing smaller than or equal to the requested_spacing
         else:
-            while level > 0 and level_spacing > target_spacing:
+            while level > 0 and level_spacing > requested_spacing_um:
                 level -= 1
                 level_spacing = self.get_level_spacing(level)
-                if abs(level_spacing - target_spacing) / target_spacing <= tolerance:
+                if abs(level_spacing - requested_spacing_um) / requested_spacing_um <= tolerance:
                     is_within_tolerance = True
                     break
 
         assert (
-            level_spacing <= target_spacing
-            or abs(level_spacing - target_spacing) / target_spacing <= tolerance
-        ), f"Unable to find a spacing less than or equal to the target spacing ({target_spacing}) or within {int(tolerance * 100)}% of the target spacing."
+            level_spacing <= requested_spacing_um
+            or abs(level_spacing - requested_spacing_um) / requested_spacing_um <= tolerance
+        ), f"Unable to find a spacing less than or equal to the requested spacing ({requested_spacing_um}) or within {int(tolerance * 100)}% of the requested spacing."
         return level, is_within_tolerance
 
     def get_best_level_for_downsample_custom(self, downsample: int):
@@ -371,16 +371,16 @@ class WSI(object):
         num_workers: int = 1,
     ):
         """
-        Extract tile coordinates based on the specified target spacing, tile size, overlap,
+        Extract tile coordinates based on the specified requested spacing, tile size, overlap,
         and additional tiling and filtering parameters.
 
         Args:
             tiling_params: Tiling configuration with spacing, tile size, overlap,
                 tissue threshold, and edge-inclusive tile extraction.
-                - target_spacing (float): Desired spacing of the tiles.
-                - tolerance (float): Tolerance for matching the target_spacing, deciding how much
-                    target_spacing can deviate from those specified in the slide metadata.
-                - target_tile_size (int): Desired size of the tiles at the target spacing.
+                - requested_spacing_um (float): Desired spacing of the tiles.
+                - tolerance (float): Tolerance for matching the requested_spacing_um, deciding how much
+                    requested_spacing_um can deviate from those specified in the slide metadata.
+                - requested_tile_size_px (int): Desired size of the tiles at the requested spacing.
                 - overlap (float, optional): Overlap between adjacent tiles. Defaults to 0.0.
                 - "tissue_percentage" (dict[str, float]): Minimum amount pixels covered with tissue required for a tile for a given annotation.
             filter_params (NamedTuple): Parameters for filtering contours, including:
@@ -399,14 +399,14 @@ class WSI(object):
                 - resize_factor (float): The factor by which the tile size was resized.
                 - tile_size_lv0 (int): The tile size at level 0 of the wsi pyramid.
         """
-        scale = tiling_params.target_spacing_um / self.get_level_spacing(0)
-        tile_size_lv0 = int(round(tiling_params.target_tile_size_px * scale, 0))
-        self._active_target_tile_size_px = int(tiling_params.target_tile_size_px)
-        self._active_target_spacing_um = float(tiling_params.target_spacing_um)
+        scale = tiling_params.requested_spacing_um / self.get_level_spacing(0)
+        tile_size_lv0 = int(round(tiling_params.requested_tile_size_px * scale, 0))
+        self._active_requested_tile_size_px = int(tiling_params.requested_tile_size_px)
+        self._active_requested_spacing_um = float(tiling_params.requested_spacing_um)
         self._active_tolerance = float(tiling_params.tolerance)
 
         contours, holes = self.detect_contours(
-            target_spacing=tiling_params.target_spacing_um,
+            requested_spacing_um=tiling_params.requested_spacing_um,
             tolerance=tiling_params.tolerance,
             filter_params=filter_params,
             annotation=annotation,
@@ -459,11 +459,11 @@ class WSI(object):
         filter_params,
         num_workers: int = 1,
     ):
-        target_tile_size_px = int(
-            getattr(self, "_active_target_tile_size_px", int(tile_size))
+        requested_tile_size_px = int(
+            getattr(self, "_active_requested_tile_size_px", int(tile_size))
         )
-        target_spacing_um = float(
-            getattr(self, "_active_target_spacing_um", self.get_level_spacing(tile_level))
+        requested_spacing_um = float(
+            getattr(self, "_active_requested_spacing_um", self.get_level_spacing(tile_level))
         )
         tolerance = float(getattr(self, "_active_tolerance", 0.05))
         batch_read_windows = None
@@ -496,8 +496,8 @@ class WSI(object):
             keep_flags=keep_flags,
             level_dimensions=self.level_dimensions,
             level_downsamples=self.level_downsamples,
-            target_tile_size_px=target_tile_size_px,
-            target_spacing_um=target_spacing_um,
+            requested_tile_size_px=requested_tile_size_px,
+            requested_spacing_um=requested_spacing_um,
             base_spacing_um=float(self.get_level_spacing(0)),
             tolerance=tolerance,
             filter_params=filter_params,
@@ -549,7 +549,7 @@ class WSI(object):
 
     def detect_contours(
         self,
-        target_spacing: float,
+        requested_spacing_um: float,
         tolerance: float,
         filter_params: FilterConfig,
         annotation: str | None = None,
@@ -561,9 +561,9 @@ class WSI(object):
         thresholds, and scales the contours to a specified target resolution.
 
         Args:
-            target_spacing (float): Desired spacing at which tiles should be extracted.
-            tolerance (float): Tolerance for matching the target_spacing, deciding how much
-                target_spacing can deviate from those specified in the slide metadata.
+            requested_spacing_um (float): Desired spacing at which tiles should be extracted.
+            tolerance (float): Tolerance for matching the requested_spacing_um, deciding how much
+                requested_spacing_um can deviate from those specified in the slide metadata.
             filter_params (FilterConfig): Filtering parameters containing:
                 - "a_t" (int): Minimum area threshold for foreground contours.
                 - "a_h" (int): Minimum area threshold for holes within contours.
@@ -576,7 +576,7 @@ class WSI(object):
                 - A list of lists containing scaled hole contours for each foreground contour.
         """
 
-        spacing_level, _ = self.get_best_level_for_spacing(target_spacing, tolerance)
+        spacing_level, _ = self.get_best_level_for_spacing(requested_spacing_um, tolerance)
         current_scale = self.level_downsamples[spacing_level]
         target_scale = self.level_downsamples[self.seg_level]
         scale = tuple(a / b for a, b in zip(target_scale, current_scale))
@@ -753,13 +753,13 @@ class WSI(object):
         )
 
     def _resolve_tile_read_metadata(self, tiling_params: TilingConfig):
-        target_spacing = tiling_params.target_spacing_um
+        requested_spacing_um = tiling_params.requested_spacing_um
         tolerance = tiling_params.tolerance
         tile_level, is_within_tolerance = self.get_best_level_for_spacing(
-            target_spacing, tolerance
+            requested_spacing_um, tolerance
         )
         tile_spacing = self.get_level_spacing(tile_level)
-        resize_factor = target_spacing / tile_spacing
+        resize_factor = requested_spacing_um / tile_spacing
         if is_within_tolerance:
             resize_factor = 1.0
 
@@ -792,13 +792,13 @@ class WSI(object):
                 - tile_level (int): Level of the image used for tile extraction.
                 - resize_factor (float): The factor by which the tile size was resized.
         """
-        target_tile_size = tiling_params.target_tile_size_px
+        requested_tile_size_px = tiling_params.requested_tile_size_px
         overlap = tiling_params.overlap
 
         tile_level, tile_spacing, resize_factor = self._resolve_tile_read_metadata(
             tiling_params
         )
-        tile_size_resized = int(round(target_tile_size * resize_factor, 0))
+        tile_size_resized = int(round(requested_tile_size_px * resize_factor, 0))
         step_size = int(tile_size_resized * (1.0 - overlap))
 
         if contour is not None:
@@ -839,7 +839,7 @@ class WSI(object):
             contour_holes=contour_holes,
             tissue_mask=mask,
             geometry=ResolvedGeometry(
-                target_tile_size_px=target_tile_size,
+                requested_tile_size_px=requested_tile_size_px,
                 read_spacing_um=tile_spacing,
                 resize_factor=resize_factor,
                 seg_spacing_um=self.get_level_spacing(self.seg_level),

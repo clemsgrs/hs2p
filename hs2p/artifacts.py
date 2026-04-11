@@ -183,10 +183,10 @@ def validate_tiling_artifacts(
         )
     if result.backend != compatibility.tiling.backend:
         raise ValueError("precomputed tiles backend mismatch")
-    if result.requested_spacing_um != compatibility.tiling.target_spacing_um:
-        raise ValueError("precomputed tiles target_spacing_um mismatch")
-    if result.requested_tile_size_px != compatibility.tiling.target_tile_size_px:
-        raise ValueError("precomputed tiles target_tile_size_px mismatch")
+    if result.requested_spacing_um != compatibility.tiling.requested_spacing_um:
+        raise ValueError("precomputed tiles requested_spacing_um mismatch")
+    if result.requested_tile_size_px != compatibility.tiling.requested_tile_size_px:
+        raise ValueError("precomputed tiles requested_tile_size_px mismatch")
     if result.overlap != compatibility.tiling.overlap:
         raise ValueError("precomputed tiles overlap mismatch")
     if result.min_tissue_fraction != compatibility.tiling.tissue_threshold:

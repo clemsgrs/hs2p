@@ -46,8 +46,8 @@ Start from [`hs2p/configs/default.yaml`](../hs2p/configs/default.yaml), then edi
 - `csv`
 - `output_dir`
 - `tiling.backend`
-- `tiling.params.target_spacing_um`
-- `tiling.params.target_tile_size_px`
+- `tiling.params.requested_spacing_um`
+- `tiling.params.requested_tile_size_px`
 
 Run tiling:
 

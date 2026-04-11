@@ -222,16 +222,16 @@ def get_best_level_for_downsample_custom(
 
 
 def get_best_level_for_spacing(
-    wsi: wsd.WholeSlideImage, target_spacing: float, tolerance: float
+    wsi: wsd.WholeSlideImage, requested_spacing_um: float, tolerance: float
 ):
     """
     Determines the best level in a multi-resolution image pyramid for a given target spacing.
 
-    Ensures that the spacing of the returned level is either within the specified tolerance of the target
-    spacing or smaller than the target spacing to avoid upsampling.
+    Ensures that the spacing of the returned level is either within the specified tolerance of the requested
+    spacing or smaller than the requested spacing to avoid upsampling.
 
     Args:
-        target_spacing (float): Desired spacing.
+        requested_spacing_um (float): Desired spacing.
         tolerance (float, optional): Tolerance for matching the spacing, deciding how much
             spacing can deviate from those specified in the slide metadata.
 
@@ -239,46 +239,46 @@ def get_best_level_for_spacing(
         level (int): Index of the best matching level in the image pyramid.
     """
     spacing_at_0 = wsi.spacings[0]
-    target_downsample = target_spacing / spacing_at_0
+    requested_downsample = requested_spacing_um / spacing_at_0
     level_downsamples = get_downsamples(wsi)
-    level = get_best_level_for_downsample_custom(level_downsamples, target_downsample)
+    level = get_best_level_for_downsample_custom(level_downsamples, requested_downsample)
     level_spacing = wsi.spacings[level]
 
-    # check if the level_spacing is within the tolerance of the target_spacing
+    # check if the level_spacing is within the tolerance of the requested_spacing
     is_within_tolerance = False
-    if abs(level_spacing - target_spacing) / target_spacing <= tolerance:
+    if abs(level_spacing - requested_spacing_um) / requested_spacing_um <= tolerance:
         is_within_tolerance = True
         return level, is_within_tolerance
 
-    # otherwise, look for a spacing smaller than or equal to the target_spacing
+    # otherwise, look for a spacing smaller than or equal to the requested_spacing
     else:
-        while level > 0 and level_spacing > target_spacing:
+        while level > 0 and level_spacing > requested_spacing_um:
             level -= 1
             level_spacing = wsi.spacings[level]
-            if abs(level_spacing - target_spacing) / target_spacing <= tolerance:
+            if abs(level_spacing - requested_spacing_um) / requested_spacing_um <= tolerance:
                 is_within_tolerance = True
                 break
 
     assert (
-        level_spacing <= target_spacing
-        or abs(level_spacing - target_spacing) / target_spacing <= tolerance
-    ), f"Unable to find a spacing less than or equal to the target spacing ({target_spacing}) or within {int(tolerance * 100)}% of the target spacing."
+        level_spacing <= requested_spacing_um
+        or abs(level_spacing - requested_spacing_um) / requested_spacing_um <= tolerance
+    ), f"Unable to find a spacing less than or equal to the requested spacing ({requested_spacing_um}) or within {int(tolerance * 100)}% of the requested spacing."
     return level, is_within_tolerance
 
 
 def load_wsi_at_spacing(
     *,
     wsi_path: Path,
-    target_spacing: float,
+    requested_spacing_um: float,
     tolerance: float,
     backend: str,
     spacing_at_level_0: float | None = None,
 ) -> tuple[np.ndarray, float]:
 
     wsi = wsd.WholeSlideImage(wsi_path, backend=backend)
-    level, read_spacing, effective_spacing, needs_resampling = _resolve_spacing_plan(
+    level, read_spacing_um, requested_read_spacing_um, needs_resampling = _resolve_spacing_plan(
         wsi=wsi,
-        target_spacing=target_spacing,
+        requested_spacing_um=requested_spacing_um,
         tolerance=tolerance,
         spacing_at_level_0=spacing_at_level_0,
     )
@@ -289,7 +289,7 @@ def load_wsi_at_spacing(
     wsi_arr = wsi.get_slide(spacing=base_spacings[level])
 
     if needs_resampling:
-        scale = read_spacing / effective_spacing  # < 1: downscale to target spacing
+        scale = read_spacing_um / requested_read_spacing_um  # < 1: downscale to requested spacing
         wsi_arr = cv2.resize(
             wsi_arr,
             dsize=None,
@@ -298,7 +298,7 @@ def load_wsi_at_spacing(
             interpolation=cv2.INTER_AREA,
         )
 
-    return wsi_arr, effective_spacing
+    return wsi_arr, requested_read_spacing_um
 
 
 def _get_spacings(
@@ -315,38 +315,38 @@ def _get_spacings(
 def _resolve_spacing_plan(
     *,
     wsi: wsd.WholeSlideImage,
-    target_spacing: float,
+    requested_spacing_um: float,
     tolerance: float,
     spacing_at_level_0: float | None,
 ) -> tuple[int, float, float, bool]:
     spacings = _get_spacings(wsi=wsi, spacing_at_level_0=spacing_at_level_0)
-    target_downsample = target_spacing / spacings[0]
+    requested_downsample = requested_spacing_um / spacings[0]
     level_downsamples = get_downsamples(wsi)
-    level = get_best_level_for_downsample_custom(level_downsamples, target_downsample)
+    level = get_best_level_for_downsample_custom(level_downsamples, requested_downsample)
     level_spacing = spacings[level]
 
-    if abs(level_spacing - target_spacing) / target_spacing <= tolerance:
+    if abs(level_spacing - requested_spacing_um) / requested_spacing_um <= tolerance:
         return level, level_spacing, level_spacing, False
 
-    while level > 0 and level_spacing > target_spacing:
+    while level > 0 and level_spacing > requested_spacing_um:
         level -= 1
         level_spacing = spacings[level]
-        if abs(level_spacing - target_spacing) / target_spacing <= tolerance:
+        if abs(level_spacing - requested_spacing_um) / requested_spacing_um <= tolerance:
             return level, level_spacing, level_spacing, False
 
-    if level_spacing > target_spacing:
+    if level_spacing > requested_spacing_um:
         available_spacings = ", ".join(f"{spacing:.4g}" for spacing in spacings)
         raise ValueError(
-            "Unable to resolve a read spacing for the requested tissue-mask target "
-            f"spacing ({target_spacing:.4g} um/px). Available spacings: "
+            "Unable to resolve a read spacing for the requested tissue-mask spacing "
+            f"({requested_spacing_um:.4g} um/px). Available spacings: "
             f"[{available_spacings}] um/px. The finest available spacing "
-            f"({spacings[0]:.4g} um/px) is still coarser than the target and not "
+            f"({spacings[0]:.4g} um/px) is still coarser than the requested spacing and not "
             f"within the current tolerance ({tolerance:.0%}). Consider increasing "
             "the tolerance if that finest level is acceptable, or request a "
-            "coarser target spacing."
+            "coarser requested spacing."
         )
 
-    return level, level_spacing, target_spacing, True
+    return level, level_spacing, requested_spacing_um, True
 
 
 def segment_tissue_hsv(
@@ -482,7 +482,7 @@ def _coarse_boxes_to_target_boxes(
 def _compute_level0_mask_with_coarse_roi_shortcut(
     *,
     wsi_path: Path,
-    target_spacing: float,
+    requested_spacing_um: float,
     tolerance: float,
     backend: str,
     spacing_at_level_0: float | None,
@@ -497,28 +497,28 @@ def _compute_level0_mask_with_coarse_roi_shortcut(
 ) -> tuple[np.ndarray, float, str]:
     wsi = wsd.WholeSlideImage(wsi_path, backend=backend)
     spacing_at_l0 = _get_spacings(wsi=wsi, spacing_at_level_0=spacing_at_level_0)[0]
-    level, read_spacing, effective_spacing, needs_resampling = _resolve_spacing_plan(
+    level, read_spacing_um, requested_read_spacing_um, needs_resampling = _resolve_spacing_plan(
         wsi=wsi,
-        target_spacing=target_spacing,
+        requested_spacing_um=requested_spacing_um,
         tolerance=tolerance,
         spacing_at_level_0=spacing_at_level_0,
     )
     native_level_spacing = list(wsi.spacings)[level]
 
-    coarse_arr, coarse_effective_spacing = load_wsi_at_spacing(
+    coarse_arr, coarse_read_spacing_um = load_wsi_at_spacing(
         wsi_path=wsi_path,
-        target_spacing=coarse_spacing,
+        requested_spacing_um=coarse_spacing,
         tolerance=tolerance,
         backend=backend,
         spacing_at_level_0=spacing_at_level_0,
     )
-    coarse_sigma_px = _sigma_um_to_px(gaussian_sigma_um, coarse_effective_spacing)
+    coarse_sigma_px = _sigma_um_to_px(gaussian_sigma_um, coarse_read_spacing_um)
     coarse_mask = segment_tissue_hsv(
         wsi_arr=coarse_arr, gaussian_sigma_px=coarse_sigma_px
     )
     coarse_mask = postprocess_mask(
         mask=coarse_mask,
-        spacing_um_per_px=coarse_effective_spacing,
+        spacing_um_per_px=coarse_read_spacing_um,
         min_component_area_um2=min_component_area_um2,
         min_hole_area_um2=min_hole_area_um2,
         open_radius_um=open_radius_um,
@@ -526,11 +526,11 @@ def _compute_level0_mask_with_coarse_roi_shortcut(
     )
 
     level_w, level_h = wsi.shapes[level]
-    spacing_ratio = read_spacing / effective_spacing
+    spacing_ratio = read_spacing_um / requested_read_spacing_um
     target_w = max(1, int(round(level_w * spacing_ratio)))
     target_h = max(1, int(round(level_h * spacing_ratio)))
     target_shape = (target_h, target_w)
-    margin_px = _radius_um_to_px(coarse_roi_margin_um, effective_spacing)
+    margin_px = _radius_um_to_px(coarse_roi_margin_um, requested_read_spacing_um)
     target_boxes = _coarse_boxes_to_target_boxes(
         coarse_boxes=_extract_roi_boxes(coarse_mask),
         coarse_shape=coarse_mask.shape[:2],
@@ -547,10 +547,10 @@ def _compute_level0_mask_with_coarse_roi_shortcut(
         mask_l0 = np.memmap(tmp_path, dtype=np.uint8, mode="w+", shape=target_shape)
         mask_l0[:] = 0
 
-        sigma_px = _sigma_um_to_px(gaussian_sigma_um, effective_spacing)
+        sigma_px = _sigma_um_to_px(gaussian_sigma_um, requested_read_spacing_um)
         halo_px = max(
-            _radius_um_to_px(open_radius_um, effective_spacing),
-            _radius_um_to_px(close_radius_um, effective_spacing),
+            _radius_um_to_px(open_radius_um, requested_read_spacing_um),
+            _radius_um_to_px(close_radius_um, requested_read_spacing_um),
             int(np.ceil(3.0 * sigma_px)),
         )
 
@@ -564,8 +564,8 @@ def _compute_level0_mask_with_coarse_roi_shortcut(
                 rx1 = min(target_shape[1], x1 + halo_px)
                 ry1 = min(target_shape[0], y1 + halo_px)
 
-                rx0_l0 = int(round(rx0 * (effective_spacing / spacing_at_l0)))
-                ry0_l0 = int(round(ry0 * (effective_spacing / spacing_at_l0)))
+                rx0_l0 = int(round(rx0 * (requested_read_spacing_um / spacing_at_l0)))
+                ry0_l0 = int(round(ry0 * (requested_read_spacing_um / spacing_at_l0)))
 
                 tile = wsi.get_patch(
                     rx0_l0,
@@ -585,7 +585,7 @@ def _compute_level0_mask_with_coarse_roi_shortcut(
 
         mask_l0 = postprocess_mask(
             mask=np.asarray(mask_l0),
-            spacing_um_per_px=effective_spacing,
+            spacing_um_per_px=requested_read_spacing_um,
             min_component_area_um2=min_component_area_um2,
             min_hole_area_um2=min_hole_area_um2,
             open_radius_um=open_radius_um,
@@ -593,7 +593,7 @@ def _compute_level0_mask_with_coarse_roi_shortcut(
         )
 
         mode = "coarse-roi-resampled" if needs_resampling else "coarse-roi"
-        return np.asarray(mask_l0), effective_spacing, mode
+        return np.asarray(mask_l0), requested_read_spacing_um, mode
     finally:
         if tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
@@ -917,22 +917,22 @@ def _process_slide_job(job: dict[str, object]) -> dict[str, object]:
 
     try:
         if bool(job.get("disable_coarse_roi_shortcut", False)):
-            wsi_arr, effective_spacing = load_wsi_at_spacing(
+            wsi_arr, read_spacing_um = load_wsi_at_spacing(
                 wsi_path=input_wsi,
-                target_spacing=float(job["spacing"]),
+                requested_spacing_um=float(job["spacing"]),
                 tolerance=float(job["tolerance"]),
                 backend=str(job["backend"]),
                 spacing_at_level_0=job["spacing_at_level_0"],
             )
             gaussian_sigma_px = _sigma_um_to_px(
-                float(job["gaussian_sigma_um"]), effective_spacing
+                float(job["gaussian_sigma_um"]), read_spacing_um
             )
             mask_l0 = segment_tissue_hsv(
                 wsi_arr=wsi_arr, gaussian_sigma_px=gaussian_sigma_px
             )
             mask_l0 = postprocess_mask(
                 mask=mask_l0,
-                spacing_um_per_px=effective_spacing,
+                spacing_um_per_px=read_spacing_um,
                 min_component_area_um2=float(job["min_component_area_um2"]),
                 min_hole_area_um2=float(job["min_hole_area_um2"]),
                 open_radius_um=float(job["open_radius_um"]),
@@ -940,10 +940,10 @@ def _process_slide_job(job: dict[str, object]) -> dict[str, object]:
             )
             processing_mode = "full"
         else:
-            mask_l0, effective_spacing, processing_mode = (
+            mask_l0, read_spacing_um, processing_mode = (
                 _compute_level0_mask_with_coarse_roi_shortcut(
                     wsi_path=input_wsi,
-                    target_spacing=float(job["spacing"]),
+                    requested_spacing_um=float(job["spacing"]),
                     tolerance=float(job["tolerance"]),
                     backend=str(job["backend"]),
                     spacing_at_level_0=job["spacing_at_level_0"],
@@ -970,7 +970,7 @@ def _process_slide_job(job: dict[str, object]) -> dict[str, object]:
         write_pyramidal_mask_tiff(
             levels=levels,
             output_path=output_path,
-            level0_spacing=effective_spacing,
+            level0_spacing=read_spacing_um,
             downsample_per_level=downsample_per_level,
             compression=str(job["compression"]),
             tile_size=int(job["tile_size"]),
@@ -978,7 +978,7 @@ def _process_slide_job(job: dict[str, object]) -> dict[str, object]:
 
         level_info = []
         for idx, level in enumerate(levels):
-            level_spacing = effective_spacing * (downsample_per_level**idx)
+            level_spacing = read_spacing_um * (downsample_per_level**idx)
             height, width = level.shape[:2]
             level_info.append(
                 {

@@ -49,8 +49,8 @@ def _make_tiling_result(
             requested_tile_size_px=tile_size,
             requested_spacing_um=0.5,
             read_level=0,
-            effective_tile_size_px=tile_size,
-            effective_spacing_um=0.5,
+            read_tile_size_px=tile_size,
+            read_spacing_um=0.5,
             tile_size_lv0=tile_size,
             is_within_tolerance=True,
             base_spacing_um=0.5,
@@ -117,8 +117,8 @@ def _make_grid_tiling_result(
             requested_tile_size_px=tile_size,
             requested_spacing_um=0.5,
             read_level=0,
-            effective_tile_size_px=tile_size,
-            effective_spacing_um=0.5,
+            read_tile_size_px=tile_size,
+            read_spacing_um=0.5,
             tile_size_lv0=tile_size,
             is_within_tolerance=True,
             base_spacing_um=0.5,
@@ -169,8 +169,8 @@ def _make_custom_tiling_result(
             requested_tile_size_px=tile_size,
             requested_spacing_um=0.5,
             read_level=0,
-            effective_tile_size_px=tile_size,
-            effective_spacing_um=0.5,
+            read_tile_size_px=tile_size,
+            read_spacing_um=0.5,
             tile_size_lv0=tile_size,
             is_within_tolerance=True,
             base_spacing_um=0.5,
@@ -628,7 +628,7 @@ class TestExtractTilesToTar:
             result,
             tiles=replace(
                 result.tiles,
-                effective_tile_size_px=512,
+                read_tile_size_px=512,
             ),
         )
 
@@ -648,7 +648,7 @@ class TestExtractTilesToTar:
             result,
             tiles=replace(
                 result.tiles,
-                effective_tile_size_px=512,
+                read_tile_size_px=512,
             ),
         )
 
@@ -747,7 +747,7 @@ class TestExtractTilesToTar:
             tiles=replace(
                 result.tiles,
                 read_level=3,
-                effective_tile_size_px=128,
+                read_tile_size_px=128,
             ),
         )
 
@@ -820,7 +820,7 @@ class TestExtractTilesToTar:
             tiles=replace(
                 result.tiles,
                 read_level=1,
-                effective_tile_size_px=128,
+                read_tile_size_px=128,
                 slide_dimensions=[1024, 512],
                 level_downsamples=[1.0, 2.0],
             ),

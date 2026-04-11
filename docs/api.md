@@ -36,8 +36,8 @@ The Python API is the best entrypoint when you want to integrate `hs2p` into you
 - `tile_index`
 - `requested_tile_size_px`
 - `requested_spacing_um`
-- `effective_tile_size_px`
-- `effective_spacing_um`
+- `read_tile_size_px`
+- `read_spacing_um`
 - `tile_size_lv0`
 - `step_px_lv0`
 - `min_tissue_fraction`
@@ -64,8 +64,8 @@ result = tile_slide(
     ),
     tiling=TilingConfig(
         backend="openslide",
-        target_spacing_um=0.5,
-        target_tile_size_px=224,
+        requested_spacing_um=0.5,
+        requested_tile_size_px=224,
         tolerance=0.07,
         overlap=0.0,
         tissue_threshold=0.1,
@@ -109,8 +109,8 @@ artifacts = tile_slides(
     slides,
     tiling=TilingConfig(
         backend="auto",
-        target_spacing_um=0.5,
-        target_tile_size_px=224,
+        requested_spacing_um=0.5,
+        requested_tile_size_px=224,
         tolerance=0.07,
         overlap=0.0,
         tissue_threshold=0.1,

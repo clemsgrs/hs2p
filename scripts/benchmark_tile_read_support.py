@@ -189,7 +189,7 @@ class BenchmarkProgressReporter:
             (
                 f"[bold]Benchmarking[/bold] sample={result.sample_id} "
                 f"tiles={len(result.x):,} "
-                f"read_tile={int(result.effective_tile_size_px)}px "
+                f"read_tile={int(result.read_tile_size_px)}px "
                 f"modes={', '.join(modes)} repeat={int(repeat)} warmup={int(warmup)}"
             ),
             highlight=False,

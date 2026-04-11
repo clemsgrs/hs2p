@@ -47,8 +47,8 @@ import hs2p.api as api_mod
 @pytest.fixture
 def tiling_config() -> TilingConfig:
     return TilingConfig(
-        target_spacing_um=0.5,
-        target_tile_size_px=224,
+        requested_spacing_um=0.5,
+        requested_tile_size_px=224,
         tolerance=0.07,
         overlap=0.1,
         tissue_threshold=0.2,
@@ -176,8 +176,8 @@ def _build_preprocessing_result(
             requested_tile_size_px=224,
             requested_spacing_um=0.5,
             read_level=read_level,
-            effective_tile_size_px=read_tile_size_px,
-            effective_spacing_um=read_spacing_um,
+            read_tile_size_px=read_tile_size_px,
+            read_spacing_um=read_spacing_um,
             tile_size_lv0=tile_size_lv0,
             is_within_tolerance=read_spacing_um == 0.5,
             base_spacing_um=0.25,
@@ -346,11 +346,11 @@ def test_tile_slide_returns_named_arrays(
     assert result.image_path == Path("slide-1.svs")
     assert result.mask_path == Path("slide-1-mask.png")
     assert result.read_level == 1
-    assert result.effective_spacing_um == pytest.approx(1.0)
-    assert result.effective_tile_size_px == 448
+    assert result.read_spacing_um == pytest.approx(1.0)
+    assert result.read_tile_size_px == 448
     assert result.tile_size_lv0 == 448
-    assert result.requested_spacing_um == tiling_config.target_spacing_um
-    assert result.requested_tile_size_px == tiling_config.target_tile_size_px
+    assert result.requested_spacing_um == tiling_config.requested_spacing_um
+    assert result.requested_tile_size_px == tiling_config.requested_tile_size_px
     assert result.overlap == tiling_config.overlap
     assert result.min_tissue_fraction == tiling_config.tissue_threshold
     assert len(result.x) == 2
@@ -392,8 +392,8 @@ def test_compute_tiling_result_uses_preprocessing_core(
     assert captured["tissue_mask_path"] == Path("slide-1-mask.png")
     assert captured["backend"] == tiling_config.backend
     assert captured["spacing_override"] == 0.25
-    assert captured["requested_tile_size_px"] == tiling_config.target_tile_size_px
-    assert captured["requested_spacing_um"] == tiling_config.target_spacing_um
+    assert captured["requested_tile_size_px"] == tiling_config.requested_tile_size_px
+    assert captured["requested_spacing_um"] == tiling_config.requested_spacing_um
     assert captured["min_tissue_fraction"] == tiling_config.tissue_threshold
     assert captured["overlap"] == tiling_config.overlap
     assert captured["seg_downsample"] == segmentation_config.downsample
@@ -483,8 +483,8 @@ def test_save_tiling_result_writes_preprocessing_npz_and_json(tmp_path: Path):
     assert meta["tiling"]["requested_spacing_um"] == 0.5
     assert meta["tiling"]["requested_tile_size_px"] == 224
     assert meta["tiling"]["read_level"] == 0
-    assert meta["tiling"]["effective_spacing_um"] == 0.5
-    assert meta["tiling"]["effective_tile_size_px"] == 224
+    assert meta["tiling"]["read_spacing_um"] == 0.5
+    assert meta["tiling"]["read_tile_size_px"] == 224
     assert meta["tiling"]["tile_size_lv0"] == 224
     assert meta["tiling"]["step_px_lv0"] == 224
     assert meta["tiling"]["overlap"] == 0.0
@@ -523,9 +523,9 @@ def test_save_and_load_tiling_result_round_trip(tmp_path: Path):
     assert loaded.mask_path == result.mask_path
     assert loaded.backend == result.backend
     assert loaded.read_level == result.read_level
-    assert loaded.effective_spacing_um == result.effective_spacing_um
+    assert loaded.read_spacing_um == result.read_spacing_um
     assert resolve_read_step_px(loaded) == resolve_read_step_px(result)
-    assert loaded.effective_tile_size_px == result.effective_tile_size_px
+    assert loaded.read_tile_size_px == result.read_tile_size_px
     assert loaded.step_px_lv0 == result.step_px_lv0
     assert loaded.tile_size_lv0 == result.tile_size_lv0
     assert loaded.overlap == result.overlap
@@ -566,8 +566,8 @@ def test_preprocessing_result_builder_preserves_core_fields():
     assert result.requested_spacing_um == 0.5
     assert result.requested_tile_size_px == 224
     assert result.read_level == 1
-    assert result.effective_spacing_um == 1.0
-    assert result.effective_tile_size_px == 448
+    assert result.read_spacing_um == 1.0
+    assert result.read_tile_size_px == 448
     assert resolve_read_step_px(result) == 403
     assert result.step_px_lv0 == 806
     assert result.tile_size_lv0 == 448
@@ -597,8 +597,8 @@ def test_load_tiling_result_accepts_preprocessing_artifact(tmp_path: Path):
             requested_tile_size_px=224,
             requested_spacing_um=0.5,
             read_level=1,
-            effective_tile_size_px=448,
-            effective_spacing_um=1.0,
+            read_tile_size_px=448,
+            read_spacing_um=1.0,
             tile_size_lv0=448,
             is_within_tolerance=False,
             base_spacing_um=0.25,
@@ -652,8 +652,8 @@ def test_load_tiling_result_accepts_preprocessing_artifact(tmp_path: Path):
     assert loaded.requested_spacing_um == pytest.approx(0.5)
     assert loaded.requested_tile_size_px == 224
     assert loaded.read_level == 1
-    assert loaded.effective_spacing_um == pytest.approx(1.0)
-    assert loaded.effective_tile_size_px == 448
+    assert loaded.read_spacing_um == pytest.approx(1.0)
+    assert loaded.read_tile_size_px == 448
     assert resolve_read_step_px(loaded) == 403
     assert loaded.step_px_lv0 == 806
     assert loaded.tile_size_lv0 == 448
@@ -1020,8 +1020,8 @@ def test_compute_request_passes_inner_workers_to_tile_extraction(
         whole_slide=SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs")),
         tiling=TilingConfig(
             backend="cucim",
-            target_spacing_um=0.5,
-            target_tile_size_px=224,
+            requested_spacing_um=0.5,
+            requested_tile_size_px=224,
             tolerance=0.07,
             overlap=0.0,
             tissue_threshold=0.1,
@@ -1092,8 +1092,8 @@ def test_tile_slides_defaults_gpu_decode_to_disabled_for_saved_tiles(
         [SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs"))],
         tiling=TilingConfig(
             backend="cucim",
-            target_spacing_um=0.5,
-            target_tile_size_px=224,
+            requested_spacing_um=0.5,
+            requested_tile_size_px=224,
             tolerance=0.07,
             overlap=0.1,
             tissue_threshold=0.2,
@@ -1118,8 +1118,8 @@ def test_save_tiling_result_rejects_invalid_tile_index(tmp_path: Path):
             requested_tile_size_px=224,
             requested_spacing_um=0.5,
             read_level=0,
-            effective_tile_size_px=224,
-            effective_spacing_um=0.5,
+            read_tile_size_px=224,
+            read_spacing_um=0.5,
             tile_size_lv0=224,
             is_within_tolerance=True,
             base_spacing_um=0.5,
@@ -1140,8 +1140,8 @@ def test_save_tiling_result_rejects_non_vector_arrays(tmp_path: Path):
             requested_tile_size_px=224,
             requested_spacing_um=0.5,
             read_level=0,
-            effective_tile_size_px=224,
-            effective_spacing_um=0.5,
+            read_tile_size_px=224,
+            read_spacing_um=0.5,
             tile_size_lv0=224,
             is_within_tolerance=True,
             base_spacing_um=0.5,
@@ -1198,15 +1198,15 @@ def test_validate_tiling_artifacts_rejects_mismatched_tiling_config(
     artifacts = save_tiling_result(result, output_dir=tmp_path)
 
     incompatible_tiling = TilingConfig(
-        target_spacing_um=0.75,
-        target_tile_size_px=tiling_config.target_tile_size_px,
+        requested_spacing_um=0.75,
+        requested_tile_size_px=tiling_config.requested_tile_size_px,
         tolerance=tiling_config.tolerance,
         overlap=tiling_config.overlap,
         tissue_threshold=tiling_config.tissue_threshold,
         backend=tiling_config.backend,
     )
 
-    with pytest.raises(ValueError, match="target_spacing_um mismatch"):
+    with pytest.raises(ValueError, match="requested_spacing_um mismatch"):
         validate_tiling_artifacts(
             whole_slide=SlideSpec(sample_id="slide-3", image_path=Path("slide-3.svs")),
             coordinates_npz_path=artifacts.coordinates_npz_path,
@@ -1225,8 +1225,8 @@ def test_validate_tiling_artifacts_ignores_disabled_filter_threshold_mismatches(
     result = _build_result(sample_id="slide-filter", image_path="slide-filter.svs")
     artifacts = save_tiling_result(result, output_dir=tmp_path)
     matching_tiling = TilingConfig(
-        target_spacing_um=result.requested_spacing_um,
-        target_tile_size_px=result.requested_tile_size_px,
+        requested_spacing_um=result.requested_spacing_um,
+        requested_tile_size_px=result.requested_tile_size_px,
         tolerance=result.tolerance,
         overlap=result.overlap,
         tissue_threshold=result.min_tissue_fraction,
@@ -1416,8 +1416,8 @@ def test_tile_slides_omits_tiling_preview_path_when_no_tiles(
                 requested_tile_size_px=224,
                 requested_spacing_um=0.5,
                 read_level=0,
-                effective_tile_size_px=224,
-                effective_spacing_um=0.5,
+                read_tile_size_px=224,
+                read_spacing_um=0.5,
                 tile_size_lv0=224,
                 is_within_tolerance=True,
                 base_spacing_um=0.5,
@@ -1769,8 +1769,8 @@ def test_load_tiling_result_rejects_legacy_artifacts(tmp_path: Path):
                 "image_path": "legacy.svs",
                 "mask_path": None,
                 "backend": "asap",
-                "target_spacing_um": 0.5,
-                "target_tile_size_px": 224,
+                "requested_spacing_um": 0.5,
+                "requested_tile_size_px": 224,
                 "read_level": 0,
                 "read_spacing_um": 0.5,
                 "read_tile_size_px": 224,
@@ -1930,8 +1930,8 @@ def test_write_process_list_removes_temp_file_on_failure(monkeypatch, tmp_path: 
             [],
             tiling=TilingConfig(
                 backend="asap",
-                target_spacing_um=0.5,
-                target_tile_size_px=224,
+                requested_spacing_um=0.5,
+                requested_tile_size_px=224,
                 tolerance=0.07,
                 overlap=0.1,
                 tissue_threshold=0.2,
@@ -1947,8 +1947,8 @@ def test_write_process_list_removes_temp_file_on_failure(monkeypatch, tmp_path: 
 
 def test_config_dataclasses_apply_package_defaults_for_secondary_parameters():
     tiling = TilingConfig(
-        target_spacing_um=0.5,
-        target_tile_size_px=224,
+        requested_spacing_um=0.5,
+        requested_tile_size_px=224,
         tolerance=0.07,
         overlap=0.0,
         tissue_threshold=0.1,

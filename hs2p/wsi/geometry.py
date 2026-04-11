@@ -7,7 +7,7 @@ import numpy as np
 @dataclass(frozen=True)
 class LevelSelection:
     level: int
-    effective_spacing_um: float
+    read_spacing_um: float
     is_within_tolerance: bool
 
 
@@ -86,10 +86,7 @@ def select_level(
     )
     level = int(
         np.argmin(
-            [
-                abs(effective_spacing - requested_spacing_um)
-                for effective_spacing in level_spacings
-            ]
+            [abs(read_spacing - requested_spacing_um) for read_spacing in level_spacings]
         )
     )
     best_spacing = level_spacings[level]
@@ -105,6 +102,6 @@ def select_level(
 
     return LevelSelection(
         level=level,
-        effective_spacing_um=best_spacing,
+        read_spacing_um=best_spacing,
         is_within_tolerance=is_within_tolerance,
     )

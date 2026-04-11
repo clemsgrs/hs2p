@@ -108,8 +108,8 @@ def _compute_tiling_result(
         tissue_mask_path=whole_slide.mask_path,
         backend=tiling.backend,
         spacing_override=whole_slide.spacing_at_level_0,
-        requested_tile_size_px=tiling.target_tile_size_px,
-        requested_spacing_um=tiling.target_spacing_um,
+        requested_tile_size_px=tiling.requested_tile_size_px,
+        requested_spacing_um=tiling.requested_spacing_um,
         use_hsv=segmentation.use_hsv,
         use_otsu=segmentation.use_otsu,
         sthresh=segmentation.sthresh,
@@ -273,7 +273,7 @@ def extract_tiles_to_tar(
                     tile_arr = tile_arr[:, :, :3]
 
                 encode_start = time.perf_counter()
-                if result.effective_tile_size_px != result.requested_tile_size_px:
+                if result.read_tile_size_px != result.requested_tile_size_px:
                     img = Image.fromarray(tile_arr).convert("RGB")
                     img = img.resize(
                         (
@@ -387,8 +387,8 @@ def _apply_qc_filtering_to_result(
             keep_flags=np.ones(len(result.x), dtype=np.uint8),
             level_dimensions=slide.level_dimensions,
             level_downsamples=slide.level_downsamples,
-            target_tile_size_px=result.requested_tile_size_px,
-            target_spacing_um=result.requested_spacing_um,
+            requested_tile_size_px=result.requested_tile_size_px,
+            requested_spacing_um=result.requested_spacing_um,
             base_spacing_um=result.base_spacing_um,
             tolerance=result.tolerance,
             filter_params=filter_params,
