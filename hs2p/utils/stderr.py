@@ -1,6 +1,5 @@
 
 import os
-import sys
 import tempfile
 from typing import Callable, TypeVar
 
@@ -15,7 +14,7 @@ CUCIM_NO_GPU_STDERR_PATTERNS = (
 )
 
 
-def _filter_stderr_text(
+def _filter_text(
     text: str,
     suppress_patterns: tuple[str, ...],
 ) -> str:
@@ -34,35 +33,58 @@ def _filter_stderr_text(
     return "".join(kept_lines)
 
 
+def _run_with_filtered_fds(
+    func: Callable[[], T],
+    fds: tuple[int, ...],
+    suppress_patterns: tuple[str, ...],
+) -> T:
+    originals = [os.dup(fd) for fd in fds]
+    captured_exc: BaseException | None = None
+    try:
+        tmp_files = [tempfile.TemporaryFile(mode="w+b") for _ in fds]
+        try:
+            for tmp, fd in zip(tmp_files, fds):
+                os.dup2(tmp.fileno(), fd)
+            try:
+                result = func()
+            except BaseException as exc:
+                captured_exc = exc
+                result = None
+            finally:
+                for orig, fd in zip(originals, fds):
+                    os.dup2(orig, fd)
+                captured_texts = []
+                for tmp in tmp_files:
+                    tmp.seek(0)
+                    captured_texts.append(tmp.read().decode("utf-8", errors="replace"))
+        finally:
+            for tmp in tmp_files:
+                tmp.close()
+        for text, fd in zip(captured_texts, fds):
+            filtered = _filter_text(text, suppress_patterns)
+            if filtered:
+                os.write(fd, filtered.encode("utf-8", errors="replace"))
+        if captured_exc is not None:
+            raise captured_exc
+        return result  # type: ignore[return-value]
+    finally:
+        for orig in originals:
+            os.close(orig)
+
+
 def run_with_filtered_stderr(
     func: Callable[[], T],
     *,
     suppress_patterns: tuple[str, ...] = CUCIM_NO_GPU_STDERR_PATTERNS,
 ) -> T:
     """Run ``func`` while capturing fd 2 and dropping known-noisy lines."""
+    return _run_with_filtered_fds(func, (2,), suppress_patterns)
 
-    original_stderr_fd = os.dup(2)
-    captured_stderr_text = ""
-    captured_exc: tuple[type[BaseException], BaseException, object] | None = None
-    try:
-        with tempfile.TemporaryFile(mode="w+b") as tmp:
-            os.dup2(tmp.fileno(), 2)
-            try:
-                result = func()
-            except BaseException:
-                captured_exc = sys.exc_info()
-                result = None
-            finally:
-                os.dup2(original_stderr_fd, 2)
-                tmp.flush()
-                tmp.seek(0)
-                captured_stderr_text = tmp.read().decode("utf-8", errors="replace")
-        filtered = _filter_stderr_text(captured_stderr_text, suppress_patterns)
-        if filtered:
-            os.write(2, filtered.encode("utf-8", errors="replace"))
-        if captured_exc is not None:
-            exc_type, exc, tb = captured_exc
-            raise exc.with_traceback(tb)
-        return result  # type: ignore[return-value]
-    finally:
-        os.close(original_stderr_fd)
+
+def run_with_filtered_stdio(
+    func: Callable[[], T],
+    *,
+    suppress_patterns: tuple[str, ...] = CUCIM_NO_GPU_STDERR_PATTERNS,
+) -> T:
+    """Run ``func`` while filtering known-native noise from both fd 1 and fd 2."""
+    return _run_with_filtered_fds(func, (1, 2), suppress_patterns)

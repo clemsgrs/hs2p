@@ -1,6 +1,6 @@
 import os
 
-from hs2p.utils.stderr import run_with_filtered_stderr
+from hs2p.utils.stderr import run_with_filtered_stderr, run_with_filtered_stdio
 
 
 def test_run_with_filtered_stderr_suppresses_known_cucim_noise(capfd):
@@ -43,3 +43,19 @@ def test_run_with_filtered_stderr_suppresses_interleaved_cucim_noise(capfd):
 
     assert result == 11
     assert captured.err == "kept line\n"
+
+
+def test_run_with_filtered_stdio_suppresses_known_cucim_noise_from_stdout_and_stderr(capfd):
+    def _write_noise():
+        os.write(1, b"cuInit Failed, error CUDA_ERROR_NO_DEVICE\n")
+        os.write(2, b"cuFile initialization failed\n")
+        os.write(1, b"kept stdout\n")
+        os.write(2, b"kept stderr\n")
+        return 5
+
+    result = run_with_filtered_stdio(_write_noise)
+    captured = capfd.readouterr()
+
+    assert result == 5
+    assert captured.out == "kept stdout\n"
+    assert captured.err == "kept stderr\n"
