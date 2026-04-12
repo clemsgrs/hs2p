@@ -1,5 +1,10 @@
 # Documentation Notes
 
+## 2026-04-12
+
+- Added package markers for `tests/` and `scripts/` so test modules can import shared helpers with explicit package-qualified paths.
+- Updated backend-selection test imports to use `tests.test_progress` after the test suite became package-aware.
+
 ## 2026-04-01
 
 - Preview saving now lives under `tiling.preview.save` instead of the old top-level `save_previews` flag.

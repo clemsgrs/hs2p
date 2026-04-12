@@ -486,7 +486,7 @@ class WSI(object):
                 )
             except ImportError:
                 warnings.warn(
-                    "CuCIM is unavailable for backend='cucim'; falling back to sequential tile filtering reads.",
+                    "cuCIM is unavailable for backend='cucim'; falling back to sequential tile filtering reads.",
                     UserWarning,
                 )
 
