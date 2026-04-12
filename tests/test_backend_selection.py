@@ -8,6 +8,63 @@ import hs2p.preprocessing as preprocessing_mod
 import hs2p.wsi.backend as backend_mod
 import hs2p.wsi.reader as reader_mod
 import hs2p.wsi.wsi as wsi_mod
+from tests.test_progress import RecordingReporter
+
+
+def _make_tiling_result(sample_id: str = "slide-1") -> preprocessing_mod.TilingResult:
+    return preprocessing_mod.TilingResult(
+        tiles=preprocessing_mod.TileGeometry(
+            x=np.array([0], dtype=np.int64),
+            y=np.array([0], dtype=np.int64),
+            tissue_fractions=np.array([0.0], dtype=np.float32),
+            tile_index=np.array([0], dtype=np.int32),
+            requested_tile_size_px=256,
+            requested_spacing_um=0.5,
+            read_level=0,
+            read_tile_size_px=256,
+            read_spacing_um=0.5,
+            tile_size_lv0=256,
+            is_within_tolerance=True,
+            base_spacing_um=0.5,
+            slide_dimensions=[1000, 1000],
+            level_downsamples=[1.0],
+            overlap=0.0,
+            min_tissue_fraction=0.1,
+        ),
+        sample_id=sample_id,
+        image_path=Path("slide.svs"),
+        backend="cucim",
+        requested_backend="cucim",
+        tolerance=0.05,
+        step_px_lv0=256,
+        tissue_method="hsv",
+        seg_downsample=64,
+        seg_level=0,
+        seg_spacing_um=0.5,
+        seg_sthresh=8,
+        seg_sthresh_up=255,
+        seg_mthresh=7,
+        seg_close=4,
+        ref_tile_size_px=16,
+        a_t=4,
+        a_h=2,
+        filter_white=False,
+        filter_black=False,
+        white_threshold=220,
+        black_threshold=25,
+        fraction_threshold=0.9,
+    )
+
+
+def _cucim_auto_backend_selection(
+    requested_backend: str, *, wsi_path: Path, mask_path
+) -> backend_mod.BackendSelection:
+    del requested_backend, wsi_path, mask_path
+    return backend_mod.BackendSelection(
+        backend="cucim",
+        reason="selected cuCIM for auto backend",
+        tried=("cucim",),
+    )
 
 
 def test_resolve_backend_prefers_cucim_when_supported(monkeypatch):
@@ -24,7 +81,7 @@ def test_resolve_backend_prefers_cucim_when_supported(monkeypatch):
 
     assert selection.backend == "cucim"
     assert selection.tried == ("cucim",)
-    assert "CuCIM" in (selection.reason or "")
+    assert "cuCIM" in (selection.reason or "")
     assert calls == ["cucim"]
 
 
@@ -77,7 +134,7 @@ def test_reader_resolve_backend_prefers_cucim_when_supported(monkeypatch):
 
     assert selection.backend == "cucim"
     assert selection.tried == ("cucim",)
-    assert "CuCIM" in (selection.reason or "")
+    assert "cuCIM" in (selection.reason or "")
     assert calls == ["cucim"]
 
 
@@ -177,60 +234,11 @@ def test_wsi_opens_slide_and_mask_readers_with_resolved_backend(monkeypatch):
 def test_tile_slide_uses_resolved_backend_for_hash_and_result(monkeypatch):
     captured: dict[str, str] = {}
 
-    def _fake_resolve_backend(requested_backend: str, *, wsi_path: Path, mask_path):
-        del requested_backend, wsi_path, mask_path
-        return backend_mod.BackendSelection(
-            backend="cucim",
-            reason="selected CuCIM for auto backend",
-            tried=("cucim",),
-        )
-
     def _fake_preprocess_slide(**kwargs):
         captured["backend"] = kwargs["backend"]
-        return preprocessing_mod.TilingResult(
-            tiles=preprocessing_mod.TileGeometry(
-                x=np.array([0], dtype=np.int64),
-                y=np.array([0], dtype=np.int64),
-                tissue_fractions=np.array([0.0], dtype=np.float32),
-                tile_index=np.array([0], dtype=np.int32),
-                requested_tile_size_px=256,
-                requested_spacing_um=0.5,
-                read_level=0,
-                read_tile_size_px=256,
-                read_spacing_um=0.5,
-                tile_size_lv0=256,
-                is_within_tolerance=True,
-                base_spacing_um=0.5,
-                slide_dimensions=[1000, 1000],
-                level_downsamples=[1.0],
-                overlap=0.0,
-                min_tissue_fraction=0.1,
-            ),
-            sample_id="slide-1",
-            image_path=Path("slide.svs"),
-            backend="cucim",
-            requested_backend="cucim",
-            tolerance=0.05,
-            step_px_lv0=256,
-            tissue_method="hsv",
-            seg_downsample=64,
-            seg_level=0,
-            seg_spacing_um=0.5,
-            seg_sthresh=8,
-            seg_sthresh_up=255,
-            seg_mthresh=7,
-            seg_close=4,
-            ref_tile_size_px=16,
-            a_t=4,
-            a_h=2,
-            filter_white=False,
-            filter_black=False,
-            white_threshold=220,
-            black_threshold=25,
-            fraction_threshold=0.9,
-        )
+        return _make_tiling_result()
 
-    monkeypatch.setattr(api_mod, "resolve_backend", _fake_resolve_backend)
+    monkeypatch.setattr(api_mod, "resolve_backend", _cucim_auto_backend_selection)
     monkeypatch.setattr(api_mod, "preprocess_slide", _fake_preprocess_slide)
 
     result = api_mod.tile_slide(
@@ -250,3 +258,39 @@ def test_tile_slide_uses_resolved_backend_for_hash_and_result(monkeypatch):
 
     assert result.backend == "cucim"
     assert captured["backend"] == "cucim"
+
+
+def test_tile_slide_emits_backend_selection_progress_event(monkeypatch):
+    import hs2p.progress as progress
+
+    reporter = RecordingReporter()
+
+    monkeypatch.setattr(api_mod, "resolve_backend", _cucim_auto_backend_selection)
+    monkeypatch.setattr(
+        api_mod,
+        "preprocess_slide",
+        lambda **kwargs: _make_tiling_result(sample_id="slide-quiet"),
+    )
+
+    with progress.activate_progress_reporter(reporter):
+        api_mod.tile_slide(
+            api_mod.SlideSpec(sample_id="slide-quiet", image_path=Path("slide.svs")),
+            tiling=api_mod.TilingConfig(
+                requested_spacing_um=0.5,
+                requested_tile_size_px=256,
+                tolerance=0.05,
+                overlap=0.0,
+                tissue_threshold=0.1,
+                backend="auto",
+            ),
+            segmentation=api_mod.SegmentationConfig(64, 8, 255, 7, 4, False, True),
+            filtering=api_mod.FilterConfig(16, 4, 2, False, False, 220, 25, 0.9),
+            num_workers=1,
+        )
+
+    assert [event.kind for event in reporter.events] == ["backend.selected"]
+    assert reporter.events[0].payload == {
+        "sample_id": "slide-quiet",
+        "backend": "cucim",
+        "reason": "selected cuCIM for auto backend",
+    }

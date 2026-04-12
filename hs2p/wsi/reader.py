@@ -208,13 +208,13 @@ def resolve_backend(
         ):
             return BackendSelection(
                 backend="cucim",
-                reason="selected CuCIM for auto backend",
+                reason="selected cuCIM for auto backend",
                 tried=tuple(tried),
             )
-        reasons.append("CuCIM could not open the slide or mask")
+        reasons.append("cuCIM could not open the slide or mask")
     else:
         reasons.append(
-            f"CuCIM skipped for unsupported slide suffix {wsi_path.suffix.lower() or '<none>'}"
+            f"cuCIM skipped for unsupported slide suffix {wsi_path.suffix.lower() or '<none>'}"
         )
 
     for backend in AUTO_BACKEND_ORDER[1:]:

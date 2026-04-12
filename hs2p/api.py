@@ -169,8 +169,11 @@ def tile_slide(
         mask_path=whole_slide.mask_path,
     )
     if backend_selection.reason is not None:
-        emit_progress_log(
-            f"[backend] {whole_slide.sample_id}: {backend_selection.reason}"
+        emit_progress(
+            "backend.selected",
+            sample_id=whole_slide.sample_id,
+            backend=backend_selection.backend,
+            reason=backend_selection.reason,
         )
     effective_tiling = (
         tiling
@@ -829,8 +832,11 @@ def tile_slides(
             mask_path=whole_slide.mask_path,
         )
         if backend_selection.reason is not None:
-            emit_progress_log(
-                f"[backend] {whole_slide.sample_id}: {backend_selection.reason}"
+            emit_progress(
+                "backend.selected",
+                sample_id=whole_slide.sample_id,
+                backend=backend_selection.backend,
+                reason=backend_selection.reason,
             )
         return (
             tiling

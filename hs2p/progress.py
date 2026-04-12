@@ -80,6 +80,11 @@ class TextReporter:
                 f"Sampling finished: {payload['completed']}/{payload['total']} complete, "
                 f"{payload['failed']} failed, {payload['sampled_tiles']} tiles kept"
             )
+        if kind == "backend.selected":
+            reason = payload.get("reason")
+            if reason:
+                return f"[backend] {payload['sample_id']}: {reason}"
+            return f"[backend] {payload['sample_id']}: using {payload['backend']}"
         if kind == "run.finished":
             return f"Run finished successfully. Output: {payload['output_dir']}"
         if kind == "run.failed":
@@ -188,6 +193,14 @@ class RichReporter:
             ):
                 rows.append((f"Zero-tile {annotation}", str(count)))
             self._print_summary("Sampling Summary", rows)
+            return
+        if kind == "backend.selected":
+            sample_id = payload["sample_id"]
+            reason = payload.get("reason")
+            if reason:
+                self.console.print(f"[backend] {sample_id}: {reason}")
+            else:
+                self.console.print(f"[backend] {sample_id}: using {payload['backend']}")
             return
         if kind == "run.finished":
             self._print_summary(

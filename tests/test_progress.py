@@ -52,6 +52,9 @@ def _install_fake_rich_console(monkeypatch, *, is_terminal: bool):
             self.file = file
             self.is_terminal = is_terminal
 
+        def log(self, *args, **kwargs):
+            return None
+
     fake_console.Console = FakeConsole
     fake_rich.console = fake_console
     monkeypatch.setitem(sys.modules, "rich", fake_rich)
@@ -223,6 +226,9 @@ def test_rich_tiling_summary_uses_zero_tile_label_without_process_list(monkeypat
     class FakeConsole:
         def print(self, *args, **kwargs):
             captured["printed"] = args
+
+        def log(self, *args, **kwargs):
+            captured["logged"] = args
 
     reporter = progress.RichReporter(output_dir="out", console=FakeConsole())
     monkeypatch.setattr(
@@ -746,3 +752,55 @@ def test_progress_aware_logging_routes_stdout_through_active_reporter():
         logging.getLogger(logger_name).info("progress aware message")
 
     assert any("progress aware message" in line for line in reporter.log_lines)
+
+
+def test_text_reporter_formats_backend_selection_line(capsys):
+    import hs2p.progress as progress
+
+    reporter = progress.TextReporter()
+
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="backend.selected",
+            payload={
+                "sample_id": "slide-1",
+                "backend": "cucim",
+                "reason": "selected cuCIM for auto backend",
+            },
+        )
+    )
+
+    out = capsys.readouterr().out.strip()
+    assert out == "[backend] slide-1: selected cuCIM for auto backend"
+
+
+def test_rich_reporter_emits_backend_selection_line(monkeypatch):
+    import hs2p.progress as progress
+
+    _install_fake_rich_console(monkeypatch, is_terminal=True)
+    _install_fake_rich_progress(monkeypatch)
+    _install_fake_rich_summary_types(monkeypatch)
+
+    class FakeConsole:
+        def __init__(self):
+            self.lines = []
+
+        def print(self, message, **kwargs):
+            self.lines.append((message, kwargs))
+
+        def log(self, message, **kwargs):
+            self.lines.append((message, kwargs))
+
+    reporter = progress.RichReporter(output_dir="out", console=FakeConsole())
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="backend.selected",
+            payload={
+                "sample_id": "slide-1",
+                "backend": "cucim",
+                "reason": "selected cuCIM for auto backend",
+            },
+        )
+    )
+
+    assert reporter.console.lines[-1][0] == "[backend] slide-1: selected cuCIM for auto backend"
