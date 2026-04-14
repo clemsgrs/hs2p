@@ -33,7 +33,7 @@ class TilingConfig:
 class SegmentationConfig:
     """Control tissue segmentation before coordinate extraction."""
 
-    method: str = str(getattr(_DEFAULT_SEGMENTATION, "method", "hsv"))
+    method: str
     downsample: int = int(_DEFAULT_SEGMENTATION.downsample)
     sthresh: int = int(_DEFAULT_SEGMENTATION.sthresh)
     sthresh_up: int = int(_DEFAULT_SEGMENTATION.sthresh_up)
@@ -50,10 +50,6 @@ class SegmentationConfig:
         else None
     )
     sam2_device: str = str(getattr(_DEFAULT_SEGMENTATION, "sam2_device", "cpu"))
-    sam2_input_size: int = int(getattr(_DEFAULT_SEGMENTATION, "sam2_input_size", 1024))
-    sam2_mask_threshold: float = float(
-        getattr(_DEFAULT_SEGMENTATION, "sam2_mask_threshold", 0.0)
-    )
 
 
 @dataclass(frozen=True)

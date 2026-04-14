@@ -162,6 +162,7 @@ Detailed logs still go to `output_dir/logs/log.txt`.
 - `threshold` applies a fixed saturation threshold
 - `sam2` runs SAM2 inference on the selected segmentation image
   - if `sam2_checkpoint_path` is empty, HS2P downloads the default AtlasPatch checkpoint from Hugging Face
+  - if `sam2_config_path` is empty, HS2P downloads the default AtlasPatch SAM2 config from Hugging Face
 
 ### Tile pixel QC
 

@@ -1025,8 +1025,6 @@ def preprocess_slide(
     sam2_checkpoint_path: str | Path | None = None,
     sam2_config_path: str | Path | None = None,
     sam2_device: str = "cpu",
-    sam2_input_size: int = 1024,
-    sam2_mask_threshold: float = 0.0,
     tolerance: float = 0.05,
     ref_tile_size_px: int = 16,
     a_t: int = 4,
@@ -1087,8 +1085,6 @@ def preprocess_slide(
                     else None
                 ),
                 sam2_device=sam2_device,
-                sam2_input_size=sam2_input_size,
-                sam2_mask_threshold=sam2_mask_threshold,
             )
             resolved_tissue_method = segmentation_config.method
             mask = segment_tissue_image(

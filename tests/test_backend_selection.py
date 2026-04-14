@@ -251,7 +251,7 @@ def test_tile_slide_uses_resolved_backend_for_hash_and_result(monkeypatch):
             tissue_threshold=0.1,
             backend="auto",
         ),
-        segmentation=api_mod.SegmentationConfig(64, 8, 255, 7, 4, False, True),
+        segmentation=api_mod.SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
         filtering=api_mod.FilterConfig(16, 4, 2, False, False, 220, 25, 0.9),
         num_workers=1,
     )
@@ -283,7 +283,7 @@ def test_tile_slide_emits_backend_selection_progress_event(monkeypatch):
                 tissue_threshold=0.1,
                 backend="auto",
             ),
-            segmentation=api_mod.SegmentationConfig(64, 8, 255, 7, 4, False, True),
+            segmentation=api_mod.SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
             filtering=api_mod.FilterConfig(16, 4, 2, False, False, 220, 25, 0.9),
             num_workers=1,
         )

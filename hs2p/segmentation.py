@@ -10,6 +10,9 @@ from hs2p.configs import SegmentationConfig
 
 DEFAULT_SAM2_MODEL_REPO = "AtlasAnalyticsLab/AtlasPatch"
 DEFAULT_SAM2_MODEL_FILENAME = "model.pth"
+DEFAULT_SAM2_CONFIG_FILENAME = "sam2.1_hiera_t.yaml"
+DEFAULT_SAM2_INPUT_SIZE = 1024
+DEFAULT_SAM2_MASK_THRESHOLD = 0.0
 
 
 def segment_tissue_image(
@@ -44,8 +47,6 @@ def segment_tissue_image(
             checkpoint_path=config.sam2_checkpoint_path,
             config_path=config.sam2_config_path,
             device=str(config.sam2_device),
-            input_size=int(config.sam2_input_size),
-            mask_threshold=float(config.sam2_mask_threshold),
             sthresh_up=int(config.sthresh_up),
         )
     else:
@@ -132,16 +133,12 @@ def _segment_sam2(
     checkpoint_path: Path | None,
     config_path: Path | None,
     device: str,
-    input_size: int,
-    mask_threshold: float,
     sthresh_up: int,
 ) -> np.ndarray:
     predictor = _build_sam2_predictor(
         checkpoint_path=checkpoint_path,
         config_path=config_path,
         device=device,
-        input_size=input_size,
-        mask_threshold=mask_threshold,
     )
     mask = predictor.predict_mask(image)
     return np.where(mask > 0, int(sthresh_up), 0).astype(np.uint8)
@@ -152,15 +149,11 @@ def _build_sam2_predictor(
     checkpoint_path: Path | None,
     config_path: Path | None,
     device: str,
-    input_size: int,
-    mask_threshold: float,
 ) -> "_Sam2Predictor":
     return _Sam2Predictor(
         checkpoint_path=checkpoint_path,
         config_path=config_path,
         device=device,
-        input_size=input_size,
-        mask_threshold=mask_threshold,
     )
 
 
@@ -171,21 +164,16 @@ class _Sam2Predictor:
         checkpoint_path: Path | None,
         config_path: Path | None,
         device: str,
-        input_size: int,
-        mask_threshold: float,
     ) -> None:
-        if config_path is None:
-            raise ValueError("sam2_config_path is required when method='sam2'")
-        if input_size <= 0:
-            raise ValueError(f"sam2_input_size must be > 0, got {input_size}")
         self.device = _validate_sam2_device(device)
-        self.input_size = int(input_size)
+        self.input_size = DEFAULT_SAM2_INPUT_SIZE
         self.checkpoint_path = self._resolve_checkpoint_path(checkpoint_path)
+        self.config_path = self._resolve_config_path(config_path)
         self._predictor = self._load_predictor(
             checkpoint_path=self.checkpoint_path,
-            config_path=Path(config_path),
+            config_path=self.config_path,
             device=self.device,
-            mask_threshold=float(mask_threshold),
+            mask_threshold=DEFAULT_SAM2_MASK_THRESHOLD,
         )
 
     def _resolve_checkpoint_path(self, checkpoint_path: Path | None) -> Path:
@@ -211,6 +199,33 @@ class _Sam2Predictor:
         except Exception as exc:
             raise RuntimeError(
                 "Failed to download the default SAM2 checkpoint from "
+                f"{DEFAULT_SAM2_MODEL_REPO}: {exc}"
+            ) from exc
+        return Path(downloaded)
+
+    def _resolve_config_path(self, config_path: Path | None) -> Path:
+        if config_path is not None:
+            resolved = Path(config_path)
+            if not resolved.exists():
+                raise FileNotFoundError(f"SAM2 config not found: {resolved}")
+            return resolved
+
+        try:
+            from huggingface_hub import hf_hub_download
+        except ImportError as exc:
+            raise ImportError(
+                "Automatic SAM2 config download requires huggingface-hub. "
+                "Install hs2p with the 'sam2' extra or provide sam2_config_path."
+            ) from exc
+
+        try:
+            downloaded = hf_hub_download(
+                repo_id=DEFAULT_SAM2_MODEL_REPO,
+                filename=DEFAULT_SAM2_CONFIG_FILENAME,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                "Failed to download the default SAM2 config from "
                 f"{DEFAULT_SAM2_MODEL_REPO}: {exc}"
             ) from exc
         return Path(downloaded)

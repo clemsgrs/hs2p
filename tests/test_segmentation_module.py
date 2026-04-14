@@ -5,7 +5,7 @@ import pytest
 import hs2p.segmentation as segmentation_mod
 
 
-def test_sam2_predictor_prefers_explicit_local_checkpoint(tmp_path: Path, monkeypatch):
+def test_sam2_predictor_prefers_explicit_local_paths(tmp_path: Path, monkeypatch):
     checkpoint_path = tmp_path / "sam2-model.pth"
     checkpoint_path.write_bytes(b"checkpoint")
     config_path = tmp_path / "sam2.yaml"
@@ -31,30 +31,33 @@ def test_sam2_predictor_prefers_explicit_local_checkpoint(tmp_path: Path, monkey
         checkpoint_path=checkpoint_path,
         config_path=config_path,
         device="cpu",
-        input_size=1024,
-        mask_threshold=0.0,
     )
 
     assert predictor.checkpoint_path == checkpoint_path
+    assert predictor.config_path == config_path
     assert captured["checkpoint_path"] == checkpoint_path
     assert captured["config_path"] == config_path
+    assert captured["mask_threshold"] == segmentation_mod.DEFAULT_SAM2_MASK_THRESHOLD
 
 
-def test_sam2_predictor_downloads_default_checkpoint_when_local_path_is_missing(
+def test_sam2_predictor_downloads_default_assets_when_local_paths_are_missing(
     tmp_path: Path, monkeypatch
 ):
-    config_path = tmp_path / "sam2.yaml"
-    config_path.write_text("model: {}\n")
-    downloaded_path = tmp_path / "downloaded-model.pth"
-    downloaded_path.write_bytes(b"checkpoint")
-    captured = {}
+    downloaded_checkpoint = tmp_path / "downloaded-model.pth"
+    downloaded_checkpoint.write_bytes(b"checkpoint")
+    downloaded_config = tmp_path / "downloaded-config.yaml"
+    downloaded_config.write_text("model: {}\n")
+    captured = []
 
     class _FakeHub:
         @staticmethod
         def hf_hub_download(*, repo_id, filename):
-            captured["repo_id"] = repo_id
-            captured["filename"] = filename
-            return str(downloaded_path)
+            captured.append((repo_id, filename))
+            if filename == segmentation_mod.DEFAULT_SAM2_MODEL_FILENAME:
+                return str(downloaded_checkpoint)
+            if filename == segmentation_mod.DEFAULT_SAM2_CONFIG_FILENAME:
+                return str(downloaded_config)
+            raise AssertionError(f"Unexpected filename {filename}")
 
     monkeypatch.setattr(
         segmentation_mod._Sam2Predictor,
@@ -67,25 +70,27 @@ def test_sam2_predictor_downloads_default_checkpoint_when_local_path_is_missing(
 
     predictor = segmentation_mod._Sam2Predictor(
         checkpoint_path=None,
-        config_path=config_path,
+        config_path=None,
         device="cpu",
-        input_size=1024,
-        mask_threshold=0.0,
     )
 
-    assert predictor.checkpoint_path == downloaded_path
-    assert captured == {
-        "repo_id": segmentation_mod.DEFAULT_SAM2_MODEL_REPO,
-        "filename": segmentation_mod.DEFAULT_SAM2_MODEL_FILENAME,
-    }
+    assert predictor.checkpoint_path == downloaded_checkpoint
+    assert predictor.config_path == downloaded_config
+    assert captured == [
+        (
+            segmentation_mod.DEFAULT_SAM2_MODEL_REPO,
+            segmentation_mod.DEFAULT_SAM2_MODEL_FILENAME,
+        ),
+        (
+            segmentation_mod.DEFAULT_SAM2_MODEL_REPO,
+            segmentation_mod.DEFAULT_SAM2_CONFIG_FILENAME,
+        ),
+    ]
 
 
-def test_sam2_predictor_requires_huggingface_hub_for_automatic_download(
-    tmp_path: Path, monkeypatch
+def test_sam2_predictor_requires_huggingface_hub_for_automatic_asset_download(
+    monkeypatch,
 ):
-    config_path = tmp_path / "sam2.yaml"
-    config_path.write_text("model: {}\n")
-
     import builtins
 
     real_import = builtins.__import__
@@ -100,8 +105,6 @@ def test_sam2_predictor_requires_huggingface_hub_for_automatic_download(
     with pytest.raises(ImportError, match="huggingface-hub"):
         segmentation_mod._Sam2Predictor(
             checkpoint_path=None,
-            config_path=config_path,
+            config_path=None,
             device="cpu",
-            input_size=1024,
-            mask_threshold=0.0,
         )

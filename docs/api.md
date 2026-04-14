@@ -70,7 +70,7 @@ result = tile_slide(
         overlap=0.0,
         tissue_threshold=0.1,
     ),
-    segmentation=SegmentationConfig(downsample=64),
+    segmentation=SegmentationConfig(method="hsv", downsample=64),
     filtering=FilterConfig(ref_tile_size=224, a_t=4, a_h=2),
 )
 
@@ -115,7 +115,7 @@ artifacts = tile_slides(
         overlap=0.0,
         tissue_threshold=0.1,
     ),
-    segmentation=SegmentationConfig(downsample=64),
+    segmentation=SegmentationConfig(method="hsv", downsample=64),
     filtering=FilterConfig(ref_tile_size=224, a_t=4, a_h=2),
     preview=PreviewConfig(
         save_mask_preview=True,

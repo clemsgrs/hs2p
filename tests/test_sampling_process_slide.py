@@ -397,7 +397,7 @@ def test_sampling_main_uses_shared_config_resolvers(monkeypatch, tmp_path):
                 overlap=0.0,
                 tissue_threshold=0.1,
             ),
-            seg_params={},
+            seg_params={"method": "hsv"},
             filter_params={},
             preview=SimpleNamespace(save=False, downsample=32),
             sampling_params=SimpleNamespace(
@@ -475,7 +475,7 @@ def test_sampling_main_rejects_partial_sampling_config(monkeypatch, tmp_path):
                 overlap=0.0,
                 tissue_threshold=0.1,
             ),
-            seg_params={},
+            seg_params={"method": "hsv"},
             filter_params={},
             preview=SimpleNamespace(save=False, downsample=32),
             sampling_params=SimpleNamespace(
@@ -519,7 +519,7 @@ def test_sampling_main_rejects_missing_background_label(monkeypatch, tmp_path):
                 overlap=0.0,
                 tissue_threshold=0.1,
             ),
-            seg_params={},
+            seg_params={"method": "hsv"},
             filter_params={},
             preview=SimpleNamespace(save=False, downsample=32),
             sampling_params=SimpleNamespace(
@@ -702,7 +702,7 @@ def test_sampling_main_defaults_inner_slide_workers_to_one(monkeypatch, tmp_path
     monkeypatch.setattr(
         sampling_mod,
         "resolve_segmentation_config",
-        lambda cfg: sampling_mod.SegmentationConfig(64, 8, 255, 7, 4, False, True),
+        lambda cfg: sampling_mod.SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
     )
     monkeypatch.setattr(
         sampling_mod,
@@ -819,7 +819,7 @@ def test_sampling_main_rejects_explicit_inner_slide_workers_override(
     monkeypatch.setattr(
         sampling_mod,
         "resolve_segmentation_config",
-        lambda cfg: sampling_mod.SegmentationConfig(64, 8, 255, 7, 4, False, True),
+        lambda cfg: sampling_mod.SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
     )
     monkeypatch.setattr(
         sampling_mod,

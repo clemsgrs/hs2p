@@ -30,10 +30,8 @@ tiling:
     mthresh: 7 # median filter size used by threshold/otsu methods (positive, odd integer)
     close: 4 # additional morphological closing to apply following initial thresholding (positive integer)
     sam2_checkpoint_path: # optional when method=sam2; if empty, hs2p downloads the default AtlasPatch checkpoint from Hugging Face
-    sam2_config_path: # required when method=sam2; path to the SAM2 model config yaml
+    sam2_config_path: # optional local override for the SAM2 model config yaml; if empty, hs2p downloads the default AtlasPatch config from Hugging Face
     sam2_device: "cpu" # device for SAM2 inference, e.g. cpu, cuda, cuda:0
-    sam2_input_size: 1024 # square input size used before SAM2 inference
-    sam2_mask_threshold: 0.0 # mask threshold passed to SAM2ImagePredictor
   filter_params:
     ref_tile_size: 16 # reference tile size at the target spacing
     a_t: 4 # area filter threshold for tissue (positive integer, the minimum size of detected foreground contours to consider, relative to the reference tile size ref_tile_size, e.g. a value 10 means only detected foreground contours of size greater than 10 [ref_tile_size, ref_tile_size] tiles at the target spacing will be kept)

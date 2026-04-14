@@ -1021,7 +1021,7 @@ def test_compute_request_passes_inner_workers_to_tile_extraction(
             overlap=0.0,
             tissue_threshold=0.1,
         ),
-        segmentation=SegmentationConfig(64, 8, 255, 7, 4, False, True),
+        segmentation=SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
         filtering=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
         mask_preview_path=None,
         output_dir=tmp_path,
@@ -1283,7 +1283,7 @@ def test_validate_tiling_artifacts_rejects_mismatched_image_path(tmp_path: Path)
                 coordinates_meta_path=artifacts.coordinates_meta_path,
                 compatibility=_artifact_compatibility(
                     tiling_config=TilingConfig(0.5, 224, 0.07, 0.0, 0.1, "asap"),
-                    segmentation_config=SegmentationConfig(64, 8, 255, 7, 4, False, True),
+                    segmentation_config=SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
                     filter_config=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
                 ),
             )
@@ -1308,7 +1308,7 @@ def test_validate_tiling_artifacts_rejects_mismatched_mask_path(tmp_path: Path):
                 coordinates_meta_path=artifacts.coordinates_meta_path,
                 compatibility=_artifact_compatibility(
                     tiling_config=TilingConfig(0.5, 224, 0.07, 0.0, 0.1, "asap"),
-                    segmentation_config=SegmentationConfig(64, 8, 255, 7, 4, False, True),
+                    segmentation_config=SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
                     filter_config=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
                 ),
             )
@@ -1930,7 +1930,7 @@ def test_write_process_list_removes_temp_file_on_failure(monkeypatch, tmp_path: 
                 overlap=0.1,
                 tissue_threshold=0.2,
             ),
-            segmentation=SegmentationConfig(64, 8, 255, 7, 4, False, True),
+            segmentation=SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
             filtering=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
             output_dir=tmp_path,
         )
@@ -1947,7 +1947,7 @@ def test_config_dataclasses_apply_package_defaults_for_secondary_parameters():
         overlap=0.0,
         tissue_threshold=0.1,
     )
-    segmentation = SegmentationConfig(downsample=64)
+    segmentation = SegmentationConfig(method="hsv", downsample=64)
     filtering = FilterConfig(ref_tile_size=224, a_t=4, a_h=2)
     preview = PreviewConfig()
 
