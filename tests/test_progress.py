@@ -146,13 +146,12 @@ def _tiling_config() -> TilingConfig:
 
 def _segmentation_config() -> SegmentationConfig:
     return SegmentationConfig(
+        method="hsv",
         downsample=64,
         sthresh=8,
         sthresh_up=255,
         mthresh=7,
         close=4,
-        use_otsu=False,
-        use_hsv=True,
     )
 
 

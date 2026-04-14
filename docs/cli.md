@@ -97,6 +97,7 @@ pip install "hs2p[all]"
   - spacing, tile size, overlap, tolerance, padding, and minimum tissue fraction
 - `tiling.seg_params`
   - tissue segmentation settings
+  - `method` selects `hsv`, `otsu`, `threshold`, or `sam2`
 - `tiling.filter_params`
   - contour and optional white/black filtering settings
 - `tiling.preview`
@@ -153,6 +154,14 @@ Detailed logs still go to `output_dir/logs/log.txt`.
 
 - larger values are faster and coarser
 - smaller values improve edge precision but cost more time and memory
+
+`tiling.seg_params.method` controls how the segmentation mask is generated at that level:
+
+- `hsv` uses the existing HSV heuristic
+- `otsu` thresholds the saturation channel with Otsu
+- `threshold` applies a fixed saturation threshold
+- `sam2` runs SAM2 inference on the selected segmentation image
+  - if `sam2_checkpoint_path` is empty, HS2P downloads the default AtlasPatch checkpoint from Hugging Face
 
 ### Tile pixel QC
 

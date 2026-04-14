@@ -5,6 +5,12 @@
 - Added package markers for `tests/` and `scripts/` so test modules can import shared helpers with explicit package-qualified paths.
 - Updated backend-selection test imports to use `tests.test_progress` after the test suite became package-aware.
 
+## 2026-04-14
+
+- Centralized tissue-mask generation in `hs2p/segmentation.py` so both `preprocess_slide()` and `WSI.segment_tissue()` use the same implementation.
+- Replaced the old `use_hsv` / `use_otsu` segmentation booleans with explicit `SegmentationConfig.method`.
+- Added SAM2-oriented segmentation config fields and optional dependency wiring for checkpoint/config-path driven inference.
+
 ## 2026-04-01
 
 - Preview saving now lives under `tiling.preview.save` instead of the old top-level `save_previews` flag.

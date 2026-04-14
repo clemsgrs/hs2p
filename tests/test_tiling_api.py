@@ -59,13 +59,12 @@ def tiling_config() -> TilingConfig:
 @pytest.fixture
 def segmentation_config() -> SegmentationConfig:
     return SegmentationConfig(
+        method="hsv",
         downsample=64,
         sthresh=8,
         sthresh_up=255,
         mthresh=7,
         close=4,
-        use_otsu=False,
-        use_hsv=True,
     )
 
 
@@ -209,8 +208,6 @@ def _build_preprocessing_result(
         white_threshold=220,
         black_threshold=25,
         fraction_threshold=0.9,
-        seg_use_otsu=False,
-        seg_use_hsv=True,
         mask_path=mask_path,
         annotation=annotation,
         selection_strategy=selection_strategy,
@@ -629,8 +626,6 @@ def test_load_tiling_result_accepts_preprocessing_artifact(tmp_path: Path):
         white_threshold=220,
         black_threshold=25,
         fraction_threshold=0.9,
-        seg_use_otsu=False,
-        seg_use_hsv=True,
         mask_path="slide-preprocessing-mask.png",
         annotation="tumor",
         selection_strategy="per_annotation",
@@ -1233,13 +1228,12 @@ def test_validate_tiling_artifacts_ignores_disabled_filter_threshold_mismatches(
         backend=result.backend,
     )
     matching_segmentation = SegmentationConfig(
+        method=result.tissue_method,
         downsample=result.seg_downsample,
         sthresh=result.seg_sthresh,
         sthresh_up=result.seg_sthresh_up,
         mthresh=result.seg_mthresh,
         close=result.seg_close,
-        use_otsu=result.seg_use_otsu,
-        use_hsv=result.seg_use_hsv,
     )
 
     compatibility_filter = FilterConfig(
@@ -1964,8 +1958,7 @@ def test_config_dataclasses_apply_package_defaults_for_secondary_parameters():
     assert segmentation.sthresh_up == default_config.tiling.seg_params.sthresh_up
     assert segmentation.mthresh == default_config.tiling.seg_params.mthresh
     assert segmentation.close == default_config.tiling.seg_params.close
-    assert segmentation.use_otsu == default_config.tiling.seg_params.use_otsu
-    assert segmentation.use_hsv == default_config.tiling.seg_params.use_hsv
+    assert segmentation.method == default_config.tiling.seg_params.method
     assert filtering.filter_white == default_config.tiling.filter_params.filter_white
     assert filtering.filter_black == default_config.tiling.filter_params.filter_black
     assert (
@@ -2098,12 +2091,19 @@ def test_maybe_load_existing_artifacts_zero_tiles_meta_only(tmp_path: Path):
             image_path=Path("zero-tile-maybe.svs"),
         ),
         read_coordinates_from=tiles_dir,
-        compatibility=_artifact_compatibility(
-            tiling_config=TilingConfig(0.5, 224, 0.07, 0.1, 0.2, "asap"),
-            segmentation_config=SegmentationConfig(64, 8, 255, 7, 4, False, True),
-            filter_config=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
-        ),
-    )
+            compatibility=_artifact_compatibility(
+                tiling_config=TilingConfig(0.5, 224, 0.07, 0.1, 0.2, "asap"),
+                segmentation_config=SegmentationConfig(
+                    method="hsv",
+                    downsample=64,
+                    sthresh=8,
+                    sthresh_up=255,
+                    mthresh=7,
+                    close=4,
+                ),
+                filter_config=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
+            ),
+        )
 
     assert loaded is not None
     assert loaded.num_tiles == 0

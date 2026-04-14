@@ -27,13 +27,12 @@ def _run_extract(wsi_path: Path, mask_path: Path, backend: str, tissue_pct: floa
         mask_path=mask_path,
         backend=backend,
         segment_params=SegmentationConfig(
+            method="hsv",
             downsample=64,
             sthresh=8,
             sthresh_up=255,
             mthresh=7,
             close=4,
-            use_otsu=False,
-            use_hsv=True,
         ),
         tiling_params=TilingConfig(
             requested_spacing_um=0.5,

@@ -151,7 +151,7 @@ def save_sampling_coordinates(
         requested_backend=backend,
         step_px_lv0=extraction.step_px_lv0,
         tolerance=tiling_config.tolerance,
-        tissue_method="unknown",
+        tissue_method=segmentation_config.method,
         seg_downsample=segmentation_config.downsample,
         seg_level=0,
         seg_spacing_um=0.0,
@@ -173,8 +173,6 @@ def save_sampling_coordinates(
         filter_blur=filter_config.filter_blur,
         blur_threshold=filter_config.blur_threshold,
         qc_spacing_um=filter_config.qc_spacing_um,
-        seg_use_otsu=segmentation_config.use_otsu,
-        seg_use_hsv=segmentation_config.use_hsv,
         annotation=annotation,
         selection_strategy=selection_strategy,
         output_mode=output_mode,
@@ -261,10 +259,8 @@ def validate_sampling_artifact_row(
         raise ValueError("sampling mthresh mismatch")
     if result.seg_close != segmentation_config.close:
         raise ValueError("sampling close mismatch")
-    if result.seg_use_otsu != segmentation_config.use_otsu:
-        raise ValueError("sampling use_otsu mismatch")
-    if result.seg_use_hsv != segmentation_config.use_hsv:
-        raise ValueError("sampling use_hsv mismatch")
+    if result.tissue_method != segmentation_config.method:
+        raise ValueError("sampling tissue_method mismatch")
     if result.ref_tile_size_px != filter_config.ref_tile_size:
         raise ValueError("sampling ref_tile_size mismatch")
     if result.a_t != filter_config.a_t:

@@ -13,6 +13,8 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from hs2p.configs import SegmentationConfig
+from hs2p.segmentation import segment_tissue_image
 from hs2p.wsi.geometry import project_discrete_grid_origins
 from hs2p.wsi.reader import open_slide, select_level, select_level_for_downsample
 from hs2p.tile_qc import filter_coordinate_tiles, needs_pixel_qc
@@ -28,61 +30,6 @@ def _normalize_level_downsamples(
         else:
             normalized.append(float(downsample))
     return normalized
-
-
-def segment_tissue(
-    thumbnail: np.ndarray,
-    *,
-    method: str = "hsv",
-    kernel_size: int = 5,
-    morph_iterations: int = 2,
-    sthresh: int = 8,
-    sthresh_up: int = 255,
-    median_blur_size: int = 7,
-) -> np.ndarray:
-    """Segment tissue from an RGB thumbnail image."""
-    if method == "hsv":
-        hsv = cv2.cvtColor(thumbnail, cv2.COLOR_RGB2HSV)
-        mask = cv2.inRange(
-            hsv,
-            np.array((90, 8, 103)),
-            np.array((180, 255, 255)),
-        )
-    elif method == "otsu":
-        hsv = cv2.cvtColor(thumbnail, cv2.COLOR_RGB2HSV)
-        saturation = hsv[:, :, 1]
-        blurred = cv2.medianBlur(saturation, median_blur_size)
-        _, mask = cv2.threshold(
-            blurred,
-            0,
-            255,
-            cv2.THRESH_BINARY + cv2.THRESH_OTSU,
-        )
-    elif method == "threshold":
-        hsv = cv2.cvtColor(thumbnail, cv2.COLOR_RGB2HSV)
-        saturation = hsv[:, :, 1]
-        blurred = cv2.medianBlur(saturation, median_blur_size)
-        _, mask = cv2.threshold(
-            blurred,
-            sthresh,
-            sthresh_up,
-            cv2.THRESH_BINARY,
-        )
-    else:
-        raise ValueError(
-            "Unknown tissue segmentation method: "
-            f"'{method}'. Available: hsv, otsu, threshold"
-        )
-
-    if kernel_size > 0 and morph_iterations > 0:
-        kernel = np.ones((kernel_size, kernel_size), np.uint8)
-        mask = cv2.morphologyEx(
-            mask,
-            cv2.MORPH_CLOSE,
-            kernel,
-            iterations=morph_iterations,
-        )
-    return mask
 
 
 @dataclass(frozen=True)
@@ -277,8 +224,6 @@ class TilingResult:
     blur_threshold: float = 50.0
     qc_spacing_um: float = 2.0
     # -- optional (legitimately None in some paths) --
-    seg_use_otsu: bool | None = None
-    seg_use_hsv: bool | None = None
     mask_path: str | Path | None = None
     tissue_mask_tissue_value: int | None = None
     mask_level: int | None = None
@@ -605,8 +550,6 @@ _SEGMENTATION_KEYS = {
     "sthresh_up",
     "mthresh",
     "close",
-    "use_otsu",
-    "use_hsv",
     "mask_path",
     "ref_tile_size_px",
     "tissue_mask_tissue_value",
@@ -675,8 +618,6 @@ def _build_tiling_metadata(result: TilingResult) -> dict[str, Any]:
         "sthresh_up": result.seg_sthresh_up,
         "mthresh": result.seg_mthresh,
         "close": result.seg_close,
-        "use_otsu": result.seg_use_otsu,
-        "use_hsv": result.seg_use_hsv,
         "mask_path": str(result.mask_path) if result.mask_path is not None else None,
         "ref_tile_size_px": result.ref_tile_size_px,
         "tissue_mask_tissue_value": result.tissue_mask_tissue_value,
@@ -948,8 +889,6 @@ def _load_tiling_result(*, npz_path: "Path | None", meta: dict[str, Any]) -> Til
         filter_blur=filtering["filter_blur"],
         blur_threshold=filtering["blur_threshold"],
         qc_spacing_um=filtering["qc_spacing_um"],
-        seg_use_otsu=segmentation["use_otsu"],
-        seg_use_hsv=segmentation["use_hsv"],
         mask_path=segmentation["mask_path"],
         tissue_mask_tissue_value=segmentation["tissue_mask_tissue_value"],
         mask_level=segmentation["mask_level"],
@@ -1076,8 +1015,6 @@ def preprocess_slide(
     requested_tile_size_px: int = 256,
     requested_spacing_um: float = 0.5,
     tissue_method: str = "hsv",
-    use_hsv: bool | None = None,
-    use_otsu: bool | None = None,
     sthresh: int = 8,
     sthresh_up: int = 255,
     mthresh: int = 7,
@@ -1085,6 +1022,11 @@ def preprocess_slide(
     min_tissue_fraction: float = 0.1,
     overlap: float = 0.0,
     seg_downsample: int = 64,
+    sam2_checkpoint_path: str | Path | None = None,
+    sam2_config_path: str | Path | None = None,
+    sam2_device: str = "cpu",
+    sam2_input_size: int = 1024,
+    sam2_mask_threshold: float = 0.0,
     tolerance: float = 0.05,
     ref_tile_size_px: int = 16,
     a_t: int = 4,
@@ -1127,23 +1069,31 @@ def preprocess_slide(
         else:
             seg_size = slide.level_dimensions[seg_level]
             seg_image = slide.read_region((0, 0), seg_level, seg_size)
-            if use_hsv is None:
-                use_hsv = tissue_method == "hsv"
-            if use_otsu is None:
-                use_otsu = tissue_method == "otsu"
-            resolved_tissue_method = (
-                "hsv"
-                if use_hsv
-                else ("otsu" if use_otsu else "threshold")
-            )
-            mask = segment_tissue(
-                seg_image,
-                method=resolved_tissue_method,
-                kernel_size=close,
-                morph_iterations=1 if close > 0 else 0,
+            segmentation_config = SegmentationConfig(
+                method=tissue_method,
+                downsample=seg_downsample,
                 sthresh=sthresh,
                 sthresh_up=sthresh_up,
-                median_blur_size=mthresh,
+                mthresh=mthresh,
+                close=close,
+                sam2_checkpoint_path=(
+                    Path(sam2_checkpoint_path)
+                    if sam2_checkpoint_path is not None
+                    else None
+                ),
+                sam2_config_path=(
+                    Path(sam2_config_path)
+                    if sam2_config_path is not None
+                    else None
+                ),
+                sam2_device=sam2_device,
+                sam2_input_size=sam2_input_size,
+                sam2_mask_threshold=sam2_mask_threshold,
+            )
+            resolved_tissue_method = segmentation_config.method
+            mask = segment_tissue_image(
+                seg_image,
+                config=segmentation_config,
             )
             mask_level = None
             mask_spacing_um = None
@@ -1244,8 +1194,6 @@ def preprocess_slide(
             filter_blur=filter_blur,
             blur_threshold=blur_threshold,
             qc_spacing_um=qc_spacing_um,
-            seg_use_otsu=use_otsu,
-            seg_use_hsv=use_hsv,
             mask_path=tissue_mask_path,
             tissue_mask_tissue_value=(
                 int(tissue_mask_tissue_value)
@@ -1274,7 +1222,6 @@ __all__ = [
     "open_slide",
     "preprocess_slide",
     "resolve_base_spacing_um",
-    "segment_tissue",
     "select_level",
     "select_level_for_downsample",
     "validate_tiling_result_provenance",

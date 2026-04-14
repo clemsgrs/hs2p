@@ -263,13 +263,12 @@ def test_extract_coordinates_uses_overlay_mask_preview_instead_of_line_rendering
         mask_path=None,
         backend="openslide",
         segment_params=SimpleNamespace(
+            method="hsv",
             downsample=64,
             sthresh=8,
             sthresh_up=255,
             mthresh=7,
             close=4,
-            use_otsu=False,
-            use_hsv=True,
         ),
         tiling_params=SimpleNamespace(
             requested_spacing_um=0.5,
@@ -372,13 +371,12 @@ def test_extract_coordinates_preview_uses_in_memory_annotation_labels_when_style
         mask_path=Path("fake-mask.tif"),
         backend="openslide",
         segment_params=SimpleNamespace(
+            method="hsv",
             downsample=64,
             sthresh=8,
             sthresh_up=255,
             mthresh=7,
             close=4,
-            use_otsu=False,
-            use_hsv=True,
         ),
         tiling_params=SimpleNamespace(
             requested_spacing_um=0.5,

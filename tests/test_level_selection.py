@@ -10,13 +10,12 @@ from hs2p.wsi.wsi import WSI
 
 def _segmentation_config() -> SegmentationConfig:
     return SegmentationConfig(
+        method="threshold",
         downsample=2,
         sthresh=8,
         sthresh_up=255,
         mthresh=3,
         close=0,
-        use_otsu=False,
-        use_hsv=False,
     )
 
 

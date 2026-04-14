@@ -10,6 +10,7 @@ import tqdm
 from PIL import Image
 
 from hs2p.configs import FilterConfig, SegmentationConfig, TilingConfig
+from hs2p.segmentation import segment_tissue_image
 from hs2p.wsi.backend import open_slide, resolve_backend
 from hs2p.wsi.types import SamplingSpec
 from hs2p.wsi.utils import TissueFilter, ResolvedGeometry
@@ -303,62 +304,18 @@ class WSI(object):
         segment_params: SegmentationConfig,
     ):
         """
-        Segment the tissue via HSV -> Median thresholding -> Binary thresholding -> Morphological closing.
-        Or via HSV thresholding if use_hsv is True.
+        Segment tissue at the configured segmentation level.
 
         Args:
-            downsample (int): Downsample factor for finding best level for tissue segmentation.
-            sthresh (int, optional): Lower threshold for binary thresholding. Defaults to 20.
-            sthresh_up (int, optional): Upper threshold for binary thresholding. Defaults to 255.
-            mthresh (int, optional): Kernel size for median blurring. Defaults to 7.
-            close (int, optional): Size of the kernel for morphological closing.
-                If 0, no morphological closing is applied. Defaults to 0.
-            use_otsu (bool, optional): Whether to use Otsu's method for thresholding. Defaults to False.
-            use_hsv (bool, optional): Whether to use HSV thresholding. Defaults to False.
+            segment_params: Segmentation parameters including method and thresholding details.
 
         Returns:
             int: Level at which the tissue mask was created.
         """
 
         seg_level = self.get_best_level_for_downsample_custom(segment_params.downsample)
-
         img = np.asarray(self.get_slide(seg_level))
-        if img.ndim == 3 and img.shape[2] == 4:
-            img = img[:, :, :3]
-        img_hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)  # convert to HSV space
-
-        if segment_params.use_hsv:
-            # hsv thresholding
-            lower = np.array([90, 8, 103])
-            upper = np.array([180, 255, 255])
-            img_thresh = cv2.inRange(img_hsv, lower, upper)
-
-        else:
-            img_med = cv2.medianBlur(
-                img_hsv[:, :, 1], segment_params.mthresh
-            )  # apply median blurring
-
-            # thresholding
-            if segment_params.use_otsu:
-                _, img_thresh = cv2.threshold(
-                    img_med,
-                    0,
-                    segment_params.sthresh_up,
-                    cv2.THRESH_OTSU + cv2.THRESH_BINARY,
-                )
-            else:
-                _, img_thresh = cv2.threshold(
-                    img_med,
-                    segment_params.sthresh,
-                    segment_params.sthresh_up,
-                    cv2.THRESH_BINARY,
-                )
-
-        # morphological closing
-        if segment_params.close > 0:
-            kernel = np.ones((segment_params.close, segment_params.close), np.uint8)
-            img_thresh = cv2.morphologyEx(img_thresh, cv2.MORPH_CLOSE, kernel)
-
+        img_thresh = segment_tissue_image(img, config=segment_params)
         self.annotation_mask = {"tissue": img_thresh}
         return seg_level
 
