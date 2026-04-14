@@ -49,6 +49,12 @@ The supported backend set is:
 
 `auto` prefers `cucim -> vips -> openslide -> asap`.
 
+SAM2-based tissue segmentation requires a separate additional install:
+
+```bash
+pip install "git+https://github.com/facebookresearch/sam2.git"
+```
+
 ## Workflows
 
 ### Tiling
