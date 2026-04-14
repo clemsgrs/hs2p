@@ -41,7 +41,7 @@
     "sthresh": 8,
     "sthresh_up": 255,
     "tissue_mask_tissue_value": null,
-    "tissue_method": "unknown"
+    "tissue_method": "precomputed_mask"
   },
   "slide": {
     "base_spacing_um": 0.25200000393750005,

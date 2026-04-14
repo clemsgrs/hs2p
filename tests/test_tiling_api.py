@@ -304,6 +304,37 @@ def test_tile_slide_passes_default_sampling_semantics_for_masked_slides(
     assert captured["tissue_mask_path"] == Path("slide-mask.png")
 
 
+def test_tile_slide_allows_masked_slides_without_segmentation_config(
+    monkeypatch, tiling_config, filter_config
+):
+    captured = {}
+
+    _patch_preprocess_slide(
+        monkeypatch,
+        result=_build_preprocessing_result(
+            sample_id="slide-with-mask",
+            image_path="slide.svs",
+            mask_path="slide-mask.png",
+            selection_strategy=CoordinateSelectionStrategy.MERGED_DEFAULT_TILING,
+            output_mode=CoordinateOutputMode.SINGLE_OUTPUT,
+        ),
+        hook=captured.update,
+    )
+
+    tile_slide(
+        SlideSpec(
+            sample_id="slide-with-mask",
+            image_path=Path("slide.svs"),
+            mask_path=Path("slide-mask.png"),
+        ),
+        tiling=tiling_config,
+        filtering=filter_config,
+    )
+
+    assert captured["tissue_method"] == "precomputed_mask"
+    assert captured["tissue_mask_path"] == Path("slide-mask.png")
+
+
 def test_tile_slide_returns_named_arrays(
     monkeypatch, tiling_config, segmentation_config, filter_config
 ):
@@ -1179,6 +1210,18 @@ def test_tile_slide_surfaces_preprocessing_errors(
             SlideSpec(sample_id="slide-bad-tissue", image_path=Path("slide.svs")),
             tiling=tiling_config,
             segmentation=segmentation_config,
+            filtering=filter_config,
+        )
+
+
+def test_tile_slide_requires_segmentation_when_mask_is_missing(
+    tiling_config: TilingConfig,
+    filter_config: FilterConfig,
+):
+    with pytest.raises(ValueError, match="segmentation config is required"):
+        tile_slide(
+            SlideSpec(sample_id="slide-bad-tissue", image_path=Path("slide.svs")),
+            tiling=tiling_config,
             filtering=filter_config,
         )
 

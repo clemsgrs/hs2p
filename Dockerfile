@@ -70,7 +70,7 @@ RUN python -m pip install \
       --no-cache-dir \
       --no-color \
       --no-build-isolation \
-      "/opt/app[all]" \
+      "/opt/app[all,sam2]" \
     && rm -rf /root/.cache/pip
 
 COPY --chown=user:user . /opt/app/

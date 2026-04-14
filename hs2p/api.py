@@ -89,11 +89,42 @@ def _write_mask_preview(
     )
 
 
+def _resolve_effective_segmentation(
+    *,
+    whole_slide: SlideSpec,
+    segmentation: SegmentationConfig | None,
+) -> SegmentationConfig:
+    if segmentation is not None:
+        return segmentation
+    if whole_slide.mask_path is None:
+        raise ValueError(
+            "segmentation config is required when no precomputed tissue mask is provided"
+        )
+    return SegmentationConfig(method="precomputed_mask")
+
+
+def _validate_segmentation_requirement(
+    *,
+    whole_slides: Sequence[SlideSpec],
+    segmentation: SegmentationConfig | None,
+) -> None:
+    if segmentation is not None:
+        return
+    missing_masks = [
+        slide.sample_id for slide in whole_slides if slide.mask_path is None
+    ]
+    if missing_masks:
+        raise ValueError(
+            "segmentation config is required for slides without a precomputed mask: "
+            + ", ".join(missing_masks)
+        )
+
+
 def _compute_tiling_result(
     whole_slide: SlideSpec,
     *,
     tiling: TilingConfig,
-    segmentation: SegmentationConfig,
+    segmentation: SegmentationConfig | None,
     filtering: FilterConfig,
     mask_preview_path: Path | None,
     preview_downsample: int = 32,
@@ -102,6 +133,10 @@ def _compute_tiling_result(
     num_workers: int,
 ) -> TilingResult:
     has_mask = whole_slide.mask_path is not None
+    effective_segmentation = _resolve_effective_segmentation(
+        whole_slide=whole_slide,
+        segmentation=segmentation,
+    )
     preprocessing_result = preprocess_slide(
         image_path=whole_slide.image_path,
         sample_id=whole_slide.sample_id,
@@ -110,17 +145,17 @@ def _compute_tiling_result(
         spacing_override=whole_slide.spacing_at_level_0,
         requested_tile_size_px=tiling.requested_tile_size_px,
         requested_spacing_um=tiling.requested_spacing_um,
-        tissue_method=segmentation.method,
-        sthresh=segmentation.sthresh,
-        sthresh_up=segmentation.sthresh_up,
-        mthresh=segmentation.mthresh,
-        close=segmentation.close,
-        sam2_checkpoint_path=segmentation.sam2_checkpoint_path,
-        sam2_config_path=segmentation.sam2_config_path,
-        sam2_device=segmentation.sam2_device,
+        tissue_method=effective_segmentation.method,
+        sthresh=effective_segmentation.sthresh,
+        sthresh_up=effective_segmentation.sthresh_up,
+        mthresh=effective_segmentation.mthresh,
+        close=effective_segmentation.close,
+        sam2_checkpoint_path=effective_segmentation.sam2_checkpoint_path,
+        sam2_config_path=effective_segmentation.sam2_config_path,
+        sam2_device=effective_segmentation.sam2_device,
         min_tissue_fraction=tiling.tissue_threshold,
         overlap=tiling.overlap,
-        seg_downsample=segmentation.downsample,
+        seg_downsample=effective_segmentation.downsample,
         tolerance=tiling.tolerance,
         ref_tile_size_px=filtering.ref_tile_size,
         a_t=filtering.a_t,
@@ -161,7 +196,7 @@ def tile_slide(
     whole_slide: SlideSpec,
     *,
     tiling: TilingConfig,
-    segmentation: SegmentationConfig,
+    segmentation: SegmentationConfig | None = None,
     filtering: FilterConfig = FilterConfig(),
     num_workers: int = 1,
 ) -> TilingResult:
@@ -546,7 +581,7 @@ class _ComputeRequest:
     input_index: int
     whole_slide: SlideSpec
     tiling: TilingConfig
-    segmentation: SegmentationConfig
+    segmentation: SegmentationConfig | None
     filtering: FilterConfig
     mask_preview_path: Path | None
     output_dir: Path
@@ -773,7 +808,7 @@ def tile_slides(
     whole_slides: Sequence[SlideSpec],
     *,
     tiling: TilingConfig,
-    segmentation: SegmentationConfig,
+    segmentation: SegmentationConfig | None = None,
     filtering: FilterConfig = FilterConfig(),
     preview: PreviewConfig | None = None,
     output_dir: Path,
@@ -787,6 +822,10 @@ def tile_slides(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     _validate_whole_slides(whole_slides)
+    _validate_segmentation_requirement(
+        whole_slides=whole_slides,
+        segmentation=segmentation,
+    )
     artifacts: list[TilingArtifacts] = []
     process_rows: list[dict[str, Any]] = []
     process_list_path = output_dir / "process_list.csv"
@@ -856,7 +895,10 @@ def tile_slides(
                 has_mask = whole_slide.mask_path is not None
                 compatibility_specs[key] = CompatibilitySpec(
                     tiling=effective_tiling,
-                    segmentation=segmentation,
+                    segmentation=_resolve_effective_segmentation(
+                        whole_slide=whole_slide,
+                        segmentation=segmentation,
+                    ),
                     filtering=filtering,
                     selection_strategy=(
                         CoordinateSelectionStrategy.MERGED_DEFAULT_TILING if has_mask else None

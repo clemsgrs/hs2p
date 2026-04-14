@@ -1,6 +1,6 @@
 # CLI Guide
 
-HS2P provides two batch entrypoints:
+hs2p provides two batch entrypoints:
 
 - `python -m hs2p.cli.tiling`
 - `python -m hs2p.cli.sampling`
@@ -161,18 +161,18 @@ Detailed logs still go to `output_dir/logs/log.txt`.
 - `otsu` thresholds the saturation channel with Otsu
 - `threshold` applies a fixed saturation threshold
 - `sam2` runs SAM2 inference on the selected segmentation image
-  - if `sam2_checkpoint_path` is empty, HS2P downloads the default AtlasPatch checkpoint from Hugging Face
-  - if `sam2_config_path` is empty, HS2P downloads the default AtlasPatch SAM2 config from Hugging Face
+  - if `sam2_checkpoint_path` is empty, hs2p downloads the default AtlasPatch checkpoint from Hugging Face
+  - if `sam2_config_path` is empty, hs2p downloads the default AtlasPatch SAM2 config from Hugging Face
 
 ### Tile pixel QC
 
 `tiling.filter_params.filter_white`, `filter_black`, `filter_grayspace`, and `filter_blur` are disabled by default.
 
-When enabled, HS2P evaluates candidate tiles at `tiling.filter_params.qc_spacing_um`, which is typically coarser than the final extraction spacing. This is still slower than mask-only tiling, but cheaper than running pixel QC at the requested tile spacing.
+When enabled, hs2p evaluates candidate tiles at `tiling.filter_params.qc_spacing_um`, which is typically coarser than the final extraction spacing. This is still slower than mask-only tiling, but cheaper than running pixel QC at the requested tile spacing.
 
 ### Tile tar export
 
-When `save_tiles: true`, HS2P also writes `tiles/{sample_id}.tiles.tar`.
+When `save_tiles: true`, hs2p also writes `tiles/{sample_id}.tiles.tar`.
 
 - non-CuCIM paths coalesce dense tile regions before slicing them back into tiles
 - CuCIM paths use batched reads
