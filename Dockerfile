@@ -67,9 +67,7 @@ RUN python -m pip install \
       --no-build-isolation \
       "/opt/app[all,sam2]" \
       ${GIT_MODEL_DEPENDENCIES} \
-      && rm -rf /root/.cache/pip
-
-COPY --chown=user:user . /opt/app/
+    && rm -rf /root/.cache/pip
 
 USER user
 WORKDIR /opt/app
