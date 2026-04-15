@@ -5,7 +5,7 @@ import tarfile
 import tempfile
 import time
 import traceback
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Sequence
@@ -1165,6 +1165,7 @@ def tile_slides(
     resolved_masks: dict[int, ResolvedTissueMask] = {}
     mask_failures: dict[int, _MaskResolutionResponse] = {}
     if mask_resolution_requests:
+        emit_progress("tissue.started", total=len(mask_resolution_requests))
         use_mask_pool, mask_outer_workers, _ = _resolve_tiling_worker_allocation(
             num_workers=num_workers,
             compute_count=len(mask_resolution_requests),
@@ -1183,21 +1184,45 @@ def tile_slides(
                     traceback_text=traceback.format_exc(),
                 )
 
-        if use_mask_pool:
-            with ThreadPoolExecutor(max_workers=mask_outer_workers) as pool:
-                mask_responses = list(
-                    pool.map(_resolve_mask_response, mask_resolution_requests)
-                )
-        else:
-            mask_responses = [
-                _resolve_mask_response(request)
-                for request in mask_resolution_requests
-            ]
-        for response in mask_responses:
+        def _record_mask_response(response: _MaskResolutionResponse) -> None:
             if response.ok and response.resolved_mask is not None:
                 resolved_masks[response.input_index] = response.resolved_mask
             else:
                 mask_failures[response.input_index] = response
+            snapshot_completed = len(resolved_masks)
+            snapshot_failed = len(mask_failures)
+            emit_progress(
+                "tissue.progress",
+                total=len(mask_resolution_requests),
+                completed=snapshot_completed,
+                failed=snapshot_failed,
+                pending=max(
+                    0, len(mask_resolution_requests) - snapshot_completed - snapshot_failed
+                ),
+            )
+
+        if use_mask_pool:
+            with ThreadPoolExecutor(max_workers=mask_outer_workers) as pool:
+                futures = [
+                    pool.submit(_resolve_mask_response, request)
+                    for request in mask_resolution_requests
+                ]
+                for future in as_completed(futures):
+                    _record_mask_response(future.result())
+        else:
+            for request in mask_resolution_requests:
+                _record_mask_response(_resolve_mask_response(request))
+        snapshot_completed = len(resolved_masks)
+        snapshot_failed = len(mask_failures)
+        emit_progress(
+            "tissue.finished",
+            total=len(mask_resolution_requests),
+            completed=snapshot_completed,
+            failed=snapshot_failed,
+            pending=max(
+                0, len(mask_resolution_requests) - snapshot_completed - snapshot_failed
+            ),
+        )
     compute_requests = [
         replace(request, resolved_mask=resolved_masks.get(request.input_index))
         for request in compute_requests

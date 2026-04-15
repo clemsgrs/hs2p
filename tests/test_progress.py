@@ -262,6 +262,41 @@ def test_rich_tiling_summary_uses_zero_tile_label_without_process_list(monkeypat
     ]
 
 
+def test_rich_tissue_progress_uses_a_separate_task(monkeypatch):
+    import hs2p.progress as progress
+
+    _install_fake_rich_console(monkeypatch, is_terminal=True)
+    _install_fake_rich_progress(monkeypatch)
+    _install_fake_rich_summary_types(monkeypatch)
+
+    class FakeConsole:
+        def print(self, *args, **kwargs):
+            return None
+
+    reporter = progress.RichReporter(output_dir="out", console=FakeConsole())
+
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="tissue.started",
+            payload={"total": 3},
+        )
+    )
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="tissue.progress",
+            payload={
+                "total": 3,
+                "completed": 2,
+                "failed": 1,
+                "pending": 0,
+            },
+        )
+    )
+
+    assert reporter.progress.tasks[1]["description"] == "Tissue masks (2/3 resolved)"
+    assert reporter.progress.tasks[1]["completed"] == 3
+
+
 def test_rich_sampling_summary_shows_zero_tile_and_total_tiles(monkeypatch):
     import hs2p.progress as progress
 
@@ -482,6 +517,10 @@ def test_tile_slides_emits_progress_for_reused_success_and_failure(
         )
 
     assert [event.kind for event in reporter.events] == [
+        "tissue.started",
+        "tissue.progress",
+        "tissue.progress",
+        "tissue.finished",
         "tiling.started",
         "tiling.progress",
         "tiling.progress",

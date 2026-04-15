@@ -1318,6 +1318,96 @@ def test_tile_slides_resolves_all_masks_before_computing_any_slide(
     ]
 
 
+def test_tile_slides_emits_tissue_progress_before_tiling_progress(
+    monkeypatch,
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    progress_events: list[tuple[str, dict[str, object]]] = []
+
+    def _fake_emit_progress(kind: str, **payload):
+        progress_events.append((kind, payload))
+
+    def _fake_resolve_mask_for_request(request):
+        return api_mod._MaskResolutionResponse(
+            input_index=request.input_index,
+            whole_slide=request.whole_slide,
+            ok=True,
+            resolved_mask=preprocessing_mod.ResolvedTissueMask(
+                tissue_mask=np.zeros((8, 8), dtype=np.uint8),
+                tissue_method="hsv",
+                seg_downsample=64,
+                seg_level=0,
+                seg_spacing_um=0.5,
+            ),
+            requested_backend=request.tiling.requested_backend,
+            backend=request.tiling.backend,
+        )
+
+    def _fake_compute_tiling_result(
+        whole_slide,
+        *,
+        tiling,
+        segmentation,
+        resolved_mask=None,
+        filtering,
+        mask_preview_path,
+        preview_downsample=32,
+        mask_overlay_color=(157, 219, 129),
+        mask_overlay_alpha=0.5,
+        num_workers,
+    ):
+        del (
+            tiling,
+            segmentation,
+            resolved_mask,
+            filtering,
+            mask_preview_path,
+            preview_downsample,
+            mask_overlay_color,
+            mask_overlay_alpha,
+            num_workers,
+        )
+        return _build_result(
+            sample_id=whole_slide.sample_id,
+            image_path=str(whole_slide.image_path),
+        )
+
+    monkeypatch.setattr(api_mod, "emit_progress", _fake_emit_progress)
+    monkeypatch.setattr(api_mod, "_resolve_mask_for_request", _fake_resolve_mask_for_request)
+    monkeypatch.setattr(api_mod, "_compute_tiling_result", _fake_compute_tiling_result)
+    monkeypatch.setattr(
+        api_mod,
+        "save_tiling_result",
+        lambda result, output_dir, tiles_dir=None: TilingArtifacts(
+            sample_id=result.sample_id,
+            coordinates_npz_path=Path(output_dir) / "tiles" / f"{result.sample_id}.coordinates.npz",
+            coordinates_meta_path=Path(output_dir) / "tiles" / f"{result.sample_id}.coordinates.meta.json",
+            num_tiles=len(result.x),
+        ),
+    )
+
+    tile_slides(
+        [
+            SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs")),
+            SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
+        ],
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        output_dir=tmp_path,
+        num_workers=1,
+    )
+
+    kinds = [kind for kind, _ in progress_events]
+    assert kinds[0] == "tissue.started"
+    assert kinds.index("tissue.finished") < kinds.index("tiling.started")
+    assert kinds.count("tissue.progress") == 2
+    assert kinds.count("tiling.progress") == 2
+
+
 def test_tile_slides_defaults_gpu_decode_to_disabled_for_saved_tiles(
     monkeypatch,
     tmp_path: Path,
