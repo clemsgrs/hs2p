@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import logging
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,20 @@ def _is_sam2_predictor_log(record: logging.LogRecord) -> bool:
         return True
     pathname = Path(getattr(record, "pathname", "")).name
     return pathname == "sam2_image_predictor.py"
+
+
+@functools.lru_cache(maxsize=8)
+def _build_sam2_predictor(
+    *,
+    checkpoint_path: Path | None,
+    config_path: Path | None,
+    device: str,
+) -> "_Sam2Predictor":
+    return _Sam2Predictor(
+        checkpoint_path=checkpoint_path,
+        config_path=config_path,
+        device=device,
+    )
 
 
 @contextlib.contextmanager
@@ -171,19 +186,6 @@ def _segment_sam2(
         )
         mask = predictor.predict_mask(image)
     return np.where(mask > 0, int(sthresh_up), 0).astype(np.uint8)
-
-
-def _build_sam2_predictor(
-    *,
-    checkpoint_path: Path | None,
-    config_path: Path | None,
-    device: str,
-) -> "_Sam2Predictor":
-    return _Sam2Predictor(
-        checkpoint_path=checkpoint_path,
-        config_path=config_path,
-        device=device,
-    )
 
 
 class _Sam2Predictor:

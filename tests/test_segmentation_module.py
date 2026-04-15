@@ -143,3 +143,38 @@ def test_sam2_log_filter_keeps_predictor_messages_but_silences_httpx_noise():
     assert segmentation_mod._is_sam2_predictor_log(predictor_record) is True
     assert segmentation_mod._is_sam2_predictor_log(httpx_record) is False
     assert segmentation_mod._is_sam2_predictor_log(warning_record) is True
+
+
+def test_sam2_predictor_is_cached_per_process(monkeypatch, tmp_path: Path):
+    checkpoint_path = tmp_path / "sam2-model.pth"
+    checkpoint_path.write_bytes(b"checkpoint")
+    config_path = tmp_path / "sam2.yaml"
+    config_path.write_text("model: {}\n")
+
+    segmentation_mod._build_sam2_predictor.cache_clear()
+    build_calls = []
+
+    def _fake_init(self, *, checkpoint_path, config_path, device):
+        build_calls.append((checkpoint_path, config_path, device))
+        self.checkpoint_path = checkpoint_path
+        self.config_path = config_path
+        self.device = device
+        self.input_size = segmentation_mod.DEFAULT_SAM2_INPUT_SIZE
+        self._predictor = object()
+
+    monkeypatch.setattr(segmentation_mod._Sam2Predictor, "__init__", _fake_init)
+
+    predictor_a = segmentation_mod._build_sam2_predictor(
+        checkpoint_path=checkpoint_path,
+        config_path=config_path,
+        device="cpu",
+    )
+    predictor_b = segmentation_mod._build_sam2_predictor(
+        checkpoint_path=checkpoint_path,
+        config_path=config_path,
+        device="cpu",
+    )
+
+    assert predictor_a is predictor_b
+    assert build_calls == [(checkpoint_path, config_path, "cpu")]
+    segmentation_mod._build_sam2_predictor.cache_clear()
