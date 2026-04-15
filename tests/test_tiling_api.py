@@ -1408,6 +1408,95 @@ def test_tile_slides_emits_tissue_progress_before_tiling_progress(
     assert kinds.count("tiling.progress") == 2
 
 
+def test_tile_slides_uses_process_pool_for_tissue_resolution(
+    monkeypatch,
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    calls: list[str] = []
+    pool_sizes: list[int] = []
+
+    def _fake_resolve_mask_for_request(request):
+        return api_mod._MaskResolutionResponse(
+            input_index=request.input_index,
+            whole_slide=request.whole_slide,
+            ok=True,
+            resolved_mask=preprocessing_mod.ResolvedTissueMask(
+                tissue_mask=np.zeros((8, 8), dtype=np.uint8),
+                tissue_method="hsv",
+                seg_downsample=64,
+                seg_level=0,
+                seg_spacing_um=0.5,
+            ),
+            requested_backend=request.tiling.requested_backend,
+            backend=request.tiling.backend,
+        )
+
+    def _fake_compute_and_save(request):
+        calls.append("_compute_and_save_tiling_artifacts_from_request")
+        tiles_dir = Path(request.output_dir) / "tiles"
+        tiles_dir.mkdir(parents=True, exist_ok=True)
+        npz_path = tiles_dir / f"{request.whole_slide.sample_id}.coordinates.npz"
+        meta_path = tiles_dir / f"{request.whole_slide.sample_id}.coordinates.meta.json"
+        npz_path.write_bytes(b"npz")
+        meta_path.write_text("{}")
+        return SimpleNamespace(
+            input_index=request.input_index,
+            whole_slide=request.whole_slide,
+            ok=True,
+            artifact=TilingArtifacts(
+                sample_id=request.whole_slide.sample_id,
+                coordinates_npz_path=npz_path,
+                coordinates_meta_path=meta_path,
+                num_tiles=1,
+            ),
+            mask_preview_path=None,
+            error=None,
+            traceback_text=None,
+        )
+
+    class _FakePool:
+        def __init__(self, processes):
+            pool_sizes.append(processes)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def imap_unordered(self, fn, args_list):
+            calls.append(fn.__name__)
+            for args in args_list:
+                yield fn(args)
+
+    monkeypatch.setattr(api_mod, "_resolve_mask_for_request", _fake_resolve_mask_for_request)
+    monkeypatch.setattr(
+        api_mod,
+        "_compute_and_save_tiling_artifacts_from_request",
+        _fake_compute_and_save,
+    )
+    monkeypatch.setattr(api_mod.mp, "Pool", _FakePool)
+
+    tile_slides(
+        [
+            SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs")),
+            SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
+        ],
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        output_dir=tmp_path,
+        num_workers=2,
+    )
+
+    assert pool_sizes == [2, 2]
+    assert calls[0] == "_resolve_mask_for_request_safe"
+    assert calls[1] == "_fake_compute_and_save"
+
+
 def test_tile_slides_defaults_gpu_decode_to_disabled_for_saved_tiles(
     monkeypatch,
     tmp_path: Path,

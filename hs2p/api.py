@@ -5,7 +5,7 @@ import tarfile
 import tempfile
 import time
 import traceback
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Sequence
@@ -953,6 +953,23 @@ def _resolve_mask_for_request(
         )
 
 
+def _resolve_mask_for_request_safe(
+    request: _MaskResolutionRequest,
+) -> _MaskResolutionResponse:
+    try:
+        return _resolve_mask_for_request(request)
+    except Exception as exc:
+        return _MaskResolutionResponse(
+            input_index=request.input_index,
+            whole_slide=request.whole_slide,
+            ok=False,
+            requested_backend=request.tiling.requested_backend,
+            backend=request.tiling.backend,
+            error=str(exc),
+            traceback_text=traceback.format_exc(),
+        )
+
+
 def _resolve_tiling_worker_allocation(
     *, num_workers: int, compute_count: int
 ) -> tuple[bool, int, int]:
@@ -1166,24 +1183,6 @@ def tile_slides(
     mask_failures: dict[int, _MaskResolutionResponse] = {}
     if mask_resolution_requests:
         emit_progress("tissue.started", total=len(mask_resolution_requests))
-        use_mask_pool, mask_outer_workers, _ = _resolve_tiling_worker_allocation(
-            num_workers=num_workers,
-            compute_count=len(mask_resolution_requests),
-        )
-        def _resolve_mask_response(request: _MaskResolutionRequest) -> _MaskResolutionResponse:
-            try:
-                return _resolve_mask_for_request(request)
-            except Exception as exc:
-                return _MaskResolutionResponse(
-                    input_index=request.input_index,
-                    whole_slide=request.whole_slide,
-                    ok=False,
-                    requested_backend=request.tiling.requested_backend,
-                    backend=request.tiling.backend,
-                    error=str(exc),
-                    traceback_text=traceback.format_exc(),
-                )
-
         def _record_mask_response(response: _MaskResolutionResponse) -> None:
             if response.ok and response.resolved_mask is not None:
                 resolved_masks[response.input_index] = response.resolved_mask
@@ -1201,17 +1200,19 @@ def tile_slides(
                 ),
             )
 
-        if use_mask_pool:
-            with ThreadPoolExecutor(max_workers=mask_outer_workers) as pool:
-                futures = [
-                    pool.submit(_resolve_mask_response, request)
-                    for request in mask_resolution_requests
-                ]
-                for future in as_completed(futures):
-                    _record_mask_response(future.result())
+        mask_worker_count = max(1, int(num_workers))
+        if mask_worker_count > 1 and len(mask_resolution_requests) > 1:
+            with mp.Pool(
+                processes=min(mask_worker_count, len(mask_resolution_requests))
+            ) as pool:
+                for response in pool.imap_unordered(
+                    _resolve_mask_for_request_safe,
+                    mask_resolution_requests,
+                ):
+                    _record_mask_response(response)
         else:
             for request in mask_resolution_requests:
-                _record_mask_response(_resolve_mask_response(request))
+                _record_mask_response(_resolve_mask_for_request_safe(request))
         snapshot_completed = len(resolved_masks)
         snapshot_failed = len(mask_failures)
         emit_progress(
