@@ -77,6 +77,7 @@ RUN set -eux; \
 
 WORKDIR /opt/app/
 
+ARG PYTORCH_CUDA_INDEX_URL=https://download.pytorch.org/whl/cu128
 ARG GIT_MODEL_DEPENDENCIES="git+https://github.com/facebookresearch/sam2.git"
 
 RUN python -m ensurepip --upgrade \
@@ -93,6 +94,7 @@ COPY --chown=user:user LICENSE /opt/app/LICENSE
 RUN python -m pip install \
       --no-cache-dir \
       --no-color \
+      --extra-index-url "${PYTORCH_CUDA_INDEX_URL}" \
       "/opt/app[all,sam2]" \
       ${GIT_MODEL_DEPENDENCIES} \
     && rm -rf /root/.cache/pip

@@ -57,6 +57,7 @@ RUN set -eux; \
 RUN python -m pip install --upgrade pip "setuptools>=61" wheel pip-tools \
     && rm -rf /root/.cache/pip
 
+ARG PYTORCH_CUDA_INDEX_URL=https://download.pytorch.org/whl/cu128
 ARG GIT_MODEL_DEPENDENCIES="git+https://github.com/facebookresearch/sam2.git"
 
 COPY --chown=user:user pyproject.toml README.md LICENSE /opt/app/
@@ -64,7 +65,7 @@ COPY --chown=user:user hs2p /opt/app/hs2p
 RUN python -m pip install \
       --no-cache-dir \
       --no-color \
-      --no-build-isolation \
+      --extra-index-url "${PYTORCH_CUDA_INDEX_URL}" \
       "/opt/app[all,sam2]" \
       ${GIT_MODEL_DEPENDENCIES} \
     && rm -rf /root/.cache/pip
