@@ -1,5 +1,10 @@
 # Documentation Notes
 
+## 2026-04-15
+
+- Split tissue preprocessing into an explicit mask-resolution step and a separate tiling step in `hs2p/preprocessing.py`.
+- Added a shared `ResolvedTissueMask` boundary so precomputed masks and on-the-fly segmentation feed the same tiling pipeline.
+
 ## 2026-04-12
 
 - Added package markers for `tests/` and `scripts/` so test modules can import shared helpers with explicit package-qualified paths.
