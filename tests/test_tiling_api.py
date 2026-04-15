@@ -82,6 +82,35 @@ def filter_config() -> FilterConfig:
     )
 
 
+@pytest.fixture(autouse=True)
+def _default_mask_resolution(monkeypatch):
+    def _fake_resolve_mask_for_request(request):
+        return api_mod._MaskResolutionResponse(
+            input_index=request.input_index,
+            whole_slide=request.whole_slide,
+            ok=True,
+            resolved_mask=preprocessing_mod.ResolvedTissueMask(
+                tissue_mask=np.zeros((8, 8), dtype=np.uint8),
+                tissue_method=(
+                    request.segmentation.method
+                    if request.segmentation is not None
+                    else "precomputed_mask"
+                ),
+                seg_downsample=(
+                    request.segmentation.downsample
+                    if request.segmentation is not None
+                    else 64
+                ),
+                seg_level=0,
+                seg_spacing_um=0.5,
+            ),
+            requested_backend=request.tiling.requested_backend,
+            backend=request.tiling.backend,
+        )
+
+    monkeypatch.setattr(api_mod, "_resolve_mask_for_request", _fake_resolve_mask_for_request)
+
+
 def _coords_array(result) -> np.ndarray:
     x = np.asarray(result.x, dtype=np.int64)
     y = np.asarray(result.y, dtype=np.int64)
@@ -251,7 +280,133 @@ def _patch_preprocess_slide(
             return result(**kwargs)
         return result
 
+    def _request_kwargs(request):
+        has_mask = request.whole_slide.mask_path is not None
+        segmentation = request.segmentation
+        return {
+            "image_path": request.whole_slide.image_path,
+            "sample_id": request.whole_slide.sample_id,
+            "tissue_mask_path": request.whole_slide.mask_path,
+            "tissue_method": (
+                segmentation.method if segmentation is not None else None
+            ),
+            "backend": request.tiling.backend,
+            "spacing_override": request.whole_slide.spacing_at_level_0,
+            "requested_tile_size_px": request.tiling.requested_tile_size_px,
+            "requested_spacing_um": request.tiling.requested_spacing_um,
+            "min_tissue_fraction": request.tiling.tissue_threshold,
+            "overlap": request.tiling.overlap,
+            "tolerance": request.tiling.tolerance,
+            "seg_downsample": (
+                segmentation.downsample if segmentation is not None else None
+            ),
+            "sthresh": segmentation.sthresh if segmentation is not None else None,
+            "sthresh_up": segmentation.sthresh_up if segmentation is not None else None,
+            "mthresh": segmentation.mthresh if segmentation is not None else None,
+            "close": segmentation.close if segmentation is not None else None,
+            "ref_tile_size_px": request.filtering.ref_tile_size,
+            "a_t": request.filtering.a_t,
+            "a_h": request.filtering.a_h,
+            "filter_white": request.filtering.filter_white,
+            "filter_black": request.filtering.filter_black,
+            "white_threshold": request.filtering.white_threshold,
+            "black_threshold": request.filtering.black_threshold,
+            "fraction_threshold": request.filtering.fraction_threshold,
+            "filter_grayspace": request.filtering.filter_grayspace,
+            "grayspace_saturation_threshold": request.filtering.grayspace_saturation_threshold,
+            "grayspace_fraction_threshold": request.filtering.grayspace_fraction_threshold,
+            "filter_blur": request.filtering.filter_blur,
+            "blur_threshold": request.filtering.blur_threshold,
+            "qc_spacing_um": request.filtering.qc_spacing_um,
+            "num_workers": request.num_workers,
+            "annotation": None,
+            "selection_strategy": (
+                CoordinateSelectionStrategy.MERGED_DEFAULT_TILING if has_mask else None
+            ),
+            "output_mode": (
+                CoordinateOutputMode.SINGLE_OUTPUT if has_mask else None
+            ),
+            "sam2_checkpoint_path": (
+                segmentation.sam2_checkpoint_path if segmentation is not None else None
+            ),
+            "sam2_config_path": (
+                segmentation.sam2_config_path if segmentation is not None else None
+            ),
+            "sam2_device": (
+                segmentation.sam2_device if segmentation is not None else None
+            ),
+        }
+
+    def _fake_resolve_mask_for_request(request):
+        if error is not None:
+            raise error
+        return api_mod._MaskResolutionResponse(
+            input_index=request.input_index,
+            whole_slide=request.whole_slide,
+            ok=True,
+            resolved_mask=preprocessing_mod.ResolvedTissueMask(
+                tissue_mask=np.zeros((8, 8), dtype=np.uint8),
+                tissue_method=(
+                    request.segmentation.method
+                    if request.segmentation is not None
+                    else "precomputed_mask"
+                ),
+                seg_downsample=(
+                    request.segmentation.downsample
+                    if request.segmentation is not None
+                    else 64
+                ),
+                seg_level=0,
+                seg_spacing_um=0.5,
+            ),
+            requested_backend=request.tiling.requested_backend,
+            backend=request.tiling.backend,
+        )
+
+    def _fake_compute_tiling_result(
+        whole_slide,
+        *,
+        tiling,
+        segmentation,
+        resolved_mask=None,
+        filtering,
+        mask_preview_path,
+        preview_downsample=32,
+        mask_overlay_color=(157, 219, 129),
+        mask_overlay_alpha=0.5,
+        num_workers,
+    ):
+        payload = _request_kwargs(
+            SimpleNamespace(
+                whole_slide=whole_slide,
+                tiling=tiling,
+                segmentation=segmentation,
+                filtering=filtering,
+                num_workers=num_workers,
+            )
+        )
+        if hook is not None:
+            hook(payload)
+        if error is not None:
+            raise error
+        assert result is not None
+        out = result(**payload) if callable(result) else result
+        if mask_preview_path is not None:
+            api_mod._write_mask_preview(
+                wsi_path=out.image_path,
+                backend=out.backend,
+                mask_preview_path=mask_preview_path,
+                tissue_mask=out.tissue_mask,
+                downsample=preview_downsample,
+                tile_size_lv0=out.tile_size_lv0,
+                mask_overlay_color=mask_overlay_color,
+                mask_overlay_alpha=mask_overlay_alpha,
+            )
+        return out
+
     monkeypatch.setattr(api_mod, "preprocess_slide", _fake_preprocess_slide)
+    monkeypatch.setattr(api_mod, "_resolve_mask_for_request", _fake_resolve_mask_for_request)
+    monkeypatch.setattr(api_mod, "_compute_tiling_result", _fake_compute_tiling_result)
 
 
 def _save_valid_preprocessing_artifact(
@@ -745,6 +900,7 @@ def test_tile_slides_defers_preview_writes_until_after_next_slide_compute(
         *,
         tiling,
         segmentation,
+        resolved_mask=None,
         filtering,
         mask_preview_path,
         preview_downsample=32,
@@ -755,6 +911,7 @@ def test_tile_slides_defers_preview_writes_until_after_next_slide_compute(
         del (
             tiling,
             segmentation,
+            resolved_mask,
             filtering,
             mask_preview_path,
             preview_downsample,
@@ -1053,6 +1210,7 @@ def test_compute_request_passes_inner_workers_to_tile_extraction(
             tissue_threshold=0.1,
         ),
         segmentation=SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
+        resolved_mask=None,
         filtering=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
         mask_preview_path=None,
         output_dir=tmp_path,
@@ -1069,6 +1227,95 @@ def test_compute_request_passes_inner_workers_to_tile_extraction(
     assert response.ok
     assert seen["num_workers"] == 6
     assert seen["jpeg_backend"] == "pil"
+
+
+def test_tile_slides_resolves_all_masks_before_computing_any_slide(
+    monkeypatch,
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    events: list[str] = []
+
+    def _fake_resolve_mask_for_request(request):
+        events.append(f"resolve:{request.whole_slide.sample_id}")
+        return api_mod._MaskResolutionResponse(
+            input_index=request.input_index,
+            whole_slide=request.whole_slide,
+            ok=True,
+            resolved_mask=preprocessing_mod.ResolvedTissueMask(
+                tissue_mask=np.zeros((8, 8), dtype=np.uint8),
+                tissue_method="hsv",
+                seg_downsample=64,
+                seg_level=0,
+                seg_spacing_um=0.5,
+            ),
+            requested_backend=request.tiling.requested_backend,
+            backend=request.tiling.backend,
+        )
+
+    def _fake_compute_tiling_result(
+        whole_slide,
+        *,
+        tiling,
+        segmentation,
+        resolved_mask=None,
+        filtering,
+        mask_preview_path,
+        preview_downsample=32,
+        mask_overlay_color=(157, 219, 129),
+        mask_overlay_alpha=0.5,
+        num_workers,
+    ):
+        del (
+            tiling,
+            segmentation,
+            filtering,
+            mask_preview_path,
+            preview_downsample,
+            mask_overlay_color,
+            mask_overlay_alpha,
+            num_workers,
+        )
+        assert resolved_mask is not None
+        events.append(f"compute:{whole_slide.sample_id}")
+        return _build_result(
+            sample_id=whole_slide.sample_id,
+            image_path=str(whole_slide.image_path),
+        )
+
+    monkeypatch.setattr(api_mod, "_resolve_mask_for_request", _fake_resolve_mask_for_request)
+    monkeypatch.setattr(api_mod, "_compute_tiling_result", _fake_compute_tiling_result)
+    monkeypatch.setattr(
+        api_mod,
+        "save_tiling_result",
+        lambda result, output_dir, tiles_dir=None: TilingArtifacts(
+            sample_id=result.sample_id,
+            coordinates_npz_path=Path(output_dir) / "tiles" / f"{result.sample_id}.coordinates.npz",
+            coordinates_meta_path=Path(output_dir) / "tiles" / f"{result.sample_id}.coordinates.meta.json",
+            num_tiles=len(result.x),
+        ),
+    )
+
+    tile_slides(
+        [
+            SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs")),
+            SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
+        ],
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        output_dir=tmp_path,
+        num_workers=1,
+    )
+
+    assert events == [
+        "resolve:slide-1",
+        "resolve:slide-2",
+        "compute:slide-1",
+        "compute:slide-2",
+    ]
 
 
 def test_tile_slides_defaults_gpu_decode_to_disabled_for_saved_tiles(

@@ -8,6 +8,8 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
+import hs2p.api as api_mod
+import hs2p.preprocessing as preprocessing_mod
 from hs2p.api import SlideSpec, TilingArtifacts, tile_slides
 from hs2p.configs import FilterConfig, SegmentationConfig, TilingConfig
 import hs2p.cli.tiling as tiling_mod
@@ -442,8 +444,24 @@ def test_tile_slides_emits_progress_for_reused_success_and_failure(
             mask_preview_path=None,
             requested_backend=None,
             backend=None,
-            error="boom",
-            traceback_text="traceback",
+                error="boom",
+                traceback_text="traceback",
+            )
+
+    def _fake_resolve_mask_for_request(request):
+        return api_mod._MaskResolutionResponse(
+            input_index=request.input_index,
+            whole_slide=request.whole_slide,
+            ok=True,
+            resolved_mask=preprocessing_mod.ResolvedTissueMask(
+                tissue_mask=np.zeros((8, 8), dtype=np.uint8),
+                tissue_method="hsv",
+                seg_downsample=64,
+                seg_level=0,
+                seg_spacing_um=0.5,
+            ),
+            requested_backend=request.tiling.requested_backend,
+            backend=request.tiling.backend,
         )
 
     monkeypatch.setattr("hs2p.api.validate_tiling_artifacts", _fake_validate_tiling_artifacts)
@@ -451,6 +469,7 @@ def test_tile_slides_emits_progress_for_reused_success_and_failure(
         "hs2p.api._compute_and_save_tiling_artifacts_from_request",
         _fake_compute_and_save,
     )
+    monkeypatch.setattr("hs2p.api._resolve_mask_for_request", _fake_resolve_mask_for_request)
 
     with progress.activate_progress_reporter(reporter):
         tile_slides(

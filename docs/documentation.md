@@ -4,6 +4,7 @@
 
 - Split tissue preprocessing into an explicit mask-resolution step and a separate tiling step in `hs2p/preprocessing.py`.
 - Added a shared `ResolvedTissueMask` boundary so precomputed masks and on-the-fly segmentation feed the same tiling pipeline.
+- Made `tile_slides(...)` resolve masks for the whole batch before starting tiling work, while keeping `tile_slide(...)` on the single-slide compatibility path.
 
 ## 2026-04-12
 

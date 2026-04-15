@@ -36,8 +36,12 @@ from hs2p.wsi import (
 from hs2p.wsi.backend import resolve_backend
 from hs2p.wsi.reader import BatchRegionReader
 from hs2p.preprocessing import (
+    ResolvedTissueMask,
     TilingResult,
+    build_tiling_result_from_mask,
     preprocess_slide,
+    resolve_tissue_mask,
+    open_slide as open_preprocessing_slide,
 )
 from hs2p.artifacts import (
     CompatibilitySpec,
@@ -131,65 +135,115 @@ def _compute_tiling_result(
     mask_overlay_color: tuple[int, int, int] = (157, 219, 129),
     mask_overlay_alpha: float = 0.5,
     num_workers: int,
+    resolved_mask: ResolvedTissueMask | None = None,
 ) -> TilingResult:
     has_mask = whole_slide.mask_path is not None
     effective_segmentation = _resolve_effective_segmentation(
         whole_slide=whole_slide,
         segmentation=segmentation,
     )
-    preprocessing_result = preprocess_slide(
-        image_path=whole_slide.image_path,
-        sample_id=whole_slide.sample_id,
-        tissue_mask_path=whole_slide.mask_path,
+    if resolved_mask is None:
+        return preprocess_slide(
+            image_path=whole_slide.image_path,
+            sample_id=whole_slide.sample_id,
+            tissue_mask_path=whole_slide.mask_path,
+            backend=tiling.backend,
+            spacing_override=whole_slide.spacing_at_level_0,
+            requested_tile_size_px=tiling.requested_tile_size_px,
+            requested_spacing_um=tiling.requested_spacing_um,
+            tissue_method=effective_segmentation.method,
+            sthresh=effective_segmentation.sthresh,
+            sthresh_up=effective_segmentation.sthresh_up,
+            mthresh=effective_segmentation.mthresh,
+            close=effective_segmentation.close,
+            sam2_checkpoint_path=effective_segmentation.sam2_checkpoint_path,
+            sam2_config_path=effective_segmentation.sam2_config_path,
+            sam2_device=effective_segmentation.sam2_device,
+            min_tissue_fraction=tiling.tissue_threshold,
+            overlap=tiling.overlap,
+            seg_downsample=effective_segmentation.downsample,
+            tolerance=tiling.tolerance,
+            ref_tile_size_px=filtering.ref_tile_size,
+            a_t=filtering.a_t,
+            a_h=filtering.a_h,
+            filter_white=filtering.filter_white,
+            filter_black=filtering.filter_black,
+            white_threshold=filtering.white_threshold,
+            black_threshold=filtering.black_threshold,
+            fraction_threshold=filtering.fraction_threshold,
+            filter_grayspace=filtering.filter_grayspace,
+            grayspace_saturation_threshold=filtering.grayspace_saturation_threshold,
+            grayspace_fraction_threshold=filtering.grayspace_fraction_threshold,
+            filter_blur=filtering.filter_blur,
+            blur_threshold=filtering.blur_threshold,
+            qc_spacing_um=filtering.qc_spacing_um,
+            num_workers=num_workers,
+            annotation=None,
+            selection_strategy=(
+                CoordinateSelectionStrategy.MERGED_DEFAULT_TILING if has_mask else None
+            ),
+            output_mode=(
+                CoordinateOutputMode.SINGLE_OUTPUT if has_mask else None
+            ),
+        )
+
+    slide = open_preprocessing_slide(
+        whole_slide.image_path,
         backend=tiling.backend,
         spacing_override=whole_slide.spacing_at_level_0,
-        requested_tile_size_px=tiling.requested_tile_size_px,
-        requested_spacing_um=tiling.requested_spacing_um,
-        tissue_method=effective_segmentation.method,
-        sthresh=effective_segmentation.sthresh,
-        sthresh_up=effective_segmentation.sthresh_up,
-        mthresh=effective_segmentation.mthresh,
-        close=effective_segmentation.close,
-        sam2_checkpoint_path=effective_segmentation.sam2_checkpoint_path,
-        sam2_config_path=effective_segmentation.sam2_config_path,
-        sam2_device=effective_segmentation.sam2_device,
-        min_tissue_fraction=tiling.tissue_threshold,
-        overlap=tiling.overlap,
-        seg_downsample=effective_segmentation.downsample,
-        tolerance=tiling.tolerance,
-        ref_tile_size_px=filtering.ref_tile_size,
-        a_t=filtering.a_t,
-        a_h=filtering.a_h,
-        filter_white=filtering.filter_white,
-        filter_black=filtering.filter_black,
-        white_threshold=filtering.white_threshold,
-        black_threshold=filtering.black_threshold,
-        fraction_threshold=filtering.fraction_threshold,
-        filter_grayspace=filtering.filter_grayspace,
-        grayspace_saturation_threshold=filtering.grayspace_saturation_threshold,
-        grayspace_fraction_threshold=filtering.grayspace_fraction_threshold,
-        filter_blur=filtering.filter_blur,
-        blur_threshold=filtering.blur_threshold,
-        qc_spacing_um=filtering.qc_spacing_um,
-        num_workers=num_workers,
-        selection_strategy=(
-            CoordinateSelectionStrategy.MERGED_DEFAULT_TILING if has_mask else None
-        ),
-        output_mode=(
-            CoordinateOutputMode.SINGLE_OUTPUT if has_mask else None
-        ),
     )
-    _write_mask_preview(
-        wsi_path=preprocessing_result.image_path,
-        backend=preprocessing_result.backend,
-        mask_preview_path=mask_preview_path,
-        tissue_mask=preprocessing_result.tissue_mask,
-        downsample=preview_downsample,
-        tile_size_lv0=preprocessing_result.tile_size_lv0,
-        mask_overlay_color=mask_overlay_color,
-        mask_overlay_alpha=mask_overlay_alpha,
-    )
-    return preprocessing_result
+    try:
+        preprocessing_result = build_tiling_result_from_mask(
+            slide=slide,
+            resolved_mask=resolved_mask,
+            image_path=whole_slide.image_path,
+            backend=slide.backend_name,
+            requested_backend=tiling.requested_backend,
+            sample_id=whole_slide.sample_id,
+            requested_tile_size_px=tiling.requested_tile_size_px,
+            requested_spacing_um=tiling.requested_spacing_um,
+            min_tissue_fraction=tiling.tissue_threshold,
+            overlap=tiling.overlap,
+            tolerance=tiling.tolerance,
+            seg_sthresh=effective_segmentation.sthresh,
+            seg_sthresh_up=effective_segmentation.sthresh_up,
+            seg_mthresh=effective_segmentation.mthresh,
+            seg_close=effective_segmentation.close,
+            ref_tile_size_px=filtering.ref_tile_size,
+            a_t=filtering.a_t,
+            a_h=filtering.a_h,
+            filter_white=filtering.filter_white,
+            filter_black=filtering.filter_black,
+            white_threshold=filtering.white_threshold,
+            black_threshold=filtering.black_threshold,
+            fraction_threshold=filtering.fraction_threshold,
+            filter_grayspace=filtering.filter_grayspace,
+            grayspace_saturation_threshold=filtering.grayspace_saturation_threshold,
+            grayspace_fraction_threshold=filtering.grayspace_fraction_threshold,
+            filter_blur=filtering.filter_blur,
+            blur_threshold=filtering.blur_threshold,
+            qc_spacing_um=filtering.qc_spacing_um,
+            num_workers=num_workers,
+            selection_strategy=(
+                CoordinateSelectionStrategy.MERGED_DEFAULT_TILING if has_mask else None
+            ),
+            output_mode=(
+                CoordinateOutputMode.SINGLE_OUTPUT if has_mask else None
+            ),
+        )
+        _write_mask_preview(
+            wsi_path=preprocessing_result.image_path,
+            backend=preprocessing_result.backend,
+            mask_preview_path=mask_preview_path,
+            tissue_mask=preprocessing_result.tissue_mask,
+            downsample=preview_downsample,
+            tile_size_lv0=preprocessing_result.tile_size_lv0,
+            mask_overlay_color=mask_overlay_color,
+            mask_overlay_alpha=mask_overlay_alpha,
+        )
+        return preprocessing_result
+    finally:
+        slide.close()
 
 
 def tile_slide(
@@ -214,19 +268,58 @@ def tile_slide(
         )
     effective_tiling = (
         tiling
-        if backend_selection.backend == tiling.requested_backend
-        else replace(tiling, backend=backend_selection.backend)
+    if backend_selection.backend == tiling.requested_backend
+    else replace(tiling, backend=backend_selection.backend)
     )
-    return _compute_tiling_result(
-        whole_slide,
-        tiling=effective_tiling,
+    effective_segmentation = _resolve_effective_segmentation(
+        whole_slide=whole_slide,
         segmentation=segmentation,
-        filtering=filtering,
-        mask_preview_path=None,
-        preview_downsample=32,
-        mask_overlay_color=(157, 219, 129),
-        mask_overlay_alpha=0.5,
+    )
+    return preprocess_slide(
+        image_path=whole_slide.image_path,
+        sample_id=whole_slide.sample_id,
+        tissue_mask_path=whole_slide.mask_path,
+        backend=effective_tiling.backend,
+        spacing_override=whole_slide.spacing_at_level_0,
+        requested_tile_size_px=effective_tiling.requested_tile_size_px,
+        requested_spacing_um=effective_tiling.requested_spacing_um,
+        tissue_method=effective_segmentation.method,
+        sthresh=effective_segmentation.sthresh,
+        sthresh_up=effective_segmentation.sthresh_up,
+        mthresh=effective_segmentation.mthresh,
+        close=effective_segmentation.close,
+        sam2_checkpoint_path=effective_segmentation.sam2_checkpoint_path,
+        sam2_config_path=effective_segmentation.sam2_config_path,
+        sam2_device=effective_segmentation.sam2_device,
+        min_tissue_fraction=effective_tiling.tissue_threshold,
+        overlap=effective_tiling.overlap,
+        seg_downsample=effective_segmentation.downsample,
+        tolerance=effective_tiling.tolerance,
+        ref_tile_size_px=filtering.ref_tile_size,
+        a_t=filtering.a_t,
+        a_h=filtering.a_h,
+        filter_white=filtering.filter_white,
+        filter_black=filtering.filter_black,
+        white_threshold=filtering.white_threshold,
+        black_threshold=filtering.black_threshold,
+        fraction_threshold=filtering.fraction_threshold,
+        filter_grayspace=filtering.filter_grayspace,
+        grayspace_saturation_threshold=filtering.grayspace_saturation_threshold,
+        grayspace_fraction_threshold=filtering.grayspace_fraction_threshold,
+        filter_blur=filtering.filter_blur,
+        blur_threshold=filtering.blur_threshold,
+        qc_spacing_um=filtering.qc_spacing_um,
         num_workers=num_workers,
+        selection_strategy=(
+            CoordinateSelectionStrategy.MERGED_DEFAULT_TILING
+            if whole_slide.mask_path is not None
+            else None
+        ),
+        output_mode=(
+            CoordinateOutputMode.SINGLE_OUTPUT
+            if whole_slide.mask_path is not None
+            else None
+        ),
     )
 
 
@@ -582,6 +675,7 @@ class _ComputeRequest:
     whole_slide: SlideSpec
     tiling: TilingConfig
     segmentation: SegmentationConfig | None
+    resolved_mask: ResolvedTissueMask | None
     filtering: FilterConfig
     mask_preview_path: Path | None
     output_dir: Path
@@ -605,6 +699,26 @@ class _ComputeResponse:
     requested_backend: str | None = None
     backend: str | None = None
     mask_preview_path: Path | None = None
+    error: str | None = None
+    traceback_text: str | None = None
+
+
+@dataclass(frozen=True)
+class _MaskResolutionRequest:
+    input_index: int
+    whole_slide: SlideSpec
+    tiling: TilingConfig
+    segmentation: SegmentationConfig | None
+
+
+@dataclass(frozen=True)
+class _MaskResolutionResponse:
+    input_index: int
+    whole_slide: SlideSpec
+    ok: bool
+    resolved_mask: ResolvedTissueMask | None = None
+    requested_backend: str | None = None
+    backend: str | None = None
     error: str | None = None
     traceback_text: str | None = None
 
@@ -726,6 +840,7 @@ def _compute_and_save_tiling_artifacts_from_request(
             mask_overlay_color=request.mask_overlay_color,
             mask_overlay_alpha=request.mask_overlay_alpha,
             num_workers=request.num_workers,
+            resolved_mask=request.resolved_mask,
         )
         tiles_tar_path: Path | None = None
         if request.save_tiles:
@@ -767,6 +882,67 @@ def _compute_and_save_tiling_artifacts_from_request(
         )
     except Exception as exc:
         return _ComputeResponse(
+            input_index=request.input_index,
+            whole_slide=request.whole_slide,
+            ok=False,
+            requested_backend=request.tiling.requested_backend,
+            backend=request.tiling.backend,
+            error=str(exc),
+            traceback_text=traceback.format_exc(),
+        )
+
+
+def _resolve_mask_for_request(
+    request: _MaskResolutionRequest,
+) -> _MaskResolutionResponse:
+    try:
+        effective_tiling = request.tiling
+        backend_selection = resolve_backend(
+            effective_tiling.backend,
+            wsi_path=request.whole_slide.image_path,
+            mask_path=request.whole_slide.mask_path,
+        )
+        effective_tiling = (
+            effective_tiling
+            if backend_selection.backend == effective_tiling.requested_backend
+            else replace(effective_tiling, backend=backend_selection.backend)
+        )
+        slide = open_preprocessing_slide(
+            request.whole_slide.image_path,
+            backend=effective_tiling.backend,
+            spacing_override=request.whole_slide.spacing_at_level_0,
+        )
+        try:
+            effective_segmentation = _resolve_effective_segmentation(
+                whole_slide=request.whole_slide,
+                segmentation=request.segmentation,
+            )
+            resolved_mask = resolve_tissue_mask(
+                slide=slide,
+                tissue_method=effective_segmentation.method,
+                tissue_mask_path=request.whole_slide.mask_path,
+                tissue_mask_tissue_value=1,
+                sthresh=effective_segmentation.sthresh,
+                sthresh_up=effective_segmentation.sthresh_up,
+                mthresh=effective_segmentation.mthresh,
+                close=effective_segmentation.close,
+                seg_downsample=effective_segmentation.downsample,
+                sam2_checkpoint_path=effective_segmentation.sam2_checkpoint_path,
+                sam2_config_path=effective_segmentation.sam2_config_path,
+                sam2_device=effective_segmentation.sam2_device,
+            )
+        finally:
+            slide.close()
+        return _MaskResolutionResponse(
+            input_index=request.input_index,
+            whole_slide=request.whole_slide,
+            ok=True,
+            resolved_mask=resolved_mask,
+            requested_backend=request.tiling.requested_backend,
+            backend=effective_tiling.backend,
+        )
+    except Exception as exc:
+        return _MaskResolutionResponse(
             input_index=request.input_index,
             whole_slide=request.whole_slide,
             ok=False,
@@ -942,6 +1118,7 @@ def tile_slides(
                 whole_slide=whole_slide,
                 tiling=effective_tiling,
                 segmentation=segmentation,
+                resolved_mask=None,
                 filtering=filtering,
                 mask_preview_path=mask_preview_path,
                 preview_downsample=(
@@ -976,6 +1153,56 @@ def tile_slides(
                     traceback_text=traceback.format_exc(),
                 )
             )
+    mask_resolution_requests = [
+        _MaskResolutionRequest(
+            input_index=request.input_index,
+            whole_slide=request.whole_slide,
+            tiling=request.tiling,
+            segmentation=request.segmentation,
+        )
+        for request in compute_requests
+    ]
+    resolved_masks: dict[int, ResolvedTissueMask] = {}
+    mask_failures: dict[int, _MaskResolutionResponse] = {}
+    if mask_resolution_requests:
+        use_mask_pool, mask_outer_workers, _ = _resolve_tiling_worker_allocation(
+            num_workers=num_workers,
+            compute_count=len(mask_resolution_requests),
+        )
+        def _resolve_mask_response(request: _MaskResolutionRequest) -> _MaskResolutionResponse:
+            try:
+                return _resolve_mask_for_request(request)
+            except Exception as exc:
+                return _MaskResolutionResponse(
+                    input_index=request.input_index,
+                    whole_slide=request.whole_slide,
+                    ok=False,
+                    requested_backend=request.tiling.requested_backend,
+                    backend=request.tiling.backend,
+                    error=str(exc),
+                    traceback_text=traceback.format_exc(),
+                )
+
+        if use_mask_pool:
+            with ThreadPoolExecutor(max_workers=mask_outer_workers) as pool:
+                mask_responses = list(
+                    pool.map(_resolve_mask_response, mask_resolution_requests)
+                )
+        else:
+            mask_responses = [
+                _resolve_mask_response(request)
+                for request in mask_resolution_requests
+            ]
+        for response in mask_responses:
+            if response.ok and response.resolved_mask is not None:
+                resolved_masks[response.input_index] = response.resolved_mask
+            else:
+                mask_failures[response.input_index] = response
+    compute_requests = [
+        replace(request, resolved_mask=resolved_masks.get(request.input_index))
+        for request in compute_requests
+        if request.input_index not in mask_failures
+    ]
     use_slide_pool, pool_processes, worker_inner_workers = _resolve_tiling_worker_allocation(
         num_workers=num_workers,
         compute_count=len(compute_requests),
@@ -1144,6 +1371,21 @@ def tile_slides(
                 )
                 continue
             assert planned.compute_request is not None
+            if planned.compute_request.input_index in mask_failures:
+                failure = mask_failures[planned.compute_request.input_index]
+                emit_progress_log(
+                    f"[tile_slides] FAILED {planned.whole_slide.sample_id}: {failure.error}",
+                )
+                _record_process_row(
+                    _build_failure_process_row(
+                        whole_slide=planned.whole_slide,
+                        error=failure.error or "unknown error",
+                        traceback_text=failure.traceback_text or "",
+                        requested_backend=failure.requested_backend,
+                        backend=failure.backend,
+                    )
+                )
+                continue
             response = _await_response(planned.compute_request.input_index)
             _process_compute_response(response)
 
@@ -1155,6 +1397,7 @@ def tile_slides(
                     whole_slide=request.whole_slide,
                     tiling=request.tiling,
                     segmentation=request.segmentation,
+                    resolved_mask=request.resolved_mask,
                     filtering=request.filtering,
                     mask_preview_path=request.mask_preview_path,
                     preview_downsample=request.preview_downsample,
@@ -1185,6 +1428,7 @@ def tile_slides(
                     whole_slide=request.whole_slide,
                     tiling=request.tiling,
                     segmentation=request.segmentation,
+                    resolved_mask=request.resolved_mask,
                     filtering=request.filtering,
                     mask_preview_path=request.mask_preview_path,
                     preview_downsample=request.preview_downsample,
