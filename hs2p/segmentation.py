@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +15,32 @@ DEFAULT_SAM2_MODEL_FILENAME = "model.pth"
 DEFAULT_SAM2_CONFIG_FILENAME = "sam2.1_hiera_t.yaml"
 DEFAULT_SAM2_INPUT_SIZE = 1024
 DEFAULT_SAM2_MASK_THRESHOLD = 0.0
+
+
+def _is_sam2_predictor_log(record: logging.LogRecord) -> bool:
+    if record.levelno >= logging.WARNING:
+        return True
+    pathname = Path(getattr(record, "pathname", "")).name
+    return pathname == "sam2_image_predictor.py"
+
+
+@contextlib.contextmanager
+def _suppress_non_predictor_logs():
+    root = logging.getLogger()
+    handlers = list(root.handlers)
+
+    class _Filter(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            return _is_sam2_predictor_log(record)
+
+    log_filter = _Filter()
+    for handler in handlers:
+        handler.addFilter(log_filter)
+    try:
+        yield
+    finally:
+        for handler in handlers:
+            handler.removeFilter(log_filter)
 
 
 def segment_tissue_image(
@@ -135,12 +163,13 @@ def _segment_sam2(
     device: str,
     sthresh_up: int,
 ) -> np.ndarray:
-    predictor = _build_sam2_predictor(
-        checkpoint_path=checkpoint_path,
-        config_path=config_path,
-        device=device,
-    )
-    mask = predictor.predict_mask(image)
+    with _suppress_non_predictor_logs():
+        predictor = _build_sam2_predictor(
+            checkpoint_path=checkpoint_path,
+            config_path=config_path,
+            device=device,
+        )
+        mask = predictor.predict_mask(image)
     return np.where(mask > 0, int(sthresh_up), 0).astype(np.uint8)
 
 
@@ -165,16 +194,17 @@ class _Sam2Predictor:
         config_path: Path | None,
         device: str,
     ) -> None:
-        self.device = _validate_sam2_device(device)
-        self.input_size = DEFAULT_SAM2_INPUT_SIZE
-        self.checkpoint_path = self._resolve_checkpoint_path(checkpoint_path)
-        self.config_path = self._resolve_config_path(config_path)
-        self._predictor = self._load_predictor(
-            checkpoint_path=self.checkpoint_path,
-            config_path=self.config_path,
-            device=self.device,
-            mask_threshold=DEFAULT_SAM2_MASK_THRESHOLD,
-        )
+        with _suppress_non_predictor_logs():
+            self.device = _validate_sam2_device(device)
+            self.input_size = DEFAULT_SAM2_INPUT_SIZE
+            self.checkpoint_path = self._resolve_checkpoint_path(checkpoint_path)
+            self.config_path = self._resolve_config_path(config_path)
+            self._predictor = self._load_predictor(
+                checkpoint_path=self.checkpoint_path,
+                config_path=self.config_path,
+                device=self.device,
+                mask_threshold=DEFAULT_SAM2_MASK_THRESHOLD,
+            )
 
     def _resolve_checkpoint_path(self, checkpoint_path: Path | None) -> Path:
         if checkpoint_path is not None:
@@ -262,21 +292,24 @@ class _Sam2Predictor:
         return predictor
 
     def predict_mask(self, image: np.ndarray) -> np.ndarray:
-        resized, original_shape = _resize_image_for_sam2(image, input_size=self.input_size)
-        self._predictor.set_image(resized)
-        height, width = resized.shape[:2]
-        bbox = np.array([0, 0, width, height], dtype=np.float32)
-        masks, _, _ = self._predictor.predict(
-            point_coords=None,
-            point_labels=None,
-            box=bbox,
-            multimask_output=False,
-            return_logits=False,
-        )
-        mask = np.asarray(masks[0], dtype=np.float32)
-        if mask.shape[:2] != original_shape:
-            mask = _resize_mask_from_sam2(mask, target_shape=original_shape)
-        return (mask > 0).astype(np.uint8)
+        with _suppress_non_predictor_logs():
+            resized, original_shape = _resize_image_for_sam2(
+                image, input_size=self.input_size
+            )
+            self._predictor.set_image(resized)
+            height, width = resized.shape[:2]
+            bbox = np.array([0, 0, width, height], dtype=np.float32)
+            masks, _, _ = self._predictor.predict(
+                point_coords=None,
+                point_labels=None,
+                box=bbox,
+                multimask_output=False,
+                return_logits=False,
+            )
+            mask = np.asarray(masks[0], dtype=np.float32)
+            if mask.shape[:2] != original_shape:
+                mask = _resize_mask_from_sam2(mask, target_shape=original_shape)
+            return (mask > 0).astype(np.uint8)
 
 
 def _resize_image_for_sam2(

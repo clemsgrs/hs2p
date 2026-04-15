@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 import pytest
@@ -108,3 +109,37 @@ def test_sam2_predictor_requires_huggingface_hub_for_automatic_asset_download(
             config_path=None,
             device="cpu",
         )
+
+
+def test_sam2_log_filter_keeps_predictor_messages_but_silences_httpx_noise():
+    predictor_record = logging.LogRecord(
+        name="root",
+        level=logging.INFO,
+        pathname="/tmp/site-packages/sam2/sam2_image_predictor.py",
+        lineno=102,
+        msg="For numpy array image, we assume (HxWxC) format",
+        args=(),
+        exc_info=None,
+    )
+    httpx_record = logging.LogRecord(
+        name="httpx._client",
+        level=logging.INFO,
+        pathname="/tmp/site-packages/httpx/_client.py",
+        lineno=1025,
+        msg="HTTP Request: HEAD ...",
+        args=(),
+        exc_info=None,
+    )
+    warning_record = logging.LogRecord(
+        name="httpx._client",
+        level=logging.WARNING,
+        pathname="/tmp/site-packages/httpx/_client.py",
+        lineno=1025,
+        msg="warning",
+        args=(),
+        exc_info=None,
+    )
+
+    assert segmentation_mod._is_sam2_predictor_log(predictor_record) is True
+    assert segmentation_mod._is_sam2_predictor_log(httpx_record) is False
+    assert segmentation_mod._is_sam2_predictor_log(warning_record) is True
