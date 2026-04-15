@@ -17,6 +17,27 @@ def _make_slide():
     )
 
 
+def _make_sam2_slide(level_downsamples, level_dimensions, spacing=0.25):
+    calls = []
+
+    def _read_region(location, level, size):
+        del location
+        calls.append((level, size))
+        return np.full((size[1], size[0], 3), fill_value=level, dtype=np.uint8)
+
+    return (
+        SimpleNamespace(
+            level_downsamples=level_downsamples,
+            spacing=spacing,
+            level_dimensions=level_dimensions,
+            dimensions=level_dimensions[0],
+            backend_name="asap",
+            read_region=_read_region,
+        ),
+        calls,
+    )
+
+
 def test_resolve_tissue_mask_uses_precomputed_mask_without_segmentation(
     monkeypatch,
 ):
@@ -55,6 +76,44 @@ def test_resolve_tissue_mask_uses_precomputed_mask_without_segmentation(
     assert resolved.mask_path == Path("mask.png")
     assert resolved.tissue_mask_tissue_value == 1
     assert not called["segment"]
+
+
+def test_prepare_sam2_thumbnail_uses_existing_level_when_within_tolerance():
+    slide, calls = _make_sam2_slide(
+        level_downsamples=[1.0, 32.0],
+        level_dimensions=[(256, 256), (8, 8)],
+        spacing=0.25,
+    )
+
+    thumbnail = preprocessing_mod.prepare_sam2_thumbnail(
+        slide=slide,
+        target_spacing_um=8.0,
+    )
+
+    assert calls == [(1, (8, 8))]
+    assert thumbnail.seg_level == 1
+    assert thumbnail.seg_spacing_um == 8.0
+    assert thumbnail.resized is False
+    assert thumbnail.image.shape == (8, 8, 3)
+
+
+def test_prepare_sam2_thumbnail_resizes_when_out_of_tolerance():
+    slide, calls = _make_sam2_slide(
+        level_downsamples=[1.0, 16.0],
+        level_dimensions=[(256, 256), (16, 16)],
+        spacing=0.25,
+    )
+
+    thumbnail = preprocessing_mod.prepare_sam2_thumbnail(
+        slide=slide,
+        target_spacing_um=8.0,
+    )
+
+    assert calls == [(1, (16, 16))]
+    assert thumbnail.seg_level == 1
+    assert thumbnail.seg_spacing_um == 8.0
+    assert thumbnail.resized is True
+    assert thumbnail.image.shape == (8, 8, 3)
 
 
 def test_resolve_tissue_mask_requires_an_explicit_method():
@@ -96,6 +155,44 @@ def test_resolve_tissue_mask_allows_precomputed_masks_without_a_method(
 
     assert resolved.tissue_method == "precomputed_mask"
     assert resolved.mask_path == Path("mask.png")
+
+
+def test_resolve_tissue_mask_uses_sam2_thumbnail_spacing(monkeypatch):
+    slide, calls = _make_sam2_slide(
+        level_downsamples=[1.0, 16.0],
+        level_dimensions=[(256, 256), (16, 16)],
+        spacing=0.25,
+    )
+    captured = {}
+
+    def _fake_segment_tissue_image(image, *, config):
+        captured["shape"] = image.shape
+        captured["method"] = config.method
+        captured["downsample"] = config.downsample
+        return np.ones(image.shape[:2], dtype=np.uint8)
+
+    monkeypatch.setattr(
+        preprocessing_mod,
+        "segment_tissue_image",
+        _fake_segment_tissue_image,
+    )
+
+    resolved = preprocessing_mod.resolve_tissue_mask(
+        slide=slide,
+        tissue_method="sam2",
+        tissue_mask_path=None,
+        seg_downsample=64,
+    )
+
+    assert calls == [(1, (16, 16))]
+    assert captured["shape"] == (8, 8, 3)
+    assert captured["method"] == "sam2"
+    assert captured["downsample"] == 32
+    assert resolved.tissue_method == "sam2"
+    assert resolved.seg_level == 1
+    assert resolved.seg_spacing_um == 8.0
+    assert resolved.seg_downsample == 32
+    assert resolved.tissue_mask.shape == (8, 8)
 
 
 def test_build_tiling_result_from_mask_preserves_resolved_mask_metadata():

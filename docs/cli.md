@@ -160,9 +160,11 @@ Detailed logs still go to `output_dir/logs/log.txt`.
 - `hsv` uses the existing HSV heuristic
 - `otsu` thresholds the saturation channel with Otsu
 - `threshold` applies a fixed saturation threshold
-- `sam2` runs SAM2 inference on the selected segmentation image
+- `sam2` runs SAM2 inference on an internal fixed `8.0 um/px` thumbnail
+  - hs2p chooses the thumbnail level in physical units first, then resizes to the requested spacing only if the nearest pyramid level is outside tolerance
   - if `sam2_checkpoint_path` is empty, hs2p downloads the default AtlasPatch checkpoint from Hugging Face
   - if `sam2_config_path` is empty, hs2p downloads the default AtlasPatch SAM2 config from Hugging Face
+  - `tiling.seg_params.downsample` is ignored by SAM2
 
 ### Tile pixel QC
 

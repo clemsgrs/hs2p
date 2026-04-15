@@ -6,6 +6,7 @@
 - Added a shared `ResolvedTissueMask` boundary so precomputed masks and on-the-fly segmentation feed the same tiling pipeline.
 - Made `tile_slides(...)` resolve masks for the whole batch before starting tiling work, while keeping `tile_slide(...)` on the single-slide compatibility path.
 - Added a dedicated Rich/text progress phase for batch tissue resolution so CLI runs show mask-prep progress before tiling starts.
+- Switched the SAM2 thumbnail path to a fixed internal `8.0 µm/px` target resolved through the existing spacing-level selection helper, instead of the old power-based thumbnail rule.
 
 ## 2026-04-12
 

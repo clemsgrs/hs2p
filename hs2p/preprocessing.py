@@ -19,6 +19,9 @@ from hs2p.wsi.geometry import project_discrete_grid_origins
 from hs2p.wsi.reader import open_slide, select_level, select_level_for_downsample
 from hs2p.tile_qc import filter_coordinate_tiles, needs_pixel_qc
 
+DEFAULT_SAM2_THUMBNAIL_SPACING_UM = 8.0
+DEFAULT_SAM2_THUMBNAIL_TOLERANCE = 0.05
+
 
 def _normalize_level_downsamples(
     level_downsamples: list[float] | list[tuple[float, float]],
@@ -54,6 +57,15 @@ class ResolvedTissueMask:
     def __post_init__(self) -> None:
         if self.mask_path is not None:
             object.__setattr__(self, "mask_path", Path(self.mask_path))
+
+
+@dataclass(frozen=True)
+class Sam2Thumbnail:
+    image: np.ndarray
+    seg_level: int
+    seg_spacing_um: float
+    source_spacing_um: float
+    resized: bool
 
 
 def detect_contours(
@@ -1021,6 +1033,70 @@ def load_precomputed_tissue_mask(
     return mask, mask_level, mask_spacing_um
 
 
+def prepare_sam2_thumbnail(
+    *,
+    slide,
+    target_spacing_um: float = DEFAULT_SAM2_THUMBNAIL_SPACING_UM,
+    tolerance: float = DEFAULT_SAM2_THUMBNAIL_TOLERANCE,
+) -> Sam2Thumbnail:
+    """Build the SAM2 thumbnail at a fixed physical spacing.
+
+    The slide pyramid is searched in microns-per-pixel space, and the selected
+    level is only resized when it falls outside the requested spacing tolerance.
+    """
+    normalized_downsamples = _normalize_level_downsamples(slide.level_downsamples)
+    level_sel = select_level(
+        requested_spacing_um=float(target_spacing_um),
+        level0_spacing_um=float(slide.spacing),
+        level_downsamples=[
+            (float(downsample), float(downsample))
+            for downsample in normalized_downsamples
+        ],
+        tolerance=float(tolerance),
+    )
+    seg_size = slide.level_dimensions[level_sel.level]
+    seg_image = np.asarray(slide.read_region((0, 0), level_sel.level, seg_size))
+    if seg_image.ndim != 3:
+        raise ValueError(
+            f"Expected SAM2 thumbnail to be RGB, got array with shape {seg_image.shape}"
+        )
+    if level_sel.is_within_tolerance:
+        return Sam2Thumbnail(
+            image=seg_image,
+            seg_level=level_sel.level,
+            seg_spacing_um=float(level_sel.read_spacing_um),
+            source_spacing_um=float(level_sel.read_spacing_um),
+            resized=False,
+        )
+
+    target_width = max(
+        1,
+        int(round(float(slide.dimensions[0]) * float(slide.spacing) / float(target_spacing_um))),
+    )
+    target_height = max(
+        1,
+        int(round(float(slide.dimensions[1]) * float(slide.spacing) / float(target_spacing_um))),
+    )
+    if target_width != int(seg_image.shape[1]) or target_height != int(seg_image.shape[0]):
+        interpolation = (
+            cv2.INTER_AREA
+            if target_width < int(seg_image.shape[1]) or target_height < int(seg_image.shape[0])
+            else cv2.INTER_CUBIC
+        )
+        seg_image = cv2.resize(
+            seg_image,
+            (target_width, target_height),
+            interpolation=interpolation,
+        )
+    return Sam2Thumbnail(
+        image=seg_image,
+        seg_level=level_sel.level,
+        seg_spacing_um=float(target_spacing_um),
+        source_spacing_um=float(level_sel.read_spacing_um),
+        resized=True,
+    )
+
+
 def resolve_tissue_mask(
     *,
     slide,
@@ -1036,14 +1112,13 @@ def resolve_tissue_mask(
     sam2_config_path: str | Path | None = None,
     sam2_device: str = "cpu",
 ) -> ResolvedTissueMask:
-    normalized_downsamples = _normalize_level_downsamples(slide.level_downsamples)
-    seg_level = select_level_for_downsample(
-        float(seg_downsample),
-        [(float(ds), float(ds)) for ds in normalized_downsamples],
-    )
-    seg_spacing_um = float(slide.spacing) * float(normalized_downsamples[seg_level])
-
     if tissue_mask_path is not None:
+        normalized_downsamples = _normalize_level_downsamples(slide.level_downsamples)
+        seg_level = select_level_for_downsample(
+            float(seg_downsample),
+            [(float(ds), float(ds)) for ds in normalized_downsamples],
+        )
+        seg_spacing_um = float(slide.spacing) * float(normalized_downsamples[seg_level])
         mask, mask_level, mask_spacing_um = load_precomputed_tissue_mask(
             mask_path=tissue_mask_path,
             slide=slide,
@@ -1067,11 +1142,26 @@ def resolve_tissue_mask(
             "tissue_method is required when no precomputed tissue mask is provided"
         )
 
-    seg_size = slide.level_dimensions[seg_level]
-    seg_image = slide.read_region((0, 0), seg_level, seg_size)
+    if str(tissue_method).lower() == "sam2":
+        thumbnail = prepare_sam2_thumbnail(slide=slide)
+        seg_image = thumbnail.image
+        seg_level = thumbnail.seg_level
+        seg_spacing_um = thumbnail.seg_spacing_um
+        effective_downsample = max(1, int(round(seg_spacing_um / float(slide.spacing))))
+    else:
+        normalized_downsamples = _normalize_level_downsamples(slide.level_downsamples)
+        seg_level = select_level_for_downsample(
+            float(seg_downsample),
+            [(float(ds), float(ds)) for ds in normalized_downsamples],
+        )
+        seg_spacing_um = float(slide.spacing) * float(normalized_downsamples[seg_level])
+        seg_size = slide.level_dimensions[seg_level]
+        seg_image = np.asarray(slide.read_region((0, 0), seg_level, seg_size))
+        effective_downsample = int(seg_downsample)
+
     segmentation_config = SegmentationConfig(
         method=tissue_method,
-        downsample=seg_downsample,
+        downsample=effective_downsample,
         sthresh=sthresh,
         sthresh_up=sthresh_up,
         mthresh=mthresh,
@@ -1091,7 +1181,7 @@ def resolve_tissue_mask(
     return ResolvedTissueMask(
         tissue_mask=mask,
         tissue_method=segmentation_config.method,
-        seg_downsample=seg_downsample,
+        seg_downsample=effective_downsample,
         seg_level=seg_level,
         seg_spacing_um=seg_spacing_um,
     )
@@ -1347,10 +1437,12 @@ __all__ = [
     "TileGeometry",
     "TilingResult",
     "ResolvedTissueMask",
+    "Sam2Thumbnail",
     "canonicalize_tiling_result",
     "detect_contours",
     "generate_tiles",
     "load_precomputed_tissue_mask",
+    "prepare_sam2_thumbnail",
     "resolve_tissue_mask",
     "build_tiling_result_from_mask",
     "normalize_artifact_path",
