@@ -186,12 +186,37 @@ def draw_grid_from_coordinates(
     return Image.fromarray(canvas)
 
 
-def pad_to_patch_size(canvas: Image.Image, patch_size: tuple[int, int]) -> Image.Image:
-    width, height = canvas.size
+def pad_to_patch_size(
+    canvas: Image.Image | np.ndarray,
+    patch_size: tuple[int, int],
+    *,
+    fill: int | tuple[int, ...] = (255, 255, 255),
+):
+    width = canvas.size[0] if isinstance(canvas, Image.Image) else int(canvas.shape[1])
+    height = canvas.size[1] if isinstance(canvas, Image.Image) else int(canvas.shape[0])
     pad_width = (patch_size[0] - (width % patch_size[0])) % patch_size[0]
     pad_height = (patch_size[1] - (height % patch_size[1])) % patch_size[1]
-    return ImageOps.expand(
-        canvas,
-        (0, 0, pad_width, pad_height),
-        fill=(255, 255, 255),
+    if isinstance(canvas, Image.Image):
+        image_fill = fill
+        if canvas.mode in {"L", "I", "F"} and isinstance(fill, tuple):
+            image_fill = fill[0]
+        return ImageOps.expand(
+            canvas,
+            (0, 0, pad_width, pad_height),
+            fill=image_fill,
+        )
+    if canvas.ndim == 2:
+        padded = np.full(
+            (height + pad_height, width + pad_width),
+            fill,
+            dtype=canvas.dtype,
+        )
+        padded[:height, :width] = canvas
+        return padded
+    padded = np.full(
+        (height + pad_height, width + pad_width, canvas.shape[2]),
+        fill,
+        dtype=canvas.dtype,
     )
+    padded[:height, :width, :] = canvas
+    return padded

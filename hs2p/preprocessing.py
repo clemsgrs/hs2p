@@ -257,6 +257,7 @@ class TilingResult:
     tissue_mask_tissue_value: int | None = None
     mask_level: int | None = None
     mask_spacing_um: float | None = None
+    contours: ContourResult | None = None
     annotation: str | None = None
     selection_strategy: str | None = None
     output_mode: str | None = None
@@ -1326,6 +1327,7 @@ def build_tiling_result_from_mask(
         tissue_mask_tissue_value=resolved_mask.tissue_mask_tissue_value,
         mask_level=resolved_mask.mask_level,
         mask_spacing_um=resolved_mask.mask_spacing_um,
+        contours=contours,
         annotation=annotation,
         selection_strategy=selection_strategy,
         output_mode=output_mode,
