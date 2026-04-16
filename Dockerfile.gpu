@@ -1,34 +1,56 @@
-FROM ubuntu:22.04
+ARG UBUNTU_VERSION=22.04
+ARG CUDA_MAJOR_VERSION=12.8.1
+
+FROM nvidia/cuda:${CUDA_MAJOR_VERSION}-cudnn-runtime-ubuntu${UBUNTU_VERSION}
 
 ARG USER_UID=1001
 ARG USER_GID=1001
 
+# ensures that Python output to stdout/stderr is not buffered: prevents missing information when terminating
 ENV PYTHONUNBUFFERED=1
-ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=Europe/Amsterdam
-ENV PATH="/home/user/.local/bin:${PATH}"
+ENV DEBIAN_FRONTEND=noninteractive TZ=Europe/Amsterdam
 
-# Create user and I/O dirs
+USER root
+
+# create user and I/O dirs
 RUN groupadd --gid ${USER_GID} user \
     && useradd -m --no-log-init --uid ${USER_UID} --gid ${USER_GID} user \
     && mkdir /input /output \
     && chown user:user /input /output
 
-WORKDIR /opt/app
+# set /home/user as working directory
+WORKDIR /home/user
+ENV PATH="/home/user/.local/bin:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libtiff-dev \
-    zlib1g-dev \
-    curl \
     cmake \
+    zlib1g-dev \
+    libnuma1 \
+    libspatialindex-dev \
+    curl \
     vim screen \
     zip unzip \
     git \
     openssh-server \
+    software-properties-common \
     build-essential \
     ninja-build \
-    python3-pip python3-dev python-is-python3 \
+    && mkdir /var/run/sshd \
     && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3.11 \
+        python3.11-dev \
+        python3.11-venv \
+        python3.11-distutils \
+    && ln -sf /usr/bin/python3.11 /usr/local/bin/python3 \
+    && ln -sf /usr/bin/python3.11 /usr/bin/python3 \
+    && ln -sf /usr/bin/python3.11 /usr/local/bin/python \
+    && ln -sf /usr/bin/python3.11 /usr/bin/python \
     && rm -rf /var/lib/apt/lists/*
 
 # libjpeg-turbo 3.x (required by PyTurboJPEG>=2)
@@ -53,15 +75,22 @@ RUN set -eux; \
     apt-get clean; \
     rm -rf /var/lib/apt/lists/*
 
-# Python deps & pyproject-based package install
-RUN python -m pip install --upgrade pip "setuptools>=61" wheel pip-tools \
-    && rm -rf /root/.cache/pip
+WORKDIR /opt/app/
 
 ARG PYTORCH_CUDA_INDEX_URL=https://download.pytorch.org/whl/cu128
 ARG GIT_MODEL_DEPENDENCIES="git+https://github.com/facebookresearch/sam2.git"
 
-COPY --chown=user:user pyproject.toml README.md LICENSE /opt/app/
+RUN python -m ensurepip --upgrade \
+    && python -m pip install --upgrade pip setuptools pip-tools \
+    && python -m pip install hatchling psutil \
+    && rm -rf /home/user/.cache/pip
+
+# install slide2vec with all model extras
 COPY --chown=user:user hs2p /opt/app/hs2p
+COPY --chown=user:user pyproject.toml /opt/app/pyproject.toml
+COPY --chown=user:user README.md /opt/app/README.md
+COPY --chown=user:user LICENSE /opt/app/LICENSE
+
 RUN python -m pip install \
       --no-cache-dir \
       --no-color \

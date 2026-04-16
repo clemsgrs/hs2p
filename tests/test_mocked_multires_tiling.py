@@ -13,13 +13,12 @@ from tests.helpers.fake_wsi_backend import FakePyramidWSI, FakeReaderFactory, Py
 
 def _segmentation_config() -> SegmentationConfig:
     return SegmentationConfig(
+        method="threshold",
         downsample=2,
         sthresh=8,
         sthresh_up=255,
         mthresh=3,
         close=0,
-        use_otsu=False,
-        use_hsv=False,
     )
 
 
@@ -296,13 +295,12 @@ def test_extract_coordinates_segments_maskless_slides_without_annotation_pct_cra
         mask_path=None,
         backend="asap",
         segment_params=SegmentationConfig(
+            method="threshold",
             downsample=2,
             sthresh=8,
             sthresh_up=255,
             mthresh=3,
             close=0,
-            use_otsu=False,
-            use_hsv=False,
         ),
         tiling_params=_tiling_config(tissue_threshold=0.0),
         filter_params=_filter_config(),

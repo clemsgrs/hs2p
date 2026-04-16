@@ -41,13 +41,12 @@ def _build_tiling_configs(
         backend=backend,
     )
     segmentation = SegmentationConfig(
+        method="hsv",
         downsample=64,
         sthresh=8,
         sthresh_up=255,
         mthresh=7,
         close=4,
-        use_otsu=False,
-        use_hsv=True,
     )
     filtering = FilterConfig(
         ref_tile_size=224,

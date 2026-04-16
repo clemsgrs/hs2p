@@ -18,18 +18,21 @@ tiling:
     overlap: 0.0 # percentage of overlap between two consecutive tiles (float between 0 and 1)
     tissue_threshold: 0.01 # minimum fraction of pixels that must be tissue to keep a tile (float between 0 and 1)
   seg_params:
+    method: "hsv" # tissue segmentation method: hsv, otsu, threshold, or sam2
     # downsample: controls which pyramid level is read for tissue segmentation.
     # A larger value reads a smaller thumbnail → faster segmentation and a smaller in-memory mask.
     # A smaller value reads a higher-resolution thumbnail → slower but more precise tissue boundaries.
     # Practically, values below 16 rarely improve tile selection meaningfully while being significantly slower.
     # Speed impact: thumbnail read time and cv2.integral() cost both scale with the mask area (∝ 1/downsample²).
     downsample: 64 # find the closest downsample in the slide for tissue segmentation
-    sthresh: 8 # segmentation threshold (positive integer, using a higher threshold leads to less foreground and more background detection) (not used when use_otsu=True)
+    sthresh: 8 # threshold used by method=threshold
     sthresh_up: 255 # upper threshold value for scaling the binary mask
-    mthresh: 7 # median filter size (positive, odd integer)
+    mthresh: 7 # median filter size used by threshold/otsu methods (positive, odd integer)
     close: 4 # additional morphological closing to apply following initial thresholding (positive integer)
-    use_otsu: false # use otsu's method instead of simple binary thresholding
-    use_hsv: true # use HSV thresholding instead of simple binary thresholding
+    sam2_checkpoint_path: # optional when method=sam2; if empty, hs2p downloads the default AtlasPatch checkpoint from Hugging Face
+    sam2_config_path: # optional local override for the SAM2 model config yaml; if empty, hs2p downloads the default AtlasPatch config from Hugging Face
+    sam2_device: "cpu" # device for SAM2 inference, e.g. cpu, cuda, cuda:0
+    # SAM2 ignores seg_params.downsample and instead uses a fixed internal 8.0 µm/px thumbnail.
   filter_params:
     ref_tile_size: 16 # reference tile size at the target spacing
     a_t: 4 # area filter threshold for tissue (positive integer, the minimum size of detected foreground contours to consider, relative to the reference tile size ref_tile_size, e.g. a value 10 means only detected foreground contours of size greater than 10 [ref_tile_size, ref_tile_size] tiles at the target spacing will be kept)

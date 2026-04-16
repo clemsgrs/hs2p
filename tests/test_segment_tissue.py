@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+import hs2p.segmentation as segmentation_mod
 import hs2p.wsi.wsi as wsimod
 
 
@@ -34,29 +35,29 @@ def _patch_cv2_passthrough(monkeypatch):
 
 
 _SEG_PARAMS = SimpleNamespace(
+    method="threshold",
     downsample=64,
     sthresh=8,
     sthresh_up=255,
     mthresh=7,
     close=0,
-    use_otsu=False,
-    use_hsv=False,
 )
 
 
 def test_segment_tissue_strips_alpha_channel_before_hsv_conversion(monkeypatch):
-    """Alpha channel is stripped before cvtColor so it receives a 3-channel image."""
+    """Alpha channel is stripped before the shared segmentation helper receives the image."""
     dummy = _make_dummy(raw_spacings=[0.5])
     dummy.get_slide = lambda level: np.zeros((2, 2, 4), dtype=np.uint8)
 
     captured_shape: dict = {}
 
     def _fake_cvt_color(img, code):
+        del code
         captured_shape["shape"] = img.shape
         return np.zeros((2, 2, 3), dtype=np.uint8)
 
     _patch_cv2_passthrough(monkeypatch)
-    monkeypatch.setattr(wsimod.cv2, "cvtColor", _fake_cvt_color)
+    monkeypatch.setattr(segmentation_mod.cv2, "cvtColor", _fake_cvt_color)
 
     seg_level = wsimod.WSI.segment_tissue(dummy, _SEG_PARAMS)
 
@@ -84,7 +85,11 @@ def test_segment_tissue_reads_from_correct_seg_level(monkeypatch):
     dummy = _make_dummy(raw_spacings=[0.5, 1.0, 2.0, 4.0, 8.0], seg_level=4)
     dummy.get_slide = lambda level: (levels_read.append(level), np.zeros((2, 2, 3), dtype=np.uint8))[1]
 
-    _patch_cv2_passthrough(monkeypatch)
+    monkeypatch.setattr(
+        wsimod,
+        "segment_tissue_image",
+        lambda img, *, config: np.ones(img.shape[:2], dtype=np.uint8),
+    )
 
     wsimod.WSI.segment_tissue(dummy, _SEG_PARAMS)
 

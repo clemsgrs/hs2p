@@ -8,6 +8,8 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
+import hs2p.api as api_mod
+import hs2p.preprocessing as preprocessing_mod
 from hs2p.api import SlideSpec, TilingArtifacts, tile_slides
 from hs2p.configs import FilterConfig, SegmentationConfig, TilingConfig
 import hs2p.cli.tiling as tiling_mod
@@ -146,13 +148,12 @@ def _tiling_config() -> TilingConfig:
 
 def _segmentation_config() -> SegmentationConfig:
     return SegmentationConfig(
+        method="hsv",
         downsample=64,
         sthresh=8,
         sthresh_up=255,
         mthresh=7,
         close=4,
-        use_otsu=False,
-        use_hsv=True,
     )
 
 
@@ -259,6 +260,41 @@ def test_rich_tiling_summary_uses_zero_tile_label_without_process_list(monkeypat
         ("Zero-tile", "4"),
         ("Total tiles", "7"),
     ]
+
+
+def test_rich_tissue_progress_uses_a_separate_task(monkeypatch):
+    import hs2p.progress as progress
+
+    _install_fake_rich_console(monkeypatch, is_terminal=True)
+    _install_fake_rich_progress(monkeypatch)
+    _install_fake_rich_summary_types(monkeypatch)
+
+    class FakeConsole:
+        def print(self, *args, **kwargs):
+            return None
+
+    reporter = progress.RichReporter(output_dir="out", console=FakeConsole())
+
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="tissue.started",
+            payload={"total": 3},
+        )
+    )
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="tissue.progress",
+            payload={
+                "total": 3,
+                "completed": 2,
+                "failed": 1,
+                "pending": 0,
+            },
+        )
+    )
+
+    assert reporter.progress.tasks[1]["description"] == "Tissue masks (2/3 resolved)"
+    assert reporter.progress.tasks[1]["completed"] == 3
 
 
 def test_rich_sampling_summary_shows_zero_tile_and_total_tiles(monkeypatch):
@@ -443,8 +479,24 @@ def test_tile_slides_emits_progress_for_reused_success_and_failure(
             mask_preview_path=None,
             requested_backend=None,
             backend=None,
-            error="boom",
-            traceback_text="traceback",
+                error="boom",
+                traceback_text="traceback",
+            )
+
+    def _fake_resolve_mask_for_request(request):
+        return api_mod._MaskResolutionResponse(
+            input_index=request.input_index,
+            whole_slide=request.whole_slide,
+            ok=True,
+            resolved_mask=preprocessing_mod.ResolvedTissueMask(
+                tissue_mask=np.zeros((8, 8), dtype=np.uint8),
+                tissue_method="hsv",
+                seg_downsample=64,
+                seg_level=0,
+                seg_spacing_um=0.5,
+            ),
+            requested_backend=request.tiling.requested_backend,
+            backend=request.tiling.backend,
         )
 
     monkeypatch.setattr("hs2p.api.validate_tiling_artifacts", _fake_validate_tiling_artifacts)
@@ -452,6 +504,7 @@ def test_tile_slides_emits_progress_for_reused_success_and_failure(
         "hs2p.api._compute_and_save_tiling_artifacts_from_request",
         _fake_compute_and_save,
     )
+    monkeypatch.setattr("hs2p.api._resolve_mask_for_request", _fake_resolve_mask_for_request)
 
     with progress.activate_progress_reporter(reporter):
         tile_slides(
@@ -464,6 +517,10 @@ def test_tile_slides_emits_progress_for_reused_success_and_failure(
         )
 
     assert [event.kind for event in reporter.events] == [
+        "tissue.started",
+        "tissue.progress",
+        "tissue.progress",
+        "tissue.finished",
         "tiling.started",
         "tiling.progress",
         "tiling.progress",

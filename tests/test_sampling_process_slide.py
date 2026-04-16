@@ -102,13 +102,12 @@ def test_independent_sampling_without_previews_does_not_crash(monkeypatch, tmp_p
             backend="asap",
         ),
         segmentation_config=sampling_mod.SegmentationConfig(
+            method="hsv",
             downsample=64,
             sthresh=8,
             sthresh_up=255,
             mthresh=7,
             close=4,
-            use_otsu=False,
-            use_hsv=True,
         ),
         filter_config=sampling_mod.FilterConfig(
             ref_tile_size=16,
@@ -187,13 +186,12 @@ def test_process_slide_accepts_resolved_sampling_spec(monkeypatch, tmp_path):
             backend="asap",
         ),
         segmentation_config=sampling_mod.SegmentationConfig(
+            method="hsv",
             downsample=64,
             sthresh=8,
             sthresh_up=255,
             mthresh=7,
             close=4,
-            use_otsu=False,
-            use_hsv=True,
         ),
         filter_config=sampling_mod.FilterConfig(
             ref_tile_size=16,
@@ -278,13 +276,12 @@ def test_process_slide_success_rows_include_backend_provenance(monkeypatch, tmp_
             backend="auto",
         ),
         segmentation_config=sampling_mod.SegmentationConfig(
+            method="hsv",
             downsample=64,
             sthresh=8,
             sthresh_up=255,
             mthresh=7,
             close=4,
-            use_otsu=False,
-            use_hsv=True,
         ),
         filter_config=sampling_mod.FilterConfig(
             ref_tile_size=16,
@@ -357,13 +354,12 @@ def test_process_slide_failure_rows_include_backend_provenance(monkeypatch, tmp_
             backend="auto",
         ),
         segmentation_config=sampling_mod.SegmentationConfig(
+            method="hsv",
             downsample=64,
             sthresh=8,
             sthresh_up=255,
             mthresh=7,
             close=4,
-            use_otsu=False,
-            use_hsv=True,
         ),
         filter_config=sampling_mod.FilterConfig(
             ref_tile_size=16,
@@ -401,7 +397,7 @@ def test_sampling_main_uses_shared_config_resolvers(monkeypatch, tmp_path):
                 overlap=0.0,
                 tissue_threshold=0.1,
             ),
-            seg_params={},
+            seg_params={"method": "hsv"},
             filter_params={},
             preview=SimpleNamespace(save=False, downsample=32),
             sampling_params=SimpleNamespace(
@@ -436,13 +432,12 @@ def test_sampling_main_uses_shared_config_resolvers(monkeypatch, tmp_path):
         sampling_mod,
         "resolve_segmentation_config",
         lambda cfg: sampling_mod.SegmentationConfig(
+            method="hsv",
             downsample=64,
             sthresh=8,
             sthresh_up=255,
             mthresh=7,
             close=4,
-            use_otsu=False,
-            use_hsv=True,
         ),
     )
     monkeypatch.setattr(
@@ -480,7 +475,7 @@ def test_sampling_main_rejects_partial_sampling_config(monkeypatch, tmp_path):
                 overlap=0.0,
                 tissue_threshold=0.1,
             ),
-            seg_params={},
+            seg_params={"method": "hsv"},
             filter_params={},
             preview=SimpleNamespace(save=False, downsample=32),
             sampling_params=SimpleNamespace(
@@ -524,7 +519,7 @@ def test_sampling_main_rejects_missing_background_label(monkeypatch, tmp_path):
                 overlap=0.0,
                 tissue_threshold=0.1,
             ),
-            seg_params={},
+            seg_params={"method": "hsv"},
             filter_params={},
             preview=SimpleNamespace(save=False, downsample=32),
             sampling_params=SimpleNamespace(
@@ -622,13 +617,12 @@ def test_process_slide_uses_extraction_preview_instead_of_reopening_overlay(
             backend="asap",
         ),
         segmentation_config=sampling_mod.SegmentationConfig(
+            method="hsv",
             downsample=64,
             sthresh=8,
             sthresh_up=255,
             mthresh=7,
             close=4,
-            use_otsu=False,
-            use_hsv=True,
         ),
         filter_config=sampling_mod.FilterConfig(
             ref_tile_size=16,
@@ -708,7 +702,7 @@ def test_sampling_main_defaults_inner_slide_workers_to_one(monkeypatch, tmp_path
     monkeypatch.setattr(
         sampling_mod,
         "resolve_segmentation_config",
-        lambda cfg: sampling_mod.SegmentationConfig(64, 8, 255, 7, 4, False, True),
+        lambda cfg: sampling_mod.SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
     )
     monkeypatch.setattr(
         sampling_mod,
@@ -825,7 +819,7 @@ def test_sampling_main_rejects_explicit_inner_slide_workers_override(
     monkeypatch.setattr(
         sampling_mod,
         "resolve_segmentation_config",
-        lambda cfg: sampling_mod.SegmentationConfig(64, 8, 255, 7, 4, False, True),
+        lambda cfg: sampling_mod.SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
     )
     monkeypatch.setattr(
         sampling_mod,
@@ -918,13 +912,12 @@ def test_save_sampling_coordinates_uses_annotation_threshold_and_sampling_mode(
         backend="asap",
     )
     segmentation_config = sampling_mod.SegmentationConfig(
+        method="hsv",
         downsample=64,
         sthresh=8,
         sthresh_up=255,
         mthresh=7,
         close=4,
-        use_otsu=False,
-        use_hsv=True,
     )
     filter_config = sampling_mod.FilterConfig(
         ref_tile_size=16,
@@ -996,13 +989,12 @@ def test_save_sampling_coordinates_writes_sampling_metadata_fields(tmp_path):
         backend="asap",
     )
     segmentation_config = sampling_mod.SegmentationConfig(
+        method="hsv",
         downsample=64,
         sthresh=8,
         sthresh_up=255,
         mthresh=7,
         close=4,
-        use_otsu=False,
-        use_hsv=True,
     )
     filter_config = sampling_mod.FilterConfig(
         ref_tile_size=16,
@@ -1071,13 +1063,12 @@ def test_validate_sampling_artifact_row_accepts_matching_metadata(tmp_path):
         backend="asap",
     )
     segmentation_config = sampling_mod.SegmentationConfig(
+        method="hsv",
         downsample=64,
         sthresh=8,
         sthresh_up=255,
         mthresh=7,
         close=4,
-        use_otsu=False,
-        use_hsv=True,
     )
     filter_config = sampling_mod.FilterConfig(
         ref_tile_size=16,
@@ -1165,13 +1156,12 @@ def test_validate_sampling_artifact_row_ignores_disabled_filter_threshold_mismat
         backend="asap",
     )
     segmentation_config = sampling_mod.SegmentationConfig(
+        method="hsv",
         downsample=64,
         sthresh=8,
         sthresh_up=255,
         mthresh=7,
         close=4,
-        use_otsu=False,
-        use_hsv=True,
     )
     stored_filter_config = sampling_mod.FilterConfig(
         ref_tile_size=16,
@@ -1273,13 +1263,12 @@ def test_validate_sampling_artifact_row_rejects_mismatched_tiling_config(tmp_pat
         backend="asap",
     )
     segmentation_config = sampling_mod.SegmentationConfig(
+        method="hsv",
         downsample=64,
         sthresh=8,
         sthresh_up=255,
         mthresh=7,
         close=4,
-        use_otsu=False,
-        use_hsv=True,
     )
     filter_config = sampling_mod.FilterConfig(
         ref_tile_size=16,

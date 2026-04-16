@@ -13,9 +13,14 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from hs2p.configs import SegmentationConfig
+from hs2p.segmentation import segment_tissue_image
 from hs2p.wsi.geometry import project_discrete_grid_origins
 from hs2p.wsi.reader import open_slide, select_level, select_level_for_downsample
 from hs2p.tile_qc import filter_coordinate_tiles, needs_pixel_qc
+
+DEFAULT_SAM2_THUMBNAIL_SPACING_UM = 8.0
+DEFAULT_SAM2_THUMBNAIL_TOLERANCE = 0.05
 
 
 def _normalize_level_downsamples(
@@ -30,66 +35,37 @@ def _normalize_level_downsamples(
     return normalized
 
 
-def segment_tissue(
-    thumbnail: np.ndarray,
-    *,
-    method: str = "hsv",
-    kernel_size: int = 5,
-    morph_iterations: int = 2,
-    sthresh: int = 8,
-    sthresh_up: int = 255,
-    median_blur_size: int = 7,
-) -> np.ndarray:
-    """Segment tissue from an RGB thumbnail image."""
-    if method == "hsv":
-        hsv = cv2.cvtColor(thumbnail, cv2.COLOR_RGB2HSV)
-        mask = cv2.inRange(
-            hsv,
-            np.array((90, 8, 103)),
-            np.array((180, 255, 255)),
-        )
-    elif method == "otsu":
-        hsv = cv2.cvtColor(thumbnail, cv2.COLOR_RGB2HSV)
-        saturation = hsv[:, :, 1]
-        blurred = cv2.medianBlur(saturation, median_blur_size)
-        _, mask = cv2.threshold(
-            blurred,
-            0,
-            255,
-            cv2.THRESH_BINARY + cv2.THRESH_OTSU,
-        )
-    elif method == "threshold":
-        hsv = cv2.cvtColor(thumbnail, cv2.COLOR_RGB2HSV)
-        saturation = hsv[:, :, 1]
-        blurred = cv2.medianBlur(saturation, median_blur_size)
-        _, mask = cv2.threshold(
-            blurred,
-            sthresh,
-            sthresh_up,
-            cv2.THRESH_BINARY,
-        )
-    else:
-        raise ValueError(
-            "Unknown tissue segmentation method: "
-            f"'{method}'. Available: hsv, otsu, threshold"
-        )
-
-    if kernel_size > 0 and morph_iterations > 0:
-        kernel = np.ones((kernel_size, kernel_size), np.uint8)
-        mask = cv2.morphologyEx(
-            mask,
-            cv2.MORPH_CLOSE,
-            kernel,
-            iterations=morph_iterations,
-        )
-    return mask
-
-
 @dataclass(frozen=True)
 class ContourResult:
     contours: list[np.ndarray]
     holes: list[list[np.ndarray]]
     mask: np.ndarray
+
+
+@dataclass(frozen=True)
+class ResolvedTissueMask:
+    tissue_mask: np.ndarray
+    tissue_method: str
+    seg_downsample: int
+    seg_level: int
+    seg_spacing_um: float
+    mask_path: str | Path | None = None
+    tissue_mask_tissue_value: int | None = None
+    mask_level: int | None = None
+    mask_spacing_um: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.mask_path is not None:
+            object.__setattr__(self, "mask_path", Path(self.mask_path))
+
+
+@dataclass(frozen=True)
+class Sam2Thumbnail:
+    image: np.ndarray
+    seg_level: int
+    seg_spacing_um: float
+    source_spacing_um: float
+    resized: bool
 
 
 def detect_contours(
@@ -277,8 +253,6 @@ class TilingResult:
     blur_threshold: float = 50.0
     qc_spacing_um: float = 2.0
     # -- optional (legitimately None in some paths) --
-    seg_use_otsu: bool | None = None
-    seg_use_hsv: bool | None = None
     mask_path: str | Path | None = None
     tissue_mask_tissue_value: int | None = None
     mask_level: int | None = None
@@ -605,8 +579,6 @@ _SEGMENTATION_KEYS = {
     "sthresh_up",
     "mthresh",
     "close",
-    "use_otsu",
-    "use_hsv",
     "mask_path",
     "ref_tile_size_px",
     "tissue_mask_tissue_value",
@@ -675,8 +647,6 @@ def _build_tiling_metadata(result: TilingResult) -> dict[str, Any]:
         "sthresh_up": result.seg_sthresh_up,
         "mthresh": result.seg_mthresh,
         "close": result.seg_close,
-        "use_otsu": result.seg_use_otsu,
-        "use_hsv": result.seg_use_hsv,
         "mask_path": str(result.mask_path) if result.mask_path is not None else None,
         "ref_tile_size_px": result.ref_tile_size_px,
         "tissue_mask_tissue_value": result.tissue_mask_tissue_value,
@@ -948,8 +918,6 @@ def _load_tiling_result(*, npz_path: "Path | None", meta: dict[str, Any]) -> Til
         filter_blur=filtering["filter_blur"],
         blur_threshold=filtering["blur_threshold"],
         qc_spacing_um=filtering["qc_spacing_um"],
-        seg_use_otsu=segmentation["use_otsu"],
-        seg_use_hsv=segmentation["use_hsv"],
         mask_path=segmentation["mask_path"],
         tissue_mask_tissue_value=segmentation["tissue_mask_tissue_value"],
         mask_level=segmentation["mask_level"],
@@ -1065,6 +1033,305 @@ def load_precomputed_tissue_mask(
     return mask, mask_level, mask_spacing_um
 
 
+def prepare_sam2_thumbnail(
+    *,
+    slide,
+    target_spacing_um: float = DEFAULT_SAM2_THUMBNAIL_SPACING_UM,
+    tolerance: float = DEFAULT_SAM2_THUMBNAIL_TOLERANCE,
+) -> Sam2Thumbnail:
+    """Build the SAM2 thumbnail at a fixed physical spacing.
+
+    The slide pyramid is searched in microns-per-pixel space, and the selected
+    level is only resized when it falls outside the requested spacing tolerance.
+    """
+    normalized_downsamples = _normalize_level_downsamples(slide.level_downsamples)
+    level_sel = select_level(
+        requested_spacing_um=float(target_spacing_um),
+        level0_spacing_um=float(slide.spacing),
+        level_downsamples=[
+            (float(downsample), float(downsample))
+            for downsample in normalized_downsamples
+        ],
+        tolerance=float(tolerance),
+    )
+    seg_size = slide.level_dimensions[level_sel.level]
+    seg_image = np.asarray(slide.read_region((0, 0), level_sel.level, seg_size))
+    if seg_image.ndim != 3:
+        raise ValueError(
+            f"Expected SAM2 thumbnail to be RGB, got array with shape {seg_image.shape}"
+        )
+    if level_sel.is_within_tolerance:
+        return Sam2Thumbnail(
+            image=seg_image,
+            seg_level=level_sel.level,
+            seg_spacing_um=float(level_sel.read_spacing_um),
+            source_spacing_um=float(level_sel.read_spacing_um),
+            resized=False,
+        )
+
+    target_width = max(
+        1,
+        int(round(float(slide.dimensions[0]) * float(slide.spacing) / float(target_spacing_um))),
+    )
+    target_height = max(
+        1,
+        int(round(float(slide.dimensions[1]) * float(slide.spacing) / float(target_spacing_um))),
+    )
+    if target_width != int(seg_image.shape[1]) or target_height != int(seg_image.shape[0]):
+        interpolation = (
+            cv2.INTER_AREA
+            if target_width < int(seg_image.shape[1]) or target_height < int(seg_image.shape[0])
+            else cv2.INTER_CUBIC
+        )
+        seg_image = cv2.resize(
+            seg_image,
+            (target_width, target_height),
+            interpolation=interpolation,
+        )
+    return Sam2Thumbnail(
+        image=seg_image,
+        seg_level=level_sel.level,
+        seg_spacing_um=float(target_spacing_um),
+        source_spacing_um=float(level_sel.read_spacing_um),
+        resized=True,
+    )
+
+
+def resolve_tissue_mask(
+    *,
+    slide,
+    tissue_method: str | None = None,
+    tissue_mask_path: str | Path | None,
+    tissue_mask_tissue_value: int = 1,
+    sthresh: int = 8,
+    sthresh_up: int = 255,
+    mthresh: int = 7,
+    close: int = 4,
+    seg_downsample: int = 64,
+    sam2_checkpoint_path: str | Path | None = None,
+    sam2_config_path: str | Path | None = None,
+    sam2_device: str = "cpu",
+) -> ResolvedTissueMask:
+    if tissue_mask_path is not None:
+        normalized_downsamples = _normalize_level_downsamples(slide.level_downsamples)
+        seg_level = select_level_for_downsample(
+            float(seg_downsample),
+            [(float(ds), float(ds)) for ds in normalized_downsamples],
+        )
+        seg_spacing_um = float(slide.spacing) * float(normalized_downsamples[seg_level])
+        mask, mask_level, mask_spacing_um = load_precomputed_tissue_mask(
+            mask_path=tissue_mask_path,
+            slide=slide,
+            seg_level=seg_level,
+            tissue_value=int(tissue_mask_tissue_value),
+        )
+        return ResolvedTissueMask(
+            tissue_mask=mask,
+            tissue_method="precomputed_mask",
+            seg_downsample=int(seg_downsample),
+            seg_level=seg_level,
+            seg_spacing_um=seg_spacing_um,
+            mask_path=tissue_mask_path,
+            tissue_mask_tissue_value=int(tissue_mask_tissue_value),
+            mask_level=mask_level,
+            mask_spacing_um=mask_spacing_um,
+        )
+
+    if not tissue_method:
+        raise ValueError(
+            "tissue_method is required when no precomputed tissue mask is provided"
+        )
+
+    if str(tissue_method).lower() == "sam2":
+        thumbnail = prepare_sam2_thumbnail(slide=slide)
+        seg_image = thumbnail.image
+        seg_level = thumbnail.seg_level
+        seg_spacing_um = thumbnail.seg_spacing_um
+        effective_downsample = max(1, int(round(seg_spacing_um / float(slide.spacing))))
+    else:
+        normalized_downsamples = _normalize_level_downsamples(slide.level_downsamples)
+        seg_level = select_level_for_downsample(
+            float(seg_downsample),
+            [(float(ds), float(ds)) for ds in normalized_downsamples],
+        )
+        seg_spacing_um = float(slide.spacing) * float(normalized_downsamples[seg_level])
+        seg_size = slide.level_dimensions[seg_level]
+        seg_image = np.asarray(slide.read_region((0, 0), seg_level, seg_size))
+        effective_downsample = int(seg_downsample)
+
+    segmentation_config = SegmentationConfig(
+        method=tissue_method,
+        downsample=effective_downsample,
+        sthresh=sthresh,
+        sthresh_up=sthresh_up,
+        mthresh=mthresh,
+        close=close,
+        sam2_checkpoint_path=(
+            Path(sam2_checkpoint_path) if sam2_checkpoint_path is not None else None
+        ),
+        sam2_config_path=(
+            Path(sam2_config_path) if sam2_config_path is not None else None
+        ),
+        sam2_device=sam2_device,
+    )
+    mask = segment_tissue_image(
+        seg_image,
+        config=segmentation_config,
+    )
+    return ResolvedTissueMask(
+        tissue_mask=mask,
+        tissue_method=segmentation_config.method,
+        seg_downsample=effective_downsample,
+        seg_level=seg_level,
+        seg_spacing_um=seg_spacing_um,
+    )
+
+
+def build_tiling_result_from_mask(
+    *,
+    slide,
+    resolved_mask: ResolvedTissueMask,
+    image_path: str | Path,
+    backend: str,
+    requested_backend: str,
+    sample_id: str | None = None,
+    requested_tile_size_px: int = 256,
+    requested_spacing_um: float = 0.5,
+    min_tissue_fraction: float = 0.5,
+    overlap: float = 0.0,
+    tolerance: float = 0.05,
+    seg_sthresh: int = 8,
+    seg_sthresh_up: int = 255,
+    seg_mthresh: int = 7,
+    seg_close: int = 4,
+    ref_tile_size_px: int = 16,
+    a_t: int = 4,
+    a_h: int = 0,
+    filter_white: bool = False,
+    filter_black: bool = False,
+    white_threshold: int = 220,
+    black_threshold: int = 25,
+    fraction_threshold: float = 0.9,
+    filter_grayspace: bool = False,
+    grayspace_saturation_threshold: float = 0.05,
+    grayspace_fraction_threshold: float = 0.6,
+    filter_blur: bool = False,
+    blur_threshold: float = 50.0,
+    qc_spacing_um: float = 2.0,
+    num_workers: int = 1,
+    annotation: str | None = None,
+    selection_strategy: str | None = None,
+    output_mode: str | None = None,
+) -> TilingResult:
+    normalized_downsamples = _normalize_level_downsamples(slide.level_downsamples)
+    seg_level = resolved_mask.seg_level
+    seg_spacing_um = resolved_mask.seg_spacing_um
+    mask = resolved_mask.tissue_mask
+    contours = detect_contours(
+        mask,
+        slide_dimensions=slide.dimensions,
+        ref_tile_size_px=ref_tile_size_px,
+        requested_spacing_um=requested_spacing_um,
+        a_t=a_t,
+        base_spacing_um=float(slide.spacing),
+        level_downsamples=normalized_downsamples,
+        tolerance=tolerance,
+    )
+    tiles = generate_tiles(
+        slide_dimensions=slide.dimensions,
+        contours=contours,
+        requested_tile_size_px=requested_tile_size_px,
+        requested_spacing_um=requested_spacing_um,
+        base_spacing_um=float(slide.spacing),
+        level_downsamples=normalized_downsamples,
+        overlap=overlap,
+        min_tissue_fraction=min_tissue_fraction,
+        tolerance=tolerance,
+        num_workers=num_workers,
+    )
+    filter_params = SimpleNamespace(
+        filter_white=filter_white,
+        filter_black=filter_black,
+        white_threshold=white_threshold,
+        black_threshold=black_threshold,
+        fraction_threshold=fraction_threshold,
+        filter_grayspace=filter_grayspace,
+        grayspace_saturation_threshold=grayspace_saturation_threshold,
+        grayspace_fraction_threshold=grayspace_fraction_threshold,
+        filter_blur=filter_blur,
+        blur_threshold=blur_threshold,
+        qc_spacing_um=qc_spacing_um,
+    )
+    if needs_pixel_qc(filter_params):
+        coord_candidates = np.column_stack((tiles.x, tiles.y))
+        keep_flags = filter_coordinate_tiles(
+            coord_candidates=coord_candidates,
+            keep_flags=np.ones(len(coord_candidates), dtype=np.uint8),
+            level_dimensions=slide.level_dimensions,
+            level_downsamples=slide.level_downsamples,
+            requested_tile_size_px=requested_tile_size_px,
+            requested_spacing_um=requested_spacing_um,
+            base_spacing_um=float(slide.spacing),
+            tolerance=tolerance,
+            filter_params=filter_params,
+            read_window=lambda x, y, width, height, level: slide.read_region(
+                (x, y),
+                level,
+                (width, height),
+            ),
+            batch_read_windows=None,
+            num_workers=num_workers,
+            source_label=str(image_path),
+        )
+        keep = np.asarray(keep_flags, dtype=bool)
+        tiles = replace(
+            tiles,
+            x=tiles.x[keep],
+            y=tiles.y[keep],
+            tissue_fractions=tiles.tissue_fractions[keep],
+            tile_index=np.arange(int(keep.sum()), dtype=np.int32),
+        )
+    step_px_lv0 = max(1, round(tiles.tile_size_lv0 * (1.0 - overlap)))
+    return TilingResult(
+        tiles=tiles,
+        sample_id=sample_id,
+        image_path=Path(image_path),
+        backend=backend,
+        requested_backend=requested_backend,
+        tolerance=tolerance,
+        step_px_lv0=step_px_lv0,
+        tissue_method=resolved_mask.tissue_method,
+        seg_downsample=resolved_mask.seg_downsample,
+        seg_level=seg_level,
+        seg_spacing_um=seg_spacing_um,
+        seg_sthresh=seg_sthresh,
+        seg_sthresh_up=seg_sthresh_up,
+        seg_mthresh=seg_mthresh,
+        seg_close=seg_close,
+        ref_tile_size_px=ref_tile_size_px,
+        a_t=a_t,
+        a_h=a_h,
+        filter_white=filter_white,
+        filter_black=filter_black,
+        white_threshold=white_threshold,
+        black_threshold=black_threshold,
+        fraction_threshold=fraction_threshold,
+        filter_grayspace=filter_grayspace,
+        grayspace_saturation_threshold=grayspace_saturation_threshold,
+        grayspace_fraction_threshold=grayspace_fraction_threshold,
+        filter_blur=filter_blur,
+        blur_threshold=blur_threshold,
+        qc_spacing_um=qc_spacing_um,
+        mask_path=resolved_mask.mask_path,
+        tissue_mask_tissue_value=resolved_mask.tissue_mask_tissue_value,
+        mask_level=resolved_mask.mask_level,
+        mask_spacing_um=resolved_mask.mask_spacing_um,
+        annotation=annotation,
+        selection_strategy=selection_strategy,
+        output_mode=output_mode,
+    )
+
+
 def preprocess_slide(
     *,
     image_path: str | Path,
@@ -1076,8 +1343,6 @@ def preprocess_slide(
     requested_tile_size_px: int = 256,
     requested_spacing_um: float = 0.5,
     tissue_method: str = "hsv",
-    use_hsv: bool | None = None,
-    use_otsu: bool | None = None,
     sthresh: int = 8,
     sthresh_up: int = 255,
     mthresh: int = 7,
@@ -1085,6 +1350,9 @@ def preprocess_slide(
     min_tissue_fraction: float = 0.1,
     overlap: float = 0.0,
     seg_downsample: int = 64,
+    sam2_checkpoint_path: str | Path | None = None,
+    sam2_config_path: str | Path | None = None,
+    sam2_device: str = "cpu",
     tolerance: float = 0.05,
     ref_tile_size_px: int = 16,
     a_t: int = 4,
@@ -1111,121 +1379,32 @@ def preprocess_slide(
         spacing_override=spacing_override,
     )
     try:
-        normalized_downsamples = _normalize_level_downsamples(slide.level_downsamples)
-        seg_level = select_level_for_downsample(
-            float(seg_downsample),
-            [(float(ds), float(ds)) for ds in normalized_downsamples],
+        resolved_mask = resolve_tissue_mask(
+            slide=slide,
+            tissue_mask_path=tissue_mask_path,
+            tissue_mask_tissue_value=tissue_mask_tissue_value,
+            tissue_method=tissue_method,
+            sthresh=sthresh,
+            sthresh_up=sthresh_up,
+            mthresh=mthresh,
+            close=close,
+            seg_downsample=seg_downsample,
+            sam2_checkpoint_path=sam2_checkpoint_path,
+            sam2_config_path=sam2_config_path,
+            sam2_device=sam2_device,
         )
-        if tissue_mask_path is not None:
-            mask, mask_level, mask_spacing_um = load_precomputed_tissue_mask(
-                mask_path=tissue_mask_path,
-                slide=slide,
-                seg_level=seg_level,
-                tissue_value=int(tissue_mask_tissue_value),
-            )
-            resolved_tissue_method = "precomputed_mask"
-        else:
-            seg_size = slide.level_dimensions[seg_level]
-            seg_image = slide.read_region((0, 0), seg_level, seg_size)
-            if use_hsv is None:
-                use_hsv = tissue_method == "hsv"
-            if use_otsu is None:
-                use_otsu = tissue_method == "otsu"
-            resolved_tissue_method = (
-                "hsv"
-                if use_hsv
-                else ("otsu" if use_otsu else "threshold")
-            )
-            mask = segment_tissue(
-                seg_image,
-                method=resolved_tissue_method,
-                kernel_size=close,
-                morph_iterations=1 if close > 0 else 0,
-                sthresh=sthresh,
-                sthresh_up=sthresh_up,
-                median_blur_size=mthresh,
-            )
-            mask_level = None
-            mask_spacing_um = None
-
-        seg_spacing_um = float(slide.spacing) * float(normalized_downsamples[seg_level])
-        contours = detect_contours(
-            mask,
-            slide_dimensions=slide.dimensions,
-            ref_tile_size_px=ref_tile_size_px,
-            requested_spacing_um=requested_spacing_um,
-            a_t=a_t,
-            base_spacing_um=float(slide.spacing),
-            level_downsamples=normalized_downsamples,
-            tolerance=tolerance,
-        )
-        tiles = generate_tiles(
-            slide_dimensions=slide.dimensions,
-            contours=contours,
-            requested_tile_size_px=requested_tile_size_px,
-            requested_spacing_um=requested_spacing_um,
-            base_spacing_um=float(slide.spacing),
-            level_downsamples=normalized_downsamples,
-            overlap=overlap,
-            min_tissue_fraction=min_tissue_fraction,
-            tolerance=tolerance,
-            num_workers=num_workers,
-        )
-        filter_params = SimpleNamespace(
-            filter_white=filter_white,
-            filter_black=filter_black,
-            white_threshold=white_threshold,
-            black_threshold=black_threshold,
-            fraction_threshold=fraction_threshold,
-            filter_grayspace=filter_grayspace,
-            grayspace_saturation_threshold=grayspace_saturation_threshold,
-            grayspace_fraction_threshold=grayspace_fraction_threshold,
-            filter_blur=filter_blur,
-            blur_threshold=blur_threshold,
-            qc_spacing_um=qc_spacing_um,
-        )
-        if needs_pixel_qc(filter_params):
-            coord_candidates = np.column_stack((tiles.x, tiles.y))
-            keep_flags = filter_coordinate_tiles(
-                coord_candidates=coord_candidates,
-                keep_flags=np.ones(len(coord_candidates), dtype=np.uint8),
-                level_dimensions=slide.level_dimensions,
-                level_downsamples=slide.level_downsamples,
-                requested_tile_size_px=requested_tile_size_px,
-                requested_spacing_um=requested_spacing_um,
-                base_spacing_um=float(slide.spacing),
-                tolerance=tolerance,
-                filter_params=filter_params,
-                read_window=lambda x, y, width, height, level: slide.read_region(
-                    (x, y),
-                    level,
-                    (width, height),
-                ),
-                batch_read_windows=None,
-                num_workers=num_workers,
-                source_label=str(image_path),
-            )
-            keep = np.asarray(keep_flags, dtype=bool)
-            tiles = replace(
-                tiles,
-                x=tiles.x[keep],
-                y=tiles.y[keep],
-                tissue_fractions=tiles.tissue_fractions[keep],
-                tile_index=np.arange(int(keep.sum()), dtype=np.int32),
-            )
-        step_px_lv0 = max(1, round(tiles.tile_size_lv0 * (1.0 - overlap)))
-        return TilingResult(
-            tiles=tiles,
-            sample_id=sample_id,
-            image_path=Path(image_path),
+        return build_tiling_result_from_mask(
+            slide=slide,
+            resolved_mask=resolved_mask,
+            image_path=image_path,
             backend=slide.backend_name,
             requested_backend=backend,
+            sample_id=sample_id,
+            requested_tile_size_px=requested_tile_size_px,
+            requested_spacing_um=requested_spacing_um,
+            min_tissue_fraction=min_tissue_fraction,
+            overlap=overlap,
             tolerance=tolerance,
-            step_px_lv0=step_px_lv0,
-            tissue_method=resolved_tissue_method,
-            seg_downsample=seg_downsample,
-            seg_level=seg_level,
-            seg_spacing_um=seg_spacing_um,
             seg_sthresh=sthresh,
             seg_sthresh_up=sthresh_up,
             seg_mthresh=mthresh,
@@ -1244,16 +1423,7 @@ def preprocess_slide(
             filter_blur=filter_blur,
             blur_threshold=blur_threshold,
             qc_spacing_um=qc_spacing_um,
-            seg_use_otsu=use_otsu,
-            seg_use_hsv=use_hsv,
-            mask_path=tissue_mask_path,
-            tissue_mask_tissue_value=(
-                int(tissue_mask_tissue_value)
-                if tissue_mask_path is not None
-                else None
-            ),
-            mask_level=mask_level,
-            mask_spacing_um=mask_spacing_um,
+            num_workers=num_workers,
             annotation=annotation,
             selection_strategy=selection_strategy,
             output_mode=output_mode,
@@ -1266,15 +1436,19 @@ __all__ = [
     "ContourResult",
     "TileGeometry",
     "TilingResult",
+    "ResolvedTissueMask",
+    "Sam2Thumbnail",
     "canonicalize_tiling_result",
     "detect_contours",
     "generate_tiles",
     "load_precomputed_tissue_mask",
+    "prepare_sam2_thumbnail",
+    "resolve_tissue_mask",
+    "build_tiling_result_from_mask",
     "normalize_artifact_path",
     "open_slide",
     "preprocess_slide",
     "resolve_base_spacing_um",
-    "segment_tissue",
     "select_level",
     "select_level_for_downsample",
     "validate_tiling_result_provenance",

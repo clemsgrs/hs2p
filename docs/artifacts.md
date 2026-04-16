@@ -86,8 +86,6 @@ When `is_within_tolerance` is true, `tile_size_lv0` and `step_px_lv0` reflect th
 - `sthresh_up`
 - `mthresh`
 - `close`
-- `use_otsu`
-- `use_hsv`
 - `mask_path`
 - `ref_tile_size_px`
 - `tissue_mask_tissue_value`

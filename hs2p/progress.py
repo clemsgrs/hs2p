@@ -56,6 +56,18 @@ class TextReporter:
                 f"tile_size={payload['requested_tile_size_px']}px workers={payload['num_workers']} "
                 f"output={payload['output_dir']}"
             )
+        if kind == "tissue.started":
+            return f"Resolving tissue masks ({payload['total']} total)..."
+        if kind == "tissue.progress":
+            return (
+                f"Tissue resolution: {payload['completed']}/{payload['total']} complete, "
+                f"{payload['failed']} failed"
+            )
+        if kind == "tissue.finished":
+            return (
+                f"Tissue resolution finished: {payload['completed']}/{payload['total']} complete, "
+                f"{payload['failed']} failed"
+            )
         if kind == "tiling.started":
             return f"Tiling slides ({payload['total']} total)..."
         if kind == "tiling.progress":
@@ -133,6 +145,29 @@ class RichReporter:
             )
             self.console.print(f"Output: {payload['output_dir']}")
             return
+        if kind == "tissue.started":
+            self._task_ids["tissue"] = self.progress.add_task(
+                "Tissue masks", total=payload["total"]
+            )
+            return
+        if kind == "tissue.progress":
+            task_id = self._task_ids.get("tissue")
+            if task_id is not None:
+                self.progress.update(
+                    task_id,
+                    completed=payload["completed"] + payload["failed"],
+                    description=(
+                        f"Tissue masks ({payload['completed']}/{payload['total']} resolved)"
+                    ),
+                )
+            return
+        if kind == "tissue.finished":
+            task_id = self._task_ids.get("tissue")
+            if task_id is not None:
+                self.progress.update(
+                    task_id, completed=payload["completed"] + payload["failed"]
+                )
+            return
         if kind == "tiling.started":
             self._task_ids["tiling"] = self.progress.add_task(
                 "Tiling slides", total=payload["total"]
@@ -144,7 +179,7 @@ class RichReporter:
                 self.progress.update(
                     task_id,
                     completed=payload["completed"] + payload["failed"],
-                    description=f"Tiling slides ({payload['discovered_tiles']} tiles discovered)",
+                    description=f"Tiling slides ({payload['completed']}/{payload['total']} resolved)",
                 )
             return
         if kind == "tiling.finished":
