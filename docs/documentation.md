@@ -1,5 +1,12 @@
 # Documentation Notes
 
+## 2026-04-16
+
+- Batch tiling now uses a spawn-based multiprocessing context for all SAM2 work and GPU-decode work so CUDA initializes in fresh child interpreters instead of forked workers.
+- CPU-only and non-SAM2 tiling paths still use the existing multiprocessing behavior.
+- SAM2 predictor INFO lines from `sam2_image_predictor.py` are filtered out in the SAM2 segmentation path so the CLI stays quiet during inference.
+- SAM2 tissue segmentation now pads rectangular thumbnails to a square before inference and crops back after prediction, which preserves aspect ratio on extreme slides.
+
 ## 2026-04-15
 
 - Split tissue preprocessing into an explicit mask-resolution step and a separate tiling step in `hs2p/preprocessing.py`.

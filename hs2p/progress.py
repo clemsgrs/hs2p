@@ -179,7 +179,7 @@ class RichReporter:
                 self.progress.update(
                     task_id,
                     completed=payload["completed"] + payload["failed"],
-                    description=f"Tiling slides ({payload['discovered_tiles']} tiles discovered)",
+                    description=f"Tiling slides ({payload['completed']}/{payload['total']} resolved)",
                 )
             return
         if kind == "tiling.finished":

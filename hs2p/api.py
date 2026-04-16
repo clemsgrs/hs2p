@@ -1,5 +1,6 @@
 import csv
 import io
+import logging
 import multiprocessing as mp
 import tarfile
 import tempfile
@@ -983,6 +984,22 @@ def _resolve_tiling_worker_allocation(
     return True, outer_workers, inner_workers
 
 
+def _segmentation_requires_spawn(segmentation: SegmentationConfig | None) -> bool:
+    return segmentation is not None and str(segmentation.method).lower() == "sam2"
+
+
+def _configure_worker_logging(output_dir: str) -> None:
+    from hs2p.utils import setup_logging
+
+    setup_logging(output=output_dir, level=logging.INFO)
+
+
+def _process_pool_context(*, use_spawn: bool):
+    if use_spawn:
+        return mp.get_context("spawn")
+    return mp
+
+
 def _write_tiling_preview_from_artifacts(
     *,
     artifact: TilingArtifacts,
@@ -1201,9 +1218,16 @@ def tile_slides(
             )
 
         mask_worker_count = max(1, int(num_workers))
+        mask_requires_spawn = any(
+            _segmentation_requires_spawn(request.segmentation)
+            for request in mask_resolution_requests
+        )
+        mask_pool_module = _process_pool_context(use_spawn=mask_requires_spawn)
         if mask_worker_count > 1 and len(mask_resolution_requests) > 1:
-            with mp.Pool(
-                processes=min(mask_worker_count, len(mask_resolution_requests))
+            with mask_pool_module.Pool(
+                processes=min(mask_worker_count, len(mask_resolution_requests)),
+                initializer=_configure_worker_logging,
+                initargs=(str(output_dir),),
             ) as pool:
                 for response in pool.imap_unordered(
                     _resolve_mask_for_request_safe,
@@ -1233,6 +1257,11 @@ def tile_slides(
         num_workers=num_workers,
         compute_count=len(compute_requests),
     )
+    compute_requires_spawn = any(
+        _segmentation_requires_spawn(request.segmentation) or bool(request.gpu_decode)
+        for request in compute_requests
+    )
+    compute_pool_module = _process_pool_context(use_spawn=compute_requires_spawn)
     preview_executor = (
         ThreadPoolExecutor(max_workers=max(1, pool_processes))
         if preview is not None and preview.save_tiling_preview
@@ -1438,7 +1467,11 @@ def tile_slides(
                 )
                 for request in compute_requests
             ]
-            with mp.Pool(processes=pool_processes) as pool:
+            with compute_pool_module.Pool(
+                processes=pool_processes,
+                initializer=_configure_worker_logging,
+                initargs=(str(output_dir),),
+            ) as pool:
                 _drain_planned_work(
                     iter(
                         pool.imap_unordered(

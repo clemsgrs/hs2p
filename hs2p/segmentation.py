@@ -18,11 +18,11 @@ DEFAULT_SAM2_INPUT_SIZE = 1024
 DEFAULT_SAM2_MASK_THRESHOLD = 0.0
 
 
-def _is_sam2_predictor_log(record: logging.LogRecord) -> bool:
+def _should_keep_sam2_log(record: logging.LogRecord) -> bool:
     if record.levelno >= logging.WARNING:
         return True
     pathname = Path(getattr(record, "pathname", "")).name
-    return pathname == "sam2_image_predictor.py"
+    return pathname != "sam2_image_predictor.py"
 
 
 @functools.lru_cache(maxsize=8)
@@ -40,13 +40,13 @@ def _build_sam2_predictor(
 
 
 @contextlib.contextmanager
-def _suppress_non_predictor_logs():
+def _suppress_sam2_predictor_info():
     root = logging.getLogger()
     handlers = list(root.handlers)
 
     class _Filter(logging.Filter):
         def filter(self, record: logging.LogRecord) -> bool:
-            return _is_sam2_predictor_log(record)
+            return _should_keep_sam2_log(record)
 
     log_filter = _Filter()
     for handler in handlers:
@@ -178,7 +178,7 @@ def _segment_sam2(
     device: str,
     sthresh_up: int,
 ) -> np.ndarray:
-    with _suppress_non_predictor_logs():
+    with _suppress_sam2_predictor_info():
         predictor = _build_sam2_predictor(
             checkpoint_path=checkpoint_path,
             config_path=config_path,
@@ -196,7 +196,7 @@ class _Sam2Predictor:
         config_path: Path | None,
         device: str,
     ) -> None:
-        with _suppress_non_predictor_logs():
+        with _suppress_sam2_predictor_info():
             self.device = _validate_sam2_device(device)
             self.input_size = DEFAULT_SAM2_INPUT_SIZE
             self.checkpoint_path = self._resolve_checkpoint_path(checkpoint_path)
@@ -294,12 +294,11 @@ class _Sam2Predictor:
         return predictor
 
     def predict_mask(self, image: np.ndarray) -> np.ndarray:
-        with _suppress_non_predictor_logs():
-            resized, original_shape = _resize_image_for_sam2(
-                image, input_size=self.input_size
-            )
-            self._predictor.set_image(resized)
-            height, width = resized.shape[:2]
+        with _suppress_sam2_predictor_info():
+            normalized = _normalize_rgb_image(image)
+            padded, original_shape = _pad_rgb_image_to_square(normalized)
+            self._predictor.set_image(padded)
+            height, width = original_shape
             bbox = np.array([0, 0, width, height], dtype=np.float32)
             masks, _, _ = self._predictor.predict(
                 point_coords=None,
@@ -310,37 +309,18 @@ class _Sam2Predictor:
             )
             mask = np.asarray(masks[0], dtype=np.float32)
             if mask.shape[:2] != original_shape:
-                mask = _resize_mask_from_sam2(mask, target_shape=original_shape)
+                mask = mask[: original_shape[0], : original_shape[1]]
             return (mask > 0).astype(np.uint8)
 
 
-def _resize_image_for_sam2(
-    image: np.ndarray,
-    *,
-    input_size: int,
-) -> tuple[np.ndarray, tuple[int, int]]:
-    original_shape = (int(image.shape[0]), int(image.shape[1]))
-    if original_shape == (input_size, input_size):
-        return image, original_shape
-    resized = cv2.resize(
-        image,
-        (int(input_size), int(input_size)),
-        interpolation=cv2.INTER_LINEAR,
-    )
-    return resized, original_shape
-
-
-def _resize_mask_from_sam2(
-    mask: np.ndarray,
-    *,
-    target_shape: tuple[int, int],
-) -> np.ndarray:
-    resized = cv2.resize(
-        mask.astype(np.float32),
-        (int(target_shape[1]), int(target_shape[0])),
-        interpolation=cv2.INTER_NEAREST,
-    )
-    return resized
+def _pad_rgb_image_to_square(image: np.ndarray) -> tuple[np.ndarray, tuple[int, int]]:
+    height, width = image.shape[0], image.shape[1]
+    if height == width:
+        return image, (height, width)
+    side = max(height, width)
+    padded = np.full((side, side, image.shape[2]), 255, dtype=image.dtype)
+    padded[:height, :width, :] = image
+    return padded, (height, width)
 
 
 def _validate_sam2_device(device: str) -> str:
