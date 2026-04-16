@@ -198,6 +198,7 @@ def _build_preprocessing_result(
     overlap: float = 0.1,
     tissue_threshold: float = 0.2,
     step_px_lv0: int = 403,
+    contours: preprocessing_mod.ContourResult | None = None,
 ) -> preprocessing_mod.TilingResult:
     if coords is None:
         coords = np.array([[100, 200], [300, 400]], dtype=np.int64)
@@ -207,6 +208,12 @@ def _build_preprocessing_result(
     tissue_fractions = np.asarray(tissue_fractions, dtype=np.float32)
     if coords.shape[0] != tissue_fractions.shape[0]:
         raise ValueError("coords and tissue_fractions must be aligned")
+    if contours is None:
+        contours = preprocessing_mod.ContourResult(
+            contours=[],
+            holes=[],
+            mask=np.full((8, 8), 255, dtype=np.uint8),
+        )
     x, y = _split_coords(coords)
     return preprocessing_mod.TilingResult(
         tiles=preprocessing_mod.TileGeometry(
@@ -251,6 +258,7 @@ def _build_preprocessing_result(
         black_threshold=25,
         fraction_threshold=0.9,
         mask_path=mask_path,
+        contours=contours,
         annotation=annotation,
         selection_strategy=selection_strategy,
         output_mode=output_mode,
@@ -2133,9 +2141,17 @@ def test_tile_slides_mask_preview_uses_overlay_renderer_with_preview_style(
     filter_config: FilterConfig,
 ):
     captured: dict[str, object] = {}
+    contours = preprocessing_mod.ContourResult(
+        contours=[np.array([[[1, 1]], [[1, 6]], [[6, 6]], [[6, 1]]], dtype=np.int32)],
+        holes=[[
+            np.array([[[2, 2]], [[2, 3]], [[3, 3]], [[3, 2]]], dtype=np.int32)
+        ]],
+        mask=np.array([[0, 1], [1, 0]], dtype=np.uint8),
+    )
     result = _build_preprocessing_result(
         sample_id="slide-preview",
         image_path="slide-preview.svs",
+        contours=contours,
     )
     result.tiles = replace(
         result.tiles,
@@ -2180,14 +2196,13 @@ def test_tile_slides_mask_preview_uses_overlay_renderer_with_preview_style(
         captured["mask_arr"],
         np.array([[0, 1], [1, 0]], dtype=np.uint8),
     )
+    assert captured["contours"] is not None
+    assert len(captured["contours"].contours) == 1
+    assert len(captured["contours"].holes) == 1
     assert captured["downsample"] == 16
     assert captured["tile_size_lv0"] == result.tile_size_lv0
-    assert captured["pixel_mapping"] == {"background": 0, "tissue": 1}
-    assert captured["color_mapping"] == {
-        "background": None,
-        "tissue": [10, 20, 30],
-    }
-    assert captured["alpha"] == pytest.approx(0.35)
+    assert captured["outer_border_color"] == (10, 20, 30)
+    assert captured["hole_border_color"] == (0xF2, 0x6B, 0x3A)
 
 
 def test_tile_slides_resume_marks_stale_artifact_as_failed(

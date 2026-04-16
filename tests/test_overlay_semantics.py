@@ -11,6 +11,10 @@ coordinate_api_mod = pytest.importorskip("hs2p.wsi.api")
 visualization_mod = pytest.importorskip("hs2p.wsi.visualization")
 
 
+def _contour(points: list[tuple[int, int]]) -> np.ndarray:
+    return np.asarray(points, dtype=np.int32).reshape((-1, 1, 2))
+
+
 def _build_palette(mapping: dict[int, tuple[int, int, int]]) -> np.ndarray:
     palette = np.zeros(shape=768, dtype=int)
     for label, color in mapping.items():
@@ -18,43 +22,15 @@ def _build_palette(mapping: dict[int, tuple[int, int, int]]) -> np.ndarray:
     return palette
 
 
-def test_overlay_mask_on_tile_only_colored_labels_are_blended():
-    tile_arr = np.full((2, 2, 3), 120, dtype=np.uint8)
-    tile = Image.fromarray(tile_arr)
-    mask_arr = np.array([[0, 3], [4, 3]], dtype=np.uint8)
-    mask = Image.fromarray(mask_arr)
-
-    pixel_mapping = {"background": 0, "gleason3": 3, "gleason4": 4}
-    color_mapping = {
-        "background": None,
-        "gleason3": [255, 0, 0],
-        "gleason4": None,
-    }
-    palette = _build_palette({3: (255, 0, 0)})
-
-    overlay = wsi_mod.overlay_mask_on_tile(
-        tile=tile,
-        mask=mask,
-        palette=palette,
-        pixel_mapping=pixel_mapping,
-        color_mapping=color_mapping,
-        alpha=0.5,
+def test_overlay_mask_on_slide_renders_outer_and_hole_contours(monkeypatch):
+    slide_arr = np.full((120, 120, 3), 240, dtype=np.uint8)
+    mask_arr = np.zeros((120, 120), dtype=np.uint8)
+    mask_arr[40:80, 40:80] = 1
+    mask_arr[52:68, 52:68] = 0
+    contours = SimpleNamespace(
+        contours=[_contour([(40, 40), (40, 79), (79, 79), (79, 40)])],
+        holes=[[_contour([(52, 52), (52, 67), (67, 67), (67, 52)])]],
     )
-    overlay_arr = np.array(overlay)
-
-    assert np.array_equal(overlay_arr[0, 0], tile_arr[0, 0])  # background untouched
-    assert np.array_equal(
-        overlay_arr[1, 0], tile_arr[1, 0]
-    )  # uncolored label untouched
-    assert not np.array_equal(
-        overlay_arr[0, 1], tile_arr[0, 1]
-    )  # colored label blended
-
-
-def test_overlay_mask_on_slide_matches_tile_semantics(monkeypatch):
-    slide_arr = np.full((2, 2, 3), 120, dtype=np.uint8)
-    mask_labels = np.array([[0, 3], [4, 3]], dtype=np.uint8)
-    mask_arr = np.stack([mask_labels, mask_labels, mask_labels], axis=-1)
 
     class FakeReader:
         spacings = [0.5]
@@ -69,11 +45,12 @@ def test_overlay_mask_on_slide_matches_tile_semantics(monkeypatch):
             del backend
             self.path = Path(path)
             self.spacings = [0.5]
-            self.level_dimensions = [(2, 2)]
+            self.level_dimensions = [(20, 20)]
             self.level_downsamples = [(1.0, 1.0)]
             self.reader = FakeReader()
 
         def get_best_level_for_downsample_custom(self, downsample):
+            del downsample
             return 0
 
         def get_level_spacing(self, level):
@@ -87,48 +64,95 @@ def test_overlay_mask_on_slide_matches_tile_semantics(monkeypatch):
     monkeypatch.setattr(coordinate_api_mod, "WSI", FakeWSI)
     monkeypatch.setattr(visualization_mod, "WSI", FakeWSI)
 
-    pixel_mapping = {"background": 0, "gleason3": 3, "gleason4": 4}
-    color_mapping = {
-        "background": None,
-        "gleason3": [255, 0, 0],
-        "gleason4": None,
-    }
-    palette = _build_palette({3: (255, 0, 0)})
-
     overlay = wsi_mod.overlay_mask_on_slide(
         wsi_path=Path("fake-wsi.tif"),
-        annotation_mask_path=Path("fake-mask.tif"),
+        annotation_mask_path=None,
         downsample=1,
         backend="openslide",
-        palette=palette,
-        pixel_mapping=pixel_mapping,
-        color_mapping=color_mapping,
-        alpha=0.5,
+        mask_arr=mask_arr,
+        contours=contours,
     )
     overlay_arr = np.array(overlay.convert("RGB"))
 
-    assert np.array_equal(overlay_arr[0, 0], slide_arr[0, 0])  # background untouched
-    assert np.array_equal(
-        overlay_arr[1, 0], slide_arr[1, 0]
-    )  # uncolored label untouched
-    assert not np.array_equal(
-        overlay_arr[0, 1], slide_arr[0, 1]
-    )  # colored label blended
+    assert np.array_equal(overlay_arr[0, 119], slide_arr[0, 119])
+    assert np.any(np.all(overlay_arr == np.array([37, 94, 59], dtype=np.uint8), axis=-1))
+    assert np.any(np.all(overlay_arr == np.array([242, 107, 58], dtype=np.uint8), axis=-1))
 
 
-def test_overlay_mask_on_slide_accepts_in_memory_mask_array(monkeypatch):
-    slide_arr = np.full((2, 2, 3), 120, dtype=np.uint8)
-    mask_arr = np.array([[0, 1], [0, 1]], dtype=np.uint8)
+def test_overlay_mask_on_slide_scales_level_zero_contours_to_vis_level(monkeypatch):
+    slide_arr = np.full((5, 5, 3), 240, dtype=np.uint8)
+    contours = SimpleNamespace(
+        contours=[_contour([(4, 4), (4, 8), (8, 8), (8, 4)])],
+        holes=[[]],
+    )
 
     class FakeWSI:
         def __init__(self, path, backend="asap"):
             del backend
             self.path = Path(path)
             self.spacings = [0.5]
-            self.level_dimensions = [(2, 2)]
+            self.level_dimensions = [(10, 10), (5, 5)]
+            self.level_downsamples = [(1.0, 1.0), (2.0, 2.0)]
+
+        def get_best_level_for_downsample_custom(self, downsample):
+            del downsample
+            return 1
+
+        def get_slide(self, level):
+            assert level == 1
+            return slide_arr
+
+    monkeypatch.setattr(coordinate_api_mod, "WSI", FakeWSI)
+    monkeypatch.setattr(visualization_mod, "WSI", FakeWSI)
+
+    overlay = wsi_mod.overlay_mask_on_slide(
+        wsi_path=Path("fake-wsi.tif"),
+        annotation_mask_path=None,
+        downsample=1,
+        backend="openslide",
+        mask_arr=np.zeros((5, 5), dtype=np.uint8),
+        contours=contours,
+        stroke_thickness=1,
+    )
+    overlay_arr = np.array(overlay.convert("RGB"))
+
+    assert np.array_equal(overlay_arr[2, 2], np.array([37, 94, 59], dtype=np.uint8))
+
+
+def test_resolve_stroke_thickness_scales_with_requested_downsample():
+    assert visualization_mod._resolve_stroke_thickness(
+        level_downsample=16,
+        stroke_thickness=None,
+    ) == 4
+    assert visualization_mod._resolve_stroke_thickness(
+        level_downsample=16,
+        stroke_thickness=None,
+    ) == 4
+    assert visualization_mod._resolve_stroke_thickness(
+        level_downsample=32,
+        stroke_thickness=None,
+    ) == 2
+    assert visualization_mod._resolve_stroke_thickness(
+        level_downsample=16,
+        stroke_thickness=5,
+    ) == 5
+
+
+def test_overlay_mask_on_slide_accepts_in_memory_mask_array(monkeypatch):
+    slide_arr = np.full((120, 120, 3), 120, dtype=np.uint8)
+    mask_arr = np.zeros((120, 120), dtype=np.uint8)
+    mask_arr[40:80, 40:80] = 1
+
+    class FakeWSI:
+        def __init__(self, path, backend="asap"):
+            del backend
+            self.path = Path(path)
+            self.spacings = [0.5]
+            self.level_dimensions = [(120, 120)]
             self.level_downsamples = [(1.0, 1.0)]
 
         def get_best_level_for_downsample_custom(self, downsample):
+            del downsample
             return 0
 
         def get_slide(self, level):
@@ -138,40 +162,34 @@ def test_overlay_mask_on_slide_accepts_in_memory_mask_array(monkeypatch):
     monkeypatch.setattr(coordinate_api_mod, "WSI", FakeWSI)
     monkeypatch.setattr(visualization_mod, "WSI", FakeWSI)
 
-    pixel_mapping = {"background": 0, "tissue": 1}
-    color_mapping = {"background": None, "tissue": [157, 219, 129]}
-    palette = _build_palette({1: (157, 219, 129)})
-
     overlay = wsi_mod.overlay_mask_on_slide(
         wsi_path=Path("fake-wsi.tif"),
         annotation_mask_path=None,
         mask_arr=mask_arr,
         downsample=1,
         backend="openslide",
-        palette=palette,
-        pixel_mapping=pixel_mapping,
-        color_mapping=color_mapping,
-        alpha=0.5,
     )
     overlay_arr = np.array(overlay.convert("RGB"))
 
-    assert np.array_equal(overlay_arr[0, 0], slide_arr[0, 0])
-    assert not np.array_equal(overlay_arr[0, 1], slide_arr[0, 1])
+    assert np.array_equal(overlay_arr[0, 119], slide_arr[0, 119])
+    assert np.any(np.all(overlay_arr == np.array([37, 94, 59], dtype=np.uint8), axis=-1))
 
 
 def test_overlay_mask_on_slide_defaults_to_tissue_overlay_style(monkeypatch):
-    slide_arr = np.full((2, 2, 3), 120, dtype=np.uint8)
-    mask_arr = np.array([[0, 1], [0, 1]], dtype=np.uint8)
+    slide_arr = np.full((120, 120, 3), 120, dtype=np.uint8)
+    mask_arr = np.zeros((120, 120), dtype=np.uint8)
+    mask_arr[40:80, 40:80] = 1
 
     class FakeWSI:
         def __init__(self, path, backend="asap"):
             del backend
             self.path = Path(path)
             self.spacings = [0.5]
-            self.level_dimensions = [(2, 2)]
+            self.level_dimensions = [(120, 120)]
             self.level_downsamples = [(1.0, 1.0)]
 
         def get_best_level_for_downsample_custom(self, downsample):
+            del downsample
             return 0
 
         def get_slide(self, level):
@@ -189,8 +207,41 @@ def test_overlay_mask_on_slide_defaults_to_tissue_overlay_style(monkeypatch):
     )
     overlay_arr = np.array(overlay.convert("RGB"))
 
-    assert np.array_equal(overlay_arr[0, 0], slide_arr[0, 0])
-    assert not np.array_equal(overlay_arr[0, 1], slide_arr[0, 1])
+    assert np.array_equal(overlay_arr[0, 119], slide_arr[0, 119])
+    assert np.any(np.all(overlay_arr == np.array([37, 94, 59], dtype=np.uint8), axis=-1))
+
+
+def test_save_overlay_preview_writes_rgba_overlay_to_jpeg(monkeypatch, tmp_path: Path):
+    overlay = Image.fromarray(
+        np.array(
+            [
+                [[10, 20, 30, 0], [40, 50, 60, 255]],
+                [[70, 80, 90, 128], [100, 110, 120, 255]],
+            ],
+            dtype=np.uint8,
+        ),
+        mode="RGBA",
+    )
+
+    monkeypatch.setattr(
+        visualization_mod,
+        "overlay_mask_on_slide",
+        lambda **kwargs: overlay,
+    )
+
+    preview_path = tmp_path / "mask-preview.jpg"
+    visualization_mod.save_overlay_preview(
+        wsi_path=Path("fake-wsi.tif"),
+        backend="openslide",
+        mask_arr=np.zeros((2, 2), dtype=np.uint8),
+        mask_preview_path=preview_path,
+        downsample=1,
+    )
+
+    assert preview_path.is_file()
+    with Image.open(preview_path) as saved:
+        assert saved.mode == "RGB"
+
 
 def test_extract_coordinates_uses_overlay_mask_preview_instead_of_line_rendering(
     monkeypatch, tmp_path: Path

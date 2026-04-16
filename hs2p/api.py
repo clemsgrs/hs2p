@@ -9,8 +9,10 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Sequence
 
+import cv2
 import numpy as np
 import pandas as pd
 from PIL import Image
@@ -26,7 +28,6 @@ from hs2p.tile_qc import filter_coordinate_tiles, needs_pixel_qc
 from hs2p.wsi import (
     CoordinateOutputMode,
     CoordinateSelectionStrategy,
-    build_palette,
     iter_tile_records_from_result,
     normalize_tissue_mask,
     open_reader_for_result,
@@ -64,6 +65,7 @@ def _write_mask_preview(
     backend: str,
     mask_preview_path: Path | None,
     tissue_mask: np.ndarray | None,
+    contours=None,
     downsample: int,
     tile_size_lv0: int,
     mask_overlay_color: tuple[int, int, int],
@@ -71,26 +73,35 @@ def _write_mask_preview(
 ) -> None:
     if mask_preview_path is None or tissue_mask is None:
         return
-    pixel_mapping = {"background": 0, "tissue": 1}
-    color_mapping = {
-        "background": None,
-        "tissue": list(mask_overlay_color),
-    }
-    palette = build_palette(
-        pixel_mapping=pixel_mapping,
-        color_mapping=color_mapping,
-    )
+    preview_contours = contours
+    if preview_contours is None:
+        binary_mask = (np.asarray(tissue_mask) > 0).astype(np.uint8) * 255
+        raw_contours, hierarchy = cv2.findContours(
+            binary_mask,
+            cv2.RETR_CCOMP,
+            cv2.CHAIN_APPROX_NONE,
+        )
+        if hierarchy is not None and len(raw_contours) > 0:
+            hierarchy = hierarchy[0]
+            preview_contours = SimpleNamespace(contours=[], holes=[])
+            for fg_idx, h in enumerate(hierarchy):
+                if h[3] != -1:
+                    continue
+                hole_indices = np.flatnonzero(hierarchy[:, 3] == fg_idx)
+                preview_contours.contours.append(raw_contours[fg_idx])
+                preview_contours.holes.append(
+                    [raw_contours[idx] for idx in hole_indices.tolist()]
+                )
     save_overlay_preview(
         wsi_path=wsi_path,
         backend=backend,
         mask_arr=normalize_tissue_mask(np.asarray(tissue_mask)),
         mask_preview_path=mask_preview_path,
         downsample=downsample,
-        palette=palette,
-        pixel_mapping=pixel_mapping,
-        color_mapping=color_mapping,
-        alpha=mask_overlay_alpha,
         tile_size_lv0=tile_size_lv0,
+        contours=preview_contours,
+        outer_border_color=mask_overlay_color,
+        hole_border_color=(0xF2, 0x6B, 0x3A),
     )
 
 
@@ -237,6 +248,7 @@ def _compute_tiling_result(
             backend=preprocessing_result.backend,
             mask_preview_path=mask_preview_path,
             tissue_mask=preprocessing_result.tissue_mask,
+            contours=preprocessing_result.contours,
             downsample=preview_downsample,
             tile_size_lv0=preprocessing_result.tile_size_lv0,
             mask_overlay_color=mask_overlay_color,
@@ -632,6 +644,10 @@ def overlay_mask_on_slide(
     color_mapping: dict[str, list[int] | None] | None = None,
     alpha: float = 0.5,
     mask_arr: np.ndarray | None = None,
+    contours=None,
+    outer_border_color: tuple[int, int, int] = (0x25, 0x5E, 0x3B),
+    hole_border_color: tuple[int, int, int] = (0xF2, 0x6B, 0x3A),
+    stroke_thickness: int = 2,
 ):
     """Render a mask overlay preview for a slide.
 
@@ -650,6 +666,10 @@ def overlay_mask_on_slide(
         color_mapping=color_mapping,
         alpha=alpha,
         mask_arr=mask_arr,
+        contours=contours,
+        outer_border_color=outer_border_color,
+        hole_border_color=hole_border_color,
+        stroke_thickness=stroke_thickness,
     )
 
 

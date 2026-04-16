@@ -6,6 +6,9 @@
 - CPU-only and non-SAM2 tiling paths still use the existing multiprocessing behavior.
 - SAM2 predictor INFO lines from `sam2_image_predictor.py` are filtered out in the SAM2 segmentation path so the CLI stays quiet during inference.
 - SAM2 tissue segmentation now pads rectangular thumbnails to a square before inference and crops back after prediction, which preserves aspect ratio on extreme slides.
+- Tissue-mask previews now render contour boundaries instead of a filled mask overlay: outer tissue borders use evergreen `#255E3B` and hole contours use coral `#F26B3A`.
+- The batch tiling preview path reuses the precomputed contour hierarchy from preprocessing when it is available.
+- Mask preview files with `.jpg`/`.jpeg` suffixes are converted to RGB before saving so RGBA overlays no longer fail at write time.
 
 ## 2026-04-15
 
