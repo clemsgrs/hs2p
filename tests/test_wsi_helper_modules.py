@@ -122,6 +122,26 @@ def test_masks_pad_and_extract_padded_crop_preserve_existing_pixels():
     )
 
 
+def test_preview_pad_to_patch_size_handles_numpy_masks_and_pil_images():
+    image = Image.fromarray(np.array([[1, 2, 3]], dtype=np.uint8))
+    array = np.array([[1, 2, 3]], dtype=np.uint8)
+
+    padded_image = preview_mod.pad_to_patch_size(image, (2, 2))
+    padded_array = preview_mod.pad_to_patch_size(array, (2, 2), fill=0)
+
+    assert padded_image.size == (4, 2)
+    np.testing.assert_array_equal(
+        padded_array,
+        np.array(
+            [
+                [1, 2, 3, 0],
+                [0, 0, 0, 0],
+            ],
+            dtype=np.uint8,
+        ),
+    )
+
+
 def test_preview_build_overlay_alpha_only_uses_colored_labels():
     palette = build_palette(
         pixel_mapping={"background": 0, "tissue": 1, "tumor": 2},

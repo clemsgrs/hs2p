@@ -393,7 +393,7 @@ def _patch_preprocess_slide(
         filtering,
         mask_preview_path,
         preview_downsample=32,
-        mask_overlay_color=(157, 219, 129),
+        mask_overlay_color=(37, 94, 59),
         mask_overlay_alpha=0.5,
         num_workers,
     ):
@@ -925,7 +925,7 @@ def test_tile_slides_defers_preview_writes_until_after_next_slide_compute(
         filtering,
         mask_preview_path,
         preview_downsample=32,
-        mask_overlay_color=(157, 219, 129),
+        mask_overlay_color=(37, 94, 59),
         mask_overlay_alpha=0.5,
         num_workers,
     ):
@@ -1289,7 +1289,7 @@ def test_tile_slides_resolves_all_masks_before_computing_any_slide(
         filtering,
         mask_preview_path,
         preview_downsample=32,
-        mask_overlay_color=(157, 219, 129),
+        mask_overlay_color=(37, 94, 59),
         mask_overlay_alpha=0.5,
         num_workers,
     ):
@@ -1380,7 +1380,7 @@ def test_tile_slides_emits_tissue_progress_before_tiling_progress(
         filtering,
         mask_preview_path,
         preview_downsample=32,
-        mask_overlay_color=(157, 219, 129),
+        mask_overlay_color=(37, 94, 59),
         mask_overlay_alpha=0.5,
         num_workers,
     ):

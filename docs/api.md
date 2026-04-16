@@ -121,7 +121,7 @@ artifacts = tile_slides(
         save_mask_preview=True,
         save_tiling_preview=True,
         downsample=32,
-        mask_overlay_color=(157, 219, 129),
+        mask_overlay_color=(37, 94, 59),
         mask_overlay_alpha=0.5,
     ),
     output_dir=Path("output"),

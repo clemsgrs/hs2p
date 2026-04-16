@@ -56,7 +56,7 @@ tiling:
   preview:
     save: true # save preview images of slide tiling and mask overlays
     downsample: 32 # downsample to use for preview rendering
-    mask_overlay_color: [157, 219, 129] # RGB color used for tissue overlays in batch mask previews
+    mask_overlay_color: [37, 94, 59] # RGB color used for outer tissue contours in batch mask previews
     mask_overlay_alpha: 0.5 # alpha used for tissue overlays in batch mask previews
   sampling_params:
     independent_sampling: false # whether or not to sample tiles independently for each category (if false, tiles will be sampled jointly across all categories, ensuring no overlap between tiles of different categories)

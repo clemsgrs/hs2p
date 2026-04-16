@@ -4,7 +4,6 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from .masks import pad_array_to_shape
 from .masks import read_aligned_mask
 from .preview import (
     build_overlay_alpha,
@@ -246,11 +245,7 @@ def overlay_mask_on_slide(
         mask_arr = np.zeros((base_height, base_width), dtype=np.uint8)
 
     if tile_size_lv0 is not None and (width != base_width or height != base_height):
-        mask_arr = pad_array_to_shape(
-            mask_arr,
-            target_width=width,
-            target_height=height,
-        )
+        mask_arr = pad_to_patch_size(mask_arr, tile_size_at_vis_level, fill=0)
 
     fill_style = _resolve_fill_overlay_style(
         palette=palette,
