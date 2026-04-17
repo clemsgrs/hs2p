@@ -28,14 +28,19 @@ def _base_cfg(tmp_path: Path, csv_path: Path) -> SimpleNamespace:
         tiling=SimpleNamespace(
             read_coordinates_from=None,
             backend="asap",
+            independent_sampling=False,
             params=SimpleNamespace(
                 requested_spacing_um=0.5,
                 requested_tile_size_px=256,
                 tolerance=0.05,
                 overlap=0.0,
-                tissue_threshold=0.1,
             ),
-            preview=SimpleNamespace(save=False, downsample=32),
+            preview=SimpleNamespace(
+                save=False,
+                downsample=32,
+                mask_overlay_color=[37, 94, 59],
+                mask_overlay_alpha=0.5,
+            ),
             seg_params={
                 "method": "hsv",
                 "downsample": 64,
@@ -54,11 +59,10 @@ def _base_cfg(tmp_path: Path, csv_path: Path) -> SimpleNamespace:
                 "black_threshold": 25,
                 "fraction_threshold": 0.9,
             },
-            sampling_params=SimpleNamespace(
-                independent_sampling=True,
-                pixel_mapping=[{"background": 0}, {"tumor": 1}],
-                tissue_percentage=[{"background": None}, {"tumor": 0.1}],
-                color_mapping=None,
+            masks=SimpleNamespace(
+                pixel_mapping=[{"background": 0}, {"tissue": 1}],
+                min_coverage=[{"background": None}, {"tissue": 0.01}],
+                colors=None,
             ),
         ),
     )

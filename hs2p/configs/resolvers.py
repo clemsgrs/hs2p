@@ -5,32 +5,22 @@ import numpy as np
 
 from hs2p.wsi.types import CoordinateSelectionStrategy, SamplingSpec
 
-from .loader import default_config
 from .models import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig
 
 
-def _get_tissue_threshold_from_cfg(cfg: Any) -> float:
-    """Read tissue coverage threshold from masks.min_coverage.tissue (new format)."""
-    masks_cfg = getattr(cfg.tiling, "masks", None)
-    if masks_cfg is not None:
-        min_coverage = _merge_sampling_mapping(
-            getattr(masks_cfg, "min_coverage", None),
-            field_name="min_coverage",
-        )
-        if min_coverage is not None and min_coverage.get("tissue") is not None:
-            return float(min_coverage["tissue"])
-    return 0.01  # safe default
-
-
 def resolve_tiling_config(cfg: Any) -> TilingConfig:
+    min_coverage = _merge_sampling_mapping(
+        cfg.tiling.masks.min_coverage,
+        field_name="min_coverage",
+    )
     return TilingConfig(
         requested_spacing_um=cfg.tiling.params.requested_spacing_um,
         requested_tile_size_px=cfg.tiling.params.requested_tile_size_px,
         tolerance=cfg.tiling.params.tolerance,
         overlap=cfg.tiling.params.overlap,
-        tissue_threshold=_get_tissue_threshold_from_cfg(cfg),
-        independent_sampling=bool(getattr(cfg.tiling, "independent_sampling", False)),
-        backend=(getattr(cfg.tiling, "backend", None) or "auto"),
+        tissue_threshold=float(min_coverage["tissue"]),
+        independent_sampling=bool(cfg.tiling.independent_sampling),
+        backend=cfg.tiling.backend,
     )
 
 
@@ -44,26 +34,12 @@ def resolve_filter_config(cfg: Any) -> FilterConfig:
 
 def resolve_preview_config(cfg: Any) -> PreviewConfig:
     preview_cfg = cfg.tiling.preview
-    default_preview = default_config.tiling.preview
     return PreviewConfig(
         save_mask_preview=bool(preview_cfg.save),
         save_tiling_preview=bool(preview_cfg.save),
         downsample=int(preview_cfg.downsample),
-        mask_overlay_color=tuple(
-            int(v)
-            for v in getattr(
-                preview_cfg,
-                "mask_overlay_color",
-                default_preview.mask_overlay_color,
-            )
-        ),
-        mask_overlay_alpha=float(
-            getattr(
-                preview_cfg,
-                "mask_overlay_alpha",
-                default_preview.mask_overlay_alpha,
-            )
-        ),
+        mask_overlay_color=tuple(int(v) for v in preview_cfg.mask_overlay_color),
+        mask_overlay_alpha=float(preview_cfg.mask_overlay_alpha),
     )
 
 
