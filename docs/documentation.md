@@ -1,5 +1,9 @@
 # Documentation Notes
 
+## 2026-04-17 — CI test invocation cleanup
+
+- Updated `.github/workflows/pr-test.yaml` so the integration regression step only runs `tests/test_fixture_artifacts_regression.py`, matching the current test tree.
+
 ## 2026-04-17 — Unified tiling interface (breaking changes)
 
 - Merged `hs2p.cli.tiling` and `hs2p.cli.sampling` into a single entrypoint: `python -m hs2p --config-file …`.
