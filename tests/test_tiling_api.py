@@ -2166,7 +2166,7 @@ def test_tile_slides_mask_preview_uses_overlay_renderer_with_preview_style(
         preview=PreviewConfig(
             save_mask_preview=True,
             downsample=16,
-            mask_overlay_color=(10, 20, 30),
+            tissue_contour_color=(10, 20, 30),
             mask_overlay_alpha=0.35,
         ),
         output_dir=tmp_path,

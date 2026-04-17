@@ -899,7 +899,7 @@ def tile_slides(
                     preview.downsample if preview is not None else 32
                 ),
                 mask_overlay_color=(
-                    preview.mask_overlay_color
+                    preview.tissue_contour_color
                     if preview is not None
                     else (157, 219, 129)
                 ),
