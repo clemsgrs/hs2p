@@ -99,8 +99,8 @@ pip install "hs2p[all]"
   - preview rendering settings
   - `save` enables both batch mask previews and tiling previews
   - `downsample` controls preview resolution
-  - `mask_overlay_color` controls the RGB tint used for `preview/mask/*.jpg`
-  - `mask_overlay_alpha` controls overlay opacity for `preview/mask/*.jpg`
+  - `tissue_contour_color` controls the RGB border color used for `preview/mask/*.jpg`
+  - `mask_overlay_alpha` controls opacity for the filled annotation-mask overlay path; contour-only previews ignore it
 - `tiling.masks`
   - multi-label annotation sampling (pixel_mapping, color_mapping, min_coverage)
   - when absent, defaults to binary tissue tiling

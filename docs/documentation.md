@@ -4,6 +4,16 @@
 
 - Updated `.github/workflows/pr-test.yaml` so the integration regression step only runs `tests/test_fixture_artifacts_regression.py`, matching the current test tree.
 
+## 2026-04-17 — Mask coverage config schema fix
+
+- Normalized `tiling.masks.pixel_mapping`, `tiling.masks.colors`, and `tiling.masks.min_coverage` in `hs2p/configs/default.yaml` to use mapping syntax instead of one-item lists so OmegaConf can merge user overrides correctly.
+- Updated `hs2p/configs/resolvers.py` so OmegaConf `DictConfig` nodes are accepted as mappings when resolving sampling config.
+
+## 2026-04-17 — Preview contour naming cleanup
+
+- Renamed the preview color setting to `tiling.preview.tissue_contour_color` in the default config and docs.
+- Documented `tiling.preview.mask_overlay_alpha` as applying only to the filled annotation overlay path.
+
 ## 2026-04-17 — Unified tiling interface (breaking changes)
 
 - Merged `hs2p.cli.tiling` and `hs2p.cli.sampling` into a single entrypoint: `python -m hs2p --config-file …`.

@@ -1,5 +1,6 @@
 from pathlib import Path
-from typing import Any, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 import numpy as np
 
@@ -38,7 +39,7 @@ def resolve_preview_config(cfg: Any) -> PreviewConfig:
         save_mask_preview=bool(preview_cfg.save),
         save_tiling_preview=bool(preview_cfg.save),
         downsample=int(preview_cfg.downsample),
-        mask_overlay_color=tuple(int(v) for v in preview_cfg.mask_overlay_color),
+        tissue_contour_color=tuple(int(v) for v in preview_cfg.tissue_contour_color),
         mask_overlay_alpha=float(preview_cfg.mask_overlay_alpha),
     )
 
@@ -77,7 +78,7 @@ def _merge_sampling_mapping(
 ) -> dict[str, Any] | None:
     if entries is None:
         return None
-    if isinstance(entries, dict):
+    if isinstance(entries, Mapping):
         return {str(key): value for key, value in entries.items()}
     try:
         iterator = list(entries)
@@ -85,7 +86,7 @@ def _merge_sampling_mapping(
         raise ValueError(f"{field_name} must be a mapping or a list of mappings") from exc
     merged: dict[str, Any] = {}
     for entry in iterator:
-        if not isinstance(entry, dict):
+        if not isinstance(entry, Mapping):
             raise ValueError(
                 f"{field_name} must be a mapping or a list of single-entry mappings"
             )

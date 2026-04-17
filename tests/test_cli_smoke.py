@@ -38,7 +38,7 @@ def _base_cfg(tmp_path: Path, csv_path: Path) -> SimpleNamespace:
             preview=SimpleNamespace(
                 save=False,
                 downsample=32,
-                mask_overlay_color=[37, 94, 59],
+                tissue_contour_color=[37, 94, 59],
                 mask_overlay_alpha=0.5,
             ),
             seg_params={

@@ -85,17 +85,31 @@ class PreviewConfig:
     save_mask_preview: bool = False
     save_tiling_preview: bool = False
     downsample: int = int(_DEFAULT_PREVIEW.downsample)
-    mask_overlay_color: tuple[int, int, int] = tuple(_DEFAULT_PREVIEW.mask_overlay_color)
+    tissue_contour_color: tuple[int, int, int] = tuple(
+        _DEFAULT_PREVIEW.tissue_contour_color
+    )
     mask_overlay_alpha: float = float(_DEFAULT_PREVIEW.mask_overlay_alpha)
 
-    def __post_init__(self) -> None:
-        color = tuple(int(channel) for channel in self.mask_overlay_color)
+    def __init__(
+        self,
+        save_mask_preview: bool = False,
+        save_tiling_preview: bool = False,
+        downsample: int = int(_DEFAULT_PREVIEW.downsample),
+        tissue_contour_color: tuple[int, int, int] = tuple(
+            _DEFAULT_PREVIEW.tissue_contour_color
+        ),
+        mask_overlay_alpha: float = float(_DEFAULT_PREVIEW.mask_overlay_alpha),
+    ) -> None:
+        color = tuple(int(channel) for channel in tissue_contour_color)
         if len(color) != 3 or any(channel < 0 or channel > 255 for channel in color):
             raise ValueError(
-                "mask_overlay_color must be a length-3 RGB tuple with values in [0, 255]"
+                "tissue_contour_color must be a length-3 RGB tuple with values in [0, 255]"
             )
-        alpha = float(self.mask_overlay_alpha)
+        alpha = float(mask_overlay_alpha)
         if not 0.0 <= alpha <= 1.0:
             raise ValueError("mask_overlay_alpha must be between 0.0 and 1.0")
-        object.__setattr__(self, "mask_overlay_color", color)
+        object.__setattr__(self, "save_mask_preview", bool(save_mask_preview))
+        object.__setattr__(self, "save_tiling_preview", bool(save_tiling_preview))
+        object.__setattr__(self, "downsample", int(downsample))
+        object.__setattr__(self, "tissue_contour_color", color)
         object.__setattr__(self, "mask_overlay_alpha", alpha)

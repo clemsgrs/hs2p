@@ -56,18 +56,18 @@ tiling:
   preview:
     save: true # save preview images of slide tiling and mask overlays
     downsample: 32 # downsample to use for preview rendering
-    mask_overlay_color: [37, 94, 59] # RGB color used for outer tissue contours in batch mask previews
-    mask_overlay_alpha: 0.5 # alpha used for tissue overlays in batch mask previews
+    tissue_contour_color: [37, 94, 59] # RGB color used for outer tissue contours in batch mask previews
+    mask_overlay_alpha: 0.5 # opacity used by the filled annotation-mask overlay path; contour previews ignore this
   masks:
     pixel_mapping: # map annotated categories to their corresponding pixel values
-      - 'background': 0
-      - 'tissue': 1
+      background: 0
+      tissue: 1
     colors: # [r,g,b] color code of overlayed annotation mask, leave blank if you don't want to overlay anything for a given category
-      - 'background':
-      - 'tissue': [157, 219, 129]
+      background:
+      tissue: [157, 219, 129]
     min_coverage: # minimum fraction of tile coverage for each category required to sample tiles, leave blank to not sample from a given category
-      - 'background':
-      - 'tissue': 0.01
+      background:
+      tissue: 0.01
 
 speed:
   num_workers: 8 # number of workers for tiling slides

@@ -2562,8 +2562,8 @@ def test_config_dataclasses_apply_package_defaults_for_secondary_parameters():
         default_config.tiling.filter_params.qc_spacing_um
     )
     assert preview.downsample == default_config.tiling.preview.downsample
-    assert preview.mask_overlay_color == tuple(
-        default_config.tiling.preview.mask_overlay_color
+    assert preview.tissue_contour_color == tuple(
+        default_config.tiling.preview.tissue_contour_color
     )
     assert preview.mask_overlay_alpha == pytest.approx(
         default_config.tiling.preview.mask_overlay_alpha
@@ -2575,14 +2575,14 @@ def test_preview_config_rejects_invalid_mask_overlay_alpha():
         PreviewConfig(mask_overlay_alpha=1.5)
 
 
-def test_resolve_preview_config_reads_mask_overlay_style():
+def test_resolve_preview_config_reads_tissue_contour_style():
     cfg = OmegaConf.create(
         {
             "tiling": {
                 "preview": {
                     "save": True,
                     "downsample": 64,
-                    "mask_overlay_color": [1, 2, 3],
+                    "tissue_contour_color": [1, 2, 3],
                     "mask_overlay_alpha": 0.25,
                 }
             },
@@ -2595,7 +2595,7 @@ def test_resolve_preview_config_reads_mask_overlay_style():
         save_mask_preview=True,
         save_tiling_preview=True,
         downsample=64,
-        mask_overlay_color=(1, 2, 3),
+        tissue_contour_color=(1, 2, 3),
         mask_overlay_alpha=0.25,
     )
 
