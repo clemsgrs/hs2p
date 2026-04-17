@@ -1,22 +1,27 @@
 from pathlib import Path
-from typing import Any, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 import numpy as np
 
 from hs2p.wsi.types import CoordinateSelectionStrategy, SamplingSpec
 
-from .loader import default_config
 from .models import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig
 
 
 def resolve_tiling_config(cfg: Any) -> TilingConfig:
+    min_coverage = _merge_sampling_mapping(
+        cfg.tiling.masks.min_coverage,
+        field_name="min_coverage",
+    )
     return TilingConfig(
         requested_spacing_um=cfg.tiling.params.requested_spacing_um,
         requested_tile_size_px=cfg.tiling.params.requested_tile_size_px,
         tolerance=cfg.tiling.params.tolerance,
         overlap=cfg.tiling.params.overlap,
-        tissue_threshold=cfg.tiling.params.tissue_threshold,
-        backend=(getattr(cfg.tiling, "backend", None) or "auto"),
+        tissue_threshold=float(min_coverage["tissue"]),
+        independent_sampling=bool(cfg.tiling.independent_sampling),
+        backend=cfg.tiling.backend,
     )
 
 
@@ -30,26 +35,12 @@ def resolve_filter_config(cfg: Any) -> FilterConfig:
 
 def resolve_preview_config(cfg: Any) -> PreviewConfig:
     preview_cfg = cfg.tiling.preview
-    default_preview = default_config.tiling.preview
     return PreviewConfig(
         save_mask_preview=bool(preview_cfg.save),
         save_tiling_preview=bool(preview_cfg.save),
         downsample=int(preview_cfg.downsample),
-        mask_overlay_color=tuple(
-            int(v)
-            for v in getattr(
-                preview_cfg,
-                "mask_overlay_color",
-                default_preview.mask_overlay_color,
-            )
-        ),
-        mask_overlay_alpha=float(
-            getattr(
-                preview_cfg,
-                "mask_overlay_alpha",
-                default_preview.mask_overlay_alpha,
-            )
-        ),
+        tissue_contour_color=tuple(int(v) for v in preview_cfg.tissue_contour_color),
+        mask_overlay_alpha=float(preview_cfg.mask_overlay_alpha),
     )
 
 
@@ -61,7 +52,9 @@ def resolve_read_coordinates_from(cfg: Any) -> Path | None:
 
 
 def resolve_sampling_strategy(cfg: Any) -> str:
-    if cfg.tiling.sampling_params.independent_sampling:
+    """Derive selection strategy from tiling.independent_sampling."""
+    independent = bool(getattr(cfg.tiling, "independent_sampling", False))
+    if independent:
         return CoordinateSelectionStrategy.INDEPENDENT_SAMPLING
     return CoordinateSelectionStrategy.JOINT_SAMPLING
 
@@ -85,7 +78,7 @@ def _merge_sampling_mapping(
 ) -> dict[str, Any] | None:
     if entries is None:
         return None
-    if isinstance(entries, dict):
+    if isinstance(entries, Mapping):
         return {str(key): value for key, value in entries.items()}
     try:
         iterator = list(entries)
@@ -93,7 +86,7 @@ def _merge_sampling_mapping(
         raise ValueError(f"{field_name} must be a mapping or a list of mappings") from exc
     merged: dict[str, Any] = {}
     for entry in iterator:
-        if not isinstance(entry, dict):
+        if not isinstance(entry, Mapping):
             raise ValueError(
                 f"{field_name} must be a mapping or a list of single-entry mappings"
             )
@@ -144,10 +137,63 @@ def resolve_sampling_spec(
     *,
     tiling: TilingConfig,
 ) -> SamplingSpec:
+    # Try new masks config first
+    masks_cfg = getattr(cfg.tiling, "masks", None)
+    if masks_cfg is not None:
+        return _resolve_sampling_spec_from_masks(masks_cfg, tiling=tiling)
+
+    # Fall back to legacy sampling_params key
     sampling_config = getattr(cfg.tiling, "sampling_params", None)
     if sampling_config is None:
         return build_default_sampling_spec(tiling)
+    return _resolve_sampling_spec_from_sampling_params(sampling_config, tiling=tiling)
 
+
+def _resolve_sampling_spec_from_masks(masks_cfg: Any, *, tiling: TilingConfig) -> SamplingSpec:
+    pixel_mapping = _merge_sampling_mapping(
+        getattr(masks_cfg, "pixel_mapping", None),
+        field_name="pixel_mapping",
+    )
+    min_coverage = _merge_sampling_mapping(
+        getattr(masks_cfg, "min_coverage", None),
+        field_name="min_coverage",
+    )
+    if pixel_mapping is None:
+        raise ValueError("masks.pixel_mapping is required")
+    if min_coverage is None:
+        raise ValueError("masks.min_coverage is required")
+    if "background" not in pixel_mapping:
+        raise ValueError("masks.pixel_mapping must include a 'background' label")
+    missing_coverage_labels = sorted(set(min_coverage.keys()) - set(pixel_mapping.keys()))
+    if missing_coverage_labels:
+        raise ValueError(
+            "masks.min_coverage references unknown labels: "
+            + ", ".join(missing_coverage_labels)
+        )
+    colors = _merge_sampling_mapping(
+        getattr(masks_cfg, "colors", None),
+        field_name="colors",
+    )
+    if colors is not None:
+        validate_color_mapping(pixel_mapping=pixel_mapping, color_mapping=colors)
+
+    return SamplingSpec(
+        pixel_mapping=pixel_mapping,
+        color_mapping=colors,
+        tissue_percentage=min_coverage,
+        active_annotations=tuple(
+            annotation
+            for annotation, pct in min_coverage.items()
+            if annotation in pixel_mapping and pct is not None and annotation != "background"
+        ),
+    )
+
+
+def _resolve_sampling_spec_from_sampling_params(
+    sampling_config: Any,
+    *,
+    tiling: TilingConfig,
+) -> SamplingSpec:
     pixel_mapping = _merge_sampling_mapping(
         getattr(sampling_config, "pixel_mapping", None),
         field_name="pixel_mapping",

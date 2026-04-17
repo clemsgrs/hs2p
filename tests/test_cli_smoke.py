@@ -1,6 +1,3 @@
-import importlib
-import sys
-import types
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,19 +5,7 @@ import numpy as np
 import pandas as pd
 
 from hs2p.api import SlideSpec, TilingArtifacts
-import hs2p.cli.tiling as tiling_mod
-
-
-def _import_sampling_module():
-    try:
-        return importlib.import_module("hs2p.cli.sampling")
-    except ModuleNotFoundError as exc:
-        if exc.name != "seaborn":
-            raise
-        sys.modules["seaborn"] = types.SimpleNamespace(
-            color_palette=lambda name: [(1.0, 0.0, 0.0)] * 20
-        )
-        return importlib.import_module("hs2p.cli.sampling")
+import hs2p.__main__ as tiling_mod
 
 
 def _write_csv(tmp_path: Path) -> Path:
@@ -43,14 +28,19 @@ def _base_cfg(tmp_path: Path, csv_path: Path) -> SimpleNamespace:
         tiling=SimpleNamespace(
             read_coordinates_from=None,
             backend="asap",
+            independent_sampling=False,
             params=SimpleNamespace(
                 requested_spacing_um=0.5,
                 requested_tile_size_px=256,
                 tolerance=0.05,
                 overlap=0.0,
-                tissue_threshold=0.1,
             ),
-            preview=SimpleNamespace(save=False, downsample=32),
+            preview=SimpleNamespace(
+                save=False,
+                downsample=32,
+                tissue_contour_color=[37, 94, 59],
+                mask_overlay_alpha=0.5,
+            ),
             seg_params={
                 "method": "hsv",
                 "downsample": 64,
@@ -69,11 +59,10 @@ def _base_cfg(tmp_path: Path, csv_path: Path) -> SimpleNamespace:
                 "black_threshold": 25,
                 "fraction_threshold": 0.9,
             },
-            sampling_params=SimpleNamespace(
-                independent_sampling=True,
-                pixel_mapping=[{"background": 0}, {"tumor": 1}],
-                tissue_percentage=[{"background": None}, {"tumor": 0.1}],
-                color_mapping=None,
+            masks=SimpleNamespace(
+                pixel_mapping=[{"background": 0}, {"tissue": 1}],
+                min_coverage=[{"background": None}, {"tissue": 0.01}],
+                colors=None,
             ),
         ),
     )
@@ -112,6 +101,7 @@ def test_tiling_main_smoke_uses_current_schema_and_manifest(
             [
                 {
                     "sample_id": "slide-1",
+                    "annotation": "tissue",
                     "image_path": "slide-1.svs",
                     "mask_path": "slide-1-mask.png",
                     "requested_backend": "asap",
@@ -156,6 +146,7 @@ def test_tiling_main_smoke_uses_current_schema_and_manifest(
     process_df = pd.read_csv(Path(cfg.output_dir) / "process_list.csv")
     assert list(process_df.columns) == [
         "sample_id",
+        "annotation",
         "image_path",
         "mask_path",
         "requested_backend",
@@ -176,97 +167,28 @@ def test_tiling_main_smoke_uses_current_schema_and_manifest(
     assert row["num_tiles"] == 2
 
 
-def test_sampling_main_smoke_uses_current_schema_and_manifest(
-    monkeypatch, tmp_path: Path
-):
-    sampling_mod = _import_sampling_module()
-    csv_path = _write_csv(tmp_path)
-    cfg = _base_cfg(tmp_path, csv_path)
+def test_cli_parse_args_accepts_positional_config_file(tmp_path: Path):
+    config_path = tmp_path / "config.yaml"
 
-    monkeypatch.setattr(sampling_mod, "setup", lambda args: cfg)
-    monkeypatch.setattr(sampling_mod.mp, "cpu_count", lambda: 1)
-
-    class _FakePool:
-        def __init__(self, processes):
-            self.processes = processes
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        def imap(self, fn, args_list):
-            for args in args_list:
-                yield fn(args)
-
-    monkeypatch.setattr(sampling_mod.mp, "Pool", _FakePool)
-
-    def _fake_process_slide_wrapper(kwargs):
-        annotation_dir = Path(kwargs["cfg"].output_dir) / "tiles" / "tumor"
-        annotation_dir.mkdir(parents=True, exist_ok=True)
-        np.savez(
-            annotation_dir / f"{kwargs['sample_id']}.coordinates.npz",
-            tile_index=np.array([0], dtype=np.int32),
-            x=np.array([10], dtype=np.int64),
-            y=np.array([20], dtype=np.int64),
-        )
-        meta_path = annotation_dir / f"{kwargs['sample_id']}.coordinates.meta.json"
-        meta_path.write_text(
-            '{"provenance":{"sample_id":"slide-1","image_path":"slide-1.svs","mask_path":"slide-1-mask.png","backend":"asap","requested_backend":"asap"},"slide":{"dimensions":[256,256],"base_spacing_um":0.5,"level_downsamples":[1.0]},"tiling":{"requested_tile_size_px":256,"requested_spacing_um":0.5,"read_level":0,"read_tile_size_px":256,"read_spacing_um":0.5,"tile_size_lv0":256,"tolerance":0.05,"step_px_lv0":256,"overlap":0.0,"min_tissue_fraction":0.1,"is_within_tolerance":true,"n_tiles":1},"segmentation":{"tissue_method":"unknown","seg_downsample":64,"seg_level":0,"seg_spacing_um":0.5,"sthresh":8,"sthresh_up":255,"mthresh":7,"close":4,"mask_path":"slide-1-mask.png","ref_tile_size_px":16,"tissue_mask_tissue_value":null,"mask_level":null,"mask_spacing_um":null},"filtering":{"a_t":4,"a_h":2,"filter_white":false,"filter_black":false,"white_threshold":220,"black_threshold":25,"fraction_threshold":0.9},"artifact":{"coordinate_space":"level0_px","tile_order":"x_then_y","annotation":"tumor","selection_strategy":"independent_sampling","output_mode":"per_annotation"}}\n'
-        )
-        return kwargs["sample_id"], {
-            "status": "success",
-            "rows": [
-                {
-                    "sample_id": kwargs["sample_id"],
-                    "annotation": "tumor",
-                    "image_path": "slide-1.svs",
-                    "mask_path": "slide-1-mask.png",
-                    "requested_backend": "asap",
-                    "backend": "asap",
-                    "sampling_status": "success",
-                    "num_tiles": 1,
-                    "coordinates_npz_path": str(annotation_dir / f"{kwargs['sample_id']}.coordinates.npz"),
-                    "coordinates_meta_path": str(meta_path),
-                    "error": np.nan,
-                    "traceback": np.nan,
-                }
-            ],
-        }
-
-    monkeypatch.setattr(
-        sampling_mod, "process_slide_wrapper", _fake_process_slide_wrapper
+    args = tiling_mod.parse_args(
+        [str(config_path), "output_dir=/tmp/out", "speed.num_workers=4"]
     )
 
-    sampling_mod.main(SimpleNamespace())
+    assert args.config_file == str(config_path)
+    assert args.opts == ["output_dir=/tmp/out", "speed.num_workers=4"]
 
-    process_df = pd.read_csv(Path(cfg.output_dir) / "process_list.csv")
-    assert list(process_df.columns) == [
-        "sample_id",
-        "annotation",
-        "image_path",
-        "mask_path",
-        "requested_backend",
-        "backend",
-        "sampling_status",
-        "num_tiles",
-        "coordinates_npz_path",
-        "coordinates_meta_path",
-        "error",
-        "traceback",
-    ]
-    row = process_df.to_dict(orient="records")[0]
-    assert row["sample_id"] == "slide-1"
-    assert row["annotation"] == "tumor"
-    assert row["image_path"] == "slide-1.svs"
-    assert row["mask_path"] == "slide-1-mask.png"
-    assert row["sampling_status"] == "success"
-    assert row["num_tiles"] == 1
-    assert row["coordinates_npz_path"].endswith("tiles/tumor/slide-1.coordinates.npz")
-    assert row["coordinates_meta_path"].endswith("tiles/tumor/slide-1.coordinates.meta.json")
-    assert pd.isna(row["error"])
-    assert pd.isna(row["traceback"])
-    assert (
-        Path(cfg.output_dir) / "tiles" / "tumor" / "slide-1.coordinates.npz"
-    ).is_file()
+
+def test_cli_entrypoint_invokes_main(monkeypatch, tmp_path: Path):
+    config_path = tmp_path / "config.yaml"
+    captured = {}
+
+    def _fake_main(args):
+        captured["args"] = args
+
+    monkeypatch.setattr(tiling_mod, "main", _fake_main)
+
+    exit_code = tiling_mod.entrypoint([str(config_path), "output_dir=/tmp/out"])
+
+    assert exit_code == 0
+    assert captured["args"].config_file == str(config_path)
+    assert captured["args"].opts == ["output_dir=/tmp/out"]

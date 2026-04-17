@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import numpy as np
 
 import hs2p.preprocessing as preprocessing_mod
+import hs2p.tiling.mask as tiling_mask_mod
 
 
 def _make_slide():
@@ -54,12 +55,12 @@ def test_resolve_tissue_mask_uses_precomputed_mask_without_segmentation(
         raise AssertionError("segment_tissue_image should not be called")
 
     monkeypatch.setattr(
-        preprocessing_mod,
+        tiling_mask_mod,
         "load_precomputed_tissue_mask",
         _fake_load_precomputed_tissue_mask,
     )
     monkeypatch.setattr(
-        preprocessing_mod,
+        tiling_mask_mod,
         "segment_tissue_image",
         _fake_segment_tissue_image,
     )
@@ -136,12 +137,12 @@ def test_resolve_tissue_mask_allows_precomputed_masks_without_a_method(
     slide = _make_slide()
 
     monkeypatch.setattr(
-        preprocessing_mod,
+        tiling_mask_mod,
         "load_precomputed_tissue_mask",
         lambda **kwargs: (np.full((25, 25), 255, dtype=np.uint8), 0, 1.0),
     )
     monkeypatch.setattr(
-        preprocessing_mod,
+        tiling_mask_mod,
         "segment_tissue_image",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             AssertionError("segment_tissue_image should not be called")
@@ -172,7 +173,7 @@ def test_resolve_tissue_mask_uses_sam2_thumbnail_spacing(monkeypatch):
         return np.ones(image.shape[:2], dtype=np.uint8)
 
     monkeypatch.setattr(
-        preprocessing_mod,
+        tiling_mask_mod,
         "segment_tissue_image",
         _fake_segment_tissue_image,
     )

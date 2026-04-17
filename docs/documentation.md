@@ -1,5 +1,34 @@
 # Documentation Notes
 
+## 2026-04-17 — CI test invocation cleanup
+
+- Updated `.github/workflows/pr-test.yaml` so the integration regression step only runs `tests/test_fixture_artifacts_regression.py`, matching the current test tree.
+
+## 2026-04-17 — CLI entrypoint shorthand
+
+- Added a `hs2p` console script so the batch CLI can be launched as `hs2p /path/to/config.yaml`.
+- The positional config path is now the only supported CLI invocation form.
+
+## 2026-04-17 — Mask coverage config schema fix
+
+- Normalized `tiling.masks.pixel_mapping`, `tiling.masks.colors`, and `tiling.masks.min_coverage` in `hs2p/configs/default.yaml` to use mapping syntax instead of one-item lists so OmegaConf can merge user overrides correctly.
+- Updated `hs2p/configs/resolvers.py` so OmegaConf `DictConfig` nodes are accepted as mappings when resolving sampling config.
+
+## 2026-04-17 — Preview contour naming cleanup
+
+- Renamed the preview color setting to `tiling.preview.tissue_contour_color` in the default config and docs.
+- Documented `tiling.preview.mask_overlay_alpha` as applying only to the filled annotation overlay path.
+
+## 2026-04-17 — Unified tiling interface (breaking changes)
+
+- Merged `hs2p.cli.tiling` and `hs2p.cli.sampling` into a single entrypoint with a positional config path: `hs2p /path/to/config.yaml`.
+- `hs2p/cli/` package deleted; use `hs2p /path/to/config.yaml` or `python -m hs2p /path/to/config.yaml` in scripts.
+- `tiling.sampling_params` config block renamed to `tiling.masks` (`pixel_mapping`, `color_mapping`, `min_coverage`).
+- `tiling.params.tissue_threshold` folded into `tiling.masks.min_coverage["tissue"]`.
+- Tar path rule: `{sample_id}.tiles.tar` when annotation is `"tissue"` (default), otherwise `{sample_id}.{annotation}.tiles.tar`.
+- Process list gains `annotation` column (always `"tissue"` for the binary default).
+- Internal modules reorganized into `hs2p/tiling/` package: `result.py`, `contours.py`, `coverage.py`, `generate.py`, `mask.py`, `io.py`, `single.py`, `tar.py`, `orchestration.py`. `hs2p/preprocessing.py` and `hs2p/api.py` are now thin re-export shims.
+
 ## 2026-04-16
 
 - Batch tiling now uses a spawn-based multiprocessing context for all SAM2 work and GPU-decode work so CUDA initializes in fresh child interpreters instead of forked workers.

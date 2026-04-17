@@ -1,6 +1,7 @@
 import argparse
 from pathlib import Path
 
+import hs2p.progress as progress
 from hs2p.api import tile_slides
 from hs2p.configs.resolvers import (
     resolve_filter_config,
@@ -9,14 +10,15 @@ from hs2p.configs.resolvers import (
     resolve_segmentation_config,
     resolve_tiling_config,
 )
-import hs2p.progress as progress
-from hs2p.utils import setup, load_csv
+from hs2p.utils import load_csv, setup
 
 
 def get_args_parser(add_help: bool = True):
     parser = argparse.ArgumentParser("hs2p", add_help=add_help)
     parser.add_argument(
-        "--config-file", default="", metavar="FILE", help="path to config file"
+        "config_file",
+        metavar="CONFIG",
+        help="path to config file",
     )
     parser.add_argument(
         "--skip-datetime", action="store_true", help="skip run id datetime prefix"
@@ -29,13 +31,14 @@ def get_args_parser(add_help: bool = True):
         type=str,
         help="output directory to save logs and checkpoints",
     )
-    parser.add_argument(
-        "opts",
-        help='Modify config options at the end of the command using "path.key=value".',
-        default=None,
-        nargs=argparse.REMAINDER,
-    )
     return parser
+
+
+def parse_args(argv=None):
+    parser = get_args_parser(add_help=True)
+    args, opts = parser.parse_known_args(argv)
+    args.opts = opts
+    return args
 
 
 def main(args):
@@ -93,6 +96,10 @@ def main(args):
             raise
 
 
+def entrypoint(argv=None):
+    main(parse_args(argv))
+    return 0
+
+
 if __name__ == "__main__":
-    args = get_args_parser(add_help=True).parse_args()
-    main(args)
+    raise SystemExit(entrypoint())

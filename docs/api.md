@@ -121,7 +121,7 @@ artifacts = tile_slides(
         save_mask_preview=True,
         save_tiling_preview=True,
         downsample=32,
-        mask_overlay_color=(37, 94, 59),
+        tissue_contour_color=(37, 94, 59),
         mask_overlay_alpha=0.5,
     ),
     output_dir=Path("output"),
@@ -131,8 +131,9 @@ artifacts = tile_slides(
 
 When `save_mask_preview=True`, `tile_slides()` writes `preview/mask/{sample_id}.jpg`
 as a contour-only slide preview. The outer tissue boundary uses evergreen
-`#255E3B`, while hole contours use coral `#F26B3A`. `mask_overlay_color`
-controls the outer border color for this preview path.
+`#255E3B`, while hole contours use coral `#F26B3A`. `tissue_contour_color`
+controls the outer border color for this preview path. `mask_overlay_alpha`
+does not affect this contour-only path.
 
 The sampling preview path still uses the multi-label filled-mask renderer when
 pixel and color mappings are provided.

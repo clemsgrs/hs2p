@@ -71,4 +71,4 @@ jobs:
             -v "$GITHUB_WORKSPACE:/workspace" \
             -w /workspace \
             hs2p:${{ github.sha }} \
-            bash -lc "python -m pip install --no-cache-dir pytest pytest-cov && MPLCONFIGDIR=/tmp/mpl python -m pytest -q -m integration tests/test_fixture_artifacts_regression.py tests/test_real_fixture_smoke_regression.py"
+            bash -lc "python -m pip install --no-cache-dir pytest pytest-cov && MPLCONFIGDIR=/tmp/mpl python -m pytest -q -m integration tests/test_fixture_artifacts_regression.py"

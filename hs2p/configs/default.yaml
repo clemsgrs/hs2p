@@ -11,12 +11,12 @@ seed: 0 # seed for reproducibility
 tiling:
   read_coordinates_from: # path to a directory containing {sample_id}.coordinates.npz and {sample_id}.coordinates.meta.json (leave empty to compute tiles)
   backend: "auto" # backend to use for slide reading; auto prefers CuCIM when supported and falls back to ASAP/openslide
+  independent_sampling: false # whether to tile each annotation independently (true) or jointly over the union mask (false)
   params:
     requested_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel
     tolerance: 0.05 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)
     requested_tile_size_px: 256 # size of the tiles to extract, in pixels
     overlap: 0.0 # percentage of overlap between two consecutive tiles (float between 0 and 1)
-    tissue_threshold: 0.01 # minimum fraction of pixels that must be tissue to keep a tile (float between 0 and 1)
   seg_params:
     method: "hsv" # tissue segmentation method: hsv, otsu, threshold, or sam2
     # downsample: controls which pyramid level is read for tissue segmentation.
@@ -56,19 +56,18 @@ tiling:
   preview:
     save: true # save preview images of slide tiling and mask overlays
     downsample: 32 # downsample to use for preview rendering
-    mask_overlay_color: [37, 94, 59] # RGB color used for outer tissue contours in batch mask previews
-    mask_overlay_alpha: 0.5 # alpha used for tissue overlays in batch mask previews
-  sampling_params:
-    independent_sampling: false # whether or not to sample tiles independently for each category (if false, tiles will be sampled jointly across all categories, ensuring no overlap between tiles of different categories)
+    tissue_contour_color: [37, 94, 59] # RGB color used for outer tissue contours in batch mask previews
+    mask_overlay_alpha: 0.5 # opacity used by the filled annotation-mask overlay path; contour previews ignore this
+  masks:
     pixel_mapping: # map annotated categories to their corresponding pixel values
-      - 'background': 0
-      - 'tissue': 1
-    color_mapping: # [r,g,b] color code of overlayed annotation mask, leave blank if you don't want to overlay anything for a given category
-      - 'background':
-      - 'tissue': [157, 219, 129]
-    tissue_percentage: # minimum percentage of tile coverage for each category required to sample tiles, leave blank to not sample from a given category
-      - 'background':
-      - 'tissue': ${tiling.params.tissue_threshold}
+      background: 0
+      tissue: 1
+    colors: # [r,g,b] color code of overlayed annotation mask, leave blank if you don't want to overlay anything for a given category
+      background:
+      tissue: [157, 219, 129]
+    min_coverage: # minimum fraction of tile coverage for each category required to sample tiles, leave blank to not sample from a given category
+      background:
+      tissue: 0.01
 
 speed:
   num_workers: 8 # number of workers for tiling slides
