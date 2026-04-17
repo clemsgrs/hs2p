@@ -37,6 +37,9 @@ dependencies = [
 Homepage = "https://github.com/clemsgrs/hs2p"
 "Bug Tracker" = "https://github.com/clemsgrs/hs2p/issues"
 
+[project.scripts]
+hs2p = "hs2p.__main__:entrypoint"
+
 [project.optional-dependencies]
 openslide = [
     "openslide-python",

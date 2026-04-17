@@ -153,7 +153,7 @@ slide-2,/data/wsi/slide-2.tif,/data/mask/slide-2-annotations.tif
 Run:
 
 ```bash
-python -m hs2p --config-file /path/to/config.yaml
+hs2p /path/to/config.yaml
 ```
 
 For a first run, start from [hs2p/configs/default.yaml](hs2p/configs/default.yaml) and edit only the essentials:

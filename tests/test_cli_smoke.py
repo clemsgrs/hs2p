@@ -165,3 +165,30 @@ def test_tiling_main_smoke_uses_current_schema_and_manifest(
     assert row["mask_path"] == "slide-1-mask.png"
     assert row["tiling_status"] == "success"
     assert row["num_tiles"] == 2
+
+
+def test_cli_parse_args_accepts_positional_config_file(tmp_path: Path):
+    config_path = tmp_path / "config.yaml"
+
+    args = tiling_mod.parse_args(
+        [str(config_path), "output_dir=/tmp/out", "speed.num_workers=4"]
+    )
+
+    assert args.config_file == str(config_path)
+    assert args.opts == ["output_dir=/tmp/out", "speed.num_workers=4"]
+
+
+def test_cli_entrypoint_invokes_main(monkeypatch, tmp_path: Path):
+    config_path = tmp_path / "config.yaml"
+    captured = {}
+
+    def _fake_main(args):
+        captured["args"] = args
+
+    monkeypatch.setattr(tiling_mod, "main", _fake_main)
+
+    exit_code = tiling_mod.entrypoint([str(config_path), "output_dir=/tmp/out"])
+
+    assert exit_code == 0
+    assert captured["args"].config_file == str(config_path)
+    assert captured["args"].opts == ["output_dir=/tmp/out"]

@@ -3,7 +3,7 @@
 hs2p provides a single batch entrypoint:
 
 ```
-python -m hs2p --config-file config.yaml [opts...]
+hs2p /path/to/config.yaml [opts...]
 ```
 
 The `mask_path` column in the input CSV is interpreted as a tissue mask.
@@ -53,7 +53,7 @@ Start from [`hs2p/configs/default.yaml`](../hs2p/configs/default.yaml), then edi
 Run:
 
 ```bash
-python -m hs2p --config-file /path/to/config.yaml
+hs2p /path/to/config.yaml
 ```
 
 ## Installation and backends

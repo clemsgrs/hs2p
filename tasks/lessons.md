@@ -71,6 +71,9 @@
 - When the user says no backward compatibility is needed, do not keep a legacy
   alias "just in case"; remove the alias, update the docs/tests, and make the
   new API the only supported surface.
+- When introducing a new CLI invocation form, do not preserve the old flag
+  spelling unless the user explicitly asks for compatibility; stale aliases make
+  the entrypoint behavior ambiguous and keep tests/docs split across two paths.
 - When removing a public config field, sweep all internal call sites in the same
   change; leaving one old attribute access behind will compile but fail at
   runtime in code paths the tests may not cover.

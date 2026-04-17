@@ -4,6 +4,11 @@
 
 - Updated `.github/workflows/pr-test.yaml` so the integration regression step only runs `tests/test_fixture_artifacts_regression.py`, matching the current test tree.
 
+## 2026-04-17 — CLI entrypoint shorthand
+
+- Added a `hs2p` console script so the batch CLI can be launched as `hs2p /path/to/config.yaml`.
+- The positional config path is now the only supported CLI invocation form.
+
 ## 2026-04-17 — Mask coverage config schema fix
 
 - Normalized `tiling.masks.pixel_mapping`, `tiling.masks.colors`, and `tiling.masks.min_coverage` in `hs2p/configs/default.yaml` to use mapping syntax instead of one-item lists so OmegaConf can merge user overrides correctly.
@@ -16,8 +21,8 @@
 
 ## 2026-04-17 — Unified tiling interface (breaking changes)
 
-- Merged `hs2p.cli.tiling` and `hs2p.cli.sampling` into a single entrypoint: `python -m hs2p --config-file …`.
-- `hs2p/cli/` package deleted; use `python -m hs2p` in all scripts.
+- Merged `hs2p.cli.tiling` and `hs2p.cli.sampling` into a single entrypoint with a positional config path: `hs2p /path/to/config.yaml`.
+- `hs2p/cli/` package deleted; use `hs2p /path/to/config.yaml` or `python -m hs2p /path/to/config.yaml` in scripts.
 - `tiling.sampling_params` config block renamed to `tiling.masks` (`pixel_mapping`, `color_mapping`, `min_coverage`).
 - `tiling.params.tissue_threshold` folded into `tiling.masks.min_coverage["tissue"]`.
 - Tar path rule: `{sample_id}.tiles.tar` when annotation is `"tissue"` (default), otherwise `{sample_id}.{annotation}.tiles.tar`.
