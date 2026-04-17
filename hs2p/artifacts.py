@@ -38,6 +38,7 @@ class TilingArtifacts:
     tiling_preview_path: Path | None = None
     backend: str | None = None
     requested_backend: str | None = None
+    annotation: str | None = None
 
 
 @dataclass(frozen=True)
@@ -86,17 +87,26 @@ def validate_result_consistency(result: TilingResult) -> None:
         raise ValueError("tile_index must be a contiguous range from 0 to num_tiles-1")
 
 
+def _annotation_tiles_dir(output_dir: Path, annotation: str | None) -> Path:
+    """Return the tiles sub-directory, collapsing 'tissue' to the flat layout."""
+    base = Path(output_dir) / "tiles"
+    if annotation is None or annotation == "tissue":
+        return base
+    return base / annotation
+
+
 def save_tiling_result(
     result: TilingResult,
     output_dir: Path,
     *,
+    annotation: str | None = None,
     tiles_dir: Path | None = None,
 ) -> "TilingArtifacts":
     validate_result_consistency(result)
     tiles_dir = (
         Path(tiles_dir)
         if tiles_dir is not None
-        else Path(output_dir) / "tiles"
+        else _annotation_tiles_dir(output_dir, annotation)
     )
     tiles_dir.mkdir(parents=True, exist_ok=True)
     artifact_paths = _save_tiling_result(
@@ -111,6 +121,7 @@ def save_tiling_result(
         num_tiles=len(result.x),
         backend=result.backend,
         requested_backend=result.requested_backend,
+        annotation=annotation,
     )
 
 
@@ -358,6 +369,7 @@ __all__ = [
     "CompatibilitySpec",
     "SlideSpec",
     "TilingArtifacts",
+    "_annotation_tiles_dir",
     "load_tiling_result",
     "load_whole_slides_from_rows",
     "save_tiling_result",

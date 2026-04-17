@@ -1,4 +1,3 @@
-import importlib
 import logging
 import sys
 import types
@@ -9,25 +8,14 @@ import numpy as np
 import pandas as pd
 
 import hs2p.api as api_mod
+import hs2p.tiling.orchestration as orchestration_mod
 import hs2p.preprocessing as preprocessing_mod
 from hs2p.api import SlideSpec, TilingArtifacts, tile_slides
 from hs2p.configs import FilterConfig, SegmentationConfig, TilingConfig
-import hs2p.cli.tiling as tiling_mod
+import hs2p.__main__ as tiling_mod
 
 
-def _import_sampling_module():
-    try:
-        return importlib.import_module("hs2p.cli.sampling")
-    except ModuleNotFoundError as exc:
-        if exc.name != "seaborn":
-            raise
-        sys.modules["seaborn"] = types.SimpleNamespace(
-            color_palette=lambda name: [(1.0, 0.0, 0.0)] * 20
-        )
-        return importlib.import_module("hs2p.cli.sampling")
 
-
-sampling_mod = _import_sampling_module()
 
 
 class RecordingReporter:
@@ -297,54 +285,6 @@ def test_rich_tissue_progress_uses_a_separate_task(monkeypatch):
     assert reporter.progress.tasks[1]["completed"] == 3
 
 
-def test_rich_sampling_summary_shows_zero_tile_and_total_tiles(monkeypatch):
-    import hs2p.progress as progress
-
-    _install_fake_rich_console(monkeypatch, is_terminal=True)
-    _install_fake_rich_progress(monkeypatch)
-    _install_fake_rich_summary_types(monkeypatch)
-
-    captured = {}
-
-    class FakeConsole:
-        def print(self, *args, **kwargs):
-            captured["printed"] = args
-
-    reporter = progress.RichReporter(output_dir="out", console=FakeConsole())
-    monkeypatch.setattr(
-        reporter,
-        "_print_summary",
-        lambda title, rows: captured.update({"title": title, "rows": rows}),
-    )
-
-    reporter.emit(
-        progress.ProgressEvent(
-            kind="sampling.finished",
-            payload={
-                "total": 3,
-                "completed": 2,
-                "failed": 1,
-                "sampled_tiles": 10,
-                "output_dir": "out",
-                "process_list_path": "out/process_list.csv",
-                "zero_tile_successes_by_annotation": {"tumor": 1, "stroma": 2},
-            },
-        )
-    )
-
-    assert captured["title"] == "Sampling Summary"
-    assert captured["rows"] == [
-        ("Slides", "3"),
-        ("Completed", "2"),
-        ("Failed", "1"),
-        ("Zero-tile", "3"),
-        ("Total tiles", "10"),
-        ("Process list", "out/process_list.csv"),
-        ("Zero-tile stroma", "2"),
-        ("Zero-tile tumor", "1"),
-    ]
-
-
 def test_tiling_main_installs_progress_reporter_only_during_pipeline_run(
     monkeypatch, tmp_path: Path
 ):
@@ -428,6 +368,7 @@ def test_tile_slides_emits_progress_for_reused_success_and_failure(
         [
             {
                 "sample_id": "slide-a",
+                "annotation": "tissue",
                 "image_path": "slide-a.svs",
                 "mask_path": np.nan,
                 "requested_backend": "asap",
@@ -484,7 +425,7 @@ def test_tile_slides_emits_progress_for_reused_success_and_failure(
             )
 
     def _fake_resolve_mask_for_request(request):
-        return api_mod._MaskResolutionResponse(
+        return orchestration_mod._MaskResolutionResponse(
             input_index=request.input_index,
             whole_slide=request.whole_slide,
             ok=True,
@@ -499,12 +440,12 @@ def test_tile_slides_emits_progress_for_reused_success_and_failure(
             backend=request.tiling.backend,
         )
 
-    monkeypatch.setattr("hs2p.api.validate_tiling_artifacts", _fake_validate_tiling_artifacts)
+    monkeypatch.setattr("hs2p.tiling.orchestration.validate_tiling_artifacts", _fake_validate_tiling_artifacts)
     monkeypatch.setattr(
-        "hs2p.api._compute_and_save_tiling_artifacts_from_request",
+        "hs2p.tiling.orchestration._compute_and_save_tiling_artifacts_from_request",
         _fake_compute_and_save,
     )
-    monkeypatch.setattr("hs2p.api._resolve_mask_for_request", _fake_resolve_mask_for_request)
+    monkeypatch.setattr("hs2p.tiling.orchestration._resolve_mask_for_request", _fake_resolve_mask_for_request)
 
     with progress.activate_progress_reporter(reporter):
         tile_slides(
@@ -563,238 +504,6 @@ def test_tile_slides_emits_progress_for_reused_success_and_failure(
         "process_list_path": str(run_dir / "process_list.csv"),
         "zero_tile_successes": 0,
     }
-
-
-def test_sampling_main_emits_progress_and_run_summary(monkeypatch, tmp_path: Path):
-    import hs2p.progress as progress
-
-    reporter = RecordingReporter()
-    cfg = _base_cli_cfg(tmp_path)
-    cfg.resume = False
-    cfg.tiling.preview.save = False
-    slides = [
-        SlideSpec(
-            sample_id="slide-1",
-            image_path=Path("slide-1.svs"),
-            mask_path=Path("slide-1-mask.png"),
-        ),
-        SlideSpec(
-            sample_id="slide-2",
-            image_path=Path("slide-2.svs"),
-            mask_path=Path("slide-2-mask.png"),
-        ),
-    ]
-    resolved_sampling_spec = sampling_mod.SamplingSpec(
-        pixel_mapping={"background": 0, "tumor": 1},
-        color_mapping=None,
-        tissue_percentage={"background": None, "tumor": 0.1},
-        active_annotations=("tumor",),
-    )
-
-    monkeypatch.setattr(sampling_mod, "setup", lambda args: cfg)
-    monkeypatch.setattr(sampling_mod, "load_csv", lambda cfg, **kwargs: slides)
-    monkeypatch.setattr(sampling_mod, "resolve_tiling_config", lambda cfg: _tiling_config())
-    monkeypatch.setattr(
-        sampling_mod, "resolve_segmentation_config", lambda cfg: _segmentation_config()
-    )
-    monkeypatch.setattr(sampling_mod, "resolve_filter_config", lambda cfg: _filter_config())
-    monkeypatch.setattr(
-        sampling_mod, "resolve_sampling_spec", lambda cfg, tiling: resolved_sampling_spec
-    )
-    monkeypatch.setattr(
-        sampling_mod,
-        "resolve_sampling_strategy",
-        lambda cfg: sampling_mod.CoordinateSelectionStrategy.INDEPENDENT_SAMPLING,
-    )
-    monkeypatch.setattr(sampling_mod.mp, "cpu_count", lambda: 1)
-    monkeypatch.setattr(progress, "create_cli_progress_reporter", lambda **kwargs: reporter)
-
-    class _FakePool:
-        def __init__(self, processes):
-            self.processes = processes
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        def imap(self, fn, args_list):
-            for args in args_list:
-                yield fn(args)
-
-    monkeypatch.setattr(sampling_mod.mp, "Pool", _FakePool)
-
-    def _fake_process_slide_wrapper(kwargs):
-        sample_id = kwargs["sample_id"]
-        if sample_id == "slide-1":
-            rows = [
-                {
-                    "sample_id": sample_id,
-                    "annotation": "tumor",
-                    "image_path": f"{sample_id}.svs",
-                    "mask_path": None,
-                    "requested_backend": "asap",
-                    "backend": "asap",
-                    "sampling_status": "success",
-                    "num_tiles": 3,
-                    "coordinates_npz_path": str(
-                        Path(kwargs["cfg"].output_dir)
-                        / "tiles"
-                        / "tumor"
-                        / f"{sample_id}.coordinates.npz"
-                    ),
-                    "coordinates_meta_path": str(
-                        Path(kwargs["cfg"].output_dir)
-                        / "tiles"
-                        / "tumor"
-                        / f"{sample_id}.coordinates.meta.json"
-                    ),
-                    "error": np.nan,
-                    "traceback": np.nan,
-                }
-            ]
-            return sample_id, {"status": "success", "rows": rows}
-        rows = [
-            {
-                "sample_id": sample_id,
-                "annotation": "tumor",
-                "image_path": f"{sample_id}.svs",
-                "mask_path": None,
-                "requested_backend": "asap",
-                "backend": "asap",
-                "sampling_status": "failed",
-                "num_tiles": 0,
-                "coordinates_npz_path": np.nan,
-                "coordinates_meta_path": np.nan,
-                "error": "boom",
-                "traceback": "traceback",
-            }
-        ]
-        return sample_id, {"status": "failed", "rows": rows}
-
-    monkeypatch.setattr(
-        sampling_mod, "process_slide_wrapper", _fake_process_slide_wrapper
-    )
-
-    sampling_mod.main(SimpleNamespace())
-
-    assert [event.kind for event in reporter.events] == [
-        "run.started",
-        "sampling.started",
-        "sampling.progress",
-        "sampling.progress",
-        "sampling.finished",
-        "run.finished",
-    ]
-    assert reporter.events[2].payload == {
-        "total": 2,
-        "completed": 1,
-        "failed": 0,
-        "pending": 1,
-        "sampled_tiles": 3,
-    }
-    assert reporter.events[3].payload == {
-        "total": 2,
-        "completed": 1,
-        "failed": 1,
-        "pending": 0,
-        "sampled_tiles": 3,
-    }
-    assert reporter.events[4].payload == {
-        "total": 2,
-        "completed": 1,
-        "failed": 1,
-        "pending": 0,
-        "sampled_tiles": 3,
-        "output_dir": str(Path(cfg.output_dir)),
-        "process_list_path": str(Path(cfg.output_dir) / "process_list.csv"),
-        "zero_tile_successes_by_annotation": {"tumor": 0},
-    }
-
-
-def test_sampling_main_emits_finished_summary_when_resume_has_no_work(
-    monkeypatch, tmp_path: Path
-):
-    import hs2p.progress as progress
-
-    reporter = RecordingReporter()
-    cfg = _base_cli_cfg(tmp_path, resume=True)
-    slides = [SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs"))]
-    slides = [
-        SlideSpec(
-            sample_id="slide-1",
-            image_path=Path("slide-1.svs"),
-            mask_path=Path("slide-1-mask.png"),
-        )
-    ]
-    resolved_sampling_spec = sampling_mod.SamplingSpec(
-        pixel_mapping={"background": 0, "tumor": 1},
-        color_mapping=None,
-        tissue_percentage={"background": None, "tumor": 0.1},
-        active_annotations=("tumor",),
-    )
-    output_dir = Path(cfg.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(
-        [
-            {
-                "sample_id": "slide-1",
-                "annotation": "tumor",
-                "image_path": "slide-1.svs",
-                "mask_path": np.nan,
-                "requested_backend": "asap",
-                "backend": "asap",
-                "sampling_status": "success",
-                "num_tiles": 0,
-                "coordinates_npz_path": np.nan,
-                "coordinates_meta_path": np.nan,
-                "error": np.nan,
-                "traceback": np.nan,
-            }
-        ]
-    ).to_csv(output_dir / "process_list.csv", index=False)
-
-    monkeypatch.setattr(sampling_mod, "setup", lambda args: cfg)
-    monkeypatch.setattr(sampling_mod, "load_csv", lambda cfg, **kwargs: slides)
-    monkeypatch.setattr(sampling_mod, "resolve_tiling_config", lambda cfg: _tiling_config())
-    monkeypatch.setattr(
-        sampling_mod, "resolve_segmentation_config", lambda cfg: _segmentation_config()
-    )
-    monkeypatch.setattr(sampling_mod, "resolve_filter_config", lambda cfg: _filter_config())
-    monkeypatch.setattr(
-        sampling_mod, "resolve_sampling_spec", lambda cfg, tiling: resolved_sampling_spec
-    )
-    monkeypatch.setattr(
-        sampling_mod,
-        "resolve_sampling_strategy",
-        lambda cfg: sampling_mod.CoordinateSelectionStrategy.INDEPENDENT_SAMPLING,
-    )
-    monkeypatch.setattr(progress, "create_cli_progress_reporter", lambda **kwargs: reporter)
-    class _NoPool:
-        def __init__(self, *args, **kwargs):
-            raise AssertionError("sampling pool should not start when resume has no work")
-
-    monkeypatch.setattr(sampling_mod.mp, "Pool", _NoPool)
-
-    sampling_mod.main(SimpleNamespace())
-
-    assert [event.kind for event in reporter.events] == [
-        "run.started",
-        "sampling.finished",
-        "run.finished",
-    ]
-    assert reporter.events[1].payload == {
-        "total": 1,
-        "completed": 1,
-        "failed": 0,
-        "pending": 0,
-        "sampled_tiles": 0,
-        "output_dir": str(output_dir),
-        "process_list_path": str(output_dir / "process_list.csv"),
-        "zero_tile_successes_by_annotation": {"tumor": 1},
-    }
-
 
 def test_progress_aware_logging_routes_stdout_through_active_reporter():
     import hs2p.progress as progress

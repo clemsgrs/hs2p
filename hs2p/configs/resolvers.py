@@ -9,13 +9,27 @@ from .loader import default_config
 from .models import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig
 
 
+def _get_tissue_threshold_from_cfg(cfg: Any) -> float:
+    """Read tissue coverage threshold from masks.min_coverage.tissue (new format)."""
+    masks_cfg = getattr(cfg.tiling, "masks", None)
+    if masks_cfg is not None:
+        min_coverage = _merge_sampling_mapping(
+            getattr(masks_cfg, "min_coverage", None),
+            field_name="min_coverage",
+        )
+        if min_coverage is not None and min_coverage.get("tissue") is not None:
+            return float(min_coverage["tissue"])
+    return 0.01  # safe default
+
+
 def resolve_tiling_config(cfg: Any) -> TilingConfig:
     return TilingConfig(
         requested_spacing_um=cfg.tiling.params.requested_spacing_um,
         requested_tile_size_px=cfg.tiling.params.requested_tile_size_px,
         tolerance=cfg.tiling.params.tolerance,
         overlap=cfg.tiling.params.overlap,
-        tissue_threshold=cfg.tiling.params.tissue_threshold,
+        tissue_threshold=_get_tissue_threshold_from_cfg(cfg),
+        independent_sampling=bool(getattr(cfg.tiling, "independent_sampling", False)),
         backend=(getattr(cfg.tiling, "backend", None) or "auto"),
     )
 
@@ -61,7 +75,9 @@ def resolve_read_coordinates_from(cfg: Any) -> Path | None:
 
 
 def resolve_sampling_strategy(cfg: Any) -> str:
-    if cfg.tiling.sampling_params.independent_sampling:
+    """Derive selection strategy from tiling.independent_sampling."""
+    independent = bool(getattr(cfg.tiling, "independent_sampling", False))
+    if independent:
         return CoordinateSelectionStrategy.INDEPENDENT_SAMPLING
     return CoordinateSelectionStrategy.JOINT_SAMPLING
 
@@ -144,10 +160,63 @@ def resolve_sampling_spec(
     *,
     tiling: TilingConfig,
 ) -> SamplingSpec:
+    # Try new masks config first
+    masks_cfg = getattr(cfg.tiling, "masks", None)
+    if masks_cfg is not None:
+        return _resolve_sampling_spec_from_masks(masks_cfg, tiling=tiling)
+
+    # Fall back to legacy sampling_params key
     sampling_config = getattr(cfg.tiling, "sampling_params", None)
     if sampling_config is None:
         return build_default_sampling_spec(tiling)
+    return _resolve_sampling_spec_from_sampling_params(sampling_config, tiling=tiling)
 
+
+def _resolve_sampling_spec_from_masks(masks_cfg: Any, *, tiling: TilingConfig) -> SamplingSpec:
+    pixel_mapping = _merge_sampling_mapping(
+        getattr(masks_cfg, "pixel_mapping", None),
+        field_name="pixel_mapping",
+    )
+    min_coverage = _merge_sampling_mapping(
+        getattr(masks_cfg, "min_coverage", None),
+        field_name="min_coverage",
+    )
+    if pixel_mapping is None:
+        raise ValueError("masks.pixel_mapping is required")
+    if min_coverage is None:
+        raise ValueError("masks.min_coverage is required")
+    if "background" not in pixel_mapping:
+        raise ValueError("masks.pixel_mapping must include a 'background' label")
+    missing_coverage_labels = sorted(set(min_coverage.keys()) - set(pixel_mapping.keys()))
+    if missing_coverage_labels:
+        raise ValueError(
+            "masks.min_coverage references unknown labels: "
+            + ", ".join(missing_coverage_labels)
+        )
+    colors = _merge_sampling_mapping(
+        getattr(masks_cfg, "colors", None),
+        field_name="colors",
+    )
+    if colors is not None:
+        validate_color_mapping(pixel_mapping=pixel_mapping, color_mapping=colors)
+
+    return SamplingSpec(
+        pixel_mapping=pixel_mapping,
+        color_mapping=colors,
+        tissue_percentage=min_coverage,
+        active_annotations=tuple(
+            annotation
+            for annotation, pct in min_coverage.items()
+            if annotation in pixel_mapping and pct is not None and annotation != "background"
+        ),
+    )
+
+
+def _resolve_sampling_spec_from_sampling_params(
+    sampling_config: Any,
+    *,
+    tiling: TilingConfig,
+) -> SamplingSpec:
     pixel_mapping = _merge_sampling_mapping(
         getattr(sampling_config, "pixel_mapping", None),
         field_name="pixel_mapping",

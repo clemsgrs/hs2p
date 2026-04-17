@@ -1,6 +1,7 @@
 import argparse
 from pathlib import Path
 
+import hs2p.progress as progress
 from hs2p.api import tile_slides
 from hs2p.configs.resolvers import (
     resolve_filter_config,
@@ -9,8 +10,7 @@ from hs2p.configs.resolvers import (
     resolve_segmentation_config,
     resolve_tiling_config,
 )
-import hs2p.progress as progress
-from hs2p.utils import setup, load_csv
+from hs2p.utils import load_csv, setup
 
 
 def get_args_parser(add_help: bool = True):

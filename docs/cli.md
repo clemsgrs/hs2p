@@ -1,12 +1,13 @@
 # CLI Guide
 
-hs2p provides two batch entrypoints:
+hs2p provides a single batch entrypoint:
 
-- `python -m hs2p.cli.tiling`
-- `python -m hs2p.cli.sampling`
+```
+python -m hs2p --config-file config.yaml [opts...]
+```
 
-They share the same base tiling/segmentation/filtering config model and the same public CSV mask column, `mask_path`.
-The entrypoint determines whether that path is interpreted as a tissue mask or an annotation mask.
+The `mask_path` column in the input CSV is interpreted as a tissue mask.
+Multi-label annotation sampling is driven by the same entrypoint via `tiling.masks` config.
 
 ## Input CSV schemas
 
@@ -49,16 +50,10 @@ Start from [`hs2p/configs/default.yaml`](../hs2p/configs/default.yaml), then edi
 - `tiling.params.requested_spacing_um`
 - `tiling.params.requested_tile_size_px`
 
-Run tiling:
+Run:
 
 ```bash
-python -m hs2p.cli.tiling --config-file /path/to/config.yaml
-```
-
-Run sampling:
-
-```bash
-python -m hs2p.cli.sampling --config-file /path/to/config.yaml
+python -m hs2p --config-file /path/to/config.yaml
 ```
 
 ## Installation and backends
@@ -106,35 +101,20 @@ pip install "hs2p[all]"
   - `downsample` controls preview resolution
   - `mask_overlay_color` controls the RGB tint used for `preview/mask/*.jpg`
   - `mask_overlay_alpha` controls overlay opacity for `preview/mask/*.jpg`
-- `tiling.sampling_params`
-  - annotation-specific sampling rules for `hs2p.cli.sampling`
+- `tiling.masks`
+  - multi-label annotation sampling (pixel_mapping, color_mapping, min_coverage)
+  - when absent, defaults to binary tissue tiling
 - `save_tiles`
   - write `tiles/{sample_id}.tiles.tar`
 - `speed.num_workers`
   - slide-level batch parallelism
 
-## Sampling-specific config
-
-`hs2p.cli.sampling` adds:
-
-- `tiling.sampling_params.independent_sampling`
-- `tiling.sampling_params.pixel_mapping`
-- `tiling.sampling_params.color_mapping`
-- `tiling.sampling_params.tissue_percentage`
-
-Sampling config resolution is strict:
-
-- explicit configs must include `background`
-- partial sampling configs are rejected
-- color mappings are validated centrally
-
 ## Progress reporting
 
-When stdout is interactive, both entrypoints use `rich` live progress:
+When stdout is interactive, the entrypoint uses `rich` live progress:
 
-- tiling shows discovered tile totals during the run
-- sampling shows kept-tile totals during the run
-- both finish with summary panels including output locations and `process_list.csv`
+- shows discovered tile totals during the run
+- finishes with a summary panel including output locations and `process_list.csv`
 
 When stdout is non-interactive, `hs2p` falls back to concise plain-text progress and summary logs.
 

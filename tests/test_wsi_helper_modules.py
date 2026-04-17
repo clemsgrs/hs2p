@@ -2,7 +2,6 @@ import numpy as np
 from PIL import Image
 
 import hs2p.wsi as wsi_pkg
-from hs2p.wsi import api as wsi_api_mod
 from hs2p.wsi import masks as masks_mod
 from hs2p.wsi import preview as preview_mod
 from hs2p.wsi import types as wsi_types_mod
@@ -32,15 +31,10 @@ def test_wsi_package_reexports_helper_functions_directly():
     assert wsi_pkg.write_coordinate_preview is visualization_mod.write_coordinate_preview
 
 
-def test_wsi_package_reexports_coordinate_api_from_owner_module():
-    assert wsi_pkg.CoordinateExtractionResult is wsi_api_mod.CoordinateExtractionResult
-    assert wsi_pkg.UnifiedCoordinateRequest is wsi_api_mod.UnifiedCoordinateRequest
-    assert wsi_pkg.UnifiedCoordinateResponse is wsi_api_mod.UnifiedCoordinateResponse
+def test_wsi_package_reexports_types_directly():
     assert wsi_pkg.CoordinateSelectionStrategy is wsi_types_mod.CoordinateSelectionStrategy
     assert wsi_pkg.CoordinateOutputMode is wsi_types_mod.CoordinateOutputMode
     assert wsi_pkg.SamplingSpec is wsi_types_mod.SamplingSpec
-    assert wsi_pkg.extract_coordinates is wsi_api_mod.extract_coordinates
-    assert wsi_pkg.sample_coordinates is wsi_api_mod.sample_coordinates
 
 
 def test_masks_normalize_and_compose_overlay_mask():

@@ -7,7 +7,6 @@ from PIL import Image
 
 cv2 = pytest.importorskip("cv2")
 wsi_mod = pytest.importorskip("hs2p.wsi")
-coordinate_api_mod = pytest.importorskip("hs2p.wsi.api")
 visualization_mod = pytest.importorskip("hs2p.wsi.visualization")
 
 
@@ -61,7 +60,6 @@ def test_overlay_mask_on_slide_renders_outer_and_hole_contours(monkeypatch):
             del level
             return slide_arr
 
-    monkeypatch.setattr(coordinate_api_mod, "WSI", FakeWSI)
     monkeypatch.setattr(visualization_mod, "WSI", FakeWSI)
 
     overlay = wsi_mod.overlay_mask_on_slide(
@@ -102,7 +100,6 @@ def test_overlay_mask_on_slide_scales_level_zero_contours_to_vis_level(monkeypat
             assert level == 1
             return slide_arr
 
-    monkeypatch.setattr(coordinate_api_mod, "WSI", FakeWSI)
     monkeypatch.setattr(visualization_mod, "WSI", FakeWSI)
 
     overlay = wsi_mod.overlay_mask_on_slide(
@@ -159,7 +156,6 @@ def test_overlay_mask_on_slide_accepts_in_memory_mask_array(monkeypatch):
             del level
             return slide_arr
 
-    monkeypatch.setattr(coordinate_api_mod, "WSI", FakeWSI)
     monkeypatch.setattr(visualization_mod, "WSI", FakeWSI)
 
     overlay = wsi_mod.overlay_mask_on_slide(
@@ -241,234 +237,6 @@ def test_save_overlay_preview_writes_rgba_overlay_to_jpeg(monkeypatch, tmp_path:
     assert preview_path.is_file()
     with Image.open(preview_path) as saved:
         assert saved.mode == "RGB"
-
-
-def test_extract_coordinates_uses_overlay_mask_preview_instead_of_line_rendering(
-    monkeypatch, tmp_path: Path
-):
-    preview_calls = []
-
-    class FakeWSI:
-        def __init__(
-            self,
-            path,
-            backend="asap",
-            mask_path=None,
-            spacing_at_level_0=None,
-            segment=False,
-            segment_params=None,
-            sampling_spec=None,
-            pixel_mapping=None,
-        ):
-            del (
-                backend,
-                mask_path,
-                spacing_at_level_0,
-                segment,
-                segment_params,
-                sampling_spec,
-                pixel_mapping,
-            )
-            self.path = Path(path)
-            self.spacings = [0.5]
-            self.level_dimensions = [(2, 2)]
-            self.level_downsamples = [(1.0, 1.0)]
-            self.annotation_mask = {
-                "tissue": np.array([[0, 255], [255, 0]], dtype=np.uint8)
-            }
-
-        def get_tile_coordinates(
-            self,
-            tiling_params,
-            filter_params,
-            annotation=None,
-            disable_tqdm=False,
-            num_workers=1,
-        ):
-            return (
-                [(0, 0)],
-                [1.0],
-                [0],
-                0,
-                1.0,
-                224,
-            )
-
-        def get_level_spacing(self, level):
-            return self.spacings[level]
-
-        def visualize_mask(self, *args, **kwargs):
-            raise AssertionError("line-based visualize_mask should not be used")
-
-    def _fake_overlay_mask_on_slide(**kwargs):
-        preview_calls.append(kwargs)
-        return Image.fromarray(np.full((2, 2, 3), 200, dtype=np.uint8))
-
-    monkeypatch.setattr(coordinate_api_mod, "WSI", FakeWSI)
-    monkeypatch.setattr(visualization_mod, "WSI", FakeWSI)
-    monkeypatch.setattr(visualization_mod, "overlay_mask_on_slide", _fake_overlay_mask_on_slide)
-
-    preview_path = tmp_path / "mask-preview.jpg"
-    result = wsi_mod.extract_coordinates(
-        wsi_path=Path("fake-wsi.tif"),
-        mask_path=None,
-        backend="openslide",
-        segment_params=SimpleNamespace(
-            method="hsv",
-            downsample=64,
-            sthresh=8,
-            sthresh_up=255,
-            mthresh=7,
-            close=4,
-        ),
-        tiling_params=SimpleNamespace(
-            requested_spacing_um=0.5,
-            tolerance=0.05,
-            requested_tile_size_px=224,
-            overlap=0.0,
-            tissue_threshold=0.1,
-        ),
-        filter_params=SimpleNamespace(
-            ref_tile_size=16,
-            a_t=4,
-            a_h=2,
-            filter_white=False,
-            filter_black=False,
-            white_threshold=220,
-            black_threshold=25,
-            fraction_threshold=0.9,
-        ),
-        mask_preview_path=preview_path,
-        disable_tqdm=True,
-        num_workers=1,
-    )
-
-    assert list(zip(result.x.tolist(), result.y.tolist())) == [(0, 0)]
-    assert preview_path.is_file()
-    assert len(preview_calls) == 1
-    np.testing.assert_array_equal(
-        preview_calls[0]["mask_arr"], np.array([[0, 1], [1, 0]], dtype=np.uint8)
-    )
-    assert preview_calls[0]["annotation_mask_path"] is None
-
-
-def test_extract_coordinates_preview_uses_in_memory_annotation_labels_when_style_is_provided(
-    monkeypatch, tmp_path: Path
-):
-    preview_calls = []
-
-    class FakeWSI:
-        def __init__(
-            self,
-            path,
-            backend="asap",
-            mask_path=None,
-            spacing_at_level_0=None,
-            segment=False,
-            segment_params=None,
-            sampling_spec=None,
-            pixel_mapping=None,
-        ):
-            del (
-                backend,
-                mask_path,
-                spacing_at_level_0,
-                segment,
-                segment_params,
-                sampling_spec,
-                pixel_mapping,
-            )
-            self.path = Path(path)
-            self.spacings = [0.5]
-            self.level_dimensions = [(2, 2)]
-            self.level_downsamples = [(1.0, 1.0)]
-            self.annotation_mask = {
-                "tissue": np.array([[0, 255], [255, 0]], dtype=np.uint8),
-                "tumor": np.array([[0, 255], [255, 0]], dtype=np.uint8),
-            }
-
-        def get_tile_coordinates(
-            self,
-            tiling_params,
-            filter_params,
-            annotation=None,
-            disable_tqdm=False,
-            num_workers=1,
-        ):
-            return (
-                [(0, 0)],
-                [1.0],
-                [0],
-                0,
-                1.0,
-                224,
-            )
-
-        def get_level_spacing(self, level):
-            return self.spacings[level]
-
-    def _fake_overlay_mask_on_slide(**kwargs):
-        preview_calls.append(kwargs)
-        return Image.fromarray(np.full((2, 2, 3), 200, dtype=np.uint8))
-
-    monkeypatch.setattr(coordinate_api_mod, "WSI", FakeWSI)
-    monkeypatch.setattr(visualization_mod, "WSI", FakeWSI)
-    monkeypatch.setattr(visualization_mod, "overlay_mask_on_slide", _fake_overlay_mask_on_slide)
-
-    preview_path = tmp_path / "mask-preview.jpg"
-    palette = _build_palette({1: (255, 0, 0)})
-    result = wsi_mod.extract_coordinates(
-        wsi_path=Path("fake-wsi.tif"),
-        mask_path=Path("fake-mask.tif"),
-        backend="openslide",
-        segment_params=SimpleNamespace(
-            method="hsv",
-            downsample=64,
-            sthresh=8,
-            sthresh_up=255,
-            mthresh=7,
-            close=4,
-        ),
-        tiling_params=SimpleNamespace(
-            requested_spacing_um=0.5,
-            tolerance=0.05,
-            requested_tile_size_px=224,
-            overlap=0.0,
-            tissue_threshold=0.1,
-        ),
-        filter_params=SimpleNamespace(
-            ref_tile_size=16,
-            a_t=4,
-            a_h=2,
-            filter_white=False,
-            filter_black=False,
-            white_threshold=220,
-            black_threshold=25,
-            fraction_threshold=0.9,
-        ),
-        sampling_spec=SimpleNamespace(
-            pixel_mapping={"background": 0, "tumor": 1},
-            color_mapping={"background": None, "tumor": [255, 0, 0]},
-            tissue_percentage={"background": None, "tumor": 0.1},
-            active_annotations=("tumor",),
-        ),
-        mask_preview_path=preview_path,
-        preview_downsample=8,
-        preview_palette=palette,
-        preview_pixel_mapping={"background": 0, "tumor": 1},
-        preview_color_mapping={"background": None, "tumor": [255, 0, 0]},
-        disable_tqdm=True,
-        num_workers=1,
-    )
-
-    assert list(zip(result.x.tolist(), result.y.tolist())) == [(0, 0)]
-    assert preview_path.is_file()
-    assert len(preview_calls) == 1
-    np.testing.assert_array_equal(
-        preview_calls[0]["mask_arr"], np.array([[0, 1], [1, 0]], dtype=np.uint8)
-    )
-    assert preview_calls[0]["annotation_mask_path"] is None
-    assert preview_calls[0]["downsample"] == 8
 
 
 def test_draw_grid_from_coordinates_crops_loaded_canvas_instead_of_fetching_tiles():

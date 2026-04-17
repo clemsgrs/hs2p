@@ -5,6 +5,7 @@ import numpy as np
 
 import hs2p.api as api_mod
 import hs2p.preprocessing as preprocessing_mod
+import hs2p.tiling.orchestration as orchestration_mod
 import hs2p.wsi.backend as backend_mod
 import hs2p.wsi.reader as reader_mod
 import hs2p.wsi.wsi as wsi_mod
@@ -210,19 +211,11 @@ def test_wsi_opens_slide_and_mask_readers_with_resolved_backend(monkeypatch):
         ),
     )
     monkeypatch.setattr(wsi_mod, "open_slide", _fake_open_slide)
-    monkeypatch.setattr(wsi_mod.WSI, "load_segmentation", lambda *args, **kwargs: 0)
 
     wsi_mod.WSI(
         path=Path("/tmp/slide.tiff"),
         mask_path=Path("/tmp/mask.tiff"),
         backend="auto",
-        sampling_spec=wsi_mod.SamplingSpec(
-            pixel_mapping={"background": 0, "tumor": 1},
-            color_mapping={"background": None, "tumor": None},
-            tissue_percentage={"background": None, "tumor": 0.1},
-            active_annotations=("tumor",),
-        ),
-        segment_params=SimpleNamespace(),
     )
 
     assert seen_calls == [
@@ -238,8 +231,8 @@ def test_tile_slide_uses_resolved_backend_for_hash_and_result(monkeypatch):
         captured["backend"] = kwargs["backend"]
         return _make_tiling_result()
 
-    monkeypatch.setattr(api_mod, "resolve_backend", _cucim_auto_backend_selection)
-    monkeypatch.setattr(api_mod, "preprocess_slide", _fake_preprocess_slide)
+    monkeypatch.setattr(orchestration_mod, "resolve_backend", _cucim_auto_backend_selection)
+    monkeypatch.setattr(orchestration_mod, "preprocess_slide", _fake_preprocess_slide)
 
     result = api_mod.tile_slide(
         api_mod.SlideSpec(sample_id="slide-1", image_path=Path("slide.svs")),
@@ -265,9 +258,9 @@ def test_tile_slide_emits_backend_selection_progress_event(monkeypatch):
 
     reporter = RecordingReporter()
 
-    monkeypatch.setattr(api_mod, "resolve_backend", _cucim_auto_backend_selection)
+    monkeypatch.setattr(orchestration_mod, "resolve_backend", _cucim_auto_backend_selection)
     monkeypatch.setattr(
-        api_mod,
+        orchestration_mod,
         "preprocess_slide",
         lambda **kwargs: _make_tiling_result(sample_id="slide-quiet"),
     )
