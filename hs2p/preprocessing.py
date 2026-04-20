@@ -49,10 +49,6 @@ from hs2p.tiling.single import (
 from hs2p.wsi.reader import open_slide, select_level, select_level_for_downsample
 
 
-def _compute_tissue_fractions(candidates, tissue_mask, tile_size_lv0, slide_dimensions):
-    return compute_tile_coverage(candidates, tissue_mask, tile_size_lv0, slide_dimensions)
-
-
 __all__ = [
     "ContourResult",
     "TileGeometry",

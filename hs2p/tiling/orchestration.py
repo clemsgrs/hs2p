@@ -356,39 +356,6 @@ def write_tiling_preview(
     return save_dir / f"{result.sample_id}.jpg"
 
 
-def overlay_mask_on_slide(
-    wsi_path: Path,
-    annotation_mask_path: Path | None,
-    downsample: int,
-    backend: str,
-    palette: np.ndarray | None = None,
-    pixel_mapping: dict[str, int] | None = None,
-    color_mapping: dict[str, list[int] | None] | None = None,
-    alpha: float = 0.5,
-    mask_arr: np.ndarray | None = None,
-    contours=None,
-    outer_border_color: tuple[int, int, int] = (0x25, 0x5E, 0x3B),
-    hole_border_color: tuple[int, int, int] = (0xF2, 0x6B, 0x3A),
-    stroke_thickness: int = 2,
-):
-    from hs2p.wsi import overlay_mask_on_slide as _overlay_mask_on_slide
-    return _overlay_mask_on_slide(
-        wsi_path=wsi_path,
-        annotation_mask_path=annotation_mask_path,
-        downsample=downsample,
-        backend=backend,
-        palette=palette,
-        pixel_mapping=pixel_mapping,
-        color_mapping=color_mapping,
-        alpha=alpha,
-        mask_arr=mask_arr,
-        contours=contours,
-        outer_border_color=outer_border_color,
-        hole_border_color=hole_border_color,
-        stroke_thickness=stroke_thickness,
-    )
-
-
 @dataclass
 class _PendingPreview:
     whole_slide: SlideSpec
@@ -1271,7 +1238,6 @@ def tile_slides(
 
 __all__ = [
     "extract_tiles_to_tar",
-    "overlay_mask_on_slide",
     "tile_slide",
     "tile_slides",
     "write_tiling_preview",

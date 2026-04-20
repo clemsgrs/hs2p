@@ -1,0 +1,4 @@
+- [x] Remove the no-op `overlay_mask_on_slide` wrapper from `hs2p.tiling.orchestration` and route the public API directly to the real WSI implementation.
+- [x] Remove the private `_compute_tissue_fractions` forwarding helper from `hs2p.preprocessing` and update tests to call `compute_tile_coverage` directly.
+- [x] Run focused tests covering preprocessing coverage, overlay semantics, and public API imports.
+- [x] Record the cleanup in project docs after verification.
