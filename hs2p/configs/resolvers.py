@@ -36,8 +36,8 @@ def resolve_filter_config(cfg: Any) -> FilterConfig:
 def resolve_preview_config(cfg: Any) -> PreviewConfig:
     preview_cfg = cfg.tiling.preview
     return PreviewConfig(
-        save_mask_preview=bool(preview_cfg.save),
-        save_tiling_preview=bool(preview_cfg.save),
+        save_mask_preview=bool(preview_cfg.save_mask_preview),
+        save_tiling_preview=bool(preview_cfg.save_tiling_preview),
         downsample=int(preview_cfg.downsample),
         tissue_contour_color=tuple(int(v) for v in preview_cfg.tissue_contour_color),
         mask_overlay_alpha=float(preview_cfg.mask_overlay_alpha),
