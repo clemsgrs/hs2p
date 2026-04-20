@@ -54,7 +54,8 @@ tiling:
     blur_threshold: 50.0 # minimum blur score (higher is sharper)
     qc_spacing_um: 2.0 # spacing at which pixel-based QC is evaluated
   preview:
-    save: true # save preview images of slide tiling and mask overlays
+    save_mask_preview: true # save the mask-overlay preview image
+    save_tiling_preview: true # save the tile-layout preview image
     downsample: 32 # downsample to use for preview rendering
     tissue_contour_color: [37, 94, 59] # RGB color used for outer tissue contours in batch mask previews
     mask_overlay_alpha: 0.5 # opacity used by the filled annotation-mask overlay path; contour previews ignore this

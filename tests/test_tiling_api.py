@@ -2580,7 +2580,8 @@ def test_resolve_preview_config_reads_tissue_contour_style():
         {
             "tiling": {
                 "preview": {
-                    "save": True,
+                    "save_mask_preview": True,
+                    "save_tiling_preview": True,
                     "downsample": 64,
                     "tissue_contour_color": [1, 2, 3],
                     "mask_overlay_alpha": 0.25,
