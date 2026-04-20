@@ -11,19 +11,14 @@ from hs2p.artifacts import (
     write_process_list,
 )
 from hs2p.configs import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig
-from hs2p.tiling.orchestration import (
-    overlay_mask_on_slide,
-    tile_slide,
-    tile_slides,
-    write_tiling_preview,
-)
 from hs2p.tiling.tar import (
     _annotation_tar_stem,
     _apply_qc_filtering_to_result,
     _needs_pixel_filtering,
     extract_tiles_to_tar,
 )
-from hs2p.wsi import CoordinateOutputMode, CoordinateSelectionStrategy
+from hs2p.tiling.orchestration import tile_slide, tile_slides, write_tiling_preview
+from hs2p.wsi import CoordinateOutputMode, CoordinateSelectionStrategy, overlay_mask_on_slide
 
 __all__ = [
     "CompatibilitySpec",

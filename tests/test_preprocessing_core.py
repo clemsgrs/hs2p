@@ -15,6 +15,7 @@ from hs2p.preprocessing import (
     detect_contours,
     generate_tiles,
 )
+from hs2p.tiling.coverage import compute_tile_coverage
 from hs2p.wsi.streaming.plans import resolve_read_step_px
 
 
@@ -48,9 +49,9 @@ def test_compute_tissue_fractions_normalizes_padded_tiles_over_full_tile_area():
     tissue_mask = np.ones((100, 100), dtype=np.uint8)
     candidates = np.array([[80, 80]], dtype=np.int64)
 
-    fractions = preprocessing_mod._compute_tissue_fractions(
+    fractions = compute_tile_coverage(
         candidates=candidates,
-        tissue_mask=tissue_mask,
+        binary_mask=tissue_mask,
         tile_size_lv0=80,
         slide_dimensions=(100, 100),
     )
@@ -63,9 +64,9 @@ def test_compute_tissue_fractions_truncates_projected_tile_origins():
     tissue_mask[1, 1] = 1
     candidates = np.array([[15, 15]], dtype=np.int64)
 
-    fractions = preprocessing_mod._compute_tissue_fractions(
+    fractions = compute_tile_coverage(
         candidates=candidates,
-        tissue_mask=tissue_mask,
+        binary_mask=tissue_mask,
         tile_size_lv0=10,
         slide_dimensions=(30, 30),
     )

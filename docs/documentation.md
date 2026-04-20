@@ -1,5 +1,11 @@
 # Documentation Notes
 
+## 2026-04-20 — Dead wrapper cleanup
+
+- Removed the no-op `overlay_mask_on_slide` forwarding wrapper from `hs2p.tiling.orchestration`.
+- Pointed `hs2p.api.overlay_mask_on_slide` directly at `hs2p.wsi.overlay_mask_on_slide`.
+- Removed the private `_compute_tissue_fractions` alias from `hs2p.preprocessing` and updated tests to use `compute_tile_coverage` directly.
+
 ## 2026-04-17 — CI test invocation cleanup
 
 - Updated `.github/workflows/pr-test.yaml` so the integration regression step only runs `tests/test_fixture_artifacts_regression.py`, matching the current test tree.
