@@ -32,6 +32,7 @@ tiling:
     sam2_checkpoint_path: # optional when method=sam2; if empty, hs2p downloads the default AtlasPatch checkpoint from Hugging Face
     sam2_config_path: # optional local override for the SAM2 model config yaml; if empty, hs2p downloads the default AtlasPatch config from Hugging Face
     sam2_device: "cpu" # device for SAM2 inference, e.g. cpu, cuda, cuda:0
+    sam2_num_workers: # optional cap on concurrent SAM2 mask-resolution workers; set to 1 to serialize GPU inference and avoid CUDA OOMs
     # SAM2 ignores seg_params.downsample and instead uses a fixed internal 8.0 µm/px thumbnail.
   filter_params:
     ref_tile_size: 16 # reference tile size at the target spacing

@@ -145,6 +145,7 @@ Detailed logs still go to `output_dir/logs/log.txt`.
   - if `sam2_checkpoint_path` is empty, hs2p downloads the default AtlasPatch checkpoint from Hugging Face
   - if `sam2_config_path` is empty, hs2p downloads the default AtlasPatch SAM2 config from Hugging Face
   - `tiling.seg_params.downsample` is ignored by SAM2
+  - `sam2_num_workers` caps concurrent SAM2 mask-resolution workers; set it to `1` to serialize GPU inference and avoid CUDA OOMs
 
 ### Tile pixel QC
 

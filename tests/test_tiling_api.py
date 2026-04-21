@@ -2099,16 +2099,33 @@ def test_tile_slides_writes_preview_paths_when_previews_are_saved(
     monkeypatch.setattr("hs2p.tiling.orchestration.write_coordinate_preview", _fake_write_coordinate_preview)
     monkeypatch.setattr("hs2p.tiling.orchestration.save_overlay_preview", _fake_save_overlay_preview)
 
+    import hs2p.progress as progress
+
+    class RecordingReporter:
+        def __init__(self):
+            self.events = []
+
+        def emit(self, event):
+            self.events.append(event)
+
+        def close(self):
+            return None
+
+        def write_log(self, message: str, *, stream=None):
+            return None
+
+    reporter = RecordingReporter()
     expected_mask_path = tmp_path / "preview" / "mask" / "slide-preview.jpg"
 
-    artifacts = tile_slides(
-        [SlideSpec(sample_id="slide-preview", image_path=Path("slide-preview.svs"))],
-        tiling=tiling_config,
-        segmentation=segmentation_config,
-        filtering=filter_config,
-        preview=PreviewConfig(save_mask_preview=True, save_tiling_preview=True),
-        output_dir=tmp_path,
-    )
+    with progress.activate_progress_reporter(reporter):
+        artifacts = tile_slides(
+            [SlideSpec(sample_id="slide-preview", image_path=Path("slide-preview.svs"))],
+            tiling=tiling_config,
+            segmentation=segmentation_config,
+            filtering=filter_config,
+            preview=PreviewConfig(save_mask_preview=True, save_tiling_preview=True),
+            output_dir=tmp_path,
+        )
 
     assert len(artifacts) == 1
     assert artifacts[0].mask_preview_path == expected_mask_path
@@ -2118,6 +2135,12 @@ def test_tile_slides_writes_preview_paths_when_previews_are_saved(
         == tmp_path / "preview" / "tiling" / "slide-preview.jpg"
     )
     assert artifacts[0].tiling_preview_path.is_file()
+    kinds = [event.kind for event in reporter.events]
+    assert "preview.started" in kinds
+    assert "preview.progress" in kinds
+    assert "preview.finished" in kinds
+    assert kinds.index("tiling.finished") < kinds.index("preview.started")
+    assert kinds.index("preview.started") < kinds.index("preview.finished")
 
 
 def test_tile_slides_mask_preview_uses_overlay_renderer_with_preview_style(

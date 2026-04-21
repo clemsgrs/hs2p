@@ -34,7 +34,7 @@ class TextReporter:
         line = self._format_line(event.kind, event.payload)
         if line is None:
             return
-        if event.kind in {"tiling.progress", "sampling.progress"}:
+        if event.kind in {"tiling.progress", "preview.progress", "sampling.progress"}:
             now = time.monotonic()
             last = self._last_line_by_kind.get(event.kind)
             if last is not None and last[1] == line and (now - last[0]) < 1.0:
@@ -79,6 +79,18 @@ class TextReporter:
             return (
                 f"Tiling finished: {payload['completed']}/{payload['total']} complete, "
                 f"{payload['failed']} failed, {payload['discovered_tiles']} tiles"
+            )
+        if kind == "preview.started":
+            return f"Generating previews ({payload['total']} total)..."
+        if kind == "preview.progress":
+            return (
+                f"Preview generation: {payload['completed']}/{payload['total']} complete, "
+                f"{payload['failed']} failed"
+            )
+        if kind == "preview.finished":
+            return (
+                f"Preview generation finished: {payload['completed']}/{payload['total']} complete, "
+                f"{payload['failed']} failed"
             )
         if kind == "sampling.started":
             return f"Sampling slides ({payload['total']} total)..."
@@ -196,6 +208,39 @@ class RichReporter:
                     ("Failed", str(payload["failed"])),
                     ("Zero-tile", str(payload["zero_tile_successes"])),
                     ("Total tiles", str(payload["discovered_tiles"])),
+                ],
+            )
+            return
+        if kind == "preview.started":
+            self._task_ids["preview"] = self.progress.add_task(
+                "Generating previews", total=payload["total"]
+            )
+            return
+        if kind == "preview.progress":
+            task_id = self._task_ids.get("preview")
+            if task_id is not None:
+                self.progress.update(
+                    task_id,
+                    completed=payload["completed"] + payload["failed"],
+                    description=(
+                        f"Generating previews ({payload['completed']}/{payload['total']} rendered)"
+                    ),
+                )
+            return
+        if kind == "preview.finished":
+            task_id = self._task_ids.pop("preview", None)
+            if task_id is not None:
+                self.progress.update(
+                    task_id, completed=payload["completed"] + payload["failed"]
+                )
+                if hasattr(self.progress, "remove_task"):
+                    self.progress.remove_task(task_id)
+            self._print_summary(
+                "Preview Generation",
+                [
+                    ("Slides", str(payload["total"])),
+                    ("Completed", str(payload["completed"])),
+                    ("Failed", str(payload["failed"])),
                 ],
             )
             return
