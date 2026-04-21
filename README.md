@@ -52,6 +52,7 @@ The supported backend set is:
 SAM2-based tissue segmentation requires a separate additional install:
 
 ```bash
+pip install "hs2p[sam2]"
 pip install "git+https://github.com/facebookresearch/sam2.git"
 ```
 
