@@ -52,6 +52,11 @@ class SegmentationConfig:
         else None
     )
     sam2_device: str = str(getattr(_DEFAULT_SEGMENTATION, "sam2_device", "cpu"))
+    sam2_num_workers: int | None = (
+        int(_DEFAULT_SEGMENTATION.sam2_num_workers)
+        if getattr(_DEFAULT_SEGMENTATION, "sam2_num_workers", None) is not None
+        else None
+    )
 
 
 @dataclass(frozen=True)

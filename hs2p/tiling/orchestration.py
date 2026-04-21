@@ -694,6 +694,18 @@ def _segmentation_requires_spawn(segmentation: SegmentationConfig | None) -> boo
     return segmentation is not None and str(segmentation.method).lower() == "sam2"
 
 
+def _resolve_mask_worker_count(
+    *, num_workers: int, segmentation: SegmentationConfig | None
+) -> int:
+    total_workers = max(1, int(num_workers))
+    if segmentation is None or str(segmentation.method).lower() != "sam2":
+        return total_workers
+    configured_workers = getattr(segmentation, "sam2_num_workers", None)
+    if configured_workers is not None:
+        return max(1, min(total_workers, int(configured_workers)))
+    return total_workers
+
+
 def _configure_worker_logging(output_dir: str) -> None:
     from hs2p.utils import setup_logging
 
@@ -925,7 +937,10 @@ def tile_slides(
                 ),
             )
 
-        mask_worker_count = max(1, int(num_workers))
+        mask_worker_count = _resolve_mask_worker_count(
+            num_workers=num_workers,
+            segmentation=mask_resolution_requests[0].segmentation,
+        )
         mask_requires_spawn = any(
             _segmentation_requires_spawn(request.segmentation)
             for request in mask_resolution_requests
@@ -978,32 +993,22 @@ def tile_slides(
     pending_previews: list[_PendingPreview] = []
     total_slides = len(planned_work)
 
+    tiling_completed = 0
+    tiling_failed = 0
+    tiling_discovered_tiles = 0
+    tiling_zero_tile_successes = 0
+
     def _progress_snapshot() -> dict[str, int]:
-        completed = 0
-        failed = 0
-        discovered_tiles = 0
-        zero_tile_successes = 0
-        for row in process_rows:
-            status = str(row.get("tiling_status", ""))
-            num_tiles = int(row.get("num_tiles", 0) or 0)
-            if status == "success":
-                completed += 1
-                discovered_tiles += num_tiles
-                if num_tiles == 0:
-                    zero_tile_successes += 1
-            elif status in {"failed", "error"}:
-                failed += 1
         return {
             "total": total_slides,
-            "completed": completed,
-            "failed": failed,
-            "pending": max(0, total_slides - completed - failed),
-            "discovered_tiles": discovered_tiles,
-            "zero_tile_successes": zero_tile_successes,
+            "completed": tiling_completed,
+            "failed": tiling_failed,
+            "pending": max(0, total_slides - tiling_completed - tiling_failed),
+            "discovered_tiles": tiling_discovered_tiles,
+            "zero_tile_successes": tiling_zero_tile_successes,
         }
 
-    def _record_process_row(row: dict[str, Any]) -> None:
-        process_rows.append(row)
+    def _emit_tiling_progress() -> None:
         snapshot = _progress_snapshot()
         emit_progress(
             "tiling.progress",
@@ -1014,9 +1019,31 @@ def tile_slides(
             discovered_tiles=snapshot["discovered_tiles"],
         )
 
+    def _record_tiling_success(*, num_tiles: int) -> None:
+        nonlocal tiling_completed, tiling_discovered_tiles, tiling_zero_tile_successes
+        tiling_completed += 1
+        tiling_discovered_tiles += num_tiles
+        if num_tiles == 0:
+            tiling_zero_tile_successes += 1
+        _emit_tiling_progress()
+
+    def _record_tiling_failure() -> None:
+        nonlocal tiling_failed
+        tiling_failed += 1
+        _emit_tiling_progress()
+
+    def _record_process_row(row: dict[str, Any]) -> None:
+        process_rows.append(row)
+
     emit_progress("tiling.started", total=total_slides)
 
     def _finalize_all_pending_previews() -> None:
+        if not pending_previews:
+            return
+        total_previews = len(pending_previews)
+        completed_previews = 0
+        failed_previews = 0
+        emit_progress("preview.started", total=total_previews)
         for previous_pending in pending_previews:
             try:
                 finalized_artifact, finalized_row = _finalize_pending_tiling_preview(
@@ -1025,6 +1052,7 @@ def tile_slides(
                 if finalized_artifact is not None:
                     artifacts.append(finalized_artifact)
                 _record_process_row(finalized_row)
+                completed_previews += 1
             except Exception as exc:
                 emit_progress_log(
                     f"[tile_slides] FAILED {previous_pending.whole_slide.sample_id}: {exc}",
@@ -1038,13 +1066,29 @@ def tile_slides(
                         backend=None,
                     )
                 )
+                failed_previews += 1
+            emit_progress(
+                "preview.progress",
+                total=total_previews,
+                completed=completed_previews,
+                failed=failed_previews,
+                pending=max(0, total_previews - completed_previews - failed_previews),
+            )
         pending_previews.clear()
+        emit_progress(
+            "preview.finished",
+            total=total_previews,
+            completed=completed_previews,
+            failed=failed_previews,
+            pending=max(0, total_previews - completed_previews - failed_previews),
+        )
 
     def _process_compute_response(response: _ComputeResponse) -> None:
         if not response.ok:
             emit_progress_log(
                 f"[tile_slides] FAILED {response.whole_slide.sample_id}: {response.error}",
             )
+            _record_tiling_failure()
             _record_process_row(
                 _build_failure_process_row(
                     whole_slide=response.whole_slide,
@@ -1058,6 +1102,7 @@ def tile_slides(
 
         assert response.artifact is not None
         base_artifact = response.artifact
+        _record_tiling_success(num_tiles=base_artifact.num_tiles)
         if (
             preview_executor is not None
             and preview is not None
@@ -1112,6 +1157,7 @@ def tile_slides(
         for planned in planned_work:
             if planned.artifact is not None:
                 artifacts.append(planned.artifact)
+                _record_tiling_success(num_tiles=planned.artifact.num_tiles)
                 _record_process_row(
                     _build_success_process_row(
                         whole_slide=planned.whole_slide,
@@ -1123,6 +1169,7 @@ def tile_slides(
                 emit_progress_log(
                     f"[tile_slides] FAILED {planned.whole_slide.sample_id}: {planned.error}",
                 )
+                _record_tiling_failure()
                 _record_process_row(
                     _build_failure_process_row(
                         whole_slide=planned.whole_slide,
@@ -1139,6 +1186,7 @@ def tile_slides(
                 emit_progress_log(
                     f"[tile_slides] FAILED {planned.whole_slide.sample_id}: {failure.error}",
                 )
+                _record_tiling_failure()
                 _record_process_row(
                     _build_failure_process_row(
                         whole_slide=planned.whole_slide,
@@ -1216,23 +1264,23 @@ def tile_slides(
                     for request in serial_requests
                 )
             )
+        snapshot = _progress_snapshot()
+        emit_progress(
+            "tiling.finished",
+            total=snapshot["total"],
+            completed=snapshot["completed"],
+            failed=snapshot["failed"],
+            pending=snapshot["pending"],
+            discovered_tiles=snapshot["discovered_tiles"],
+            output_dir=str(output_dir),
+            process_list_path=str(process_list_path),
+            zero_tile_successes=snapshot["zero_tile_successes"],
+        )
         _finalize_all_pending_previews()
     finally:
         if preview_executor is not None:
             preview_executor.shutdown(wait=True)
     write_process_list(process_rows, process_list_path)
-    snapshot = _progress_snapshot()
-    emit_progress(
-        "tiling.finished",
-        total=snapshot["total"],
-        completed=snapshot["completed"],
-        failed=snapshot["failed"],
-        pending=snapshot["pending"],
-        discovered_tiles=snapshot["discovered_tiles"],
-        output_dir=str(output_dir),
-        process_list_path=str(process_list_path),
-        zero_tile_successes=snapshot["zero_tile_successes"],
-    )
     return artifacts
 
 

@@ -78,6 +78,9 @@ def _install_fake_rich_progress(monkeypatch):
         def update(self, task_id, **kwargs):
             self.tasks[task_id].update(kwargs)
 
+        def remove_task(self, task_id):
+            self.tasks.pop(task_id, None)
+
     class _Identity:
         def __init__(self, *args, **kwargs):
             pass
@@ -540,6 +543,33 @@ def test_text_reporter_formats_backend_selection_line(capsys):
     assert out == "[backend] slide-1: selected cuCIM for auto backend"
 
 
+def test_text_reporter_formats_preview_progress_line(capsys):
+    import hs2p.progress as progress
+
+    reporter = progress.TextReporter()
+
+    reporter.emit(progress.ProgressEvent(kind="preview.started", payload={"total": 3}))
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="preview.progress",
+            payload={"total": 3, "completed": 2, "failed": 1, "pending": 0},
+        )
+    )
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="preview.finished",
+            payload={"total": 3, "completed": 3, "failed": 0, "pending": 0},
+        )
+    )
+
+    out = capsys.readouterr().out.strip().splitlines()
+    assert out == [
+        "Generating previews (3 total)...",
+        "Preview generation: 2/3 complete, 1 failed",
+        "Preview generation finished: 3/3 complete, 0 failed",
+    ]
+
+
 def test_rich_reporter_emits_backend_selection_line(monkeypatch):
     import hs2p.progress as progress
 
@@ -570,3 +600,44 @@ def test_rich_reporter_emits_backend_selection_line(monkeypatch):
     )
 
     assert reporter.console.lines[-1][0] == "[backend] slide-1: selected cuCIM for auto backend"
+
+
+def test_rich_reporter_emits_preview_progress_lines(monkeypatch):
+    import hs2p.progress as progress
+
+    _install_fake_rich_console(monkeypatch, is_terminal=True)
+    _install_fake_rich_progress(monkeypatch)
+    _install_fake_rich_summary_types(monkeypatch)
+
+    class FakeConsole:
+        def __init__(self):
+            self.lines = []
+
+        def print(self, message, **kwargs):
+            self.lines.append((message, kwargs))
+
+        def log(self, message, **kwargs):
+            self.lines.append((message, kwargs))
+
+    reporter = progress.RichReporter(output_dir="out", console=FakeConsole())
+
+    reporter.emit(progress.ProgressEvent(kind="preview.started", payload={"total": 3}))
+    assert reporter.progress.tasks[1]["description"] == "Generating previews"
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="preview.progress",
+            payload={"total": 3, "completed": 2, "failed": 1, "pending": 0},
+        )
+    )
+    assert (
+        reporter.progress.tasks[1]["description"]
+        == "Generating previews (2/3 rendered)"
+    )
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="preview.finished",
+            payload={"total": 3, "completed": 3, "failed": 0, "pending": 0},
+        )
+    )
+    assert 1 not in reporter.progress.tasks
+    assert reporter.console.lines[-1][0].title == "Preview Generation"
