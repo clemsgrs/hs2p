@@ -67,7 +67,7 @@ Tiling computes a reproducible grid of tile coordinates for each slide and saves
 
 Sampling filters or partitions tile coordinates by annotation coverage so you can keep only tiles relevant to a label or tissue class.
 
-<img src="illustrations/sampling_illu.png" alt="hs2p sampling workflow" width="1000" />
+<img src="assets/sampling_illu.png" alt="hs2p sampling workflow" width="1000" />
 
 ## Python API
 
