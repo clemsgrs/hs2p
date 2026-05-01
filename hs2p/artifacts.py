@@ -204,7 +204,7 @@ def validate_tiling_artifacts(
         raise ValueError("precomputed tiles tissue_threshold mismatch")
     if result.tolerance != compatibility.tiling.tolerance:
         raise ValueError("precomputed tiles tolerance mismatch")
-    if result.seg_downsample != compatibility.segmentation.downsample:
+    if result.requested_seg_downsample != compatibility.segmentation.downsample:
         raise ValueError("precomputed tiles seg_downsample mismatch")
     if result.seg_sthresh != compatibility.segmentation.sthresh:
         raise ValueError("precomputed tiles sthresh mismatch")

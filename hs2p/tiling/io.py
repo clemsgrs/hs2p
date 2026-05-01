@@ -50,6 +50,7 @@ _TILING_KEYS = {
 }
 _SEGMENTATION_KEYS = {
     "tissue_method",
+    "requested_seg_downsample",
     "seg_downsample",
     "seg_level",
     "seg_spacing_um",
@@ -117,6 +118,7 @@ def _build_tiling_metadata(result: TilingResult) -> dict[str, Any]:
     }
     segmentation = {
         "tissue_method": result.tissue_method,
+        "requested_seg_downsample": result.requested_seg_downsample,
         "seg_downsample": result.seg_downsample,
         "seg_level": result.seg_level,
         "seg_spacing_um": result.seg_spacing_um,
@@ -376,6 +378,7 @@ def _load_tiling_result(*, npz_path: "Path | None", meta: dict[str, Any]) -> Til
         tolerance=tiling["tolerance"],
         step_px_lv0=tiling["step_px_lv0"],
         tissue_method=segmentation["tissue_method"],
+        requested_seg_downsample=segmentation["requested_seg_downsample"],
         seg_downsample=segmentation["seg_downsample"],
         seg_level=segmentation["seg_level"],
         seg_spacing_um=segmentation["seg_spacing_um"],

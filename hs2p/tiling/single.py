@@ -130,6 +130,7 @@ def build_tiling_result_from_mask(
         tolerance=tolerance,
         step_px_lv0=step_px_lv0,
         tissue_method=resolved_mask.tissue_method,
+        requested_seg_downsample=resolved_mask.requested_seg_downsample,
         seg_downsample=resolved_mask.seg_downsample,
         seg_level=seg_level,
         seg_spacing_um=seg_spacing_um,
@@ -169,6 +170,7 @@ def _annotation_to_resolved_tissue_mask(
     return ResolvedTissueMask(
         tissue_mask=resolved_masks.masks[annotation],
         tissue_method=resolved_masks.tissue_method,
+        requested_seg_downsample=resolved_masks.requested_seg_downsample,
         seg_downsample=resolved_masks.seg_downsample,
         seg_level=resolved_masks.seg_level,
         seg_spacing_um=resolved_masks.seg_spacing_um,
@@ -298,6 +300,7 @@ def _build_joint_annotation_results(
     union_resolved = ResolvedTissueMask(
         tissue_mask=union_mask,
         tissue_method=resolved_masks.tissue_method,
+        requested_seg_downsample=resolved_masks.requested_seg_downsample,
         seg_downsample=resolved_masks.seg_downsample,
         seg_level=resolved_masks.seg_level,
         seg_spacing_um=resolved_masks.seg_spacing_um,

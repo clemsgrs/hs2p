@@ -109,6 +109,11 @@ def _default_mask_resolution(monkeypatch):
                     if request.segmentation is not None
                     else "precomputed_mask"
                 ),
+                requested_seg_downsample=(
+                    request.segmentation.downsample
+                    if request.segmentation is not None
+                    else 64
+                ),
                 seg_downsample=(
                     request.segmentation.downsample
                     if request.segmentation is not None
@@ -227,6 +232,7 @@ def _build_preprocessing_result(
         tolerance=0.07,
         step_px_lv0=step_px_lv0,
         tissue_method="precomputed_mask" if mask_path is not None else "hsv",
+        requested_seg_downsample=64,
         seg_downsample=64,
         seg_level=2,
         seg_spacing_um=16.0,
@@ -356,6 +362,11 @@ def _patch_preprocess_slide(
                     request.segmentation.method
                     if request.segmentation is not None
                     else "precomputed_mask"
+                ),
+                requested_seg_downsample=(
+                    request.segmentation.downsample
+                    if request.segmentation is not None
+                    else 64
                 ),
                 seg_downsample=(
                     request.segmentation.downsample
@@ -803,6 +814,7 @@ def test_load_tiling_result_accepts_preprocessing_artifact(tmp_path: Path):
         tolerance=0.07,
         step_px_lv0=806,
         tissue_method="hsv",
+        requested_seg_downsample=64,
         seg_downsample=64,
         seg_level=2,
         seg_spacing_um=16.0,
@@ -1257,6 +1269,7 @@ def test_tile_slides_resolves_all_masks_before_computing_any_slide(
             resolved_mask=preprocessing_mod.ResolvedTissueMask(
                 tissue_mask=np.zeros((8, 8), dtype=np.uint8),
                 tissue_method="hsv",
+                requested_seg_downsample=64,
                 seg_downsample=64,
                 seg_level=0,
                 seg_spacing_um=0.5,
@@ -1348,6 +1361,7 @@ def test_tile_slides_emits_tissue_progress_before_tiling_progress(
             resolved_mask=preprocessing_mod.ResolvedTissueMask(
                 tissue_mask=np.zeros((8, 8), dtype=np.uint8),
                 tissue_method="hsv",
+                requested_seg_downsample=64,
                 seg_downsample=64,
                 seg_level=0,
                 seg_spacing_um=0.5,
@@ -1436,6 +1450,7 @@ def test_tile_slides_uses_process_pool_for_tissue_resolution(
             resolved_mask=preprocessing_mod.ResolvedTissueMask(
                 tissue_mask=np.zeros((8, 8), dtype=np.uint8),
                 tissue_method="hsv",
+                requested_seg_downsample=64,
                 seg_downsample=64,
                 seg_level=0,
                 seg_spacing_um=0.5,
@@ -1535,6 +1550,7 @@ def test_tile_slides_uses_spawn_pool_for_sam2_work(
             resolved_mask=preprocessing_mod.ResolvedTissueMask(
                 tissue_mask=np.zeros((8, 8), dtype=np.uint8),
                 tissue_method="sam2",
+                requested_seg_downsample=64,
                 seg_downsample=64,
                 seg_level=0,
                 seg_spacing_um=0.5,
@@ -1830,7 +1846,7 @@ def test_validate_tiling_artifacts_ignores_disabled_filter_threshold_mismatches(
     )
     matching_segmentation = SegmentationConfig(
         method=result.tissue_method,
-        downsample=result.seg_downsample,
+        downsample=result.requested_seg_downsample,
         sthresh=result.seg_sthresh,
         sthresh_up=result.seg_sthresh_up,
         mthresh=result.seg_mthresh,
@@ -1869,6 +1885,121 @@ def test_validate_tiling_artifacts_ignores_disabled_filter_threshold_mismatches(
     )
 
     assert validated.coordinates_meta_path == artifacts.coordinates_meta_path
+
+
+def test_validate_tiling_artifacts_compares_requested_seg_downsample_not_resolved(
+    tmp_path: Path,
+):
+    # SAM2 resolves seg_downsample from the slide pyramid (typically not equal
+    # to the user-requested value). The validator must compare the requested
+    # value, not the resolved one, so resuming a SAM2 run does not spuriously
+    # fail when the resolved downsample differs from the config value.
+    result = _build_result(sample_id="slide-sam2", image_path="slide-sam2.svs")
+    result.tissue_method = "sam2"
+    result.requested_seg_downsample = 64  # what the user asked for
+    result.seg_downsample = 16  # what SAM2 actually used
+    artifacts = save_tiling_result(result, output_dir=tmp_path)
+
+    matching_tiling = TilingConfig(
+        requested_spacing_um=result.requested_spacing_um,
+        requested_tile_size_px=result.requested_tile_size_px,
+        tolerance=result.tolerance,
+        overlap=result.overlap,
+        tissue_threshold=result.min_tissue_fraction,
+        backend=result.backend,
+    )
+    requested_segmentation = SegmentationConfig(
+        method="sam2",
+        downsample=64,  # user-requested; differs from the resolved 16
+        sthresh=result.seg_sthresh,
+        sthresh_up=result.seg_sthresh_up,
+        mthresh=result.seg_mthresh,
+        close=result.seg_close,
+    )
+    matching_filter = FilterConfig(
+        ref_tile_size=result.ref_tile_size_px,
+        a_t=result.a_t,
+        a_h=result.a_h,
+        filter_white=result.filter_white,
+        filter_black=result.filter_black,
+        white_threshold=result.white_threshold,
+        black_threshold=result.black_threshold,
+        fraction_threshold=result.fraction_threshold,
+        filter_grayspace=result.filter_grayspace,
+        grayspace_saturation_threshold=result.grayspace_saturation_threshold,
+        grayspace_fraction_threshold=result.grayspace_fraction_threshold,
+        filter_blur=result.filter_blur,
+        blur_threshold=result.blur_threshold,
+        qc_spacing_um=result.qc_spacing_um,
+    )
+
+    validated = validate_tiling_artifacts(
+        whole_slide=SlideSpec(
+            sample_id="slide-sam2", image_path=Path("slide-sam2.svs")
+        ),
+        coordinates_npz_path=artifacts.coordinates_npz_path,
+        coordinates_meta_path=artifacts.coordinates_meta_path,
+        compatibility=_artifact_compatibility(
+            tiling_config=matching_tiling,
+            segmentation_config=requested_segmentation,
+            filter_config=matching_filter,
+        ),
+    )
+    assert validated.coordinates_meta_path == artifacts.coordinates_meta_path
+
+
+def test_validate_tiling_artifacts_rejects_mismatched_requested_seg_downsample(
+    tmp_path: Path,
+):
+    result = _build_result(sample_id="slide-hsv", image_path="slide-hsv.svs")
+    artifacts = save_tiling_result(result, output_dir=tmp_path)
+
+    matching_tiling = TilingConfig(
+        requested_spacing_um=result.requested_spacing_um,
+        requested_tile_size_px=result.requested_tile_size_px,
+        tolerance=result.tolerance,
+        overlap=result.overlap,
+        tissue_threshold=result.min_tissue_fraction,
+        backend=result.backend,
+    )
+    incompatible_segmentation = SegmentationConfig(
+        method=result.tissue_method,
+        downsample=result.requested_seg_downsample + 1,
+        sthresh=result.seg_sthresh,
+        sthresh_up=result.seg_sthresh_up,
+        mthresh=result.seg_mthresh,
+        close=result.seg_close,
+    )
+    matching_filter = FilterConfig(
+        ref_tile_size=result.ref_tile_size_px,
+        a_t=result.a_t,
+        a_h=result.a_h,
+        filter_white=result.filter_white,
+        filter_black=result.filter_black,
+        white_threshold=result.white_threshold,
+        black_threshold=result.black_threshold,
+        fraction_threshold=result.fraction_threshold,
+        filter_grayspace=result.filter_grayspace,
+        grayspace_saturation_threshold=result.grayspace_saturation_threshold,
+        grayspace_fraction_threshold=result.grayspace_fraction_threshold,
+        filter_blur=result.filter_blur,
+        blur_threshold=result.blur_threshold,
+        qc_spacing_um=result.qc_spacing_um,
+    )
+
+    with pytest.raises(ValueError, match="seg_downsample mismatch"):
+        validate_tiling_artifacts(
+            whole_slide=SlideSpec(
+                sample_id="slide-hsv", image_path=Path("slide-hsv.svs")
+            ),
+            coordinates_npz_path=artifacts.coordinates_npz_path,
+            coordinates_meta_path=artifacts.coordinates_meta_path,
+            compatibility=_artifact_compatibility(
+                tiling_config=matching_tiling,
+                segmentation_config=incompatible_segmentation,
+                filter_config=matching_filter,
+            ),
+        )
 
 
 def test_validate_tiling_artifacts_rejects_mismatched_image_path(tmp_path: Path):
@@ -2031,6 +2162,7 @@ def test_tile_slides_omits_tiling_preview_path_when_no_tiles(
             tolerance=0.07,
             step_px_lv0=224,
             tissue_method="hsv",
+            requested_seg_downsample=64,
             seg_downsample=64,
             seg_level=0,
             seg_spacing_um=0.5,
@@ -2325,6 +2457,52 @@ def test_tile_slides_resume_rejects_unsupported_process_list_schema(
             output_dir=run_dir,
             resume=True,
         )
+
+
+def test_tile_slides_writes_process_list_incrementally(
+    monkeypatch,
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    """A mid-run crash must leave process_list.csv populated for slides that finished,
+    so a subsequent resume can skip them."""
+    run_dir = tmp_path / "run"
+
+    def _result_or_crash(**kwargs):
+        sample_id = kwargs["sample_id"]
+        if sample_id == "slide-2":
+            csv_path = run_dir / "process_list.csv"
+            assert csv_path.is_file()
+            df = pd.read_csv(csv_path)
+            successes = df[df["tiling_status"] == "success"]
+            assert successes["sample_id"].tolist() == ["slide-1"]
+            raise RuntimeError("simulated mid-run crash")
+        return _build_preprocessing_result(
+            sample_id=sample_id,
+            image_path=f"{sample_id}.svs",
+            mask_path=None,
+        )
+
+    _patch_preprocess_slide(monkeypatch, result=_result_or_crash)
+
+    tile_slides(
+        [
+            SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs")),
+            SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
+        ],
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        output_dir=run_dir,
+        num_workers=1,
+    )
+
+    df = pd.read_csv(run_dir / "process_list.csv")
+    assert set(df["sample_id"]) == {"slide-1", "slide-2"}
+    assert df.loc[df["sample_id"] == "slide-1", "tiling_status"].iloc[0] == "success"
+    assert df.loc[df["sample_id"] == "slide-2", "tiling_status"].iloc[0] == "failed"
 
 
 def test_load_csv_rejects_duplicate_sample_id(tmp_path: Path):

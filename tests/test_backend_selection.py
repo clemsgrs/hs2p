@@ -39,6 +39,7 @@ def _make_tiling_result(sample_id: str = "slide-1") -> preprocessing_mod.TilingR
         tolerance=0.05,
         step_px_lv0=256,
         tissue_method="hsv",
+        requested_seg_downsample=64,
         seg_downsample=64,
         seg_level=0,
         seg_spacing_um=0.5,

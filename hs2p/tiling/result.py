@@ -39,6 +39,7 @@ class ContourResult:
 class ResolvedTissueMask:
     tissue_mask: np.ndarray
     tissue_method: str
+    requested_seg_downsample: int
     seg_downsample: int
     seg_level: int
     seg_spacing_um: float
@@ -58,6 +59,7 @@ class ResolvedAnnotationMasks:
 
     masks: dict[str, np.ndarray]  # annotation name → binary uint8 mask (255=fg, 0=bg)
     tissue_method: str
+    requested_seg_downsample: int
     seg_downsample: int
     seg_level: int
     seg_spacing_um: float
@@ -119,6 +121,12 @@ class TilingResult:
     step_px_lv0: int
     tissue_method: str
     # -- segmentation --
+    # ``requested_seg_downsample`` is the value the caller asked for in the
+    # config; ``seg_downsample`` is the actual downsample of the pyramid level
+    # (or SAM2 thumbnail) ultimately used. They can differ when the requested
+    # value does not exactly match a pyramid level, or for SAM2, which always
+    # resolves the downsample from a fixed-target thumbnail.
+    requested_seg_downsample: int
     seg_downsample: int
     seg_level: int
     seg_spacing_um: float

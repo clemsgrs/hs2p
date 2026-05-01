@@ -73,7 +73,11 @@ def test_resolve_tissue_mask_uses_precomputed_mask_without_segmentation(
     )
 
     assert resolved.tissue_method == "precomputed_mask"
-    assert resolved.seg_downsample == 64
+    assert resolved.requested_seg_downsample == 64
+    # Slide level_downsamples=[1.0, 4.0] → closest pyramid level for requested
+    # downsample=64 is level 1 (downsample 4.0 → seg_spacing=1.0 µm at base
+    # spacing 0.25), so the resolved value is 4.
+    assert resolved.seg_downsample == 4
     assert resolved.mask_path == Path("mask.png")
     assert resolved.tissue_mask_tissue_value == 1
     assert not called["segment"]
@@ -190,6 +194,7 @@ def test_resolve_tissue_mask_uses_sam2_thumbnail_spacing(monkeypatch):
     assert captured["method"] == "sam2"
     assert captured["downsample"] == 32
     assert resolved.tissue_method == "sam2"
+    assert resolved.requested_seg_downsample == 64
     assert resolved.seg_level == 1
     assert resolved.seg_spacing_um == 8.0
     assert resolved.seg_downsample == 32
@@ -201,6 +206,7 @@ def test_build_tiling_result_from_mask_preserves_resolved_mask_metadata():
     resolved = preprocessing_mod.ResolvedTissueMask(
         tissue_mask=np.zeros((25, 25), dtype=np.uint8),
         tissue_method="sam2",
+        requested_seg_downsample=64,
         seg_downsample=64,
         seg_level=1,
         seg_spacing_um=1.0,

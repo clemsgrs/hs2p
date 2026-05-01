@@ -53,6 +53,7 @@ def _resolved_masks(mask):
             "stroma": np.where(mask == 2, 255, 0).astype(np.uint8),
         },
         tissue_method="precomputed_mask",
+        requested_seg_downsample=1,
         seg_downsample=1,
         seg_level=0,
         seg_spacing_um=BASE_SPACING,
