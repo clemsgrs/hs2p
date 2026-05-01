@@ -435,6 +435,7 @@ def test_tile_slides_emits_progress_for_reused_success_and_failure(
             resolved_mask=preprocessing_mod.ResolvedTissueMask(
                 tissue_mask=np.zeros((8, 8), dtype=np.uint8),
                 tissue_method="hsv",
+                requested_seg_downsample=64,
                 seg_downsample=64,
                 seg_level=0,
                 seg_spacing_um=0.5,

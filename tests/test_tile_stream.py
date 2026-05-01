@@ -46,6 +46,7 @@ def _make_result(
         step_px_lv0=tile_size,
         tolerance=0.05,
         tissue_method="unknown",
+        requested_seg_downsample=64,
         seg_downsample=64,
         seg_level=0,
         seg_spacing_um=0.0,

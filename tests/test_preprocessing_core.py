@@ -136,6 +136,7 @@ def _make_tiling_result(n_tiles: int = 4) -> TilingResult:
         tolerance=0.05,
         step_px_lv0=384,
         tissue_method="precomputed_mask",
+        requested_seg_downsample=64,
         seg_downsample=64,
         seg_level=2,
         seg_spacing_um=1.0,

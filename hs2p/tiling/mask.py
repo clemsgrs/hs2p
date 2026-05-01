@@ -211,7 +211,8 @@ def resolve_tissue_mask(
         return ResolvedTissueMask(
             tissue_mask=mask,
             tissue_method="precomputed_mask",
-            seg_downsample=int(seg_downsample),
+            requested_seg_downsample=int(seg_downsample),
+            seg_downsample=max(1, int(round(seg_spacing_um / float(slide.spacing)))),
             seg_level=seg_level,
             seg_spacing_um=seg_spacing_um,
             mask_path=tissue_mask_path,
@@ -230,7 +231,6 @@ def resolve_tissue_mask(
         seg_image = thumbnail.image
         seg_level = thumbnail.seg_level
         seg_spacing_um = thumbnail.seg_spacing_um
-        effective_downsample = max(1, int(round(seg_spacing_um / float(slide.spacing))))
     else:
         normalized_downsamples = _normalize_level_downsamples(slide.level_downsamples)
         seg_level = select_level_for_downsample(
@@ -240,7 +240,7 @@ def resolve_tissue_mask(
         seg_spacing_um = float(slide.spacing) * float(normalized_downsamples[seg_level])
         seg_size = slide.level_dimensions[seg_level]
         seg_image = np.asarray(slide.read_region((0, 0), seg_level, seg_size))
-        effective_downsample = int(seg_downsample)
+    effective_downsample = max(1, int(round(seg_spacing_um / float(slide.spacing))))
 
     segmentation_config = SegmentationConfig(
         method=tissue_method,
@@ -264,6 +264,7 @@ def resolve_tissue_mask(
     return ResolvedTissueMask(
         tissue_mask=mask,
         tissue_method=segmentation_config.method,
+        requested_seg_downsample=int(seg_downsample),
         seg_downsample=effective_downsample,
         seg_level=seg_level,
         seg_spacing_um=seg_spacing_um,
