@@ -2459,6 +2459,52 @@ def test_tile_slides_resume_rejects_unsupported_process_list_schema(
         )
 
 
+def test_tile_slides_writes_process_list_incrementally(
+    monkeypatch,
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    """A mid-run crash must leave process_list.csv populated for slides that finished,
+    so a subsequent resume can skip them."""
+    run_dir = tmp_path / "run"
+
+    def _result_or_crash(**kwargs):
+        sample_id = kwargs["sample_id"]
+        if sample_id == "slide-2":
+            csv_path = run_dir / "process_list.csv"
+            assert csv_path.is_file()
+            df = pd.read_csv(csv_path)
+            successes = df[df["tiling_status"] == "success"]
+            assert successes["sample_id"].tolist() == ["slide-1"]
+            raise RuntimeError("simulated mid-run crash")
+        return _build_preprocessing_result(
+            sample_id=sample_id,
+            image_path=f"{sample_id}.svs",
+            mask_path=None,
+        )
+
+    _patch_preprocess_slide(monkeypatch, result=_result_or_crash)
+
+    tile_slides(
+        [
+            SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs")),
+            SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
+        ],
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        output_dir=run_dir,
+        num_workers=1,
+    )
+
+    df = pd.read_csv(run_dir / "process_list.csv")
+    assert set(df["sample_id"]) == {"slide-1", "slide-2"}
+    assert df.loc[df["sample_id"] == "slide-1", "tiling_status"].iloc[0] == "success"
+    assert df.loc[df["sample_id"] == "slide-2", "tiling_status"].iloc[0] == "failed"
+
+
 def test_load_csv_rejects_duplicate_sample_id(tmp_path: Path):
     csv_path = tmp_path / "slides.csv"
     csv_path.write_text(

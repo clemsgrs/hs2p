@@ -1034,6 +1034,9 @@ def tile_slides(
 
     def _record_process_row(row: dict[str, Any]) -> None:
         process_rows.append(row)
+        # Flush after every slide so a crashed run leaves a process_list.csv
+        # that resume can use to skip already-completed slides.
+        write_process_list(process_rows, process_list_path)
 
     emit_progress("tiling.started", total=total_slides)
 
