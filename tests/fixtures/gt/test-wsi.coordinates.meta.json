@@ -35,6 +35,7 @@
     "mask_spacing_um": null,
     "mthresh": 7,
     "ref_tile_size_px": 16,
+    "requested_seg_downsample": 64,
     "seg_downsample": 64,
     "seg_level": 0,
     "seg_spacing_um": 0.0,
