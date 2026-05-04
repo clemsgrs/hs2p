@@ -10,6 +10,7 @@ import numpy as np
 
 from hs2p.tiling.generate import canonicalize_tiling_result
 from hs2p.tiling.result import TileGeometry, TilingResult
+from hs2p.fileops import promote_temp_file
 
 COORDINATE_SPACE = "level0_px"
 TILE_ORDER = "x_then_y"
@@ -282,7 +283,7 @@ def _save_tiling_result(
                     tissue_fractions=canonical.tissue_fractions.astype(np.float32, copy=False),
                 )
                 handle.flush()
-            temp_npz_path.replace(npz_path)
+            promote_temp_file(temp_npz_path, npz_path)
             temp_npz_path = None
             committed_npz_path = npz_path
         else:
@@ -297,7 +298,7 @@ def _save_tiling_result(
             temp_meta_path = Path(handle.name)
             handle.write(json.dumps(_build_tiling_metadata(canonical), indent=2, sort_keys=True) + "\n")
             handle.flush()
-        temp_meta_path.replace(meta_path)
+        promote_temp_file(temp_meta_path, meta_path)
         temp_meta_path = None
         committed_npz_path = None
     finally:
