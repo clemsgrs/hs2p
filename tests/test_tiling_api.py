@@ -1888,6 +1888,64 @@ def test_validate_tiling_artifacts_ignores_disabled_filter_threshold_mismatches(
     assert validated.coordinates_meta_path == artifacts.coordinates_meta_path
 
 
+def test_validate_tiling_artifacts_ignores_tissue_method_for_precomputed_masks(
+    tmp_path: Path,
+):
+    result = _build_result(sample_id="slide-mask", image_path="slide-mask.svs", mask_path="mask.png")
+    result.tissue_method = "precomputed_mask"
+    artifacts = save_tiling_result(result, output_dir=tmp_path)
+
+    matching_tiling = TilingConfig(
+        requested_spacing_um=result.requested_spacing_um,
+        requested_tile_size_px=result.requested_tile_size_px,
+        tolerance=result.tolerance,
+        overlap=result.overlap,
+        tissue_threshold=result.min_tissue_fraction,
+        backend=result.backend,
+    )
+    incompatible_segmentation = SegmentationConfig(
+        method="hsv",
+        downsample=result.requested_seg_downsample,
+        sthresh=result.seg_sthresh,
+        sthresh_up=result.seg_sthresh_up,
+        mthresh=result.seg_mthresh,
+        close=result.seg_close,
+    )
+    matching_filter = FilterConfig(
+        ref_tile_size=result.ref_tile_size_px,
+        a_t=result.a_t,
+        a_h=result.a_h,
+        filter_white=result.filter_white,
+        filter_black=result.filter_black,
+        white_threshold=result.white_threshold,
+        black_threshold=result.black_threshold,
+        fraction_threshold=result.fraction_threshold,
+        filter_grayspace=result.filter_grayspace,
+        grayspace_saturation_threshold=result.grayspace_saturation_threshold,
+        grayspace_fraction_threshold=result.grayspace_fraction_threshold,
+        filter_blur=result.filter_blur,
+        blur_threshold=result.blur_threshold,
+        qc_spacing_um=result.qc_spacing_um,
+    )
+
+    validated = validate_tiling_artifacts(
+        whole_slide=SlideSpec(
+            sample_id="slide-mask",
+            image_path=Path("slide-mask.svs"),
+            mask_path=Path("mask.png"),
+        ),
+        coordinates_npz_path=artifacts.coordinates_npz_path,
+        coordinates_meta_path=artifacts.coordinates_meta_path,
+        compatibility=_artifact_compatibility(
+            tiling_config=matching_tiling,
+            segmentation_config=incompatible_segmentation,
+            filter_config=matching_filter,
+        ),
+    )
+
+    assert validated.coordinates_meta_path == artifacts.coordinates_meta_path
+
+
 def test_validate_tiling_artifacts_compares_requested_seg_downsample_not_resolved(
     tmp_path: Path,
 ):
