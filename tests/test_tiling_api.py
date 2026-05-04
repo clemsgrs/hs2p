@@ -1,4 +1,5 @@
 import json
+import errno
 import tempfile
 from dataclasses import replace
 from pathlib import Path
@@ -28,7 +29,7 @@ from hs2p.api import (
     validate_tiling_artifacts,
     write_tiling_preview,
 )
-from hs2p.artifacts import load_whole_slides_from_rows
+from hs2p.artifacts import load_whole_slides_from_rows, write_process_list
 from hs2p.configs import (
     FilterConfig as ConfigsFilterConfig,
     PreviewConfig as ConfigsPreviewConfig,
@@ -2712,6 +2713,25 @@ def test_write_process_list_removes_temp_file_on_failure(monkeypatch, tmp_path: 
 
     assert created_temp_paths
     assert all(not path.exists() for path in created_temp_paths)
+
+
+def test_write_process_list_falls_back_when_replace_is_denied(
+    monkeypatch, tmp_path: Path
+):
+    process_list_path = tmp_path / "process_list.csv"
+    rows = [{"sample_id": "slide-1", "num_tiles": 3}]
+    original_replace = Path.replace
+
+    def _replace(self, target):
+        if Path(target) == process_list_path:
+            raise PermissionError(errno.EACCES, "Permission denied")
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", _replace)
+
+    write_process_list(rows, process_list_path)
+
+    assert process_list_path.read_text() == "sample_id,num_tiles\nslide-1,3\n"
 
 
 def test_config_dataclasses_apply_package_defaults_for_secondary_parameters():

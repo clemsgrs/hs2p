@@ -14,6 +14,7 @@ from PIL import Image
 
 from hs2p.tiling.result import TilingResult
 from hs2p.tile_qc import filter_coordinate_tiles, needs_pixel_qc
+from hs2p.fileops import promote_temp_file
 from hs2p.wsi import iter_tile_records_from_result, open_reader_for_result
 from hs2p.wsi.reader import BatchRegionReader
 
@@ -235,9 +236,9 @@ def extract_tiles_to_tar(
                 )
                 kept_indices.append(record.tile_index)
 
-        temp_tar_path.replace(tar_path)
+        promote_temp_file(temp_tar_path, tar_path)
         temp_tar_path = None
-        temp_manifest_path.replace(manifest_path)
+        promote_temp_file(temp_manifest_path, manifest_path)
         temp_manifest_path = None
     finally:
         if temp_tar_path is not None:

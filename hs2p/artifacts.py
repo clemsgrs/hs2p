@@ -10,9 +10,10 @@ import numpy as np
 from hs2p.configs import FilterConfig, SegmentationConfig, TilingConfig
 from hs2p.preprocessing import (
     TilingResult,
-    _save_tiling_result,
     _load_tiling_result_from_paths,
+    _save_tiling_result,
 )
+from hs2p.fileops import promote_temp_file
 
 
 @dataclass(frozen=True)
@@ -334,7 +335,7 @@ def write_process_list(process_rows: list[dict[str, Any]], process_list_path: Pa
         ) as handle:
             temp_path = Path(handle.name)
             pd.DataFrame(process_rows).to_csv(handle, index=False)
-        temp_path.replace(process_list_path)
+        promote_temp_file(temp_path, process_list_path)
         temp_path = None
     finally:
         if temp_path is not None:
