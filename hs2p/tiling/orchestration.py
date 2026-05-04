@@ -443,6 +443,7 @@ def _build_success_artifact(
         tiling_preview_path=tiling_preview_path,
         backend=base_artifact.backend,
         requested_backend=base_artifact.requested_backend,
+        annotation=base_artifact.annotation,
     )
 
 
@@ -465,9 +466,76 @@ def _build_success_process_row(
         "coordinates_npz_path": str(artifact.coordinates_npz_path) if artifact.coordinates_npz_path is not None else np.nan,
         "coordinates_meta_path": str(artifact.coordinates_meta_path),
         "tiles_tar_path": str(artifact.tiles_tar_path) if artifact.tiles_tar_path is not None else np.nan,
+        "mask_preview_path": str(artifact.mask_preview_path) if artifact.mask_preview_path is not None else np.nan,
+        "tiling_preview_path": str(artifact.tiling_preview_path) if artifact.tiling_preview_path is not None else np.nan,
         "error": np.nan,
         "traceback": np.nan,
     }
+
+
+def _existing_file_path(value: Any) -> Path | None:
+    path = optional_path(value)
+    if path is None or not path.is_file():
+        return None
+    return path
+
+
+def _same_optional_path(left: Any, right: Any) -> bool:
+    left_path = optional_path(left)
+    right_path = optional_path(right)
+    if left_path is None or right_path is None:
+        return left_path is None and right_path is None
+    return left_path.expanduser().resolve(strict=False) == right_path.expanduser().resolve(strict=False)
+
+
+def _same_optional_value(left: Any, right: Any) -> bool:
+    if left is None or pd.isna(left):
+        return right is None or pd.isna(right)
+    if right is None or pd.isna(right):
+        return False
+    return str(left) == str(right)
+
+
+def _same_optional_int(left: Any, right: Any) -> bool:
+    if left is None or pd.isna(left):
+        return right is None or pd.isna(right)
+    if right is None or pd.isna(right):
+        return False
+    return int(left) == int(right)
+
+
+def _same_tiling_artifacts(row: dict[str, Any], existing_row: dict[str, Any]) -> bool:
+    return (
+        _same_optional_int(row.get("num_tiles"), existing_row.get("num_tiles"))
+        and _same_optional_path(row.get("coordinates_npz_path"), existing_row.get("coordinates_npz_path"))
+        and _same_optional_path(row.get("coordinates_meta_path"), existing_row.get("coordinates_meta_path"))
+        and _same_optional_path(row.get("tiles_tar_path"), existing_row.get("tiles_tar_path"))
+        and _same_optional_value(row.get("requested_backend"), existing_row.get("requested_backend"))
+        and _same_optional_value(row.get("backend"), existing_row.get("backend"))
+    )
+
+
+def _merge_existing_resume_metadata(
+    row: dict[str, Any],
+    existing_row: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if existing_row is None:
+        return row
+    if row.get("tiling_status") != "success" or existing_row.get("tiling_status") != "success":
+        return row
+    if not _same_tiling_artifacts(row, existing_row):
+        return row
+    merged = dict(row)
+    for key, value in existing_row.items():
+        if key not in merged:
+            merged[key] = value
+    for key in ("mask_preview_path", "tiling_preview_path"):
+        if key not in existing_row:
+            continue
+        existing_path = _existing_file_path(existing_row.get(key))
+        if existing_path is not None and optional_path(merged.get(key)) is None:
+            merged[key] = str(existing_path)
+    return merged
 
 
 def _build_failure_process_row(
@@ -848,6 +916,11 @@ def tile_slides(
                     coordinates_meta_path=meta_path,
                     compatibility=compatibility,
                 )
+                artifact = _build_success_artifact(
+                    base_artifact=artifact,
+                    mask_preview_path=_existing_file_path(row.get("mask_preview_path")),
+                    tiling_preview_path=_existing_file_path(row.get("tiling_preview_path")),
+                )
             if read_coordinates_from is not None and artifact is None:
                 artifact = maybe_load_existing_artifacts(
                     whole_slide=whole_slide,
@@ -1033,6 +1106,10 @@ def tile_slides(
         _emit_tiling_progress()
 
     def _record_process_row(row: dict[str, Any]) -> None:
+        row = _merge_existing_resume_metadata(
+            row,
+            existing_successes.get(str(row.get("sample_id"))),
+        )
         process_rows.append(row)
         # Flush after every slide so a crashed run leaves a process_list.csv
         # that resume can use to skip already-completed slides.

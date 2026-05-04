@@ -2428,7 +2428,7 @@ def test_tile_slides_resume_marks_stale_artifact_as_failed(
                 "requested_backend": "asap",
                 "backend": "asap",
                 "tiling_status": "success",
-                "num_tiles": 1,
+                "num_tiles": artifacts.num_tiles,
                 "coordinates_npz_path": str(artifacts.coordinates_npz_path),
                 "coordinates_meta_path": str(artifacts.coordinates_meta_path),
                 "error": np.nan,
@@ -2463,6 +2463,77 @@ def test_tile_slides_resume_marks_stale_artifact_as_failed(
     assert pd.isna(row["coordinates_npz_path"])
     assert pd.isna(row["coordinates_meta_path"])
     assert "image_path mismatch" in row["error"]
+
+
+def test_tile_slides_resume_preserves_extra_columns_and_existing_preview_paths(
+    monkeypatch,
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    run_dir = tmp_path / "run"
+    result = _build_preprocessing_result(
+        sample_id="slide-resume",
+        image_path="slide-resume.svs",
+    )
+    artifacts = save_tiling_result(result, output_dir=run_dir)
+    mask_preview_path = run_dir / "preview" / "mask" / "slide-resume.jpg"
+    tiling_preview_path = run_dir / "preview" / "tiling" / "slide-resume.jpg"
+    for path in (mask_preview_path, tiling_preview_path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"preview")
+    pd.DataFrame(
+        [
+            {
+                "sample_id": "slide-resume",
+                "annotation": "tissue",
+                "image_path": "slide-resume.svs",
+                "mask_path": np.nan,
+                "requested_backend": "asap",
+                "backend": "asap",
+                "tiling_status": "success",
+                "num_tiles": artifacts.num_tiles,
+                "coordinates_npz_path": str(artifacts.coordinates_npz_path),
+                "coordinates_meta_path": str(artifacts.coordinates_meta_path),
+                "tiles_tar_path": np.nan,
+                "mask_preview_path": str(mask_preview_path),
+                "tiling_preview_path": str(tiling_preview_path),
+                "feature_status": "success",
+                "feature_path": "tile_embeddings/slide-resume.npz",
+                "error": np.nan,
+                "traceback": np.nan,
+            }
+        ]
+    ).to_csv(run_dir / "process_list.csv", index=False)
+
+    monkeypatch.setattr(
+        orchestration_mod,
+        "preprocess_slide",
+        lambda **_: (_ for _ in ()).throw(
+            AssertionError("resumed successful tiles should not be recomputed")
+        ),
+    )
+
+    reused = tile_slides(
+        [SlideSpec(sample_id="slide-resume", image_path=Path("slide-resume.svs"))],
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        preview=PreviewConfig(save_mask_preview=True, save_tiling_preview=True),
+        output_dir=run_dir,
+        resume=True,
+    )
+
+    assert len(reused) == 1
+    assert reused[0].mask_preview_path == mask_preview_path
+    assert reused[0].tiling_preview_path == tiling_preview_path
+    process_df = pd.read_csv(run_dir / "process_list.csv")
+    row = process_df.to_dict(orient="records")[0]
+    assert row["feature_status"] == "success"
+    assert row["feature_path"] == "tile_embeddings/slide-resume.npz"
+    assert Path(row["mask_preview_path"]) == mask_preview_path
+    assert Path(row["tiling_preview_path"]) == tiling_preview_path
 
 
 def test_tile_slides_logs_failures_in_real_time(
