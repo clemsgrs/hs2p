@@ -215,7 +215,7 @@ def validate_tiling_artifacts(
         raise ValueError("precomputed tiles mthresh mismatch")
     if result.seg_close != compatibility.segmentation.close:
         raise ValueError("precomputed tiles close mismatch")
-    if result.tissue_method != compatibility.segmentation.method:
+    if result.mask_path is None and result.tissue_method != compatibility.segmentation.method:
         raise ValueError("precomputed tiles tissue_method mismatch")
     if result.ref_tile_size_px != compatibility.filtering.ref_tile_size:
         raise ValueError("precomputed tiles ref_tile_size mismatch")
