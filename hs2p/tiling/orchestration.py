@@ -30,6 +30,7 @@ from hs2p.wsi.reader import open_slide as open_preprocessing_slide
 from hs2p.preprocessing import resolve_tissue_mask
 from hs2p.artifacts import (
     CompatibilitySpec,
+    ProcessListCheckpoint,
     SlideSpec,
     TilingArtifacts,
     load_tiling_result,
@@ -38,7 +39,6 @@ from hs2p.artifacts import (
     save_tiling_result,
     validate_required_columns,
     validate_tiling_artifacts,
-    write_process_list,
 )
 
 
@@ -825,6 +825,7 @@ def tile_slides(
     artifacts: list[TilingArtifacts] = []
     process_rows: list[dict[str, Any]] = []
     process_list_path = output_dir / "process_list.csv"
+    process_list_checkpoint = ProcessListCheckpoint(process_list_path)
     existing_successes: dict[str, dict[str, Any]] = {}
     if resume and process_list_path.is_file():
         existing_df = pd.read_csv(process_list_path)
@@ -1113,7 +1114,7 @@ def tile_slides(
         process_rows.append(row)
         # Flush after every slide so a crashed run leaves a process_list.csv
         # that resume can use to skip already-completed slides.
-        write_process_list(process_rows, process_list_path)
+        process_list_checkpoint.flush(process_rows)
 
     emit_progress("tiling.started", total=total_slides)
 
@@ -1129,10 +1130,6 @@ def tile_slides(
                 finalized_artifact, finalized_row = _finalize_pending_tiling_preview(
                     pending=previous_pending
                 )
-                if finalized_artifact is not None:
-                    artifacts.append(finalized_artifact)
-                _record_process_row(finalized_row)
-                completed_previews += 1
             except Exception as exc:
                 emit_progress_log(
                     f"[tile_slides] FAILED {previous_pending.whole_slide.sample_id}: {exc}",
@@ -1147,6 +1144,11 @@ def tile_slides(
                     )
                 )
                 failed_previews += 1
+            else:
+                if finalized_artifact is not None:
+                    artifacts.append(finalized_artifact)
+                _record_process_row(finalized_row)
+                completed_previews += 1
             emit_progress(
                 "preview.progress",
                 total=total_previews,
@@ -1360,7 +1362,7 @@ def tile_slides(
     finally:
         if preview_executor is not None:
             preview_executor.shutdown(wait=True)
-    write_process_list(process_rows, process_list_path)
+    process_list_checkpoint.flush(process_rows)
     return artifacts
 
 

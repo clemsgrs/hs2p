@@ -29,7 +29,7 @@ from hs2p.api import (
     validate_tiling_artifacts,
     write_tiling_preview,
 )
-from hs2p.artifacts import load_whole_slides_from_rows, write_process_list
+from hs2p.artifacts import ProcessListCheckpoint, load_whole_slides_from_rows
 from hs2p.configs import (
     FilterConfig as ConfigsFilterConfig,
     PreviewConfig as ConfigsPreviewConfig,
@@ -2169,6 +2169,8 @@ def test_tile_slides_writes_process_list_and_can_reuse_precomputed_tiles(
         "coordinates_npz_path",
         "coordinates_meta_path",
         "tiles_tar_path",
+        "mask_preview_path",
+        "tiling_preview_path",
         "error",
         "traceback",
     ]
@@ -2332,6 +2334,67 @@ def test_tile_slides_writes_preview_paths_when_previews_are_saved(
     assert "preview.finished" in kinds
     assert kinds.index("tiling.finished") < kinds.index("preview.started")
     assert kinds.index("preview.started") < kinds.index("preview.finished")
+
+
+def test_tile_slides_does_not_report_checkpoint_failure_as_preview_failure(
+    monkeypatch,
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    _patch_preprocess_slide(
+        monkeypatch,
+        result=_build_preprocessing_result(
+            sample_id="slide-preview",
+            image_path="slide-preview.svs",
+            mask_path=None,
+        ),
+    )
+
+    def _fake_write_coordinate_preview(**kwargs):
+        save_dir = Path(kwargs["save_dir"])
+        save_dir.mkdir(parents=True, exist_ok=True)
+        (save_dir / f"{kwargs['sample_id']}.jpg").write_bytes(b"preview")
+
+    class _FailingCheckpoint:
+        def __init__(self, path):
+            self.path = path
+
+        def flush(self, rows):
+            raise OSError("checkpoint unavailable")
+
+    import hs2p.progress as progress
+
+    class RecordingReporter:
+        def __init__(self):
+            self.logs = []
+
+        def emit(self, event):
+            return None
+
+        def close(self):
+            return None
+
+        def write_log(self, message: str, *, stream=None):
+            self.logs.append(message)
+
+    reporter = RecordingReporter()
+    monkeypatch.setattr("hs2p.tiling.orchestration.write_coordinate_preview", _fake_write_coordinate_preview)
+    monkeypatch.setattr("hs2p.tiling.orchestration.ProcessListCheckpoint", _FailingCheckpoint)
+
+    with pytest.raises(OSError, match="checkpoint unavailable"):
+        with progress.activate_progress_reporter(reporter):
+            tile_slides(
+                [SlideSpec(sample_id="slide-preview", image_path=Path("slide-preview.svs"))],
+                tiling=tiling_config,
+                segmentation=segmentation_config,
+                filtering=filter_config,
+                preview=PreviewConfig(save_tiling_preview=True),
+                output_dir=tmp_path,
+            )
+
+    assert not any("[tile_slides] FAILED slide-preview" in log for log in reporter.logs)
 
 
 def test_tile_slides_mask_preview_uses_overlay_renderer_with_preview_style(
@@ -2806,7 +2869,7 @@ def test_load_whole_slides_from_rows_rejects_legacy_mask_columns():
 
 
 
-def test_write_process_list_removes_temp_file_on_failure(monkeypatch, tmp_path: Path):
+def test_process_list_checkpoint_removes_temp_file_on_failure(monkeypatch, tmp_path: Path):
     created_temp_paths: list[Path] = []
     original_named_temporary_file = tempfile.NamedTemporaryFile
 
@@ -2844,23 +2907,154 @@ def test_write_process_list_removes_temp_file_on_failure(monkeypatch, tmp_path: 
     assert all(not path.exists() for path in created_temp_paths)
 
 
-def test_write_process_list_falls_back_when_replace_is_denied(
-    monkeypatch, tmp_path: Path
+def test_process_list_checkpoint_retries_transient_target_open_failures(
+    monkeypatch,
+    tmp_path: Path,
 ):
     process_list_path = tmp_path / "process_list.csv"
     rows = [{"sample_id": "slide-1", "num_tiles": 3}]
     original_replace = Path.replace
+    original_open = Path.open
+    target_open_attempts = 0
 
     def _replace(self, target):
         if Path(target) == process_list_path:
             raise PermissionError(errno.EACCES, "Permission denied")
         return original_replace(self, target)
 
-    monkeypatch.setattr(Path, "replace", _replace)
+    def _open(self, *args, **kwargs):
+        nonlocal target_open_attempts
+        mode = args[0] if args else kwargs.get("mode", "r")
+        if self == process_list_path and mode == "wb" and target_open_attempts < 3:
+            target_open_attempts += 1
+            raise FileNotFoundError(
+                errno.ENOENT,
+                "No such file or directory",
+                str(process_list_path),
+            )
+        return original_open(self, *args, **kwargs)
 
-    write_process_list(rows, process_list_path)
+    monkeypatch.setattr(Path, "replace", _replace)
+    monkeypatch.setattr(Path, "open", _open)
+
+    checkpoint = ProcessListCheckpoint(
+        process_list_path,
+        max_attempts=4,
+        retry_delay_seconds=0,
+    )
+    checkpoint.flush(rows)
 
     assert process_list_path.read_text() == "sample_id,num_tiles\nslide-1,3\n"
+    assert target_open_attempts == 3
+
+
+def test_tile_slides_uses_one_process_list_checkpoint(
+    monkeypatch,
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    checkpoints = []
+
+    class _RecordingCheckpoint:
+        def __init__(self, path):
+            self.path = path
+            self.flushes = []
+            checkpoints.append(self)
+
+        def flush(self, rows):
+            self.flushes.append([dict(row) for row in rows])
+            pd.DataFrame(rows).to_csv(self.path, index=False)
+
+    monkeypatch.setattr("hs2p.tiling.orchestration.ProcessListCheckpoint", _RecordingCheckpoint)
+    _patch_preprocess_slide(
+        monkeypatch,
+        result=_build_preprocessing_result(
+            sample_id="slide-1",
+            image_path="slide-1.svs",
+            mask_path=None,
+        ),
+    )
+
+    tile_slides(
+        [SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs"))],
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        output_dir=tmp_path,
+    )
+
+    assert len(checkpoints) == 1
+    assert checkpoints[0].path == tmp_path / "process_list.csv"
+    assert len(checkpoints[0].flushes) == 2
+
+
+def test_process_list_checkpoint_falls_back_when_replace_is_denied(
+    monkeypatch, tmp_path: Path
+):
+    process_list_path = tmp_path / "process_list.csv"
+    rows = [{"sample_id": "slide-1", "num_tiles": 3}]
+    created_temp_paths: list[Path] = []
+    original_named_temporary_file = tempfile.NamedTemporaryFile
+    original_replace = Path.replace
+
+    def _tracking_named_temporary_file(*args, **kwargs):
+        handle = original_named_temporary_file(*args, **kwargs)
+        created_temp_paths.append(Path(handle.name))
+        return handle
+
+    def _replace(self, target):
+        if Path(target) == process_list_path:
+            raise PermissionError(errno.EACCES, "Permission denied")
+        return original_replace(self, target)
+
+    monkeypatch.setattr(
+        "hs2p.artifacts.tempfile.NamedTemporaryFile",
+        _tracking_named_temporary_file,
+    )
+    monkeypatch.setattr(Path, "replace", _replace)
+
+    ProcessListCheckpoint(process_list_path, retry_delay_seconds=0).flush(rows)
+
+    assert process_list_path.read_text() == "sample_id,num_tiles\nslide-1,3\n"
+    assert created_temp_paths
+    assert all(not path.exists() for path in created_temp_paths)
+
+
+def test_process_list_checkpoint_fallback_retries_transient_missing_target(
+    monkeypatch, tmp_path: Path
+):
+    process_list_path = tmp_path / "process_list.csv"
+    rows = [{"sample_id": "slide-1", "num_tiles": 3}]
+    original_replace = Path.replace
+    original_open = Path.open
+    target_open_attempts = 0
+
+    def _replace(self, target):
+        if Path(target) == process_list_path:
+            raise PermissionError(errno.EACCES, "Permission denied")
+        return original_replace(self, target)
+
+    def _open(self, *args, **kwargs):
+        nonlocal target_open_attempts
+        mode = args[0] if args else kwargs.get("mode", "r")
+        if self == process_list_path and mode == "wb" and target_open_attempts == 0:
+            target_open_attempts += 1
+            raise FileNotFoundError(
+                errno.ENOENT,
+                "No such file or directory",
+                str(process_list_path),
+            )
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "replace", _replace)
+    monkeypatch.setattr(Path, "open", _open)
+
+    ProcessListCheckpoint(process_list_path, retry_delay_seconds=0).flush(rows)
+
+    assert process_list_path.read_text() == "sample_id,num_tiles\nslide-1,3\n"
+    assert target_open_attempts == 1
 
 
 def test_config_dataclasses_apply_package_defaults_for_secondary_parameters():
