@@ -121,6 +121,7 @@ When `is_within_tolerance` is true, `tile_size_lv0` and `step_px_lv0` reflect th
 ### Tiling manifest
 
 - `sample_id`
+- `annotation`
 - `image_path`
 - `mask_path`
 - `requested_backend`
@@ -130,6 +131,8 @@ When `is_within_tolerance` is true, `tile_size_lv0` and `step_px_lv0` reflect th
 - `coordinates_npz_path`
 - `coordinates_meta_path`
 - `tiles_tar_path`
+- `mask_preview_path`
+- `tiling_preview_path`
 - `error`
 - `traceback`
 

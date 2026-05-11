@@ -1,11 +1,12 @@
-
-import pandas as pd
+import errno
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
 import numpy as np
+import pandas as pd
 
 from hs2p.configs import FilterConfig, SegmentationConfig, TilingConfig
 from hs2p.preprocessing import (
@@ -323,23 +324,57 @@ def maybe_load_existing_artifacts(
     )
 
 
-def write_process_list(process_rows: list[dict[str, Any]], process_list_path: Path) -> None:
-    process_list_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            suffix=".csv",
-            dir=process_list_path.parent,
-            delete=False,
-        ) as handle:
-            temp_path = Path(handle.name)
-            pd.DataFrame(process_rows).to_csv(handle, index=False)
-        promote_temp_file(temp_path, process_list_path)
-        temp_path = None
-    finally:
-        if temp_path is not None:
-            temp_path.unlink(missing_ok=True)
+def _is_retryable_checkpoint_error(exc: OSError) -> bool:
+    return exc.errno in {
+        errno.ENOENT,
+        errno.EACCES,
+        errno.EPERM,
+        errno.ESTALE,
+        errno.EIO,
+    }
+
+
+class ProcessListCheckpoint:
+    def __init__(
+        self,
+        process_list_path: Path,
+        *,
+        max_attempts: int = 8,
+        retry_delay_seconds: float = 0.05,
+    ) -> None:
+        self.path = Path(process_list_path)
+        self.max_attempts = max(1, int(max_attempts))
+        self.retry_delay_seconds = max(0.0, float(retry_delay_seconds))
+
+    def flush(self, process_rows: list[dict[str, Any]]) -> None:
+        delay = self.retry_delay_seconds
+        for attempt in range(self.max_attempts):
+            temp_path: Path | None = None
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    suffix=".csv",
+                    dir=self.path.parent,
+                    delete=False,
+                ) as handle:
+                    temp_path = Path(handle.name)
+                    pd.DataFrame(process_rows).to_csv(handle, index=False)
+                promote_temp_file(temp_path, self.path)
+                temp_path = None
+                return
+            except OSError as exc:
+                if (
+                    attempt == self.max_attempts - 1
+                    or not _is_retryable_checkpoint_error(exc)
+                ):
+                    raise
+                if delay > 0:
+                    time.sleep(delay)
+                    delay *= 2
+            finally:
+                if temp_path is not None:
+                    temp_path.unlink(missing_ok=True)
 
 
 def load_whole_slides_from_rows(rows: Sequence[dict[str, Any]]) -> list[SlideSpec]:
@@ -368,6 +403,7 @@ def load_whole_slides_from_rows(rows: Sequence[dict[str, Any]]) -> list[SlideSpe
 
 __all__ = [
     "CompatibilitySpec",
+    "ProcessListCheckpoint",
     "SlideSpec",
     "TilingArtifacts",
     "_annotation_tiles_dir",
@@ -379,5 +415,4 @@ __all__ = [
     "validate_required_columns",
     "validate_result_consistency",
     "validate_tiling_artifacts",
-    "write_process_list",
 ]

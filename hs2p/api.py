@@ -8,7 +8,6 @@ from hs2p.artifacts import (
     maybe_load_existing_artifacts,
     save_tiling_result,
     validate_tiling_artifacts,
-    write_process_list,
 )
 from hs2p.configs import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig
 from hs2p.tiling.tar import (
@@ -38,6 +37,5 @@ __all__ = [
     "tile_slide",
     "tile_slides",
     "validate_tiling_artifacts",
-    "write_process_list",
     "write_tiling_preview",
 ]

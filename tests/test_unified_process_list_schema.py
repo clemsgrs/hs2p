@@ -53,6 +53,23 @@ def test_success_row_has_all_required_columns():
         "sample_id", "annotation", "image_path", "mask_path",
         "requested_backend", "backend", "tiling_status", "num_tiles",
         "coordinates_npz_path", "coordinates_meta_path", "tiles_tar_path",
+        "mask_preview_path", "tiling_preview_path",
+        "error", "traceback",
+    }
+    assert set(row.keys()) == expected_columns
+
+
+def test_failure_row_has_all_required_columns():
+    row = orchestration_mod._build_failure_process_row(
+        whole_slide=_whole_slide(mask_path=Path("mask.png")),
+        error="test error",
+        traceback_text="traceback",
+    )
+    expected_columns = {
+        "sample_id", "annotation", "image_path", "mask_path",
+        "requested_backend", "backend", "tiling_status", "num_tiles",
+        "coordinates_npz_path", "coordinates_meta_path", "tiles_tar_path",
+        "mask_preview_path", "tiling_preview_path",
         "error", "traceback",
     }
     assert set(row.keys()) == expected_columns
