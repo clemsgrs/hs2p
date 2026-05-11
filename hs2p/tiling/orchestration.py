@@ -561,6 +561,8 @@ def _build_failure_process_row(
         "coordinates_npz_path": np.nan,
         "coordinates_meta_path": np.nan,
         "tiles_tar_path": np.nan,
+        "mask_preview_path": np.nan,
+        "tiling_preview_path": np.nan,
         "error": error,
         "traceback": traceback_text,
     }
