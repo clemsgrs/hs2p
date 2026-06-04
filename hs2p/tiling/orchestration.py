@@ -760,10 +760,6 @@ def _resolve_tiling_worker_allocation(
     return True, outer_workers, inner_workers
 
 
-def _segmentation_requires_spawn(segmentation: SegmentationConfig | None) -> bool:
-    return segmentation is not None and str(segmentation.method).lower() == "sam2"
-
-
 def _resolve_mask_worker_count(
     *, num_workers: int, segmentation: SegmentationConfig | None
 ) -> int:
@@ -782,10 +778,21 @@ def _configure_worker_logging(output_dir: str) -> None:
     setup_logging(output=output_dir, level=logging.INFO)
 
 
-def _process_pool_context(*, use_spawn: bool):
-    if use_spawn:
-        return mp.get_context("spawn")
-    return mp
+def _process_pool_context():
+    """Return the multiprocessing context for the tiling worker pools.
+
+    The pools are created from a parent process that has already imported
+    heavyweight, multi-threaded libraries (torch, OpenCV, the slide backend)
+    and may hold an initialized CUDA context — e.g. slide2vec resolving the GPU
+    count before driving tiling, or SAM2 tissue segmentation running on GPU.
+    Forking such a parent copies only the calling thread but inherits every
+    mutex (glibc malloc arena, OpenMP, CUDA) in its current state; a lock held
+    by another thread at fork time is never released in the child, which then
+    deadlocks the first time it touches that lock. We therefore use ``"spawn"``
+    (a clean interpreter per worker), which is safe both for CPU tiling and for
+    SAM2-on-GPU, since each worker initializes its own CUDA after it starts.
+    """
+    return mp.get_context("spawn")
 
 
 def _write_tiling_preview_from_artifacts(
@@ -1017,11 +1024,7 @@ def tile_slides(
             num_workers=num_workers,
             segmentation=mask_resolution_requests[0].segmentation,
         )
-        mask_requires_spawn = any(
-            _segmentation_requires_spawn(request.segmentation)
-            for request in mask_resolution_requests
-        )
-        mask_pool_module = _process_pool_context(use_spawn=mask_requires_spawn)
+        mask_pool_module = _process_pool_context()
         if mask_worker_count > 1 and len(mask_resolution_requests) > 1:
             with mask_pool_module.Pool(
                 processes=min(mask_worker_count, len(mask_resolution_requests)),
@@ -1056,11 +1059,7 @@ def tile_slides(
         num_workers=num_workers,
         compute_count=len(compute_requests),
     )
-    compute_requires_spawn = any(
-        _segmentation_requires_spawn(request.segmentation) or bool(request.gpu_decode)
-        for request in compute_requests
-    )
-    compute_pool_module = _process_pool_context(use_spawn=compute_requires_spawn)
+    compute_pool_module = _process_pool_context()
     preview_executor = (
         ThreadPoolExecutor(max_workers=max(1, pool_processes))
         if preview is not None and preview.save_tiling_preview
