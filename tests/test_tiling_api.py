@@ -1072,7 +1072,10 @@ def test_tile_slides_uses_slide_level_pool_and_preserves_input_order(
             AssertionError("parent should not write tiling artifacts in pooled mode")
         ),
     )
-    monkeypatch.setattr("hs2p.tiling.orchestration.mp.Pool", _FakePool)
+    monkeypatch.setattr(
+        "hs2p.tiling.orchestration._process_pool_context",
+        lambda: SimpleNamespace(Pool=_FakePool),
+    )
 
     artifacts = tile_slides(
         [
@@ -1151,7 +1154,10 @@ def test_tile_slides_assigns_inner_workers_when_batch_is_small(
         _fake_compute_and_save,
         raising=False,
     )
-    monkeypatch.setattr("hs2p.tiling.orchestration.mp.Pool", _FakePool)
+    monkeypatch.setattr(
+        "hs2p.tiling.orchestration._process_pool_context",
+        lambda: SimpleNamespace(Pool=_FakePool),
+    )
 
     tile_slides(
         [
@@ -1506,7 +1512,11 @@ def test_tile_slides_uses_process_pool_for_tissue_resolution(
         "_compute_and_save_tiling_artifacts_from_request",
         _fake_compute_and_save,
     )
-    monkeypatch.setattr(orchestration_mod.mp, "Pool", _FakePool)
+    monkeypatch.setattr(
+        orchestration_mod,
+        "_process_pool_context",
+        lambda: SimpleNamespace(Pool=_FakePool),
+    )
 
     tile_slides(
         [
@@ -1643,6 +1653,126 @@ def test_tile_slides_uses_spawn_pool_for_sam2_work(
     assert pool_sizes == [2, 2]
     assert worker_outputs == [str(tmp_path), str(tmp_path)]
     assert calls[0] == "_resolve_mask_for_request_safe"
+    assert "_compute_and_save_tiling_artifacts_from_request" in calls
+
+
+def test_process_pool_context_uses_spawn(monkeypatch):
+    assert orchestration_mod._process_pool_context().get_start_method() == "spawn"
+
+
+def test_tile_slides_uses_spawn_pool_for_non_sam2_work(
+    monkeypatch,
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    """Regression: CPU/hsv tiling must also use a fork-safe (spawn) pool.
+
+    The tiling pools are created from a parent that has imported heavyweight,
+    multi-threaded libraries (torch, OpenCV, the slide backend) and may hold an
+    initialized CUDA context (e.g. slide2vec resolving the GPU count before
+    driving tiling). Forking such a parent inherits poisoned locks and
+    deadlocks; spawn avoids this for every segmentation method, not just SAM2.
+    """
+    pool_contexts: list[str] = []
+    calls: list[str] = []
+
+    def _fake_resolve_mask_for_request(request):
+        return orchestration_mod._MaskResolutionResponse(
+            input_index=request.input_index,
+            whole_slide=request.whole_slide,
+            ok=True,
+            resolved_mask=preprocessing_mod.ResolvedTissueMask(
+                tissue_mask=np.zeros((8, 8), dtype=np.uint8),
+                tissue_method="hsv",
+                requested_seg_downsample=64,
+                seg_downsample=64,
+                seg_level=0,
+                seg_spacing_um=0.5,
+            ),
+            requested_backend=request.tiling.requested_backend,
+            backend=request.tiling.backend,
+        )
+
+    def _fake_compute_and_save(request):
+        calls.append("_compute_and_save_tiling_artifacts_from_request")
+        tiles_dir = Path(request.output_dir) / "tiles"
+        tiles_dir.mkdir(parents=True, exist_ok=True)
+        npz_path = tiles_dir / f"{request.whole_slide.sample_id}.coordinates.npz"
+        meta_path = tiles_dir / f"{request.whole_slide.sample_id}.coordinates.meta.json"
+        npz_path.write_bytes(b"npz")
+        meta_path.write_text("{}")
+        return SimpleNamespace(
+            input_index=request.input_index,
+            whole_slide=request.whole_slide,
+            ok=True,
+            artifact=TilingArtifacts(
+                sample_id=request.whole_slide.sample_id,
+                coordinates_npz_path=npz_path,
+                coordinates_meta_path=meta_path,
+                num_tiles=1,
+            ),
+            mask_preview_path=None,
+            error=None,
+            traceback_text=None,
+        )
+
+    class _FakePool:
+        def __init__(self, processes, *, initializer=None, initargs=(), **kwargs):
+            if initializer is not None:
+                initializer(*initargs)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def imap_unordered(self, fn, args_list):
+            calls.append(fn.__name__)
+            for args in args_list:
+                yield fn(args)
+
+    class _FakeContext:
+        def Pool(self, processes, *, initializer=None, initargs=(), **kwargs):
+            return _FakePool(
+                processes,
+                initializer=initializer,
+                initargs=initargs,
+                **kwargs,
+            )
+
+    def _fake_get_context(name):
+        pool_contexts.append(name)
+        return _FakeContext()
+
+    def _unexpected_fork_pool(*args, **kwargs):
+        raise AssertionError("bare mp.Pool (fork) must not be used for tiling")
+
+    monkeypatch.setattr(orchestration_mod, "_resolve_mask_for_request", _fake_resolve_mask_for_request)
+    monkeypatch.setattr(
+        orchestration_mod,
+        "_compute_and_save_tiling_artifacts_from_request",
+        _fake_compute_and_save,
+    )
+    monkeypatch.setattr(orchestration_mod.mp, "get_context", _fake_get_context)
+    monkeypatch.setattr(orchestration_mod.mp, "Pool", _unexpected_fork_pool)
+
+    tile_slides(
+        [
+            SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs")),
+            SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
+        ],
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        output_dir=tmp_path,
+        num_workers=2,
+    )
+
+    # Both the tissue-resolution pool and the compute pool must use spawn.
+    assert pool_contexts == ["spawn", "spawn"]
     assert "_compute_and_save_tiling_artifacts_from_request" in calls
 
 
