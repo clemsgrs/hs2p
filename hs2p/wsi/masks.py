@@ -3,6 +3,52 @@ import cv2
 import numpy as np
 
 
+def read_label_at_spacing(
+    wsi,
+    requested_spacing_um: float,
+    *,
+    tolerance: float,
+) -> np.ndarray:
+    """Read a multi-class label raster at ``requested_spacing_um``, preserving class ids.
+
+    Resamples with **nearest-neighbor** (any averaging interpolation would invent
+    class indices) via :meth:`hs2p.wsi.wsi.WSI.read_full_at_spacing`, then recovers a
+    single-channel integer raster. Slide backends return RGB (a single-channel label
+    is replicated across channels); this collapses it back to one channel, asserting
+    the channels agree so a genuine colour image fails loud rather than silently
+    keeping only its red channel.
+
+    Args:
+        wsi: An :class:`hs2p.wsi.wsi.WSI` (or any object exposing
+            ``read_full_at_spacing``).
+        requested_spacing_um: Target spacing (µm/px).
+        tolerance: Relative spacing tolerance for the level match.
+
+    Returns:
+        A 2-D integer ``np.ndarray`` of class indices at the requested spacing.
+    """
+    arr = wsi.read_full_at_spacing(
+        requested_spacing_um, tolerance=tolerance, interpolation="nearest"
+    )
+    if arr.ndim == 3:
+        channels = arr.shape[2]
+        if channels >= 3 and not (
+            np.array_equal(arr[..., 0], arr[..., 1])
+            and np.array_equal(arr[..., 1], arr[..., 2])
+        ):
+            raise ValueError(
+                "label raster has non-identical RGB channels; expected a "
+                "single-channel class-index mask (channel-replicated by the backend), "
+                "not a colour image."
+            )
+        arr = arr[..., 0]
+    if not np.issubdtype(arr.dtype, np.integer):
+        raise ValueError(
+            f"label raster must have an integer dtype (class indices), got {arr.dtype}."
+        )
+    return arr
+
+
 def normalize_tissue_mask(mask_arr: np.ndarray) -> np.ndarray:
     if mask_arr.ndim == 3:
         mask_arr = mask_arr[:, :, 0]
