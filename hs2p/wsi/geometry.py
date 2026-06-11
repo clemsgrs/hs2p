@@ -105,3 +105,57 @@ def select_level(
         read_spacing_um=best_spacing,
         is_within_tolerance=is_within_tolerance,
     )
+
+
+@dataclass(frozen=True)
+class SpacingReadPlan:
+    """How to read a region of ``target_size_px`` (at ``requested_spacing_um``).
+
+    ``read_size_px`` is the size to read at ``level`` (its native ``read_spacing_um``)
+    so that, after downscaling to ``target_size_px``, the result is at the requested
+    spacing. When the chosen level is within tolerance the read size equals the target
+    (no scaling — the tiny spacing difference is accepted, never upsampled).
+    """
+
+    level: int
+    read_spacing_um: float
+    is_within_tolerance: bool
+    read_size_px: tuple[int, int]
+
+
+def plan_spacing_read(
+    *,
+    requested_spacing_um: float,
+    level0_spacing_um: float,
+    level_downsamples: list[tuple[float, float]],
+    target_size_px: tuple[int, int],
+    tolerance: float,
+) -> SpacingReadPlan:
+    """Resolve (level, read_size) for reading ``target_size_px`` at a spacing.
+
+    The shared kernel behind both :meth:`hs2p.wsi.wsi.WSI.read_region_at_spacing`
+    and the tiling pipeline's read-size derivation: pick the finest level ``<=`` the
+    requested spacing (via :func:`select_level`), then size the read at that level to
+    cover ``target_size_px`` after downscaling. Within tolerance ⇒ read the target
+    size directly (treated as exact); otherwise scale up by
+    ``requested_spacing_um / read_spacing_um``.
+    """
+    sel = select_level(
+        requested_spacing_um=requested_spacing_um,
+        level0_spacing_um=level0_spacing_um,
+        level_downsamples=level_downsamples,
+        tolerance=tolerance,
+    )
+    target_w, target_h = int(target_size_px[0]), int(target_size_px[1])
+    if sel.is_within_tolerance:
+        read_w, read_h = target_w, target_h
+    else:
+        ratio = float(requested_spacing_um) / float(sel.read_spacing_um)
+        read_w = round(target_w * ratio)
+        read_h = round(target_h * ratio)
+    return SpacingReadPlan(
+        level=sel.level,
+        read_spacing_um=sel.read_spacing_um,
+        is_within_tolerance=sel.is_within_tolerance,
+        read_size_px=(read_w, read_h),
+    )

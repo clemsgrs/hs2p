@@ -1,11 +1,45 @@
 from pathlib import Path
 
+import cv2
 import numpy as np
 from PIL import Image
 
 from hs2p.wsi.backend import open_slide, resolve_backend
+from hs2p.wsi.geometry import plan_spacing_read, select_level
 
 Image.MAX_IMAGE_PIXELS = 933120000
+
+# String aliases for cv2 interpolation flags. ``nearest`` is mandatory for label
+# masks (any averaging interpolation invents class indices); ``area`` is the
+# quality default for image downscaling.
+INTERPOLATION_FLAGS = {
+    "nearest": cv2.INTER_NEAREST,
+    "linear": cv2.INTER_LINEAR,
+    "area": cv2.INTER_AREA,
+    "cubic": cv2.INTER_CUBIC,
+    "lanczos": cv2.INTER_LANCZOS4,
+}
+
+
+def resize_array(
+    arr: np.ndarray, target_size: tuple[int, int], *, interpolation: str
+) -> np.ndarray:
+    """Resize ``arr`` to ``target_size`` (width, height) using a named interpolation.
+
+    ``target_size`` matching the current shape is a no-op (returns ``arr`` unchanged),
+    so an exact spacing/level match is lossless.
+    """
+    if interpolation not in INTERPOLATION_FLAGS:
+        raise ValueError(
+            f"unknown interpolation {interpolation!r}; expected one of "
+            f"{sorted(INTERPOLATION_FLAGS)}"
+        )
+    target_width, target_height = int(target_size[0]), int(target_size[1])
+    if arr.shape[1] == target_width and arr.shape[0] == target_height:
+        return arr
+    return cv2.resize(
+        arr, (target_width, target_height), interpolation=INTERPOLATION_FLAGS[interpolation]
+    )
 
 
 class WSI(object):
@@ -171,3 +205,69 @@ class WSI(object):
     def read_region(self, location, level, size):
         """Read a region from the slide at the given level."""
         return self.reader.read_region(location, level, size)
+
+    def read_region_at_spacing(
+        self,
+        location: tuple[int, int],
+        requested_spacing_um: float,
+        size: tuple[int, int],
+        *,
+        tolerance: float,
+        interpolation: str,
+    ) -> np.ndarray:
+        """Read a region at an arbitrary spacing (level-select + downscale).
+
+        Picks the finest pyramid level whose spacing is ``<= requested_spacing_um``
+        (within ``tolerance``) — never upsampling — reads it natively, then downscales
+        to ``size`` (width, height in px at ``requested_spacing_um``) with the named
+        ``interpolation``. When a level matches the requested spacing exactly there is
+        no resize (lossless).
+
+        Args:
+            location: ``(x, y)`` top-left in level-0 pixel space.
+            requested_spacing_um: Target spacing (µm/px).
+            size: Output ``(width, height)`` in pixels at the requested spacing.
+            tolerance: Relative spacing tolerance for the level match (no default —
+                the caller must state it).
+            interpolation: One of :data:`INTERPOLATION_FLAGS`, required so the caller
+                consciously picks it (``"nearest"`` for label masks, ``"area"`` for
+                image downscaling).
+        """
+        plan = plan_spacing_read(
+            requested_spacing_um=float(requested_spacing_um),
+            level0_spacing_um=float(self.get_level_spacing(0)),
+            level_downsamples=self.level_downsamples,
+            target_size_px=(int(size[0]), int(size[1])),
+            tolerance=float(tolerance),
+        )
+        region = self.read_region(location, plan.level, plan.read_size_px)
+        return resize_array(region, (int(size[0]), int(size[1])), interpolation=interpolation)
+
+    def read_full_at_spacing(
+        self,
+        requested_spacing_um: float,
+        *,
+        tolerance: float,
+        interpolation: str,
+    ) -> np.ndarray:
+        """Read the entire image resampled to ``requested_spacing_um``.
+
+        Convenience over :meth:`read_region_at_spacing` for the "read this whole
+        (small) image at a target spacing" case (e.g. a pre-cropped ROI tile): full
+        native read of the finest level ``<=`` the request, then downscale by
+        ``level_spacing / requested_spacing_um``. Exact-level match ⇒ no resize.
+        """
+        sel = select_level(
+            requested_spacing_um=float(requested_spacing_um),
+            level0_spacing_um=float(self.get_level_spacing(0)),
+            level_downsamples=self.level_downsamples,
+            tolerance=float(tolerance),
+        )
+        arr = self.get_slide(sel.level)
+        if sel.is_within_tolerance:
+            # Level matches the request (within tolerance) — read native, no resize.
+            return arr
+        level_height, level_width = arr.shape[0], arr.shape[1]
+        scale = float(sel.read_spacing_um) / float(requested_spacing_um)  # < 1 (downscale)
+        target_size = (int(round(level_width * scale)), int(round(level_height * scale)))
+        return resize_array(arr, target_size, interpolation=interpolation)

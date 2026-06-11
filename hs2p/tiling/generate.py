@@ -9,7 +9,7 @@ import numpy as np
 from hs2p.tiling.contours import _normalize_level_downsamples
 from hs2p.tiling.coverage import compute_tile_coverage
 from hs2p.tiling.result import ContourResult, TileGeometry, TilingResult
-from hs2p.wsi.reader import select_level
+from hs2p.wsi.geometry import plan_spacing_read
 
 
 def canonicalize_tiling_result(tiles: TileGeometry) -> TileGeometry:
@@ -63,21 +63,17 @@ def generate_tiles(
                 f"fall within tolerance ({tolerance:.0%})"
             )
 
-    level_sel = select_level(
+    level_sel = plan_spacing_read(
         requested_spacing_um=requested_spacing_um,
         level0_spacing_um=base_spacing_um,
         level_downsamples=[
             (float(downsample), float(downsample))
             for downsample in normalized_downsamples
         ],
+        target_size_px=(requested_tile_size_px, requested_tile_size_px),
         tolerance=tolerance,
     )
-    if level_sel.is_within_tolerance:
-        read_tile_size_px = requested_tile_size_px
-    else:
-        read_tile_size_px = round(
-            requested_tile_size_px * requested_spacing_um / level_sel.read_spacing_um
-        )
+    read_tile_size_px = level_sel.read_size_px[0]
     tile_size_lv0 = round(
         read_tile_size_px * level_sel.read_spacing_um / base_spacing_um
     )
