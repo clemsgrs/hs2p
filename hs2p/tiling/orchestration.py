@@ -16,11 +16,16 @@ import pandas as pd
 from hs2p.configs import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig
 from hs2p.progress import emit_progress, emit_progress_log
 from hs2p.tiling.result import ResolvedTissueMask, TilingResult
-from hs2p.tiling.single import build_tiling_result_from_mask, preprocess_slide
+from hs2p.tiling.single import (
+    build_tiling_result_from_mask,
+    preprocess_slide,
+    preprocess_slide_per_annotation,
+)
 from hs2p.tiling.tar import _annotation_tar_stem, _needs_pixel_filtering, extract_tiles_to_tar
 from hs2p.wsi import (
     CoordinateOutputMode,
     CoordinateSelectionStrategy,
+    SamplingSpec,
     normalize_tissue_mask,
     save_overlay_preview,
     write_coordinate_preview,
@@ -242,6 +247,57 @@ def _compute_tiling_result(
         slide.close()
 
 
+def _run_per_annotation(
+    *,
+    whole_slide: SlideSpec,
+    tiling: TilingConfig,
+    filtering: FilterConfig,
+    sampling: SamplingSpec,
+    selection_strategy: str,
+    output_mode: str,
+    seg_downsample: int,
+    num_workers: int,
+) -> "dict[str, TilingResult]":
+    """Shared annotation-sampling compute, called identically by ``tile_slide`` and the
+    ``tile_slides`` worker so the two paths never diverge. Resolves the annotation mask and
+    samples one :class:`TilingResult` per active annotation."""
+    if whole_slide.mask_path is None:
+        raise ValueError(
+            "annotation sampling requires whole_slide.mask_path (the annotation mask)"
+        )
+    return preprocess_slide_per_annotation(
+        image_path=whole_slide.image_path,
+        mask_path=whole_slide.mask_path,
+        pixel_mapping=sampling.pixel_mapping,
+        sampling_spec=sampling,
+        selection_strategy=selection_strategy,
+        sample_id=whole_slide.sample_id,
+        backend=tiling.backend,
+        spacing_override=whole_slide.spacing_at_level_0,
+        requested_tile_size_px=tiling.requested_tile_size_px,
+        requested_spacing_um=tiling.requested_spacing_um,
+        overlap=tiling.overlap,
+        seg_downsample=seg_downsample,
+        tolerance=tiling.tolerance,
+        ref_tile_size_px=filtering.ref_tile_size,
+        a_t=filtering.a_t,
+        a_h=filtering.a_h,
+        filter_white=filtering.filter_white,
+        filter_black=filtering.filter_black,
+        white_threshold=filtering.white_threshold,
+        black_threshold=filtering.black_threshold,
+        fraction_threshold=filtering.fraction_threshold,
+        filter_grayspace=filtering.filter_grayspace,
+        grayspace_saturation_threshold=filtering.grayspace_saturation_threshold,
+        grayspace_fraction_threshold=filtering.grayspace_fraction_threshold,
+        filter_blur=filtering.filter_blur,
+        blur_threshold=filtering.blur_threshold,
+        qc_spacing_um=filtering.qc_spacing_um,
+        num_workers=num_workers,
+        output_mode=output_mode,
+    )
+
+
 def tile_slide(
     whole_slide: SlideSpec,
     *,
@@ -249,7 +305,13 @@ def tile_slide(
     segmentation: SegmentationConfig | None = None,
     filtering: FilterConfig = FilterConfig(),
     num_workers: int = 1,
-) -> TilingResult:
+    sampling: SamplingSpec | None = None,
+    selection_strategy: str | None = None,
+    output_mode: str | None = None,
+) -> "TilingResult | dict[str, TilingResult]":
+    """Tile a single slide. With ``sampling`` provided, performs annotation-aware sampling
+    and returns one :class:`TilingResult` per active annotation (``{annotation: result}``);
+    otherwise tiles tissue and returns a single :class:`TilingResult`."""
     backend_selection = resolve_backend(
         tiling.requested_backend,
         wsi_path=whole_slide.image_path,
@@ -271,6 +333,17 @@ def tile_slide(
         whole_slide=whole_slide,
         segmentation=segmentation,
     )
+    if sampling is not None:
+        return _run_per_annotation(
+            whole_slide=whole_slide,
+            tiling=effective_tiling,
+            filtering=filtering,
+            sampling=sampling,
+            selection_strategy=selection_strategy or CoordinateSelectionStrategy.JOINT_SAMPLING,
+            output_mode=output_mode or CoordinateOutputMode.PER_ANNOTATION,
+            seg_downsample=effective_segmentation.downsample,
+            num_workers=num_workers,
+        )
     return preprocess_slide(
         image_path=whole_slide.image_path,
         sample_id=whole_slide.sample_id,
@@ -391,6 +464,9 @@ class _ComputeRequest:
     gpu_decode: bool = False
     include_result: bool = False
     save_tiles: bool = False
+    sampling: SamplingSpec | None = None
+    sampling_selection_strategy: str | None = None
+    sampling_output_mode: str | None = None
 
 
 @dataclass(frozen=True)
@@ -405,6 +481,9 @@ class _ComputeResponse:
     mask_preview_path: Path | None = None
     error: str | None = None
     traceback_text: str | None = None
+    # Annotation sampling produces one artifact per active annotation; the first lands in
+    # ``artifact`` (so the single-result path is unchanged) and the rest here.
+    extra_artifacts: tuple[TilingArtifacts, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -590,10 +669,71 @@ def _finalize_pending_tiling_preview(
     return artifact, row
 
 
+def _save_per_annotation_artifact(
+    result: TilingResult, *, output_dir: Path, annotation: str | None
+) -> TilingArtifacts:
+    artifact = save_tiling_result(result, output_dir=output_dir, annotation=annotation)
+    return TilingArtifacts(
+        sample_id=artifact.sample_id,
+        coordinates_npz_path=artifact.coordinates_npz_path,
+        coordinates_meta_path=artifact.coordinates_meta_path,
+        num_tiles=artifact.num_tiles,
+        tiles_tar_path=None,
+        mask_preview_path=artifact.mask_preview_path,
+        tiling_preview_path=artifact.tiling_preview_path,
+        backend=artifact.backend,
+        requested_backend=artifact.requested_backend,
+        annotation=annotation,
+    )
+
+
+def _compute_and_save_per_annotation(request: _ComputeRequest) -> _ComputeResponse:
+    """Compute + persist one TilingResult per active annotation, via the shared
+    ``_run_per_annotation`` core (same compute path as ``tile_slide``)."""
+    effective_segmentation = _resolve_effective_segmentation(
+        whole_slide=request.whole_slide,
+        segmentation=request.segmentation,
+    )
+    results = _run_per_annotation(
+        whole_slide=request.whole_slide,
+        tiling=request.tiling,
+        filtering=request.filtering,
+        sampling=request.sampling,
+        selection_strategy=(
+            request.sampling_selection_strategy
+            or CoordinateSelectionStrategy.JOINT_SAMPLING
+        ),
+        output_mode=(
+            request.sampling_output_mode or CoordinateOutputMode.PER_ANNOTATION
+        ),
+        seg_downsample=effective_segmentation.downsample,
+        num_workers=request.num_workers,
+    )
+    artifacts = [
+        _save_per_annotation_artifact(
+            result, output_dir=request.output_dir, annotation=annotation
+        )
+        for annotation, result in results.items()
+    ]
+    return _ComputeResponse(
+        input_index=request.input_index,
+        whole_slide=request.whole_slide,
+        ok=True,
+        artifact=artifacts[0],
+        extra_artifacts=tuple(artifacts[1:]),
+        result=None,
+        requested_backend=request.tiling.requested_backend,
+        backend=request.tiling.backend,
+        mask_preview_path=None,
+    )
+
+
 def _compute_and_save_tiling_artifacts_from_request(
     request: _ComputeRequest,
 ) -> _ComputeResponse:
     try:
+        if request.sampling is not None:
+            return _compute_and_save_per_annotation(request)
         defer_pixel_filtering = request.save_tiles and _needs_pixel_filtering(request.filtering)
         effective_filtering = (
             replace(
@@ -823,10 +963,31 @@ def tile_slides(
     save_tiles: bool = False,
     jpeg_backend: str = "turbojpeg",
     gpu_decode: bool = False,
+    sampling: SamplingSpec | None = None,
+    selection_strategy: str | None = None,
+    output_mode: str | None = None,
 ) -> list[TilingArtifacts]:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     _validate_whole_slides(whole_slides)
+    if sampling is not None:
+        if not sampling.active_annotations:
+            raise ValueError("annotation sampling requires a non-empty sampling.active_annotations")
+        unsupported = [
+            name
+            for name, active in (
+                ("resume", resume),
+                ("read_coordinates_from", read_coordinates_from is not None),
+                ("save_tiles", save_tiles),
+                ("preview", preview is not None),
+            )
+            if active
+        ]
+        if unsupported:
+            raise NotImplementedError(
+                "tile_slides annotation sampling does not yet support: "
+                + ", ".join(unsupported)
+            )
     _validate_segmentation_requirement(
         whole_slides=whole_slides,
         segmentation=segmentation,
@@ -973,6 +1134,9 @@ def tile_slides(
                 jpeg_backend=str(jpeg_backend),
                 gpu_decode=gpu_decode,
                 save_tiles=save_tiles,
+                sampling=sampling,
+                sampling_selection_strategy=selection_strategy,
+                sampling_output_mode=output_mode,
             )
             planned_work.append(
                 _SlideWork(
@@ -989,15 +1153,21 @@ def tile_slides(
                     traceback_text=traceback.format_exc(),
                 )
             )
-    mask_resolution_requests = [
-        _MaskResolutionRequest(
-            input_index=request.input_index,
-            whole_slide=request.whole_slide,
-            tiling=request.tiling,
-            segmentation=request.segmentation,
-        )
-        for request in compute_requests
-    ]
+    # Annotation sampling resolves its (multi-class) mask inside the shared compute core, so
+    # it skips the tissue-mask pre-resolution stage entirely.
+    mask_resolution_requests = (
+        []
+        if sampling is not None
+        else [
+            _MaskResolutionRequest(
+                input_index=request.input_index,
+                whole_slide=request.whole_slide,
+                tiling=request.tiling,
+                segmentation=request.segmentation,
+            )
+            for request in compute_requests
+        ]
+    )
     resolved_masks: dict[int, ResolvedTissueMask] = {}
     mask_failures: dict[int, _MaskResolutionResponse] = {}
     if mask_resolution_requests:
@@ -1227,6 +1397,21 @@ def tile_slides(
                 artifact=artifact,
             )
         )
+        # Annotation sampling emits one extra artifact per additional active annotation.
+        for extra in getattr(response, "extra_artifacts", ()):
+            extra_artifact = _build_success_artifact(
+                base_artifact=extra,
+                mask_preview_path=None,
+                tiling_preview_path=None,
+            )
+            _record_tiling_success(num_tiles=extra_artifact.num_tiles)
+            artifacts.append(extra_artifact)
+            _record_process_row(
+                _build_success_process_row(
+                    whole_slide=response.whole_slide,
+                    artifact=extra_artifact,
+                )
+            )
 
     def _drain_planned_work(compute_response_iter) -> None:
         buffered_responses: dict[int, _ComputeResponse] = {}
@@ -1303,6 +1488,9 @@ def tile_slides(
                     gpu_decode=request.gpu_decode,
                     include_result=False,
                     save_tiles=request.save_tiles,
+                    sampling=request.sampling,
+                    sampling_selection_strategy=request.sampling_selection_strategy,
+                    sampling_output_mode=request.sampling_output_mode,
                 )
                 for request in compute_requests
             ]
@@ -1338,6 +1526,9 @@ def tile_slides(
                     gpu_decode=request.gpu_decode,
                     include_result=True,
                     save_tiles=request.save_tiles,
+                    sampling=request.sampling,
+                    sampling_selection_strategy=request.sampling_selection_strategy,
+                    sampling_output_mode=request.sampling_output_mode,
                 )
                 for request in compute_requests
             ]
