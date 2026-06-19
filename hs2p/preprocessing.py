@@ -1,7 +1,7 @@
 """Reusable low-level preprocessing primitives shared with downstream projects."""
 
 from hs2p.tiling.contours import _normalize_level_downsamples, detect_contours
-from hs2p.tiling.coverage import compute_tile_coverage
+from hs2p.tiling.coverage import compute_tile_coverage, summarize_annotation_coverage
 from hs2p.tiling.generate import (
     _build_contour_tissue_mask,
     _tiles_for_contour,
@@ -29,8 +29,10 @@ from hs2p.tiling.io import (
     validate_tiling_result_provenance,
 )
 from hs2p.tiling.mask import (
+    load_annotation_label_mask,
     load_precomputed_tissue_mask,
     prepare_sam2_thumbnail,
+    resolve_annotation_masks,
     resolve_tissue_mask,
 )
 from hs2p.tiling.result import (
@@ -57,11 +59,15 @@ __all__ = [
     "ResolvedAnnotationMasks",
     "Sam2Thumbnail",
     "canonicalize_tiling_result",
+    "compute_tile_coverage",
     "detect_contours",
     "generate_tiles",
+    "load_annotation_label_mask",
     "load_precomputed_tissue_mask",
     "prepare_sam2_thumbnail",
+    "resolve_annotation_masks",
     "resolve_tissue_mask",
+    "summarize_annotation_coverage",
     "build_tiling_result_from_mask",
     "build_per_annotation_tiling_results",
     "normalize_artifact_path",

@@ -54,4 +54,64 @@ def compute_tile_coverage(
     return np.clip((tissue_sum / tile_area).astype(np.float32), 0.0, 1.0)
 
 
-__all__ = ["compute_tile_coverage"]
+def summarize_annotation_coverage(
+    *,
+    slide,
+    resolved_masks,
+    min_coverage: dict[str, float | None] | None,
+    requested_tile_size_px: int,
+    requested_spacing_um: float,
+    overlap: float = 0.0,
+) -> dict[str, dict[str, float | int | None]]:
+    """Per-class annotation coverage summary at the resolved ``seg_downsample``.
+
+    Returns ``{class_name: {"area_mm2", "frac", "est_tiles"}}`` where:
+
+    - ``area_mm2`` — class foreground area, from the seg-space pixel count scaled by the
+      seg-level spacing (``(seg_spacing_um / 1000) ** 2`` mm² per pixel).
+    - ``frac`` — class area divided by the total annotated (non-background) area, i.e. the
+      class's share among annotations (sums to 1 across classes).
+    - ``est_tiles`` — number of non-overlapping tile footprints whose class coverage is at
+      least ``min_coverage[class]`` (``None`` when no threshold is given). This is an
+      *estimate*: it reuses :func:`compute_tile_coverage` over a regular level-0 grid and
+      deliberately ignores tissue filtering and tile overlap.
+
+    Reuses hs2p's existing coverage primitive (the controllable ``seg_downsample`` is the
+    precision/speed knob) rather than re-scanning the mask.
+    """
+    seg_spacing_um = float(resolved_masks.seg_spacing_um)
+    mm2_per_pixel = (seg_spacing_um / 1000.0) ** 2
+    areas_px = {
+        name: float(np.count_nonzero(mask)) for name, mask in resolved_masks.masks.items()
+    }
+    total_annotated = sum(areas_px.values())
+
+    base_spacing_um = float(slide.spacing)
+    tile_size_lv0 = max(1, round(requested_tile_size_px * requested_spacing_um / base_spacing_um))
+    step = max(1, round(tile_size_lv0 * (1.0 - overlap)))
+    slide_w, slide_h = int(slide.dimensions[0]), int(slide.dimensions[1])
+    xs = np.arange(0, max(1, slide_w), step, dtype=np.int64)
+    ys = np.arange(0, max(1, slide_h), step, dtype=np.int64)
+    grid_x, grid_y = np.meshgrid(xs, ys)
+    candidates = np.column_stack((grid_x.ravel(), grid_y.ravel())).astype(np.int64)
+
+    summary: dict[str, dict[str, float | int | None]] = {}
+    for name, binary_mask in resolved_masks.masks.items():
+        area_px = areas_px[name]
+        threshold = None if min_coverage is None else min_coverage.get(name)
+        if threshold is None:
+            est_tiles: int | None = None
+        else:
+            coverage = compute_tile_coverage(
+                candidates, binary_mask, tile_size_lv0, (slide_w, slide_h)
+            )
+            est_tiles = int(np.count_nonzero(coverage >= float(threshold)))
+        summary[name] = {
+            "area_mm2": area_px * mm2_per_pixel,
+            "frac": (area_px / total_annotated) if total_annotated > 0 else 0.0,
+            "est_tiles": est_tiles,
+        }
+    return summary
+
+
+__all__ = ["compute_tile_coverage", "summarize_annotation_coverage"]
