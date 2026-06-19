@@ -30,6 +30,39 @@ def read_label_at_spacing(
     arr = wsi.read_full_at_spacing(
         requested_spacing_um, tolerance=tolerance, interpolation="nearest"
     )
+    return _collapse_label_raster(arr)
+
+
+def read_label_region_at_spacing(
+    wsi,
+    location: tuple[int, int],
+    requested_spacing_um: float,
+    size: tuple[int, int],
+    *,
+    tolerance: float,
+) -> np.ndarray:
+    """Read a multi-class label *region* at ``requested_spacing_um``, preserving class ids.
+
+    The region counterpart of :func:`read_label_at_spacing` (for annotation-sampled ROIs):
+    nearest-neighbor resample via :meth:`hs2p.wsi.wsi.WSI.read_region_at_spacing`, then
+    collapse the channel-replicated raster back to a single-channel integer mask.
+
+    Args:
+        location: ``(x, y)`` top-left in level-0 pixel space.
+        size: Output ``(width, height)`` in pixels at ``requested_spacing_um``.
+    """
+    arr = wsi.read_region_at_spacing(
+        location,
+        requested_spacing_um,
+        size,
+        tolerance=tolerance,
+        interpolation="nearest",
+    )
+    return _collapse_label_raster(arr)
+
+
+def _collapse_label_raster(arr: np.ndarray) -> np.ndarray:
+    """Recover a 2-D integer class-index raster from a (possibly RGB-replicated) read."""
     if arr.ndim == 3:
         channels = arr.shape[2]
         if channels >= 3 and not (
