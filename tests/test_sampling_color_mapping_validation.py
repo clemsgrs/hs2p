@@ -1,6 +1,28 @@
 import pytest
 
-from hs2p.configs.resolvers import validate_color_mapping
+from hs2p.configs.resolvers import validate_color_mapping, validate_pixel_mapping
+
+
+def test_validate_pixel_mapping_accepts_uint16_labels_without_background():
+    # background is optional, and values up to the uint16 ceiling are allowed
+    validate_pixel_mapping({"grade_4": 300, "grade_5": 600})
+
+
+def test_validate_pixel_mapping_rejects_duplicate_values():
+    with pytest.raises(ValueError, match="unique"):
+        validate_pixel_mapping({"background": 0, "tumor": 1, "stroma": 1})
+
+
+def test_validate_pixel_mapping_rejects_out_of_range_values():
+    with pytest.raises(ValueError, match="range"):
+        validate_pixel_mapping({"background": 0, "tumor": 70000})
+    with pytest.raises(ValueError, match="range"):
+        validate_pixel_mapping({"background": 0, "tumor": -1})
+
+
+def test_validate_pixel_mapping_rejects_non_integer_values():
+    with pytest.raises(ValueError, match="integer"):
+        validate_pixel_mapping({"background": 0, "tumor": 1.5})
 
 
 def test_validation_accepts_omegaconf_listconfig_rgb_values():

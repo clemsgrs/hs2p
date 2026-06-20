@@ -14,6 +14,7 @@ from hs2p.tiling.result import ResolvedAnnotationMasks, ResolvedTissueMask, Tili
 from hs2p.tiling.mask import resolve_annotation_masks, resolve_tissue_mask
 from hs2p.tile_qc import filter_coordinate_tiles, needs_pixel_qc
 from hs2p.wsi.reader import open_slide
+from hs2p.wsi.types import CoordinateOutputMode, CoordinateSelectionStrategy
 
 
 def build_tiling_result_from_mask(
@@ -293,9 +294,15 @@ def _build_joint_annotation_results(
     qc_spacing_um: float,
     num_workers: int,
 ) -> "dict[str, TilingResult]":
-    union_mask = np.zeros_like(next(iter(resolved_masks.masks.values())))
-    for binary_mask in resolved_masks.masks.values():
-        union_mask = np.where(binary_mask > 0, np.uint8(255), union_mask).astype(np.uint8)
+    # Union over the classes actually being sampled (active_annotations) — never the full
+    # mask set, which may include declared-but-unsampled labels (e.g. the value reserved for
+    # unannotated pixels) that would otherwise swallow the whole slide.
+    active = sampling_spec.active_annotations
+    union_mask = np.zeros_like(resolved_masks.masks[active[0]])
+    for annotation in active:
+        union_mask = np.where(
+            resolved_masks.masks[annotation] > 0, np.uint8(255), union_mask
+        ).astype(np.uint8)
 
     union_resolved = ResolvedTissueMask(
         tissue_mask=union_mask,
@@ -400,8 +407,6 @@ def _merge_annotation_results_to_single(
     mask is attached downstream. ``tissue_fractions`` carries the max per-class
     coverage seen for each kept tile.
     """
-    from hs2p.wsi.types import CoordinateOutputMode
-
     result_list = list(results.values())
     if not result_list:
         raise ValueError(
@@ -483,8 +488,6 @@ def build_per_annotation_tiling_results(
     INDEPENDENT_SAMPLING: one tiling pass per annotation using that annotation's binary mask.
     JOINT_SAMPLING: one pass on the union mask, then per-annotation post-filter by coverage.
     """
-    from hs2p.wsi.types import CoordinateOutputMode, CoordinateSelectionStrategy
-
     if output_mode is None:
         output_mode = CoordinateOutputMode.PER_ANNOTATION
 

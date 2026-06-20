@@ -76,17 +76,21 @@ def patched_mask_open(monkeypatch):
     return mask
 
 
-def test_resolve_annotation_masks_splits_per_non_background_class(patched_mask_open):
+def test_resolve_annotation_masks_splits_per_declared_label(patched_mask_open):
     resolved = resolve_annotation_masks(
         slide=_mock_slide(),
         mask_path="/fake/slide_mask.tif",
         pixel_mapping=PIXEL_MAPPING,
         seg_downsample=1,
     )
-    assert set(resolved.masks) == {"tumor", "stroma", "necrosis"}
+    # No reserved name: every declared label gets a binary, including "background".
+    assert set(resolved.masks) == {"background", "tumor", "stroma", "necrosis"}
     assert int(np.count_nonzero(resolved.masks["tumor"])) == TUMOR_PX
     assert int(np.count_nonzero(resolved.masks["stroma"])) == STROMA_PX
     assert int(np.count_nonzero(resolved.masks["necrosis"])) == NECROSIS_PX
+    assert int(np.count_nonzero(resolved.masks["background"])) == (
+        SLIDE_H * SLIDE_W - TUMOR_PX - STROMA_PX - NECROSIS_PX
+    )
     # binaries are 0 / 255
     assert set(np.unique(resolved.masks["tumor"]).tolist()) <= {0, 255}
     assert resolved.seg_spacing_um == pytest.approx(BASE_SPACING)
@@ -94,14 +98,53 @@ def test_resolve_annotation_masks_splits_per_non_background_class(patched_mask_o
     assert resolved.pixel_mapping == PIXEL_MAPPING
 
 
-def test_resolve_annotation_masks_requires_background(patched_mask_open):
-    with pytest.raises(ValueError, match="background"):
-        resolve_annotation_masks(
-            slide=_mock_slide(),
-            mask_path="/fake/slide_mask.tif",
-            pixel_mapping={"tumor": 1},
-            seg_downsample=1,
-        )
+def test_resolve_annotation_masks_preserves_uint16_labels_above_255(monkeypatch):
+    """Label values above 255 stored in a uint16 raster must not wrap to uint8.
+
+    The reader validates labels against the full pixel-value set (which is not bounded to
+    255), so an unconditional uint8 downcast would wrap e.g. 300 -> 44, silently dropping a
+    class or merging it into whichever class owns the wrapped value.
+    """
+    mask = np.zeros((SLIDE_H, SLIDE_W), dtype=np.uint16)
+    mask[0:200, 0:200] = 300  # would wrap to 44 under a uint8 downcast
+    mask[200:400, 200:400] = 600  # would wrap to 88
+    monkeypatch.setattr(
+        maskmod,
+        "open_slide",
+        lambda path, backend=None: _FakeMaskSlide(mask, BASE_SPACING),
+    )
+
+    resolved = resolve_annotation_masks(
+        slide=_mock_slide(),
+        mask_path="/fake/slide_mask.tif",
+        pixel_mapping={"background": 0, "tumor": 300, "stroma": 600},
+        seg_downsample=1,
+    )
+    assert int(np.count_nonzero(resolved.masks["tumor"])) == 200 * 200
+    assert int(np.count_nonzero(resolved.masks["stroma"])) == 200 * 200
+
+
+def test_resolve_annotation_masks_background_is_optional(monkeypatch):
+    """A raster that labels every pixel (no reserved background value) needs no 'background'
+    entry — every declared class still validates and is split into a binary."""
+    mask = np.zeros((SLIDE_H, SLIDE_W), dtype=np.uint8)
+    mask[:, : SLIDE_W // 2] = 1  # tumor over the left half
+    mask[:, SLIDE_W // 2 :] = 2  # stroma over the right half
+    monkeypatch.setattr(
+        maskmod,
+        "open_slide",
+        lambda path, backend=None: _FakeMaskSlide(mask, BASE_SPACING),
+    )
+
+    resolved = resolve_annotation_masks(
+        slide=_mock_slide(),
+        mask_path="/fake/slide_mask.tif",
+        pixel_mapping={"tumor": 1, "stroma": 2},
+        seg_downsample=1,
+    )
+    assert set(resolved.masks) == {"tumor", "stroma"}
+    assert int(np.count_nonzero(resolved.masks["tumor"])) == SLIDE_H * (SLIDE_W // 2)
+    assert int(np.count_nonzero(resolved.masks["stroma"])) == SLIDE_H * (SLIDE_W // 2)
 
 
 def test_summarize_annotation_coverage_area_frac_and_est_tiles(patched_mask_open):
@@ -159,7 +202,11 @@ def test_resolve_annotation_masks_recovers_via_openslide_on_degenerate_read(monk
 
 
 def test_resolve_annotation_masks_genuinely_empty_stays_empty(monkeypatch):
-    """When every backend agrees the mask is background, no spurious labels are invented."""
+    """When every backend agrees the mask is background, no spurious real labels are invented.
+
+    The background binary correctly fills the slide (every pixel is the background value); the
+    point is that no foreground class picks up phantom pixels.
+    """
     empty = np.zeros((SLIDE_H, SLIDE_W), dtype=np.uint8)
     monkeypatch.setattr(
         maskmod, "open_slide", lambda path, backend=None: _FakeMaskSlide(empty, BASE_SPACING)
@@ -170,7 +217,11 @@ def test_resolve_annotation_masks_genuinely_empty_stays_empty(monkeypatch):
         pixel_mapping=PIXEL_MAPPING,
         seg_downsample=1,
     )
-    assert all(int(np.count_nonzero(m)) == 0 for m in resolved.masks.values())
+    assert all(
+        int(np.count_nonzero(resolved.masks[name])) == 0
+        for name in ("tumor", "stroma", "necrosis")
+    )
+    assert int(np.count_nonzero(resolved.masks["background"])) == SLIDE_H * SLIDE_W
 
 
 class _FakeSlide:

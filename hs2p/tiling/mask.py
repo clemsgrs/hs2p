@@ -22,6 +22,32 @@ def _reduce_mask_channels(mask: np.ndarray) -> np.ndarray:
     return np.asarray(mask)
 
 
+def _as_discrete_label_array(mask: np.ndarray) -> np.ndarray:
+    """Return ``mask`` as the smallest cv2-resize-safe unsigned integer dtype that
+    preserves every label value (``uint8`` or ``uint16``).
+
+    Discrete masks must never be silently narrowed: downcasting a validated ``uint16``
+    label raster to ``uint8`` would wrap any value above 255 modulo 256, making a class
+    vanish or merge into the class that owns the wrapped value. Labels are non-negative
+    class ids, so we reject negatives and values past the supported ``uint16`` range
+    rather than corrupting them.
+    """
+    arr = np.asarray(mask)
+    if arr.size == 0:
+        return arr.astype(np.uint8, copy=False)
+    min_value = int(arr.min())
+    max_value = int(arr.max())
+    if min_value < 0:
+        raise ValueError(f"Mask contains negative label value {min_value}")
+    if max_value <= np.iinfo(np.uint8).max:
+        return arr.astype(np.uint8, copy=False)
+    if max_value <= np.iinfo(np.uint16).max:
+        return arr.astype(np.uint16, copy=False)
+    raise ValueError(
+        f"Mask label value {max_value} exceeds the supported uint16 range"
+    )
+
+
 def _is_discrete_binary_mask(mask: np.ndarray, *, tissue_value: int) -> bool:
     values = np.unique(mask.astype(np.int64, copy=False))
     non_tissue = [int(value) for value in values.tolist() if int(value) != tissue_value]
@@ -62,7 +88,7 @@ def _read_discrete_mask_level(
     mask_size = mask_slide.level_dimensions[mask_level]
     backend_mask = _reduce_mask_channels(mask_slide.read_region((0, 0), mask_level, mask_size))
     if is_discrete(backend_mask):
-        return backend_mask.astype(np.uint8, copy=False)
+        return _as_discrete_label_array(backend_mask)
 
     suffix = Path(mask_path).suffix.lower()
     if suffix in {".tif", ".tiff"}:
@@ -70,7 +96,7 @@ def _read_discrete_mask_level(
             _read_exact_tiff_mask_level(mask_path, mask_level=mask_level)
         )
         if is_discrete(exact_mask):
-            return exact_mask.astype(np.uint8, copy=False)
+            return _as_discrete_label_array(exact_mask)
     values = np.unique(backend_mask.astype(np.int64, copy=False))
     raise ValueError(
         f"{label} read produced non-discrete labels "
@@ -139,7 +165,7 @@ def load_precomputed_tissue_mask(
 
     if raw_mask.shape[:2] != (int(seg_size[1]), int(seg_size[0])):
         raw_mask = cv2.resize(
-            raw_mask.astype(np.uint8, copy=False),
+            _as_discrete_label_array(raw_mask),
             (int(seg_size[0]), int(seg_size[1])),
             interpolation=cv2.INTER_NEAREST,
         )
@@ -330,11 +356,11 @@ def _read_label_mask_at_seg(
 
     if raw_mask.shape[:2] != (int(seg_size[1]), int(seg_size[0])):
         raw_mask = cv2.resize(
-            raw_mask.astype(np.uint8, copy=False),
+            _as_discrete_label_array(raw_mask),
             (int(seg_size[0]), int(seg_size[1])),
             interpolation=cv2.INTER_NEAREST,
         )
-    return raw_mask.astype(np.uint8, copy=False), mask_level, mask_spacing_um
+    return _as_discrete_label_array(raw_mask), mask_level, mask_spacing_um
 
 
 def load_annotation_label_mask(
@@ -388,18 +414,23 @@ def resolve_annotation_masks(
     seg_downsample: int = 64,
     tissue_method: str = "precomputed_mask",
 ) -> ResolvedAnnotationMasks:
-    """Read an annotation mask into one binary mask per (non-background) class at ``seg_downsample``.
+    """Read an annotation mask into one binary mask per declared label at ``seg_downsample``.
 
     The multi-label producer that ``build_per_annotation_tiling_results`` consumes but that
     was missing from the codebase — the annotation counterpart of
     :func:`resolve_tissue_mask`'s precomputed path. ``pixel_mapping`` maps class name to the
-    integer pixel value in the mask and must include a ``background`` entry; one binary mask
-    (255 foreground / 0 background) is produced per non-background class.
+    integer pixel value in the mask; one binary mask (255 foreground / 0 background) is
+    produced for **every** entry — no label name is special. ``pixel_mapping`` is the user's
+    own vocabulary; *which* of these classes get sampled is decided downstream by the sampling
+    spec (``min_coverage`` thresholds), not here.
+
+    There is no reserved ``background`` label: every pixel value present in the raster must be
+    declared (the read-time discreteness guard rejects undeclared values), so if the raster
+    reserves a value for unannotated pixels, declare it like any other class — just give it no
+    coverage threshold and it will never be sampled.
     """
     if mask_path is None:
         raise ValueError("resolve_annotation_masks requires a mask_path")
-    if "background" not in pixel_mapping:
-        raise ValueError("pixel_mapping must include a 'background' label")
 
     normalized_downsamples = _normalize_level_downsamples(slide.level_downsamples)
     seg_level = select_level_for_downsample(
@@ -417,7 +448,6 @@ def resolve_annotation_masks(
     masks = {
         name: np.where(raw_mask == int(value), np.uint8(255), np.uint8(0)).astype(np.uint8)
         for name, value in pixel_mapping.items()
-        if name != "background"
     }
     return ResolvedAnnotationMasks(
         masks=masks,

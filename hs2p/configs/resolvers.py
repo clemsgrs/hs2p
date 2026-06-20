@@ -95,6 +95,34 @@ def _merge_sampling_mapping(
     return merged
 
 
+def validate_pixel_mapping(pixel_mapping: dict[str, int]) -> None:
+    """Validate the annotation ``pixel_mapping`` up front, before any slide is opened.
+
+    ``pixel_mapping`` is the user's own label vocabulary — no name is reserved. Each label
+    must map to a distinct, non-negative integer within the supported ``uint16`` range so the
+    read path can split classes by exact value without collisions or silent wrapping (see
+    :func:`hs2p.tiling.mask._as_discrete_label_array`).
+    """
+    seen: dict[int, str] = {}
+    for annotation, value in pixel_mapping.items():
+        if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
+            raise ValueError(
+                f"pixel_mapping['{annotation}'] must be an integer label value, got {value!r}"
+            )
+        ivalue = int(value)
+        if ivalue < 0 or ivalue > 65535:
+            raise ValueError(
+                f"pixel_mapping['{annotation}']={ivalue} is outside the supported "
+                "label range [0, 65535]"
+            )
+        if ivalue in seen:
+            raise ValueError(
+                "pixel_mapping values must be unique: "
+                f"'{annotation}' and '{seen[ivalue]}' both map to {ivalue}"
+            )
+        seen[ivalue] = annotation
+
+
 def validate_color_mapping(
     *,
     pixel_mapping: dict[str, int],
@@ -162,8 +190,7 @@ def _resolve_sampling_spec_from_masks(masks_cfg: Any, *, tiling: TilingConfig) -
         raise ValueError("masks.pixel_mapping is required")
     if min_coverage is None:
         raise ValueError("masks.min_coverage is required")
-    if "background" not in pixel_mapping:
-        raise ValueError("masks.pixel_mapping must include a 'background' label")
+    validate_pixel_mapping(pixel_mapping)
     missing_coverage_labels = sorted(set(min_coverage.keys()) - set(pixel_mapping.keys()))
     if missing_coverage_labels:
         raise ValueError(
@@ -184,7 +211,7 @@ def _resolve_sampling_spec_from_masks(masks_cfg: Any, *, tiling: TilingConfig) -
         active_annotations=tuple(
             annotation
             for annotation, pct in min_coverage.items()
-            if annotation in pixel_mapping and pct is not None and annotation != "background"
+            if annotation in pixel_mapping and pct is not None
         ),
     )
 
@@ -208,8 +235,7 @@ def _resolve_sampling_spec_from_sampling_params(
         raise ValueError(
             "sampling tissue_percentage is required when sampling config is provided"
         )
-    if "background" not in pixel_mapping:
-        raise ValueError("sampling pixel_mapping must include a 'background' label")
+    validate_pixel_mapping(pixel_mapping)
     missing_threshold_labels = sorted(
         set(tissue_percentage.keys()) - set(pixel_mapping.keys())
     )
@@ -235,6 +261,6 @@ def _resolve_sampling_spec_from_sampling_params(
         active_annotations=tuple(
             annotation
             for annotation, pct in tissue_percentage.items()
-            if annotation in pixel_mapping and pct is not None and annotation != "background"
+            if annotation in pixel_mapping and pct is not None
         ),
     )

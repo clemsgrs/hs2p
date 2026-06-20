@@ -69,22 +69,31 @@ def summarize_annotation_coverage(
 
     - ``area_mm2`` — class foreground area, from the seg-space pixel count scaled by the
       seg-level spacing (``(seg_spacing_um / 1000) ** 2`` mm² per pixel).
-    - ``frac`` — class area divided by the total annotated (non-background) area, i.e. the
-      class's share among annotations (sums to 1 across classes).
+    - ``frac`` — class area divided by the total area of the classes of interest, i.e. the
+      class's share among the classes given a ``min_coverage`` threshold (sums to 1 across
+      those classes). ``None`` for a class without a threshold. No label name is special:
+      ``min_coverage`` is the only signal for "which classes matter", so a declared-but-
+      unthresholded label (e.g. the value reserved for unannotated pixels) is excluded from
+      both the numerator set and the denominator.
     - ``est_tiles`` — number of non-overlapping tile footprints whose class coverage is at
       least ``min_coverage[class]`` (``None`` when no threshold is given). This is an
       *estimate*: it reuses :func:`compute_tile_coverage` over a regular level-0 grid and
       deliberately ignores tissue filtering and tile overlap.
 
-    Reuses hs2p's existing coverage primitive (the controllable ``seg_downsample`` is the
-    precision/speed knob) rather than re-scanning the mask.
+    ``area_mm2`` is reported for every declared class; ``frac``/``est_tiles`` only for the
+    thresholded classes. Reuses hs2p's existing coverage primitive (the controllable
+    ``seg_downsample`` is the precision/speed knob) rather than re-scanning the mask.
     """
     seg_spacing_um = float(resolved_masks.seg_spacing_um)
     mm2_per_pixel = (seg_spacing_um / 1000.0) ** 2
     areas_px = {
         name: float(np.count_nonzero(mask)) for name, mask in resolved_masks.masks.items()
     }
-    total_annotated = sum(areas_px.values())
+    total_of_interest = sum(
+        area
+        for name, area in areas_px.items()
+        if min_coverage is not None and min_coverage.get(name) is not None
+    )
 
     base_spacing_um = float(slide.spacing)
     tile_size_lv0 = max(1, round(requested_tile_size_px * requested_spacing_um / base_spacing_um))
@@ -101,14 +110,16 @@ def summarize_annotation_coverage(
         threshold = None if min_coverage is None else min_coverage.get(name)
         if threshold is None:
             est_tiles: int | None = None
+            frac: float | None = None
         else:
             coverage = compute_tile_coverage(
                 candidates, binary_mask, tile_size_lv0, (slide_w, slide_h)
             )
             est_tiles = int(np.count_nonzero(coverage >= float(threshold)))
+            frac = (area_px / total_of_interest) if total_of_interest > 0 else 0.0
         summary[name] = {
             "area_mm2": area_px * mm2_per_pixel,
-            "frac": (area_px / total_annotated) if total_annotated > 0 else 0.0,
+            "frac": frac,
             "est_tiles": est_tiles,
         }
     return summary

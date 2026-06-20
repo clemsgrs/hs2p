@@ -104,6 +104,16 @@ pip install "hs2p[all]"
 - `tiling.masks`
   - multi-label annotation sampling (pixel_mapping, color_mapping, min_coverage)
   - when absent, defaults to binary tissue tiling
+  - `pixel_mapping` is your own label vocabulary — **no name is reserved** (there is no
+    special `background`). It must enumerate **every** label value present in the raster
+    (each value distinct, in `[0, 65535]`); any pixel value not declared here makes the mask
+    read fail (the discreteness guard). If the raster reserves a value for unannotated
+    pixels, declare it like any other class and simply give it no `min_coverage` threshold.
+  - `min_coverage` selects **which** classes are actually sampled: only classes given a
+    (non-null) coverage threshold get tiled, and the coverage report's `frac`/`est_tiles`
+    are computed relative to those classes. To sample a subset (e.g. only Gleason grades 4
+    and 5 from a 6-grade mask), list all grades in `pixel_mapping` so the raster validates,
+    but give thresholds only to grades 4 and 5.
 - `save_tiles`
   - write `tiles/{sample_id}.tiles.tar`
 - `speed.num_workers`
