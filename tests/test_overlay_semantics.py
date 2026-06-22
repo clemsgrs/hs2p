@@ -207,6 +207,65 @@ def test_overlay_mask_on_slide_defaults_to_tissue_overlay_style(monkeypatch):
     assert np.any(np.all(overlay_arr == np.array([37, 94, 59], dtype=np.uint8), axis=-1))
 
 
+def test_render_annotation_mask_preview_fills_each_label_and_omits_null_colors(
+    monkeypatch, tmp_path: Path
+):
+    """Visual fixture for the multi-label mask preview: the filled overlay must paint each
+    colored label from the resolved per-label binary masks and omit null-color labels."""
+    slide_arr = np.full((120, 120, 3), 200, dtype=np.uint8)
+
+    class FakeWSI:
+        def __init__(self, path, backend="asap"):
+            del backend
+            self.path = Path(path)
+            self.spacings = [0.5]
+            self.level_dimensions = [(120, 120)]
+            self.level_downsamples = [(1.0, 1.0)]
+
+        def get_best_level_for_downsample_custom(self, downsample):
+            del downsample
+            return 0
+
+        def get_slide(self, level):
+            del level
+            return slide_arr
+
+    monkeypatch.setattr(visualization_mod, "WSI", FakeWSI)
+
+    tumor = np.zeros((120, 120), dtype=np.uint8)
+    tumor[10:40, 10:40] = 255
+    stroma = np.zeros((120, 120), dtype=np.uint8)
+    stroma[60:90, 60:90] = 255
+    necrosis = np.zeros((120, 120), dtype=np.uint8)
+    necrosis[10:40, 80:110] = 255  # null color → must NOT appear in the overlay
+
+    preview_path = tmp_path / "mask" / "slide0.jpg"
+    visualization_mod.render_annotation_mask_preview(
+        wsi_path=Path("fake-wsi.tif"),
+        backend="openslide",
+        masks={"tumor": tumor, "stroma": stroma, "necrosis": necrosis},
+        pixel_mapping={"background": 0, "tumor": 1, "stroma": 2, "necrosis": 3},
+        color_mapping={
+            "background": None,
+            "tumor": [255, 0, 0],
+            "stroma": [0, 255, 0],
+            "necrosis": None,
+        },
+        mask_preview_path=preview_path,
+        downsample=1,
+        alpha=1.0,
+    )
+
+    assert preview_path.is_file()
+    with Image.open(preview_path) as saved:
+        arr = np.array(saved.convert("RGB")).astype(int)
+    # tumor region painted red, stroma painted green (alpha=1.0 → label color, modulo JPEG).
+    assert np.abs(arr[25, 25] - np.array([255, 0, 0])).max() <= 4
+    assert np.abs(arr[75, 75] - np.array([0, 255, 0])).max() <= 4
+    # null-color necrosis is omitted: its region keeps the slide background.
+    assert np.abs(arr[25, 95] - np.array([200, 200, 200])).max() <= 4
+
+
 def test_save_overlay_preview_writes_rgba_overlay_to_jpeg(monkeypatch, tmp_path: Path):
     overlay = Image.fromarray(
         np.array(

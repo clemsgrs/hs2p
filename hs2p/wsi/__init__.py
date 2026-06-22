@@ -18,6 +18,7 @@ from .visualization import (
     DEFAULT_TISSUE_COLOR_MAPPING,
     DEFAULT_TISSUE_PIXEL_MAPPING,
     overlay_mask_on_slide,
+    render_annotation_mask_preview,
     save_overlay_preview,
     write_coordinate_preview,
 )
