@@ -61,6 +61,10 @@ tiling:
     tissue_contour_color: [37, 94, 59] # RGB color used for outer tissue contours in batch mask previews
     mask_overlay_alpha: 0.5 # opacity used by the filled annotation-mask overlay path; contour previews ignore this
   masks:
+    # output_mode applies only when annotation sampling is active (pixel_mapping declares
+    # classes beyond the default tissue): per_annotation writes one coordinate artifact per
+    # sampled class; single_output writes one merged per-slide artifact.
+    output_mode: per_annotation
     pixel_mapping: # map annotated categories to their corresponding pixel values
       background: 0
       tissue: 1

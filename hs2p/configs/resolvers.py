@@ -4,7 +4,7 @@ from typing import Any
 
 import numpy as np
 
-from hs2p.wsi.types import CoordinateSelectionStrategy, SamplingSpec
+from hs2p.wsi.types import CoordinateOutputMode, CoordinateSelectionStrategy, SamplingSpec
 
 from .models import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig
 
@@ -19,7 +19,9 @@ def resolve_tiling_config(cfg: Any) -> TilingConfig:
         requested_tile_size_px=cfg.tiling.params.requested_tile_size_px,
         tolerance=cfg.tiling.params.tolerance,
         overlap=cfg.tiling.params.overlap,
-        tissue_threshold=float(min_coverage["tissue"]),
+        # ``tissue`` is only meaningful for the binary-tissue path; a pure annotation-sampling
+        # config (e.g. only Gleason grades) need not declare it, so default to 0.0 when absent.
+        tissue_threshold=float(min_coverage.get("tissue") or 0.0),
         independent_sampling=bool(cfg.tiling.independent_sampling),
         backend=cfg.tiling.backend,
     )
@@ -57,6 +59,44 @@ def resolve_sampling_strategy(cfg: Any) -> str:
     if independent:
         return CoordinateSelectionStrategy.INDEPENDENT_SAMPLING
     return CoordinateSelectionStrategy.JOINT_SAMPLING
+
+
+def resolve_output_mode(cfg: Any) -> str:
+    """Derive the coordinate output mode from ``tiling.masks.output_mode``.
+
+    ``per_annotation`` (default) writes one coordinate artifact per sampled class;
+    ``single_output`` writes one merged per-slide artifact (the union of tiles passing any
+    class threshold).
+    """
+    masks_cfg = getattr(cfg.tiling, "masks", None)
+    raw = getattr(masks_cfg, "output_mode", None) if masks_cfg is not None else None
+    value = str(raw or CoordinateOutputMode.PER_ANNOTATION).lower()
+    valid = {CoordinateOutputMode.PER_ANNOTATION, CoordinateOutputMode.SINGLE_OUTPUT}
+    if value not in valid:
+        raise ValueError(
+            f"tiling.masks.output_mode must be one of {sorted(valid)}, got {value!r}"
+        )
+    return value
+
+
+def resolve_sampling_request(
+    cfg: Any,
+    *,
+    tiling: TilingConfig,
+) -> tuple[SamplingSpec | None, str | None, str | None]:
+    """Resolve the annotation-sampling invocation for the CLI tiling entrypoint.
+
+    Returns ``(sampling, selection_strategy, output_mode)`` when the masks config declares
+    annotation classes beyond the default binary-tissue setup, else ``(None, None, None)`` so
+    the caller takes the tissue-tiling path. The signal is the declared label vocabulary: a
+    ``pixel_mapping`` of just ``{background, tissue}`` (the default) is binary tissue tiling;
+    declaring any other foreground class opts into multi-label annotation sampling.
+    """
+    spec = resolve_sampling_spec(cfg, tiling=tiling)
+    foreground = set(spec.pixel_mapping) - {"background"}
+    if not spec.active_annotations or foreground <= {"tissue"}:
+        return None, None, None
+    return spec, resolve_sampling_strategy(cfg), resolve_output_mode(cfg)
 
 
 def build_default_sampling_spec(tiling: TilingConfig) -> SamplingSpec:
