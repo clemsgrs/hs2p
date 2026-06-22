@@ -100,6 +100,20 @@ def test_joint_sampling_returns_key_per_active_annotation():
     assert set(results.keys()) == {"tumor", "stroma"}
 
 
+def test_invalid_output_mode_fails_fast():
+    """An unrecognized output_mode (e.g. an API typo) must raise, not silently fall through
+    to per-annotation output."""
+    with pytest.raises(ValueError, match="output_mode"):
+        build_per_annotation_tiling_results(
+            slide=_mock_slide(),
+            resolved_masks=_resolved_masks(_nonoverlapping_annotation_mask()),
+            sampling_spec=_sampling_spec(),
+            selection_strategy=CoordinateSelectionStrategy.JOINT_SAMPLING,
+            output_mode="bogus_mode",
+            **_COMMON_KWARGS,
+        )
+
+
 def test_joint_sampling_annotation_field_on_result():
     """Each TilingResult.annotation matches its dict key."""
     results = build_per_annotation_tiling_results(

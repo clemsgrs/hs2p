@@ -490,6 +490,16 @@ def build_per_annotation_tiling_results(
     """
     if output_mode is None:
         output_mode = CoordinateOutputMode.PER_ANNOTATION
+    # Validate here (the shared chokepoint for both the CLI and the public tile_slide/
+    # tile_slides API), so an invalid value fails fast instead of silently falling through
+    # to per-annotation output and recording a bogus mode in metadata/process_list.
+    if output_mode not in (
+        CoordinateOutputMode.PER_ANNOTATION,
+        CoordinateOutputMode.SINGLE_OUTPUT,
+    ):
+        raise ValueError(
+            f"output_mode must be PER_ANNOTATION or SINGLE_OUTPUT, got {output_mode!r}"
+        )
 
     _shared = dict(
         resolved_masks=resolved_masks,
