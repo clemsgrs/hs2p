@@ -25,6 +25,13 @@ def test_validate_pixel_mapping_rejects_non_integer_values():
         validate_pixel_mapping({"background": 0, "tumor": 1.5})
 
 
+@pytest.mark.parametrize("bad", ["../escape", "/tmp/owned", "a/b", "..", ".", "x\\y", ""])
+def test_validate_pixel_mapping_rejects_unsafe_label_names(bad):
+    # label names become output path components, so traversal/separators must be rejected
+    with pytest.raises(ValueError, match="path component"):
+        validate_pixel_mapping({"background": 0, bad: 1})
+
+
 def test_validation_accepts_omegaconf_listconfig_rgb_values():
     omegaconf = pytest.importorskip("omegaconf")
     list_config = omegaconf.ListConfig([243, 229, 171])

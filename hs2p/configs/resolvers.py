@@ -142,9 +142,22 @@ def validate_pixel_mapping(pixel_mapping: dict[str, int]) -> None:
     must map to a distinct, non-negative integer within the supported ``uint16`` range so the
     read path can split classes by exact value without collisions or silent wrapping (see
     :func:`hs2p.tiling.mask._as_discrete_label_array`).
+
+    Label *names* become on-disk path components (``output_dir/tiles/<label>/...`` for
+    per-annotation artifacts), so they must be safe single path components — no separators,
+    no ``.``/``..`` — to keep artifacts inside the run's output directory.
     """
     seen: dict[int, str] = {}
     for annotation, value in pixel_mapping.items():
+        if (
+            not annotation
+            or annotation in {".", ".."}
+            or any(ch in annotation for ch in ("/", "\\", "\x00"))
+        ):
+            raise ValueError(
+                f"pixel_mapping label {annotation!r} must be a safe path component "
+                "(non-empty, no '/'\\ separators, not '.' or '..')"
+            )
         if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
             raise ValueError(
                 f"pixel_mapping['{annotation}'] must be an integer label value, got {value!r}"
