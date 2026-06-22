@@ -681,6 +681,178 @@ def test_tile_slides_sampling_without_preview_writes_no_mask_preview(monkeypatch
     assert not (tmp_path / "preview" / "mask").exists()
 
 
+def _patch_tiling_preview_renderer(monkeypatch):
+    """Record every tiling-preview render and stub the file write so the structural tests need
+    no real WSI. Returns the list of recorded render calls (one per non-empty tile set)."""
+    calls: list[dict] = []
+
+    def _fake_write_coordinate_preview(**kwargs):
+        calls.append(dict(kwargs))
+        save_dir = Path(kwargs["save_dir"])
+        annotation = kwargs.get("annotation")
+        if annotation is not None:
+            save_dir = save_dir / annotation
+        save_dir.mkdir(parents=True, exist_ok=True)
+        (save_dir / f"{kwargs['sample_id']}.jpg").write_bytes(b"preview")
+
+    monkeypatch.setattr(orchmod, "write_coordinate_preview", _fake_write_coordinate_preview)
+    return calls
+
+
+def _zero_one_label_sampling_spec():
+    """Only ``tumor`` can sample tiles; ``stroma``/``necrosis`` thresholds are impossibly high
+    so they sample zero tiles."""
+    return SamplingSpec(
+        pixel_mapping=PIXEL_MAPPING,
+        color_mapping={
+            "background": None,
+            "tumor": [255, 0, 0],
+            "stroma": [0, 255, 0],
+            "necrosis": [0, 0, 255],
+        },
+        tissue_percentage={"background": None, "tumor": 0.1, "stroma": 2.0, "necrosis": 2.0},
+        active_annotations=("tumor", "stroma", "necrosis"),
+    )
+
+
+@pytest.mark.parametrize(
+    "strategy",
+    [
+        CoordinateSelectionStrategy.JOINT_SAMPLING,
+        CoordinateSelectionStrategy.INDEPENDENT_SAMPLING,
+    ],
+)
+def test_tile_slides_per_annotation_writes_one_tiling_preview_per_label(
+    monkeypatch, tmp_path, strategy
+):
+    """PER_ANNOTATION: one tiling preview per active label, each under that label's
+    per-annotation subdir, with its tiling_preview_path recorded on the matching row.
+    Identical under INDEPENDENT and JOINT selection."""
+    from hs2p.configs import PreviewConfig
+
+    _patch_tile_slides_open(monkeypatch)
+    _patch_mask_preview_renderer(monkeypatch)
+    calls = _patch_tiling_preview_renderer(monkeypatch)
+    tile_slides(
+        _slides(1),
+        tiling=_mock_tiling(),
+        filtering=FilterConfig(a_t=0),
+        preview=PreviewConfig(save_tiling_preview=True),
+        output_dir=tmp_path,
+        num_workers=1,
+        sampling=_sampling_spec_with_colors(),
+        selection_strategy=strategy,
+        output_mode=CoordinateOutputMode.PER_ANNOTATION,
+    )
+    tiling_root = tmp_path / "preview" / "tiling"
+    for annotation in ("tumor", "stroma"):
+        assert (tiling_root / annotation / "slide0.jpg").is_file()
+    # One render per active label that sampled tiles; each carries its own annotation subdir.
+    rendered_annotations = {c.get("annotation") for c in calls}
+    assert rendered_annotations == {"tumor", "stroma", "necrosis"}
+
+    rows = pd.read_csv(tmp_path / "process_list.csv")
+    for annotation in ("tumor", "stroma"):
+        row = rows[rows["annotation"] == annotation].iloc[0]
+        expected = str(tiling_root / annotation / "slide0.jpg")
+        assert row["tiling_preview_path"] == expected
+
+
+@pytest.mark.parametrize(
+    "strategy",
+    [
+        CoordinateSelectionStrategy.JOINT_SAMPLING,
+        CoordinateSelectionStrategy.INDEPENDENT_SAMPLING,
+    ],
+)
+def test_tile_slides_single_output_writes_one_merged_tiling_preview(
+    monkeypatch, tmp_path, strategy
+):
+    """SINGLE_OUTPUT: a single merged tiling preview at the flat preview location (no
+    per-annotation subdir), with its tiling_preview_path recorded on the merged row."""
+    from hs2p.configs import PreviewConfig
+
+    _patch_tile_slides_open(monkeypatch)
+    _patch_mask_preview_renderer(monkeypatch)
+    calls = _patch_tiling_preview_renderer(monkeypatch)
+    tile_slides(
+        _slides(1),
+        tiling=_mock_tiling(),
+        filtering=FilterConfig(a_t=0),
+        preview=PreviewConfig(save_tiling_preview=True),
+        output_dir=tmp_path,
+        num_workers=1,
+        sampling=_sampling_spec_with_colors(),
+        selection_strategy=strategy,
+        output_mode=CoordinateOutputMode.SINGLE_OUTPUT,
+    )
+    flat = tmp_path / "preview" / "tiling" / "slide0.jpg"
+    assert flat.is_file()
+    # Exactly one merged render at the flat root (annotation None → no subdir).
+    assert len(calls) == 1
+    assert calls[0].get("annotation") is None
+
+    rows = pd.read_csv(tmp_path / "process_list.csv")
+    assert len(rows) == 1
+    assert rows.iloc[0]["tiling_preview_path"] == str(flat)
+
+
+def test_tile_slides_per_annotation_zero_tile_label_skips_tiling_preview(
+    monkeypatch, tmp_path
+):
+    """A label that sampled zero tiles writes no tiling preview, but still has a manifest row
+    with num_tiles=0, empty tiling_preview_path, and a populated mask_preview_path."""
+    from hs2p.configs import PreviewConfig
+
+    _patch_tile_slides_open(monkeypatch)
+    _patch_mask_preview_renderer(monkeypatch)
+    _patch_tiling_preview_renderer(monkeypatch)
+    tile_slides(
+        _slides(1),
+        tiling=_mock_tiling(),
+        filtering=FilterConfig(a_t=0),
+        preview=PreviewConfig(save_mask_preview=True, save_tiling_preview=True),
+        output_dir=tmp_path,
+        num_workers=1,
+        sampling=_zero_one_label_sampling_spec(),
+        selection_strategy=CoordinateSelectionStrategy.JOINT_SAMPLING,
+        output_mode=CoordinateOutputMode.PER_ANNOTATION,
+    )
+    tiling_root = tmp_path / "preview" / "tiling"
+    assert (tiling_root / "tumor" / "slide0.jpg").is_file()
+    assert not (tiling_root / "stroma").exists()
+    assert not (tiling_root / "necrosis").exists()
+
+    rows = pd.read_csv(tmp_path / "process_list.csv")
+    mask_expected = str(tmp_path / "preview" / "mask" / "slide0.jpg")
+    for annotation in ("stroma", "necrosis"):
+        row = rows[rows["annotation"] == annotation].iloc[0]
+        assert int(row["num_tiles"]) == 0
+        assert pd.isna(row["tiling_preview_path"])
+        assert row["mask_preview_path"] == mask_expected
+    tumor_row = rows[rows["annotation"] == "tumor"].iloc[0]
+    assert tumor_row["tiling_preview_path"] == str(tiling_root / "tumor" / "slide0.jpg")
+
+
+def test_tile_slides_sampling_without_tiling_preview_writes_none(monkeypatch, tmp_path):
+    _patch_tile_slides_open(monkeypatch)
+    calls = _patch_tiling_preview_renderer(monkeypatch)
+    tile_slides(
+        _slides(1),
+        tiling=_mock_tiling(),
+        filtering=FilterConfig(a_t=0),
+        output_dir=tmp_path,
+        num_workers=1,
+        sampling=_sampling_spec_with_colors(),
+        selection_strategy=CoordinateSelectionStrategy.JOINT_SAMPLING,
+        output_mode=CoordinateOutputMode.PER_ANNOTATION,
+    )
+    assert calls == []
+    assert not (tmp_path / "preview" / "tiling").exists()
+    rows = pd.read_csv(tmp_path / "process_list.csv")
+    assert rows["tiling_preview_path"].isna().all()
+
+
 def test_summarize_annotation_coverage_est_tiles_none_without_threshold(patched_mask_open):
     resolved = resolve_annotation_masks(
         slide=_mock_slide(),

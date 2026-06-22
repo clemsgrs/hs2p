@@ -23,10 +23,12 @@ from hs2p.tiling.single import (
     preprocess_slide_per_annotation,
 )
 from hs2p.tiling.tar import _annotation_tar_stem, _needs_pixel_filtering, extract_tiles_to_tar
+from hs2p.fileops import is_flattened_annotation
 from hs2p.wsi import (
     CoordinateOutputMode,
     CoordinateSelectionStrategy,
     SamplingSpec,
+    build_palette,
     normalize_tissue_mask,
     save_overlay_preview,
     write_coordinate_preview,
@@ -430,6 +432,54 @@ def write_tiling_preview(
         sample_id=result.sample_id,
     )
     return save_dir / f"{result.sample_id}.jpg"
+
+
+def write_annotation_tiling_preview(
+    *,
+    result: TilingResult,
+    output_dir: Path,
+    downsample: int,
+    mask_path: Path | str | None,
+    pixel_mapping: dict[str, int] | None,
+    color_mapping: dict[str, list[int] | None] | None,
+) -> Path | None:
+    """Render the tiling preview for one annotation artifact: the label's (or merged) mask in
+    full color as backdrop, with the selected tile grid (fixed black line) drawn over it.
+
+    The preview subdirectory mirrors the coordinate artifact path 1:1 via the shared
+    :func:`is_flattened_annotation` rule (per-annotation subdir, except None/"tissue"/merged →
+    flat root). Returns ``None`` for an empty tile set so zero-tile labels skip their preview.
+    """
+    if len(result.x) == 0:
+        return None
+    save_dir = output_dir / "preview" / "tiling"
+    save_dir.mkdir(parents=True, exist_ok=True)
+    annotation = result.annotation
+    if is_flattened_annotation(annotation):
+        preview_path = save_dir / f"{result.sample_id}.jpg"
+        preview_annotation = None
+    else:
+        preview_path = save_dir / annotation / f"{result.sample_id}.jpg"
+        preview_annotation = annotation
+    palette = None
+    if mask_path is not None and pixel_mapping is not None and color_mapping is not None:
+        palette = build_palette(pixel_mapping=pixel_mapping, color_mapping=color_mapping)
+    coordinates = list(zip(result.x.tolist(), result.y.tolist()))
+    write_coordinate_preview(
+        wsi_path=result.image_path,
+        coordinates=coordinates,
+        tile_size_lv0=result.tile_size_lv0,
+        save_dir=save_dir,
+        downsample=downsample,
+        backend=result.backend,
+        sample_id=result.sample_id,
+        mask_path=Path(mask_path) if mask_path is not None else None,
+        annotation=preview_annotation,
+        palette=palette,
+        pixel_mapping=pixel_mapping,
+        color_mapping=color_mapping,
+    )
+    return preview_path
 
 
 @dataclass
@@ -996,6 +1046,37 @@ def _write_tiling_preview_from_artifacts(
     )
 
 
+def _restrict_label_mapping(mapping, annotation):
+    """Restrict a per-label mapping (pixel/color) to a single label for the PER_ANNOTATION
+    backdrop. The merged (annotation None) case keeps every label."""
+    if mapping is None:
+        return None
+    if annotation is None:
+        return dict(mapping)
+    return {annotation: mapping[annotation]} if annotation in mapping else {}
+
+
+def _write_annotation_tiling_preview_from_artifacts(
+    *,
+    artifact: TilingArtifacts,
+    output_dir: Path,
+    downsample: int,
+    mask_path: Path | str | None,
+    pixel_mapping: dict[str, int] | None,
+    color_mapping: dict[str, list[int] | None] | None,
+) -> Path | None:
+    result = load_tiling_result(artifact.coordinates_npz_path, artifact.coordinates_meta_path)
+    annotation = artifact.annotation
+    return write_annotation_tiling_preview(
+        result=result,
+        output_dir=output_dir,
+        downsample=downsample,
+        mask_path=mask_path,
+        pixel_mapping=_restrict_label_mapping(pixel_mapping, annotation),
+        color_mapping=_restrict_label_mapping(color_mapping, annotation),
+    )
+
+
 def tile_slides(
     whole_slides: Sequence[SlideSpec],
     *,
@@ -1406,6 +1487,44 @@ def tile_slides(
         assert response.artifact is not None
         base_artifact = response.artifact
         _record_tiling_success(num_tiles=base_artifact.num_tiles)
+        sampling_preview_enabled = (
+            sampling is not None
+            and preview_executor is not None
+            and preview is not None
+            and preview.save_tiling_preview
+        )
+        if sampling_preview_enabled:
+            # Annotation sampling renders one tiling preview per artifact (per label in
+            # PER_ANNOTATION, the single merged result in SINGLE_OUTPUT), each over its own
+            # mask backdrop, through the shared preview executor. Each artifact gets its own
+            # manifest row, finalized once its preview future completes.
+            sampling_pixel_mapping = getattr(sampling, "pixel_mapping", None)
+            sampling_color_mapping = getattr(sampling, "color_mapping", None)
+            mask_path = response.whole_slide.mask_path
+            for offset, sampling_artifact in enumerate(
+                (base_artifact, *getattr(response, "extra_artifacts", ()))
+            ):
+                if offset > 0:
+                    _record_tiling_success(
+                        num_tiles=sampling_artifact.num_tiles,
+                        increment_completed=False,
+                    )
+                future = preview_executor.submit(
+                    _write_annotation_tiling_preview_from_artifacts,
+                    artifact=sampling_artifact,
+                    output_dir=output_dir,
+                    downsample=preview.downsample,
+                    mask_path=mask_path,
+                    pixel_mapping=sampling_pixel_mapping,
+                    color_mapping=sampling_color_mapping,
+                )
+                pending_previews.append(_PendingPreview(
+                    whole_slide=response.whole_slide,
+                    base_artifact=sampling_artifact,
+                    mask_preview_path=sampling_artifact.mask_preview_path,
+                    future=future,
+                ))
+            return
         if (
             preview_executor is not None
             and preview is not None
@@ -1615,5 +1734,6 @@ __all__ = [
     "extract_tiles_to_tar",
     "tile_slide",
     "tile_slides",
+    "write_annotation_tiling_preview",
     "write_tiling_preview",
 ]

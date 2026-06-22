@@ -366,7 +366,7 @@ def write_coordinate_preview(
     grid_thickness: int = 1,
     mask_path: Path | None = None,
     annotation: str | None = None,
-    palette: dict[str, int] | None = None,
+    palette: np.ndarray | None = None,
     pixel_mapping: dict[str, int] | None = None,
     color_mapping: dict[str, list[int] | None] | None = None,
 ):
