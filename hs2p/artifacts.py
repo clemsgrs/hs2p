@@ -41,6 +41,7 @@ class TilingArtifacts:
     backend: str | None = None
     requested_backend: str | None = None
     annotation: str | None = None
+    output_mode: str | None = None
 
 
 @dataclass(frozen=True)
@@ -89,12 +90,32 @@ def validate_result_consistency(result: TilingResult) -> None:
         raise ValueError("tile_index must be a contiguous range from 0 to num_tiles-1")
 
 
+def _ensure_safe_path_component(name: str) -> str:
+    """Reject annotation labels that aren't a single, contained path component.
+
+    Annotation names become directories under ``output_dir/tiles``; a value like ``../outside``
+    or ``/tmp/owned`` would escape the run's output tree. This is enforced at the filesystem
+    boundary so it holds for every caller — the CLI resolver and the public ``tile_slides``
+    API, which accepts a ``SamplingSpec`` directly and never passes through config validation.
+    """
+    if (
+        not name
+        or name in {".", ".."}
+        or any(ch in name for ch in ("/", "\\", "\x00"))
+    ):
+        raise ValueError(
+            f"annotation label {name!r} must be a safe path component "
+            "(non-empty, no '/'\\ separators, not '.' or '..')"
+        )
+    return name
+
+
 def _annotation_tiles_dir(output_dir: Path, annotation: str | None) -> Path:
     """Return the tiles sub-directory, collapsing 'tissue' to the flat layout."""
     base = Path(output_dir) / "tiles"
     if annotation is None or annotation == "tissue":
         return base
-    return base / annotation
+    return base / _ensure_safe_path_component(annotation)
 
 
 def save_tiling_result(
@@ -124,6 +145,7 @@ def save_tiling_result(
         backend=result.backend,
         requested_backend=result.requested_backend,
         annotation=annotation,
+        output_mode=result.output_mode,
     )
 
 

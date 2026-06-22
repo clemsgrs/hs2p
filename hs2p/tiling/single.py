@@ -11,9 +11,10 @@ from hs2p.tiling.contours import _normalize_level_downsamples, detect_contours
 from hs2p.tiling.coverage import compute_tile_coverage
 from hs2p.tiling.generate import generate_tiles
 from hs2p.tiling.result import ResolvedAnnotationMasks, ResolvedTissueMask, TilingResult
-from hs2p.tiling.mask import resolve_tissue_mask
+from hs2p.tiling.mask import resolve_annotation_masks, resolve_tissue_mask
 from hs2p.tile_qc import filter_coordinate_tiles, needs_pixel_qc
 from hs2p.wsi.reader import open_slide
+from hs2p.wsi.types import CoordinateOutputMode, CoordinateSelectionStrategy
 
 
 def build_tiling_result_from_mask(
@@ -293,9 +294,15 @@ def _build_joint_annotation_results(
     qc_spacing_um: float,
     num_workers: int,
 ) -> "dict[str, TilingResult]":
-    union_mask = np.zeros_like(next(iter(resolved_masks.masks.values())))
-    for binary_mask in resolved_masks.masks.values():
-        union_mask = np.where(binary_mask > 0, np.uint8(255), union_mask).astype(np.uint8)
+    # Union over the classes actually being sampled (active_annotations) — never the full
+    # mask set, which may include declared-but-unsampled labels (e.g. the value reserved for
+    # unannotated pixels) that would otherwise swallow the whole slide.
+    active = sampling_spec.active_annotations
+    union_mask = np.zeros_like(resolved_masks.masks[active[0]])
+    for annotation in active:
+        union_mask = np.where(
+            resolved_masks.masks[annotation] > 0, np.uint8(255), union_mask
+        ).astype(np.uint8)
 
     union_resolved = ResolvedTissueMask(
         tissue_mask=union_mask,
@@ -388,6 +395,59 @@ def _build_joint_annotation_results(
     return results
 
 
+def _merge_annotation_results_to_single(
+    results: "dict[str, TilingResult]",
+) -> "TilingResult":
+    """Collapse a per-annotation result dict into one merged result for SINGLE_OUTPUT.
+
+    The merged result is the **union** of every tile that passes *any* active
+    annotation's coverage threshold (dedup'd over the shared candidate grid), with
+    ``annotation=None``. Each spatial tile therefore appears once — the dense
+    segmentation contract, where one tile is encoded once and its full multi-class
+    mask is attached downstream. ``tissue_fractions`` carries the max per-class
+    coverage seen for each kept tile.
+    """
+    result_list = list(results.values())
+    if not result_list:
+        raise ValueError(
+            "SINGLE_OUTPUT merge requires at least one annotation result; got none "
+            "(no active annotations in the sampling spec?)"
+        )
+    template = result_list[0]
+    all_x = np.concatenate([np.asarray(r.tiles.x) for r in result_list])
+    all_y = np.concatenate([np.asarray(r.tiles.y) for r in result_list])
+    all_fracs = np.concatenate(
+        [np.asarray(r.tiles.tissue_fractions) for r in result_list]
+    )
+    if all_x.size:
+        coords = np.stack([all_x, all_y], axis=1)
+        # np.unique(axis=0) returns lexicographically-sorted unique rows → deterministic.
+        uniq, inverse = np.unique(coords, axis=0, return_inverse=True)
+        merged_x = uniq[:, 0].astype(template.tiles.x.dtype)
+        merged_y = uniq[:, 1].astype(template.tiles.y.dtype)
+        merged_fracs = np.zeros(len(uniq), dtype=all_fracs.dtype)
+        np.maximum.at(merged_fracs, inverse.ravel(), all_fracs)
+    else:
+        merged_x = np.asarray(template.tiles.x)[:0]
+        merged_y = np.asarray(template.tiles.y)[:0]
+        merged_fracs = np.asarray(template.tiles.tissue_fractions)[:0]
+
+    merged_tiles = replace(
+        template.tiles,
+        x=merged_x,
+        y=merged_y,
+        tissue_fractions=merged_fracs,
+        tile_index=np.arange(len(merged_x), dtype=np.int32),
+        min_tissue_fraction=0.0,
+    )
+    return replace(
+        template,
+        tiles=merged_tiles,
+        annotation=None,
+        output_mode=CoordinateOutputMode.SINGLE_OUTPUT,
+    )
+
+
 def build_per_annotation_tiling_results(
     *,
     slide,
@@ -428,10 +488,18 @@ def build_per_annotation_tiling_results(
     INDEPENDENT_SAMPLING: one tiling pass per annotation using that annotation's binary mask.
     JOINT_SAMPLING: one pass on the union mask, then per-annotation post-filter by coverage.
     """
-    from hs2p.wsi.types import CoordinateOutputMode, CoordinateSelectionStrategy
-
     if output_mode is None:
         output_mode = CoordinateOutputMode.PER_ANNOTATION
+    # Validate here (the shared chokepoint for both the CLI and the public tile_slide/
+    # tile_slides API), so an invalid value fails fast instead of silently falling through
+    # to per-annotation output and recording a bogus mode in metadata/process_list.
+    if output_mode not in (
+        CoordinateOutputMode.PER_ANNOTATION,
+        CoordinateOutputMode.SINGLE_OUTPUT,
+    ):
+        raise ValueError(
+            f"output_mode must be PER_ANNOTATION or SINGLE_OUTPUT, got {output_mode!r}"
+        )
 
     _shared = dict(
         resolved_masks=resolved_masks,
@@ -469,14 +537,20 @@ def build_per_annotation_tiling_results(
     )
 
     if selection_strategy == CoordinateSelectionStrategy.INDEPENDENT_SAMPLING:
-        return _build_independent_annotation_results(**_shared)
+        results = _build_independent_annotation_results(**_shared)
     elif selection_strategy == CoordinateSelectionStrategy.JOINT_SAMPLING:
-        return _build_joint_annotation_results(**_shared)
+        results = _build_joint_annotation_results(**_shared)
     else:
         raise ValueError(
             f"selection_strategy must be INDEPENDENT_SAMPLING or JOINT_SAMPLING, "
             f"got {selection_strategy!r}"
         )
+
+    if output_mode == CoordinateOutputMode.SINGLE_OUTPUT:
+        # One merged result per slide (union of tiles passing any class threshold),
+        # keyed by None so tile_slide/tile_slides persist a single per-slide artifact.
+        return {None: _merge_annotation_results_to_single(results)}
+    return results
 
 
 def preprocess_slide(
@@ -579,8 +653,92 @@ def preprocess_slide(
         slide.close()
 
 
+def preprocess_slide_per_annotation(
+    *,
+    image_path: str | Path,
+    mask_path: str | Path,
+    pixel_mapping: dict[str, int],
+    sampling_spec: Any,
+    selection_strategy: str,
+    sample_id: str | None = None,
+    backend: str = "auto",
+    spacing_override: float | None = None,
+    requested_tile_size_px: int = 256,
+    requested_spacing_um: float = 0.5,
+    overlap: float = 0.0,
+    seg_downsample: int = 64,
+    tolerance: float = 0.05,
+    ref_tile_size_px: int = 16,
+    a_t: int = 4,
+    a_h: int = 0,
+    filter_white: bool = False,
+    filter_black: bool = False,
+    white_threshold: int = 220,
+    black_threshold: int = 25,
+    fraction_threshold: float = 0.9,
+    filter_grayspace: bool = False,
+    grayspace_saturation_threshold: float = 0.05,
+    grayspace_fraction_threshold: float = 0.6,
+    filter_blur: bool = False,
+    blur_threshold: float = 50.0,
+    qc_spacing_um: float = 2.0,
+    num_workers: int = 1,
+    output_mode: str | None = None,
+) -> "dict[str, TilingResult]":
+    """Annotation-aware tiling: open the slide, resolve its annotation mask into per-class
+    binaries (:func:`resolve_annotation_masks`), then sample per active annotation.
+
+    The annotation counterpart of :func:`preprocess_slide` — it returns one
+    :class:`TilingResult` per active annotation (keyed by name) instead of a single tissue
+    result, wiring the previously-orphaned :func:`build_per_annotation_tiling_results` to a
+    real mask. ``selection_strategy`` selects INDEPENDENT vs JOINT sampling; ``output_mode``
+    selects single vs per-annotation coordinate output.
+    """
+    slide = open_slide(image_path, backend=backend, spacing_override=spacing_override)
+    try:
+        resolved_masks = resolve_annotation_masks(
+            slide=slide,
+            mask_path=mask_path,
+            pixel_mapping=pixel_mapping,
+            seg_downsample=seg_downsample,
+        )
+        return build_per_annotation_tiling_results(
+            slide=slide,
+            resolved_masks=resolved_masks,
+            sampling_spec=sampling_spec,
+            selection_strategy=selection_strategy,
+            image_path=image_path,
+            backend=slide.backend_name,
+            requested_backend=backend,
+            sample_id=sample_id,
+            requested_tile_size_px=requested_tile_size_px,
+            requested_spacing_um=requested_spacing_um,
+            overlap=overlap,
+            tolerance=tolerance,
+            ref_tile_size_px=ref_tile_size_px,
+            a_t=a_t,
+            a_h=a_h,
+            filter_white=filter_white,
+            filter_black=filter_black,
+            white_threshold=white_threshold,
+            black_threshold=black_threshold,
+            fraction_threshold=fraction_threshold,
+            filter_grayspace=filter_grayspace,
+            grayspace_saturation_threshold=grayspace_saturation_threshold,
+            grayspace_fraction_threshold=grayspace_fraction_threshold,
+            filter_blur=filter_blur,
+            blur_threshold=blur_threshold,
+            qc_spacing_um=qc_spacing_um,
+            num_workers=num_workers,
+            output_mode=output_mode,
+        )
+    finally:
+        slide.close()
+
+
 __all__ = [
     "build_per_annotation_tiling_results",
     "build_tiling_result_from_mask",
     "preprocess_slide",
+    "preprocess_slide_per_annotation",
 ]

@@ -7,6 +7,7 @@ from hs2p.configs.resolvers import (
     resolve_filter_config,
     resolve_preview_config,
     resolve_read_coordinates_from,
+    resolve_sampling_request,
     resolve_segmentation_config,
     resolve_tiling_config,
 )
@@ -55,6 +56,9 @@ def main(args):
             filtering = resolve_filter_config(cfg)
             preview = resolve_preview_config(cfg)
             read_coordinates_from = resolve_read_coordinates_from(cfg)
+            sampling, selection_strategy, output_mode = resolve_sampling_request(
+                cfg, tiling=tiling
+            )
             jpeg_backend = str(getattr(cfg.speed, "jpeg_backend", "turbojpeg"))
             progress.emit_progress(
                 "run.started",
@@ -70,8 +74,7 @@ def main(args):
                     str(read_coordinates_from) if read_coordinates_from else None
                 ),
             )
-            artifacts = tile_slides(
-                whole_slides,
+            tile_kwargs = dict(
                 tiling=tiling,
                 segmentation=segmentation,
                 filtering=filtering,
@@ -83,6 +86,43 @@ def main(args):
                 save_tiles=bool(getattr(cfg, "save_tiles", False)),
                 jpeg_backend=jpeg_backend,
             )
+            if sampling is not None:
+                # Annotation sampling does not yet support these features; refuse explicit
+                # opt-ins rather than silently ignoring them, and skip previews (which default
+                # on) with a clear notice instead of erroring on every run.
+                unsupported = [
+                    name
+                    for name, enabled in (
+                        ("resume", bool(cfg.resume)),
+                        ("read_coordinates_from", read_coordinates_from is not None),
+                        ("save_tiles", bool(getattr(cfg, "save_tiles", False))),
+                    )
+                    if enabled
+                ]
+                if unsupported:
+                    raise ValueError(
+                        "annotation sampling (tiling.masks declares non-tissue classes) does "
+                        "not yet support: " + ", ".join(unsupported)
+                    )
+                progress.emit_progress(
+                    "sampling.enabled",
+                    selection_strategy=selection_strategy,
+                    output_mode=output_mode,
+                    active_annotations=list(sampling.active_annotations),
+                    previews_skipped=bool(
+                        preview.save_mask_preview or preview.save_tiling_preview
+                    ),
+                )
+                tile_kwargs.update(
+                    preview=None,
+                    resume=False,
+                    read_coordinates_from=None,
+                    save_tiles=False,
+                    sampling=sampling,
+                    selection_strategy=selection_strategy,
+                    output_mode=output_mode,
+                )
+            artifacts = tile_slides(whole_slides, **tile_kwargs)
             progress.emit_progress(
                 "run.finished",
                 command="tiling",

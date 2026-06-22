@@ -10,6 +10,9 @@ from hs2p.artifacts import (
     validate_tiling_artifacts,
 )
 from hs2p.configs import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig
+from hs2p.tiling.coverage import summarize_annotation_coverage
+from hs2p.tiling.mask import resolve_annotation_masks
+from hs2p.tiling.result import ResolvedAnnotationMasks
 from hs2p.tiling.tar import (
     _annotation_tar_stem,
     _apply_qc_filtering_to_result,
@@ -25,6 +28,7 @@ __all__ = [
     "CoordinateSelectionStrategy",
     "FilterConfig",
     "PreviewConfig",
+    "ResolvedAnnotationMasks",
     "SegmentationConfig",
     "SlideSpec",
     "TilingArtifacts",
@@ -33,7 +37,9 @@ __all__ = [
     "load_tiling_result",
     "maybe_load_existing_artifacts",
     "overlay_mask_on_slide",
+    "resolve_annotation_masks",
     "save_tiling_result",
+    "summarize_annotation_coverage",
     "tile_slide",
     "tile_slides",
     "validate_tiling_artifacts",

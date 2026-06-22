@@ -102,8 +102,30 @@ pip install "hs2p[all]"
   - `tissue_contour_color` controls the RGB border color used for `preview/mask/*.jpg`
   - `mask_overlay_alpha` controls opacity for the filled annotation-mask overlay path; contour-only previews ignore it
 - `tiling.masks`
-  - multi-label annotation sampling (pixel_mapping, color_mapping, min_coverage)
-  - when absent, defaults to binary tissue tiling
+  - multi-label annotation sampling (pixel_mapping, color_mapping, min_coverage, output_mode)
+  - annotation sampling activates when `pixel_mapping` declares a foreground class other than
+    the default `tissue`; otherwise the CLI runs binary tissue tiling. Each slide's annotation
+    mask is taken from the `mask_path` column of the input CSV.
+  - `pixel_mapping` is your own label vocabulary: it must enumerate **every** label value present in the raster
+    (each value distinct, in `[0, 65535]`); any pixel value not declared here makes the mask
+    read fail (the discreteness guard). If the raster reserves a value for unannotated
+    pixels, declare it like any other class and simply give it no `min_coverage` threshold.
+  - `min_coverage` selects **which** classes are actually sampled: only classes given a
+    (non-null) coverage threshold get tiled, and the coverage report's `frac`/`est_tiles`
+    are computed relative to those classes. To sample a subset (e.g. only Gleason grades 4
+    and 5 from a 6-grade mask), list all grades in `pixel_mapping` so the raster validates,
+    but give thresholds only to grades 4 and 5. Because configs are deep-merged over the
+    default `{background: 0, tissue: 1}`, set `min_coverage.tissue: null` to drop the default
+    tissue class from sampling, and set `pixel_mapping.tissue: null` to remove the default
+    label entirely (required to reuse its value, e.g. a `tumor: 1` mask).
+  - `output_mode` (annotation sampling only): `per_annotation` (default) writes one coordinate
+    artifact per sampled class; `single_output` writes one merged per-slide artifact (the
+    union of tiles passing any class threshold).
+  - `tiling.independent_sampling` chooses `independent_sampling` (tile each class separately)
+    vs the default joint sampling (one pass over the union mask, then per-class coverage
+    filtering).
+  - Not yet supported with annotation sampling: `resume`, `read_coordinates_from`, and
+    `save_tiles` raise a clear error if enabled; previews are skipped.
 - `save_tiles`
   - write `tiles/{sample_id}.tiles.tar`
 - `speed.num_workers`
