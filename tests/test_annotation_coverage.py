@@ -201,6 +201,35 @@ def test_resolve_annotation_masks_recovers_via_openslide_on_degenerate_read(monk
     assert int(np.count_nonzero(resolved.masks["necrosis"])) == NECROSIS_PX
 
 
+def test_openslide_fallback_recovers_when_primary_read_rejects_all_zero(monkeypatch):
+    """No-background vocabulary + a degenerate all-zero primary read.
+
+    With no declared 0, the all-zero mis-decoded level fails the discreteness guard and the
+    primary read *raises* (rather than returning an empty mask). The openslide fallback must
+    still kick in and recover the labels — otherwise the slide errors out.
+    """
+    # Fully-labeled raster (only values 1/2, no background) so the openslide read validates.
+    labeled = np.empty((SLIDE_H, SLIDE_W), dtype=np.uint8)
+    labeled[:, : SLIDE_W // 2] = 1
+    labeled[:, SLIDE_W // 2 :] = 2
+    empty = np.zeros_like(labeled)
+
+    def fake_open(path, backend=None):
+        if str(backend).lower() == "openslide":
+            return _FakeMaskSlide(labeled, BASE_SPACING)
+        return _FakeMaskSlide(empty, BASE_SPACING)  # cucim mis-decode → all zero → rejected
+
+    monkeypatch.setattr(maskmod, "open_slide", fake_open)
+    resolved = resolve_annotation_masks(
+        slide=_mock_slide(),
+        mask_path="/fake/slide_mask.tif",
+        pixel_mapping={"tumor": 1, "stroma": 2},
+        seg_downsample=1,
+    )
+    assert int(np.count_nonzero(resolved.masks["tumor"])) == SLIDE_H * (SLIDE_W // 2)
+    assert int(np.count_nonzero(resolved.masks["stroma"])) == SLIDE_H * (SLIDE_W // 2)
+
+
 def test_resolve_annotation_masks_genuinely_empty_stays_empty(monkeypatch):
     """When every backend agrees the mask is background, no spurious real labels are invented.
 
@@ -455,6 +484,30 @@ def test_tile_slides_with_sampling_emits_one_artifact_per_slide_annotation(monke
     assert set(rows["annotation"]) == {"tumor", "stroma", "necrosis"}
     assert "tissue" not in set(rows["annotation"])  # sampling path, never the tissue label
     assert (rows["tiling_status"] == "success").all()
+
+
+def test_tile_slides_sampling_progress_counts_slides_not_artifacts(monkeypatch, tmp_path):
+    """Slide-completion progress must track slides, not per-annotation artifacts: a 2-slide ×
+    3-annotation run reports completed=2/total=2, never completed=6."""
+    _patch_tile_slides_open(monkeypatch)
+    events: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        orchmod, "emit_progress", lambda name, **kw: events.append((name, kw))
+    )
+    tile_slides(
+        _slides(2),
+        tiling=_mock_tiling(),
+        filtering=FilterConfig(a_t=0),
+        output_dir=tmp_path,
+        num_workers=1,
+        sampling=_sampling_spec(),
+        selection_strategy=CoordinateSelectionStrategy.JOINT_SAMPLING,
+    )
+    progress = [kw for name, kw in events if name == "tiling.progress"]
+    assert progress, "expected tiling.progress events"
+    assert all(p["total"] == 2 for p in progress)
+    assert max(p["completed"] for p in progress) == 2
+    assert all(p["completed"] <= p["total"] for p in progress)
 
 
 def test_tile_slides_single_output_emits_one_artifact_per_slide(monkeypatch, tmp_path):

@@ -378,19 +378,32 @@ def load_annotation_label_mask(
 
     Robustness guard: some backends mis-decode intermediate levels of a compressed
     single-channel (minisblack) pyramid and return an all-background level (observed with
-    cucim + LZW/deflate masks, where openslide decodes the same level correctly). When the
-    primary read is entirely background, we retry via openslide and prefer that result if it
-    recovers labels — costless when the primary read already carries labels, and safe for
-    genuinely-empty masks (openslide would agree).
+    cucim + LZW/deflate masks, where openslide decodes the same level correctly). We retry via
+    openslide and prefer that result when it recovers labels — costless when the primary read
+    already carries labels, and safe for genuinely-empty masks (openslide would agree).
+
+    The degenerate read shows up two ways depending on the label vocabulary: if the background
+    value is declared, the all-background level reads as a valid (empty) mask; if it is not
+    (e.g. ``{tumor: 1, stroma: 2}`` with no ``0``), the discreteness guard *rejects* the
+    all-zero level and raises. Both must trigger the openslide retry, so the primary read is
+    guarded and its error only surfaces if openslide fails to recover.
     """
-    raw_mask, mask_level, mask_spacing_um = _read_label_mask_at_seg(
-        mask_path=mask_path,
-        slide=slide,
-        seg_level=seg_level,
-        valid_values=valid_values,
-        backend=slide.backend_name,
-    )
-    if not raw_mask.any() and str(getattr(slide, "backend_name", "")).lower() != "openslide":
+    backend_name = str(getattr(slide, "backend_name", "")).lower()
+    primary_error: Exception | None = None
+    raw_mask = mask_level = mask_spacing_um = None
+    try:
+        raw_mask, mask_level, mask_spacing_um = _read_label_mask_at_seg(
+            mask_path=mask_path,
+            slide=slide,
+            seg_level=seg_level,
+            valid_values=valid_values,
+            backend=slide.backend_name,
+        )
+    except Exception as exc:
+        primary_error = exc
+
+    degenerate = primary_error is not None or not raw_mask.any()
+    if degenerate and backend_name != "openslide":
         try:
             fallback, fb_level, fb_spacing = _read_label_mask_at_seg(
                 mask_path=mask_path,
@@ -403,6 +416,9 @@ def load_annotation_label_mask(
             fallback = None
         if fallback is not None and fallback.any():
             return fallback, fb_level, fb_spacing
+
+    if primary_error is not None:
+        raise primary_error
     return raw_mask, mask_level, mask_spacing_um
 
 

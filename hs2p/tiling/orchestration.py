@@ -1264,12 +1264,16 @@ def tile_slides(
             discovered_tiles=snapshot["discovered_tiles"],
         )
 
-    def _record_tiling_success(*, num_tiles: int) -> None:
+    def _record_tiling_success(*, num_tiles: int, increment_completed: bool = True) -> None:
+        # ``increment_completed`` counts one *slide* completion. Annotation sampling emits
+        # several artifacts per slide; the extra artifacts add their discovered tiles but must
+        # not inflate the slide-completion count (which is measured against total_slides).
         nonlocal tiling_completed, tiling_discovered_tiles, tiling_zero_tile_successes
-        tiling_completed += 1
+        if increment_completed:
+            tiling_completed += 1
+            if num_tiles == 0:
+                tiling_zero_tile_successes += 1
         tiling_discovered_tiles += num_tiles
-        if num_tiles == 0:
-            tiling_zero_tile_successes += 1
         _emit_tiling_progress()
 
     def _record_tiling_failure() -> None:
@@ -1404,7 +1408,9 @@ def tile_slides(
                 mask_preview_path=None,
                 tiling_preview_path=None,
             )
-            _record_tiling_success(num_tiles=extra_artifact.num_tiles)
+            _record_tiling_success(
+                num_tiles=extra_artifact.num_tiles, increment_completed=False
+            )
             artifacts.append(extra_artifact)
             _record_process_row(
                 _build_success_process_row(
