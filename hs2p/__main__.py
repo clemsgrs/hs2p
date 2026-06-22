@@ -88,8 +88,9 @@ def main(args):
             )
             if sampling is not None:
                 # Annotation sampling does not yet support these features; refuse explicit
-                # opt-ins rather than silently ignoring them, and skip previews (which default
-                # on) with a clear notice instead of erroring on every run.
+                # opt-ins rather than silently ignoring them. Previews are supported (the
+                # multi-label mask preview); only tiling previews are still absent, which
+                # tile_slides tolerates without erroring.
                 unsupported = [
                     name
                     for name, enabled in (
@@ -109,12 +110,8 @@ def main(args):
                     selection_strategy=selection_strategy,
                     output_mode=output_mode,
                     active_annotations=list(sampling.active_annotations),
-                    previews_skipped=bool(
-                        preview.save_mask_preview or preview.save_tiling_preview
-                    ),
                 )
                 tile_kwargs.update(
-                    preview=None,
                     resume=False,
                     read_coordinates_from=None,
                     save_tiles=False,

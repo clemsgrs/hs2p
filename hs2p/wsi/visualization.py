@@ -143,6 +143,63 @@ def _resolve_fill_overlay_style(
     return palette, pixel_mapping, color_mapping
 
 
+def _combine_label_masks(
+    *,
+    masks: dict[str, np.ndarray],
+    pixel_mapping: dict[str, int],
+) -> np.ndarray:
+    """Recompose a single discrete label raster from per-label binary masks.
+
+    The annotation sampler consumes one binary (255 fg / 0 bg) mask per label; the filled
+    multi-label overlay needs them back as one raster carrying each label's declared pixel
+    value. Labels are painted in ``pixel_mapping`` order; later labels win on overlap, matching
+    how a single declared raster would have stored them.
+    """
+    reference = next(iter(masks.values()))
+    combined = np.zeros(reference.shape[:2], dtype=np.uint8)
+    for name, value in pixel_mapping.items():
+        binary = masks.get(name)
+        if binary is None:
+            continue
+        combined = np.where(np.asarray(binary) > 0, np.uint8(int(value)), combined).astype(
+            np.uint8
+        )
+    return combined
+
+
+def render_annotation_mask_preview(
+    *,
+    wsi_path: Path,
+    backend: str,
+    masks: dict[str, np.ndarray],
+    pixel_mapping: dict[str, int],
+    color_mapping: dict[str, list[int] | None] | None,
+    mask_preview_path: Path,
+    downsample: int = 32,
+    alpha: float = 0.5,
+) -> None:
+    """Write one filled, semi-transparent multi-label overlay of the resolved annotation masks.
+
+    Rebuilds a discrete label raster from the *resolved* per-label binary masks (never a
+    re-read of the raw mask file) and renders it through the shared filled-overlay path. Each
+    label is colored from ``color_mapping``; labels with a null color are omitted (the palette
+    and alpha builders skip them).
+    """
+    if color_mapping is None:
+        return
+    label_arr = _combine_label_masks(masks=masks, pixel_mapping=pixel_mapping)
+    save_overlay_preview(
+        wsi_path=Path(wsi_path),
+        backend=backend,
+        mask_arr=label_arr,
+        mask_preview_path=Path(mask_preview_path),
+        downsample=downsample,
+        pixel_mapping=dict(pixel_mapping),
+        color_mapping=dict(color_mapping),
+        alpha=alpha,
+    )
+
+
 def save_overlay_preview(
     *,
     wsi_path: Path,

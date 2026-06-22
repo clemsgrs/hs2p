@@ -2,6 +2,7 @@
 coverage summary (summarize_annotation_coverage) — the previously-missing keystone for
 build_per_annotation_tiling_results, plus the coverage utility soma's ingestion drives."""
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -574,9 +575,15 @@ def test_tile_slides_single_output_emits_one_artifact_per_slide(monkeypatch, tmp
     assert (rows["output_mode"] == CoordinateOutputMode.SINGLE_OUTPUT).all()
 
 
-def test_tile_slides_sampling_rejects_unsupported_combos(monkeypatch, tmp_path):
+@pytest.mark.parametrize("unsupported", ["resume", "read_coordinates_from", "save_tiles"])
+def test_tile_slides_sampling_rejects_unsupported_combos(monkeypatch, tmp_path, unsupported):
     _patch_tile_slides_open(monkeypatch)
-    with pytest.raises(NotImplementedError, match="resume"):
+    kwargs = {
+        "resume": {"resume": True},
+        "read_coordinates_from": {"read_coordinates_from": tmp_path},
+        "save_tiles": {"save_tiles": True},
+    }[unsupported]
+    with pytest.raises(NotImplementedError, match=unsupported):
         tile_slides(
             _slides(1),
             tiling=_mock_tiling(),
@@ -584,8 +591,94 @@ def test_tile_slides_sampling_rejects_unsupported_combos(monkeypatch, tmp_path):
             output_dir=tmp_path,
             num_workers=1,
             sampling=_sampling_spec(),
-            resume=True,
+            **kwargs,
         )
+
+
+def _sampling_spec_with_colors():
+    return SamplingSpec(
+        pixel_mapping=PIXEL_MAPPING,
+        color_mapping={
+            "background": None,
+            "tumor": [255, 0, 0],
+            "stroma": [0, 255, 0],
+            "necrosis": None,  # null color → omitted from the overlay
+        },
+        tissue_percentage={"background": None, "tumor": 0.1, "stroma": 0.1, "necrosis": 0.1},
+        active_annotations=("tumor", "stroma", "necrosis"),
+    )
+
+
+def _patch_mask_preview_renderer(monkeypatch):
+    """Record every annotation mask-preview render and stub the file write so the structural
+    tests need no real WSI. Returns the list of recorded render calls."""
+    calls: list[dict] = []
+
+    def _fake_save_overlay_preview(*, mask_preview_path, **kwargs):
+        calls.append({"mask_preview_path": Path(mask_preview_path), **kwargs})
+        Path(mask_preview_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(mask_preview_path).write_bytes(b"preview")
+
+    monkeypatch.setattr(singlemod, "save_overlay_preview", _fake_save_overlay_preview)
+    return calls
+
+
+@pytest.mark.parametrize(
+    "output_mode",
+    [CoordinateOutputMode.PER_ANNOTATION, CoordinateOutputMode.SINGLE_OUTPUT],
+)
+def test_tile_slides_sampling_writes_one_mask_preview_per_slide(
+    monkeypatch, tmp_path, output_mode
+):
+    from hs2p.configs import PreviewConfig
+
+    _patch_tile_slides_open(monkeypatch)
+    calls = _patch_mask_preview_renderer(monkeypatch)
+    tile_slides(
+        _slides(2),
+        tiling=_mock_tiling(),
+        filtering=FilterConfig(a_t=0),
+        preview=PreviewConfig(save_mask_preview=True),
+        output_dir=tmp_path,
+        num_workers=1,
+        sampling=_sampling_spec_with_colors(),
+        selection_strategy=CoordinateSelectionStrategy.JOINT_SAMPLING,
+        output_mode=output_mode,
+    )
+    # One preview file per slide at the conventional flat location.
+    for sample_id in ("slide0", "slide1"):
+        assert (tmp_path / "preview" / "mask" / f"{sample_id}.jpg").is_file()
+    # Rendered once per slide, not once per active annotation.
+    assert len(calls) == 2
+    # Filled, alpha-blended, per-label colored overlay from the resolved binaries.
+    for call in calls:
+        assert call["color_mapping"]["tumor"] == [255, 0, 0]
+        assert call["color_mapping"]["necrosis"] is None  # null-color label omitted
+        assert call["alpha"] == PreviewConfig().mask_overlay_alpha
+        assert call["pixel_mapping"] == PIXEL_MAPPING
+
+    rows = pd.read_csv(tmp_path / "process_list.csv")
+    expected = str(tmp_path / "preview" / "mask" / "slide0.jpg")
+    slide0_rows = rows[rows["sample_id"] == "slide0"]
+    assert len(slide0_rows) >= 1
+    # mask_preview_path repeated on every label row of the slide.
+    assert (slide0_rows["mask_preview_path"] == expected).all()
+
+
+def test_tile_slides_sampling_without_preview_writes_no_mask_preview(monkeypatch, tmp_path):
+    _patch_tile_slides_open(monkeypatch)
+    calls = _patch_mask_preview_renderer(monkeypatch)
+    tile_slides(
+        _slides(1),
+        tiling=_mock_tiling(),
+        filtering=FilterConfig(a_t=0),
+        output_dir=tmp_path,
+        num_workers=1,
+        sampling=_sampling_spec_with_colors(),
+        selection_strategy=CoordinateSelectionStrategy.JOINT_SAMPLING,
+    )
+    assert calls == []
+    assert not (tmp_path / "preview" / "mask").exists()
 
 
 def test_summarize_annotation_coverage_est_tiles_none_without_threshold(patched_mask_open):

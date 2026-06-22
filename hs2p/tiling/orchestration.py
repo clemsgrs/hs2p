@@ -17,6 +17,7 @@ from hs2p.configs import FilterConfig, PreviewConfig, SegmentationConfig, Tiling
 from hs2p.progress import emit_progress, emit_progress_log
 from hs2p.tiling.result import ResolvedTissueMask, TilingResult
 from hs2p.tiling.single import (
+    MaskPreviewRequest,
     build_tiling_result_from_mask,
     preprocess_slide,
     preprocess_slide_per_annotation,
@@ -257,6 +258,7 @@ def _run_per_annotation(
     output_mode: str,
     seg_downsample: int,
     num_workers: int,
+    mask_preview: "MaskPreviewRequest | None" = None,
 ) -> "dict[str, TilingResult]":
     """Shared annotation-sampling compute, called identically by ``tile_slide`` and the
     ``tile_slides`` worker so the two paths never diverge. Resolves the annotation mask and
@@ -295,6 +297,7 @@ def _run_per_annotation(
         qc_spacing_um=filtering.qc_spacing_um,
         num_workers=num_workers,
         output_mode=output_mode,
+        mask_preview=mask_preview,
     )
 
 
@@ -685,7 +688,11 @@ def _finalize_pending_tiling_preview(
 
 
 def _save_per_annotation_artifact(
-    result: TilingResult, *, output_dir: Path, annotation: str | None
+    result: TilingResult,
+    *,
+    output_dir: Path,
+    annotation: str | None,
+    mask_preview_path: Path | None = None,
 ) -> TilingArtifacts:
     artifact = save_tiling_result(result, output_dir=output_dir, annotation=annotation)
     return TilingArtifacts(
@@ -694,7 +701,8 @@ def _save_per_annotation_artifact(
         coordinates_meta_path=artifact.coordinates_meta_path,
         num_tiles=artifact.num_tiles,
         tiles_tar_path=None,
-        mask_preview_path=artifact.mask_preview_path,
+        # One slide-level preview, repeated on every label row so each row is self-describing.
+        mask_preview_path=mask_preview_path,
         tiling_preview_path=artifact.tiling_preview_path,
         backend=artifact.backend,
         requested_backend=artifact.requested_backend,
@@ -705,11 +713,24 @@ def _save_per_annotation_artifact(
 
 def _compute_and_save_per_annotation(request: _ComputeRequest) -> _ComputeResponse:
     """Compute + persist one TilingResult per active annotation, via the shared
-    ``_run_per_annotation`` core (same compute path as ``tile_slide``)."""
+    ``_run_per_annotation`` core (same compute path as ``tile_slide``).
+
+    Renders one multi-label mask preview per slide (when requested) at the conventional flat
+    ``preview/mask/{sample_id}.jpg`` location, then stamps that path onto every label row of
+    the slide so each row is self-describing.
+    """
     effective_segmentation = _resolve_effective_segmentation(
         whole_slide=request.whole_slide,
         segmentation=request.segmentation,
     )
+    mask_preview = None
+    if request.mask_preview_path is not None:
+        mask_preview = MaskPreviewRequest(
+            mask_preview_path=request.mask_preview_path,
+            color_mapping=getattr(request.sampling, "color_mapping", None),
+            downsample=request.preview_downsample,
+            alpha=request.mask_overlay_alpha,
+        )
     results = _run_per_annotation(
         whole_slide=request.whole_slide,
         tiling=request.tiling,
@@ -724,10 +745,20 @@ def _compute_and_save_per_annotation(request: _ComputeRequest) -> _ComputeRespon
         ),
         seg_downsample=effective_segmentation.downsample,
         num_workers=request.num_workers,
+        mask_preview=mask_preview,
+    )
+    mask_preview_path = (
+        request.mask_preview_path
+        if request.mask_preview_path is not None
+        and request.mask_preview_path.is_file()
+        else None
     )
     artifacts = [
         _save_per_annotation_artifact(
-            result, output_dir=request.output_dir, annotation=annotation
+            result,
+            output_dir=request.output_dir,
+            annotation=annotation,
+            mask_preview_path=mask_preview_path,
         )
         for annotation, result in results.items()
     ]
@@ -740,7 +771,7 @@ def _compute_and_save_per_annotation(request: _ComputeRequest) -> _ComputeRespon
         result=None,
         requested_backend=request.tiling.requested_backend,
         backend=request.tiling.backend,
-        mask_preview_path=None,
+        mask_preview_path=mask_preview_path,
     )
 
 
@@ -995,7 +1026,6 @@ def tile_slides(
                 ("resume", resume),
                 ("read_coordinates_from", read_coordinates_from is not None),
                 ("save_tiles", save_tiles),
-                ("preview", preview is not None),
             )
             if active
         ]
@@ -1417,11 +1447,12 @@ def tile_slides(
                 artifact=artifact,
             )
         )
-        # Annotation sampling emits one extra artifact per additional active annotation.
+        # Annotation sampling emits one extra artifact per additional active annotation. Each
+        # carries the same slide-level mask preview so every label row repeats it.
         for extra in getattr(response, "extra_artifacts", ()):
             extra_artifact = _build_success_artifact(
                 base_artifact=extra,
-                mask_preview_path=None,
+                mask_preview_path=extra.mask_preview_path,
                 tiling_preview_path=None,
             )
             _record_tiling_success(

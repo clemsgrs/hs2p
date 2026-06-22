@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -15,6 +15,45 @@ from hs2p.tiling.mask import resolve_annotation_masks, resolve_tissue_mask
 from hs2p.tile_qc import filter_coordinate_tiles, needs_pixel_qc
 from hs2p.wsi.reader import open_slide
 from hs2p.wsi.types import CoordinateOutputMode, CoordinateSelectionStrategy
+from hs2p.wsi.visualization import _combine_label_masks, save_overlay_preview
+
+
+@dataclass(frozen=True)
+class MaskPreviewRequest:
+    """Where and how to render the per-slide multi-label annotation mask preview."""
+
+    mask_preview_path: Path
+    color_mapping: dict[str, list[int] | None] | None
+    downsample: int = 32
+    alpha: float = 0.5
+
+
+def _render_annotation_mask_preview(
+    *,
+    request: MaskPreviewRequest,
+    resolved_masks: ResolvedAnnotationMasks,
+    image_path: str | Path,
+    backend: str,
+) -> None:
+    """Render one filled, semi-transparent multi-label overlay from the *resolved* per-label
+    binary masks (never a re-read of the raw mask file), once per slide. Labels with a null
+    color are omitted by the shared palette/alpha builders."""
+    if request.color_mapping is None:
+        return
+    label_arr = _combine_label_masks(
+        masks=resolved_masks.masks,
+        pixel_mapping=resolved_masks.pixel_mapping,
+    )
+    save_overlay_preview(
+        wsi_path=Path(image_path),
+        backend=backend,
+        mask_arr=label_arr,
+        mask_preview_path=Path(request.mask_preview_path),
+        downsample=request.downsample,
+        pixel_mapping=dict(resolved_masks.pixel_mapping),
+        color_mapping=dict(request.color_mapping),
+        alpha=request.alpha,
+    )
 
 
 def build_tiling_result_from_mask(
@@ -684,6 +723,7 @@ def preprocess_slide_per_annotation(
     qc_spacing_um: float = 2.0,
     num_workers: int = 1,
     output_mode: str | None = None,
+    mask_preview: MaskPreviewRequest | None = None,
 ) -> "dict[str, TilingResult]":
     """Annotation-aware tiling: open the slide, resolve its annotation mask into per-class
     binaries (:func:`resolve_annotation_masks`), then sample per active annotation.
@@ -693,6 +733,9 @@ def preprocess_slide_per_annotation(
     result, wiring the previously-orphaned :func:`build_per_annotation_tiling_results` to a
     real mask. ``selection_strategy`` selects INDEPENDENT vs JOINT sampling; ``output_mode``
     selects single vs per-annotation coordinate output.
+
+    When ``mask_preview`` is given, one filled multi-label overlay is rendered here — once per
+    slide, from the just-resolved per-label binary masks — before any sampling.
     """
     slide = open_slide(image_path, backend=backend, spacing_override=spacing_override)
     try:
@@ -702,6 +745,13 @@ def preprocess_slide_per_annotation(
             pixel_mapping=pixel_mapping,
             seg_downsample=seg_downsample,
         )
+        if mask_preview is not None:
+            _render_annotation_mask_preview(
+                request=mask_preview,
+                resolved_masks=resolved_masks,
+                image_path=image_path,
+                backend=slide.backend_name,
+            )
         return build_per_annotation_tiling_results(
             slide=slide,
             resolved_masks=resolved_masks,
@@ -737,6 +787,7 @@ def preprocess_slide_per_annotation(
 
 
 __all__ = [
+    "MaskPreviewRequest",
     "build_per_annotation_tiling_results",
     "build_tiling_result_from_mask",
     "preprocess_slide",
