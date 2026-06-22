@@ -437,7 +437,7 @@ def _build_joint_annotation_results(
 def _merge_annotation_results_to_single(
     results: "dict[str, TilingResult]",
 ) -> "TilingResult":
-    """Collapse a per-annotation result dict into one merged result for SINGLE_OUTPUT.
+    """Collapse a per-annotation result dict into one merged result for MERGED.
 
     The merged result is the **union** of every tile that passes *any* active
     annotation's coverage threshold (dedup'd over the shared candidate grid), with
@@ -449,7 +449,7 @@ def _merge_annotation_results_to_single(
     result_list = list(results.values())
     if not result_list:
         raise ValueError(
-            "SINGLE_OUTPUT merge requires at least one annotation result; got none "
+            "MERGED merge requires at least one annotation result; got none "
             "(no active annotations in the sampling spec?)"
         )
     template = result_list[0]
@@ -483,7 +483,7 @@ def _merge_annotation_results_to_single(
         template,
         tiles=merged_tiles,
         annotation=None,
-        output_mode=CoordinateOutputMode.SINGLE_OUTPUT,
+        output_mode=CoordinateOutputMode.MERGED,
     )
 
 
@@ -534,10 +534,10 @@ def build_per_annotation_tiling_results(
     # to per-annotation output and recording a bogus mode in metadata/process_list.
     if output_mode not in (
         CoordinateOutputMode.PER_ANNOTATION,
-        CoordinateOutputMode.SINGLE_OUTPUT,
+        CoordinateOutputMode.MERGED,
     ):
         raise ValueError(
-            f"output_mode must be PER_ANNOTATION or SINGLE_OUTPUT, got {output_mode!r}"
+            f"output_mode must be PER_ANNOTATION or MERGED, got {output_mode!r}"
         )
 
     _shared = dict(
@@ -585,7 +585,7 @@ def build_per_annotation_tiling_results(
             f"got {selection_strategy!r}"
         )
 
-    if output_mode == CoordinateOutputMode.SINGLE_OUTPUT:
+    if output_mode == CoordinateOutputMode.MERGED:
         # One merged result per slide (union of tiles passing any class threshold),
         # keyed by None so tile_slide/tile_slides persist a single per-slide artifact.
         return {None: _merge_annotation_results_to_single(results)}

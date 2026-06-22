@@ -34,7 +34,7 @@ def test_annotation_config_triggers_sampling_without_tissue_threshold():
         {
             "tiling": {
                 "masks": {
-                    "output_mode": "single_output",
+                    "output_mode": "merged",
                     "pixel_mapping": {"grade_4": 4, "grade_5": 5},
                     "colors": {"grade_4": [255, 0, 0], "grade_5": [0, 0, 255]},
                     # null out the default tissue threshold → pure-grade sampling
@@ -51,7 +51,7 @@ def test_annotation_config_triggers_sampling_without_tissue_threshold():
     assert sampling is not None
     assert set(sampling.active_annotations) == {"grade_4", "grade_5"}
     assert strategy == CoordinateSelectionStrategy.JOINT_SAMPLING
-    assert output_mode == CoordinateOutputMode.SINGLE_OUTPUT
+    assert output_mode == CoordinateOutputMode.MERGED
 
 
 def test_independent_sampling_flag_selects_strategy():

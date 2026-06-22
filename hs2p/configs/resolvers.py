@@ -65,13 +65,13 @@ def resolve_output_mode(cfg: Any) -> str:
     """Derive the coordinate output mode from ``tiling.masks.output_mode``.
 
     ``per_annotation`` (default) writes one coordinate artifact per sampled class;
-    ``single_output`` writes one merged per-slide artifact (the union of tiles passing any
+    ``merged`` writes one merged per-slide artifact (the union of tiles passing any
     class threshold).
     """
     masks_cfg = getattr(cfg.tiling, "masks", None)
     raw = getattr(masks_cfg, "output_mode", None) if masks_cfg is not None else None
     value = str(raw or CoordinateOutputMode.PER_ANNOTATION).lower()
-    valid = {CoordinateOutputMode.PER_ANNOTATION, CoordinateOutputMode.SINGLE_OUTPUT}
+    valid = {CoordinateOutputMode.PER_ANNOTATION, CoordinateOutputMode.MERGED}
     if value not in valid:
         raise ValueError(
             f"tiling.masks.output_mode must be one of {sorted(valid)}, got {value!r}"
