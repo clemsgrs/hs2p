@@ -186,7 +186,7 @@ def _compute_tiling_result(
                 CoordinateSelectionStrategy.MERGED_DEFAULT_TILING if has_mask else None
             ),
             output_mode=(
-                CoordinateOutputMode.SINGLE_OUTPUT if has_mask else None
+                CoordinateOutputMode.MERGED if has_mask else None
             ),
         )
 
@@ -231,7 +231,7 @@ def _compute_tiling_result(
                 CoordinateSelectionStrategy.MERGED_DEFAULT_TILING if has_mask else None
             ),
             output_mode=(
-                CoordinateOutputMode.SINGLE_OUTPUT if has_mask else None
+                CoordinateOutputMode.MERGED if has_mask else None
             ),
         )
         _write_mask_preview(
@@ -390,7 +390,7 @@ def tile_slide(
             else None
         ),
         output_mode=(
-            CoordinateOutputMode.SINGLE_OUTPUT
+            CoordinateOutputMode.MERGED
             if whole_slide.mask_path is not None
             else None
         ),
@@ -586,11 +586,11 @@ def _build_success_process_row(
     artifact: TilingArtifacts,
 ) -> dict[str, Any]:
     # A per-slide artifact with no annotation is binary tissue tiling, EXCEPT the merged
-    # SINGLE_OUTPUT annotation result (also annotation=None, but a union of annotation classes).
+    # MERGED annotation result (also annotation=None, but a union of annotation classes).
     # Record output_mode and label the merged row "merged" so it is not mistaken for tissue.
     if (
         artifact.annotation is None
-        and artifact.output_mode == CoordinateOutputMode.SINGLE_OUTPUT
+        and artifact.output_mode == CoordinateOutputMode.MERGED
     ):
         annotation_label = "merged"
     elif artifact.annotation is not None:
@@ -1199,7 +1199,7 @@ def tile_slides(
                         CoordinateSelectionStrategy.MERGED_DEFAULT_TILING if has_mask else None
                     ),
                     output_mode=(
-                        CoordinateOutputMode.SINGLE_OUTPUT if has_mask else None
+                        CoordinateOutputMode.MERGED if has_mask else None
                     ),
                 )
             compatibility = compatibility_specs[key]
@@ -1495,7 +1495,7 @@ def tile_slides(
         )
         if sampling_preview_enabled:
             # Annotation sampling renders one tiling preview per artifact (per label in
-            # PER_ANNOTATION, the single merged result in SINGLE_OUTPUT), each over its own
+            # PER_ANNOTATION, the single merged result in MERGED), each over its own
             # mask backdrop, through the shared preview executor. Each artifact gets its own
             # manifest row, finalized once its preview future completes.
             sampling_pixel_mapping = getattr(sampling, "pixel_mapping", None)

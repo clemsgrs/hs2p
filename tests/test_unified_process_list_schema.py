@@ -44,9 +44,9 @@ def test_success_row_annotation_preserved_when_set():
     assert row["annotation"] == "tumor"
 
 
-def test_single_output_row_labeled_merged_not_tissue():
-    """A merged SINGLE_OUTPUT artifact has annotation=None like binary tissue, but must not be
-    recorded as 'tissue' — it carries output_mode=single_output and the label 'merged'."""
+def test_merged_row_labeled_merged_not_tissue():
+    """A merged MERGED artifact has annotation=None like binary tissue, but must not be
+    recorded as 'tissue' — it carries output_mode=merged and the label 'merged'."""
     from hs2p.wsi.types import CoordinateOutputMode
 
     artifact = TilingArtifacts(
@@ -55,13 +55,13 @@ def test_single_output_row_labeled_merged_not_tissue():
         coordinates_meta_path=Path("tiles/slide-1.coordinates.meta.json"),
         num_tiles=5,
         annotation=None,
-        output_mode=CoordinateOutputMode.SINGLE_OUTPUT,
+        output_mode=CoordinateOutputMode.MERGED,
     )
     row = orchestration_mod._build_success_process_row(
         whole_slide=_whole_slide(), artifact=artifact
     )
     assert row["annotation"] == "merged"
-    assert row["output_mode"] == CoordinateOutputMode.SINGLE_OUTPUT
+    assert row["output_mode"] == CoordinateOutputMode.MERGED
 
 
 def test_binary_tissue_row_has_no_output_mode():

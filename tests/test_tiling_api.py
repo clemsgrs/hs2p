@@ -337,7 +337,7 @@ def _patch_preprocess_slide(
                 CoordinateSelectionStrategy.MERGED_DEFAULT_TILING if has_mask else None
             ),
             "output_mode": (
-                CoordinateOutputMode.SINGLE_OUTPUT if has_mask else None
+                CoordinateOutputMode.MERGED if has_mask else None
             ),
             "sam2_checkpoint_path": (
                 segmentation.sam2_checkpoint_path if segmentation is not None else None
@@ -453,7 +453,7 @@ def test_tile_slide_passes_default_sampling_semantics_for_masked_slides(
             image_path="slide.svs",
             mask_path="slide-mask.png",
             selection_strategy=CoordinateSelectionStrategy.MERGED_DEFAULT_TILING,
-            output_mode=CoordinateOutputMode.SINGLE_OUTPUT,
+            output_mode=CoordinateOutputMode.MERGED,
         ),
         hook=captured.update,
     )
@@ -473,7 +473,7 @@ def test_tile_slide_passes_default_sampling_semantics_for_masked_slides(
         captured["selection_strategy"]
         == CoordinateSelectionStrategy.MERGED_DEFAULT_TILING
     )
-    assert captured["output_mode"] == CoordinateOutputMode.SINGLE_OUTPUT
+    assert captured["output_mode"] == CoordinateOutputMode.MERGED
     assert captured["tissue_mask_path"] == Path("slide-mask.png")
 
 
@@ -489,7 +489,7 @@ def test_tile_slide_allows_masked_slides_without_segmentation_config(
             image_path="slide.svs",
             mask_path="slide-mask.png",
             selection_strategy=CoordinateSelectionStrategy.MERGED_DEFAULT_TILING,
-            output_mode=CoordinateOutputMode.SINGLE_OUTPUT,
+            output_mode=CoordinateOutputMode.MERGED,
         ),
         hook=captured.update,
     )
@@ -518,7 +518,7 @@ def test_tile_slide_returns_named_arrays(
             image_path="slide-1.svs",
             mask_path="slide-1-mask.png",
             selection_strategy=CoordinateSelectionStrategy.MERGED_DEFAULT_TILING,
-            output_mode=CoordinateOutputMode.SINGLE_OUTPUT,
+            output_mode=CoordinateOutputMode.MERGED,
         ),
     )
 
@@ -569,7 +569,7 @@ def test_compute_tiling_result_uses_preprocessing_core(
             image_path="slide-1.svs",
             mask_path="slide-1-mask.png",
             selection_strategy=CoordinateSelectionStrategy.MERGED_DEFAULT_TILING,
-            output_mode=CoordinateOutputMode.SINGLE_OUTPUT,
+            output_mode=CoordinateOutputMode.MERGED,
         ),
         hook=captured.update,
     )
@@ -607,7 +607,7 @@ def test_compute_tiling_result_uses_preprocessing_core(
         captured["selection_strategy"]
         == CoordinateSelectionStrategy.MERGED_DEFAULT_TILING
     )
-    assert captured["output_mode"] == CoordinateOutputMode.SINGLE_OUTPUT
+    assert captured["output_mode"] == CoordinateOutputMode.MERGED
 
     assert result.sample_id == "slide-1"
     assert result.image_path == Path("slide-1.svs")
@@ -615,7 +615,7 @@ def test_compute_tiling_result_uses_preprocessing_core(
     assert result.backend == "asap"
     assert len(result.x) == 2
     assert result.selection_strategy == CoordinateSelectionStrategy.MERGED_DEFAULT_TILING
-    assert result.output_mode == CoordinateOutputMode.SINGLE_OUTPUT
+    assert result.output_mode == CoordinateOutputMode.MERGED
     np.testing.assert_array_equal(
         _coords_array(result), np.array([[100, 200], [300, 400]], dtype=np.int64)
     )

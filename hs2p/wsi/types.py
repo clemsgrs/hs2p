@@ -17,7 +17,7 @@ class CoordinateSelectionStrategy:
 
 
 class CoordinateOutputMode:
-    SINGLE_OUTPUT = "single_output"
+    MERGED = "merged"
     PER_ANNOTATION = "per_annotation"
 
 

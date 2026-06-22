@@ -418,10 +418,10 @@ def test_tile_slide_with_sampling_returns_per_annotation_dict(monkeypatch):
         CoordinateSelectionStrategy.INDEPENDENT_SAMPLING,
     ],
 )
-def test_single_output_merges_to_one_deduped_result_per_slide(
+def test_merged_merges_to_one_deduped_result_per_slide(
     patched_slide_and_mask_open, strategy
 ):
-    """SINGLE_OUTPUT collapses the per-annotation fan-out into one merged result keyed by
+    """MERGED collapses the per-annotation fan-out into one merged result keyed by
     None: the dedup'd union of every tile passing any class threshold (the dense-seg
     contract — each spatial tile once, multi-class mask attached downstream)."""
     common = dict(
@@ -440,14 +440,14 @@ def test_single_output_merges_to_one_deduped_result_per_slide(
         output_mode=CoordinateOutputMode.PER_ANNOTATION, **common
     )
     single = preprocess_slide_per_annotation(
-        output_mode=CoordinateOutputMode.SINGLE_OUTPUT, **common
+        output_mode=CoordinateOutputMode.MERGED, **common
     )
 
     # one entry, keyed None, annotation cleared, output_mode tagged
     assert set(single) == {None}
     merged = single[None]
     assert merged.annotation is None
-    assert merged.output_mode == CoordinateOutputMode.SINGLE_OUTPUT
+    assert merged.output_mode == CoordinateOutputMode.MERGED
 
     # merged coords == sorted unique union of the per-annotation coords
     expected = set()
@@ -547,8 +547,8 @@ def test_tile_slides_sampling_progress_counts_slides_not_artifacts(monkeypatch, 
     assert all(p["completed"] <= p["total"] for p in progress)
 
 
-def test_tile_slides_single_output_emits_one_artifact_per_slide(monkeypatch, tmp_path):
-    """With SINGLE_OUTPUT the sampling fan-out collapses: one artifact / process_list row
+def test_tile_slides_merged_emits_one_artifact_per_slide(monkeypatch, tmp_path):
+    """With MERGED the sampling fan-out collapses: one artifact / process_list row
     per slide (annotation None), which soma's per-slide extraction path consumes unchanged."""
     _patch_tile_slides_open(monkeypatch)
     artifacts = tile_slides(
@@ -559,7 +559,7 @@ def test_tile_slides_single_output_emits_one_artifact_per_slide(monkeypatch, tmp
         num_workers=1,
         sampling=_sampling_spec(),
         selection_strategy=CoordinateSelectionStrategy.JOINT_SAMPLING,
-        output_mode=CoordinateOutputMode.SINGLE_OUTPUT,
+        output_mode=CoordinateOutputMode.MERGED,
     )
     assert len(artifacts) == 2  # one per slide, not per (slide, annotation)
     assert {a.sample_id for a in artifacts} == {"slide0", "slide1"}
@@ -572,7 +572,7 @@ def test_tile_slides_single_output_emits_one_artifact_per_slide(monkeypatch, tmp
     assert (rows["num_tiles"] > 0).all()
     # Merged single-output rows must be distinguishable from binary tissue tiling.
     assert set(rows["annotation"]) == {"merged"}
-    assert (rows["output_mode"] == CoordinateOutputMode.SINGLE_OUTPUT).all()
+    assert (rows["output_mode"] == CoordinateOutputMode.MERGED).all()
 
 
 @pytest.mark.parametrize("unsupported", ["resume", "read_coordinates_from", "save_tiles"])
@@ -625,7 +625,7 @@ def _patch_mask_preview_renderer(monkeypatch):
 
 @pytest.mark.parametrize(
     "output_mode",
-    [CoordinateOutputMode.PER_ANNOTATION, CoordinateOutputMode.SINGLE_OUTPUT],
+    [CoordinateOutputMode.PER_ANNOTATION, CoordinateOutputMode.MERGED],
 )
 def test_tile_slides_sampling_writes_one_mask_preview_per_slide(
     monkeypatch, tmp_path, output_mode
@@ -765,10 +765,10 @@ def test_tile_slides_per_annotation_writes_one_tiling_preview_per_label(
         CoordinateSelectionStrategy.INDEPENDENT_SAMPLING,
     ],
 )
-def test_tile_slides_single_output_writes_one_merged_tiling_preview(
+def test_tile_slides_merged_writes_one_merged_tiling_preview(
     monkeypatch, tmp_path, strategy
 ):
-    """SINGLE_OUTPUT: a single merged tiling preview at the flat preview location (no
+    """MERGED: a single merged tiling preview at the flat preview location (no
     per-annotation subdir), with its tiling_preview_path recorded on the merged row."""
     from hs2p.configs import PreviewConfig
 
@@ -784,7 +784,7 @@ def test_tile_slides_single_output_writes_one_merged_tiling_preview(
         num_workers=1,
         sampling=_sampling_spec_with_colors(),
         selection_strategy=strategy,
-        output_mode=CoordinateOutputMode.SINGLE_OUTPUT,
+        output_mode=CoordinateOutputMode.MERGED,
     )
     flat = tmp_path / "preview" / "tiling" / "slide0.jpg"
     assert flat.is_file()

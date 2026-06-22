@@ -123,7 +123,7 @@ def _sampling_spec() -> SamplingSpec:
     "output_mode, selection_strategy",
     [
         (CoordinateOutputMode.PER_ANNOTATION, CoordinateSelectionStrategy.INDEPENDENT_SAMPLING),
-        (CoordinateOutputMode.SINGLE_OUTPUT, CoordinateSelectionStrategy.JOINT_SAMPLING),
+        (CoordinateOutputMode.MERGED, CoordinateSelectionStrategy.JOINT_SAMPLING),
     ],
 )
 def test_annotation_tiling_preview_renders_on_real_slide(

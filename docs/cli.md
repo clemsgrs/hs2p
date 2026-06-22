@@ -119,7 +119,7 @@ pip install "hs2p[all]"
     tissue class from sampling, and set `pixel_mapping.tissue: null` to remove the default
     label entirely (required to reuse its value, e.g. a `tumor: 1` mask).
   - `output_mode` (annotation sampling only): `per_annotation` (default) writes one coordinate
-    artifact per sampled class; `single_output` writes one merged per-slide artifact (the
+    artifact per sampled class; `merged` writes one merged per-slide artifact (the
     union of tiles passing any class threshold).
   - `tiling.independent_sampling` chooses `independent_sampling` (tile each class separately)
     vs the default joint sampling (one pass over the union mask, then per-class coverage
