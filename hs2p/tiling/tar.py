@@ -14,13 +14,13 @@ from PIL import Image
 
 from hs2p.tiling.result import TilingResult
 from hs2p.tile_qc import filter_coordinate_tiles, needs_pixel_qc
-from hs2p.fileops import promote_temp_file
+from hs2p.fileops import is_flattened_annotation, promote_temp_file
 from hs2p.wsi import iter_tile_records_from_result, open_reader_for_result
 from hs2p.wsi.reader import BatchRegionReader
 
 
 def _annotation_tar_stem(sample_id: str, annotation: str | None) -> str:
-    if annotation is None or annotation == "tissue":
+    if is_flattened_annotation(annotation):
         return f"{sample_id}.tiles"
     return f"{sample_id}.{annotation}.tiles"
 
