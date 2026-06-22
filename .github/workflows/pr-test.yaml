@@ -13,8 +13,8 @@ jobs:
       contents: read
       actions: write  # needed for Buildx GHA cache
 
-    # don't run secret-using job on forked PRs
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    # don't run on forked PRs (no secrets) or release-* bump PRs (version-only change)
+    if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && !startsWith(github.head_ref, 'release-') }}
 
     steps:
       - name: Check out repository
