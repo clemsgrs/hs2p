@@ -266,6 +266,77 @@ def test_render_annotation_mask_preview_fills_each_label_and_omits_null_colors(
     assert np.abs(arr[25, 95] - np.array([200, 200, 200])).max() <= 4
 
 
+def test_write_annotation_tiling_preview_draws_label_backdrop_under_black_grid(
+    monkeypatch, tmp_path: Path
+):
+    """Visual fixture for the annotation tiling preview: the selected tile is drawn over the
+    label's full-color mask backdrop, bordered by the fixed black grid line."""
+    orchestration_mod = pytest.importorskip("hs2p.tiling.orchestration")
+
+    slide_arr = np.full((120, 120, 3), 200, dtype=np.uint8)
+    label_value = 1
+    mask_arr = np.zeros((120, 120), dtype=np.uint8)
+    mask_arr[0:64, 0:64] = label_value  # the single selected tile lands here
+
+    class FakeWSI:
+        def __init__(self, path, backend="asap"):
+            del backend
+            self.path = Path(path)
+            self.spacings = [0.5]
+            self.spacing = 0.5
+            self.level_dimensions = [(120, 120)]
+            self.level_downsamples = [(1.0, 1.0)]
+            self._is_mask = "mask" in str(path).lower()
+
+        def get_best_level_for_downsample_custom(self, downsample):
+            del downsample
+            return 0
+
+        def get_level_spacing(self, level):
+            del level
+            return 0.5
+
+        def get_slide(self, level):
+            del level
+            return slide_arr
+
+        def read_level(self, level):
+            del level
+            return mask_arr
+
+    monkeypatch.setattr(visualization_mod, "WSI", FakeWSI)
+
+    result = SimpleNamespace(
+        x=np.array([0], dtype=np.int64),
+        y=np.array([0], dtype=np.int64),
+        tile_size_lv0=64,
+        image_path=Path("fake-wsi.tif"),
+        backend="openslide",
+        sample_id="slide0",
+        annotation="tumor",
+    )
+    preview_path = orchestration_mod.write_annotation_tiling_preview(
+        result=result,
+        output_dir=tmp_path,
+        downsample=1,
+        mask_path=Path("fake-mask.tif"),
+        pixel_mapping={"background": 0, "tumor": label_value},
+        color_mapping={"background": None, "tumor": [255, 0, 0]},
+    )
+
+    # Per-annotation subdir mirrors the coordinate artifact layout.
+    assert preview_path == tmp_path / "preview" / "tiling" / "tumor" / "slide0.jpg"
+    assert preview_path.is_file()
+    with Image.open(preview_path) as saved:
+        arr = np.array(saved.convert("RGB")).astype(int)
+    # Tile interior shows the label's (red) mask backdrop blended over the slide: the red
+    # channel dominates the green/blue, unlike the plain gray slide.
+    interior = arr[32, 32]
+    assert interior[0] > interior[1] + 80 and interior[0] > interior[2] + 80
+    # Tile border is the fixed black grid line (modulo JPEG bleed from the adjacent fill).
+    assert arr[0, 0].max() <= 20
+
+
 def test_save_overlay_preview_writes_rgba_overlay_to_jpeg(monkeypatch, tmp_path: Path):
     overlay = Image.fromarray(
         np.array(
