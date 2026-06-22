@@ -106,8 +106,7 @@ pip install "hs2p[all]"
   - annotation sampling activates when `pixel_mapping` declares a foreground class other than
     the default `tissue`; otherwise the CLI runs binary tissue tiling. Each slide's annotation
     mask is taken from the `mask_path` column of the input CSV.
-  - `pixel_mapping` is your own label vocabulary — **no name is reserved** (there is no
-    special `background`). It must enumerate **every** label value present in the raster
+  - `pixel_mapping` is your own label vocabulary: it must enumerate **every** label value present in the raster
     (each value distinct, in `[0, 65535]`); any pixel value not declared here makes the mask
     read fail (the discreteness guard). If the raster reserves a value for unannotated
     pixels, declare it like any other class and simply give it no `min_coverage` threshold.
