@@ -230,6 +230,42 @@ def test_openslide_fallback_recovers_when_primary_read_rejects_all_zero(monkeypa
     assert int(np.count_nonzero(resolved.masks["stroma"])) == SLIDE_H * (SLIDE_W // 2)
 
 
+def test_openslide_fallback_accepts_valid_all_zero_after_primary_error(monkeypatch):
+    """Primary read raises (e.g. a decode error), openslide recovers a valid all-zero mask.
+
+    With background (0) declared, an all-zero raster is a legitimate read — the fallback must
+    be accepted even though it has no foreground, instead of re-raising the primary error.
+    """
+
+    class _RaisingMaskSlide:
+        spacing = BASE_SPACING
+        level_dimensions = [(SLIDE_W, SLIDE_H)]
+        level_downsamples = [1.0]
+
+        def read_region(self, location, level, size):
+            raise RuntimeError("backend decode error")
+
+        def close(self):
+            return None
+
+    empty = np.zeros((SLIDE_H, SLIDE_W), dtype=np.uint8)
+
+    def fake_open(path, backend=None):
+        if str(backend).lower() == "openslide":
+            return _FakeMaskSlide(empty, BASE_SPACING)  # valid: 0 is declared background
+        return _RaisingMaskSlide()  # primary backend raises
+
+    monkeypatch.setattr(maskmod, "open_slide", fake_open)
+    resolved = resolve_annotation_masks(
+        slide=_mock_slide(),
+        mask_path="/fake/slide_mask.tif",
+        pixel_mapping={"background": 0, "tumor": 1},
+        seg_downsample=1,
+    )
+    assert int(np.count_nonzero(resolved.masks["tumor"])) == 0
+    assert int(np.count_nonzero(resolved.masks["background"])) == SLIDE_H * SLIDE_W
+
+
 def test_resolve_annotation_masks_genuinely_empty_stays_empty(monkeypatch):
     """When every backend agrees the mask is background, no spurious real labels are invented.
 

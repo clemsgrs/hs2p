@@ -403,9 +403,10 @@ def load_annotation_label_mask(
         primary_error = exc
 
     degenerate = primary_error is not None or not raw_mask.any()
+    fallback = None
     if degenerate and backend_name != "openslide":
         try:
-            fallback, fb_level, fb_spacing = _read_label_mask_at_seg(
+            fallback = _read_label_mask_at_seg(
                 mask_path=mask_path,
                 slide=slide,
                 seg_level=seg_level,
@@ -414,8 +415,15 @@ def load_annotation_label_mask(
             )
         except Exception:
             fallback = None
-        if fallback is not None and fallback.any():
-            return fallback, fb_level, fb_spacing
+    if fallback is not None:
+        fb_mask, fb_level, fb_spacing = fallback
+        # When the primary read *raised*, any validated fallback is acceptable — including a
+        # legitimately all-zero mask (a genuinely empty raster, or a label mapped to 0 now
+        # that no value is reserved). The ``.any()`` gate applies only to the all-background
+        # *successful*-primary recovery heuristic, where we prefer openslide solely when it
+        # actually recovers labels rather than swapping one empty read for another.
+        if primary_error is not None or fb_mask.any():
+            return fb_mask, fb_level, fb_spacing
 
     if primary_error is not None:
         raise primary_error
