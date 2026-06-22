@@ -14,7 +14,7 @@ from hs2p.preprocessing import (
     _load_tiling_result_from_paths,
     _save_tiling_result,
 )
-from hs2p.fileops import promote_temp_file
+from hs2p.fileops import is_flattened_annotation, promote_temp_file
 
 
 @dataclass(frozen=True)
@@ -113,7 +113,7 @@ def _ensure_safe_path_component(name: str) -> str:
 def _annotation_tiles_dir(output_dir: Path, annotation: str | None) -> Path:
     """Return the tiles sub-directory, collapsing 'tissue' to the flat layout."""
     base = Path(output_dir) / "tiles"
-    if annotation is None or annotation == "tissue":
+    if is_flattened_annotation(annotation):
         return base
     return base / _ensure_safe_path_component(annotation)
 
