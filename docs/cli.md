@@ -116,7 +116,9 @@ pip install "hs2p[all]"
     are computed relative to those classes. To sample a subset (e.g. only Gleason grades 4
     and 5 from a 6-grade mask), list all grades in `pixel_mapping` so the raster validates,
     but give thresholds only to grades 4 and 5. Because configs are deep-merged over the
-    defaults, set `min_coverage.tissue: null` to drop the default tissue class from sampling.
+    default `{background: 0, tissue: 1}`, set `min_coverage.tissue: null` to drop the default
+    tissue class from sampling, and set `pixel_mapping.tissue: null` to remove the default
+    label entirely (required to reuse its value, e.g. a `tumor: 1` mask).
   - `output_mode` (annotation sampling only): `per_annotation` (default) writes one coordinate
     artifact per sampled class; `single_output` writes one merged per-slide artifact (the
     union of tiles passing any class threshold).

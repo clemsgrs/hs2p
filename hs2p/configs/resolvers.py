@@ -86,15 +86,21 @@ def resolve_sampling_request(
 ) -> tuple[SamplingSpec | None, str | None, str | None]:
     """Resolve the annotation-sampling invocation for the CLI tiling entrypoint.
 
-    Returns ``(sampling, selection_strategy, output_mode)`` when the masks config declares
-    annotation classes beyond the default binary-tissue setup, else ``(None, None, None)`` so
-    the caller takes the tissue-tiling path. The signal is the declared label vocabulary: a
-    ``pixel_mapping`` of just ``{background, tissue}`` (the default) is binary tissue tiling;
-    declaring any other foreground class opts into multi-label annotation sampling.
+    Returns ``(sampling, selection_strategy, output_mode)`` when the masks config has been
+    customized away from the shipped default, else ``(None, None, None)`` so the caller takes
+    the binary tissue-tiling path. The signal is configuration, not label names: a spec equal
+    to :func:`build_default_sampling_spec` (the untouched default ``{background, tissue}``
+    setup) is binary tissue tiling; any change to the label vocabulary or the sampled set opts
+    into multi-label annotation sampling. No label name is reserved at this boundary.
     """
     spec = resolve_sampling_spec(cfg, tiling=tiling)
-    foreground = set(spec.pixel_mapping) - {"background"}
-    if not spec.active_annotations or foreground <= {"tissue"}:
+    if not spec.active_annotations:
+        return None, None, None
+    default = build_default_sampling_spec(tiling)
+    is_untouched_default = dict(spec.pixel_mapping) == dict(default.pixel_mapping) and set(
+        spec.active_annotations
+    ) == set(default.active_annotations)
+    if is_untouched_default:
         return None, None, None
     return spec, resolve_sampling_strategy(cfg), resolve_output_mode(cfg)
 
@@ -230,6 +236,28 @@ def resolve_sampling_spec(
     return _resolve_sampling_spec_from_sampling_params(sampling_config, tiling=tiling)
 
 
+def _drop_null_labels(
+    pixel_mapping: dict[str, Any],
+    *companions: dict[str, Any] | None,
+) -> tuple[dict[str, Any], list[dict[str, Any] | None]]:
+    """Drop labels removed via the null-to-drop idiom (pixel value set to null) and filter the
+    companion mappings (min_coverage, colors) to the surviving labels.
+
+    Configs are deep-merged over the default ``{background:0, tissue:1}`` mapping, so shadowing
+    a default value isn't enough to remove a default label — e.g. reusing value ``1`` for a new
+    class collides with the default ``tissue:1``. Nulling a label's pixel value removes it
+    entirely (mirroring how ``min_coverage.<label>: null`` drops a class from sampling), and the
+    label is also stripped from the companion mappings so the cross-mapping checks stay coherent.
+    """
+    removed = {name for name, value in pixel_mapping.items() if value is None}
+    kept = {name: value for name, value in pixel_mapping.items() if value is not None}
+    filtered = [
+        None if m is None else {k: v for k, v in m.items() if k not in removed}
+        for m in companions
+    ]
+    return kept, filtered
+
+
 def _resolve_sampling_spec_from_masks(masks_cfg: Any, *, tiling: TilingConfig) -> SamplingSpec:
     pixel_mapping = _merge_sampling_mapping(
         getattr(masks_cfg, "pixel_mapping", None),
@@ -243,6 +271,13 @@ def _resolve_sampling_spec_from_masks(masks_cfg: Any, *, tiling: TilingConfig) -
         raise ValueError("masks.pixel_mapping is required")
     if min_coverage is None:
         raise ValueError("masks.min_coverage is required")
+    colors = _merge_sampling_mapping(
+        getattr(masks_cfg, "colors", None),
+        field_name="colors",
+    )
+    pixel_mapping, (min_coverage, colors) = _drop_null_labels(
+        pixel_mapping, min_coverage, colors
+    )
     validate_pixel_mapping(pixel_mapping)
     missing_coverage_labels = sorted(set(min_coverage.keys()) - set(pixel_mapping.keys()))
     if missing_coverage_labels:
@@ -250,10 +285,6 @@ def _resolve_sampling_spec_from_masks(masks_cfg: Any, *, tiling: TilingConfig) -
             "masks.min_coverage references unknown labels: "
             + ", ".join(missing_coverage_labels)
         )
-    colors = _merge_sampling_mapping(
-        getattr(masks_cfg, "colors", None),
-        field_name="colors",
-    )
     if colors is not None:
         validate_color_mapping(pixel_mapping=pixel_mapping, color_mapping=colors)
 
@@ -288,6 +319,13 @@ def _resolve_sampling_spec_from_sampling_params(
         raise ValueError(
             "sampling tissue_percentage is required when sampling config is provided"
         )
+    color_mapping = _merge_sampling_mapping(
+        getattr(sampling_config, "color_mapping", None),
+        field_name="color_mapping",
+    )
+    pixel_mapping, (tissue_percentage, color_mapping) = _drop_null_labels(
+        pixel_mapping, tissue_percentage, color_mapping
+    )
     validate_pixel_mapping(pixel_mapping)
     missing_threshold_labels = sorted(
         set(tissue_percentage.keys()) - set(pixel_mapping.keys())
@@ -297,10 +335,6 @@ def _resolve_sampling_spec_from_sampling_params(
             "sampling tissue_percentage references unknown labels: "
             + ", ".join(missing_threshold_labels)
         )
-    color_mapping = _merge_sampling_mapping(
-        getattr(sampling_config, "color_mapping", None),
-        field_name="color_mapping",
-    )
     if color_mapping is not None:
         validate_color_mapping(
             pixel_mapping=pixel_mapping,

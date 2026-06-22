@@ -72,6 +72,45 @@ def test_independent_sampling_flag_selects_strategy():
     assert strategy == CoordinateSelectionStrategy.INDEPENDENT_SAMPLING
 
 
+def test_label_reusing_value_one_works_when_default_tissue_is_nulled():
+    """Configs deep-merge over the default {background:0, tissue:1}; nulling the tissue pixel
+    value drops it so a 0/1 annotation mask (tumor:1) configures without a duplicate-value error."""
+    cfg = _cfg(
+        {
+            "tiling": {
+                "masks": {
+                    "pixel_mapping": {"tissue": None, "tumor": 1},
+                    "colors": {"tissue": None, "tumor": [1, 2, 3]},
+                    "min_coverage": {"tissue": None, "tumor": 0.5},
+                }
+            }
+        }
+    )
+    sampling, _, _ = resolve_sampling_request(cfg, tiling=resolve_tiling_config(cfg))
+    assert sampling is not None
+    assert dict(sampling.pixel_mapping) == {"background": 0, "tumor": 1}
+    assert set(sampling.active_annotations) == {"tumor"}
+
+
+def test_background_label_is_not_reserved_at_activation():
+    """No label name is special at the CLI activation boundary: a thresholded 'background'
+    class enables annotation sampling instead of falling through to binary tissue."""
+    cfg = _cfg(
+        {
+            "tiling": {
+                "masks": {
+                    "pixel_mapping": {"tissue": None},
+                    "colors": {"tissue": None},
+                    "min_coverage": {"tissue": None, "background": 0.5},
+                }
+            }
+        }
+    )
+    sampling, _, _ = resolve_sampling_request(cfg, tiling=resolve_tiling_config(cfg))
+    assert sampling is not None
+    assert set(sampling.active_annotations) == {"background"}
+
+
 def test_resolve_output_mode_default_and_validation():
     assert resolve_output_mode(_cfg()) == CoordinateOutputMode.PER_ANNOTATION
     with pytest.raises(ValueError, match="output_mode"):
