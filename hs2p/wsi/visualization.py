@@ -373,7 +373,12 @@ def write_coordinate_preview(
     wsi = WSI(wsi_path, backend=backend)
     vis_level = wsi.get_best_level_for_downsample_custom(downsample)
     if mask_path is not None:
-        mask = WSI(mask_path, backend=backend)
+        # Pass the backend *reader*, not the WSI, into the grid renderer's mask-overlay
+        # path: ``read_aligned_mask`` calls ``read_level``/``spacings`` (reader/backend
+        # methods). A WSI exposes ``spacings`` but not ``read_level``, so handing it the
+        # WSI raised ``'WSI' object has no attribute 'read_level'``. This mirrors the
+        # mask-preview path (``overlay_mask_on_slide`` uses ``mask_obj=mask_object.reader``).
+        mask = WSI(mask_path, backend=backend).reader
     else:
         mask = None
 

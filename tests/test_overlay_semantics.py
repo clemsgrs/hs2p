@@ -278,6 +278,18 @@ def test_write_annotation_tiling_preview_draws_label_backdrop_under_black_grid(
     mask_arr = np.zeros((120, 120), dtype=np.uint8)
     mask_arr[0:64, 0:64] = label_value  # the single selected tile lands here
 
+    class FakeReader:
+        # The mask backdrop is read through the backend *reader* (``read_level``/
+        # ``spacings``/``level_downsamples``), never through the WSI. A WSI does not
+        # expose ``read_level``; keeping these only on ``.reader`` guards the
+        # WSI-vs-reader gap that a reader-less fake would otherwise hide.
+        spacings = [0.5]
+        level_downsamples = [(1.0, 1.0)]
+
+        def read_level(self, level):
+            del level
+            return mask_arr
+
     class FakeWSI:
         def __init__(self, path, backend="asap"):
             del backend
@@ -287,6 +299,7 @@ def test_write_annotation_tiling_preview_draws_label_backdrop_under_black_grid(
             self.level_dimensions = [(120, 120)]
             self.level_downsamples = [(1.0, 1.0)]
             self._is_mask = "mask" in str(path).lower()
+            self.reader = FakeReader()
 
         def get_best_level_for_downsample_custom(self, downsample):
             del downsample
@@ -299,10 +312,6 @@ def test_write_annotation_tiling_preview_draws_label_backdrop_under_black_grid(
         def get_slide(self, level):
             del level
             return slide_arr
-
-        def read_level(self, level):
-            del level
-            return mask_arr
 
     monkeypatch.setattr(visualization_mod, "WSI", FakeWSI)
 
