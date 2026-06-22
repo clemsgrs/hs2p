@@ -2290,6 +2290,7 @@ def test_tile_slides_writes_process_list_and_can_reuse_precomputed_tiles(
     assert list(process_df.columns) == [
         "sample_id",
         "annotation",
+        "output_mode",
         "image_path",
         "mask_path",
         "requested_backend",

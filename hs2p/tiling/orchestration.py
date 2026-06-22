@@ -523,6 +523,7 @@ def _build_success_artifact(
         backend=base_artifact.backend,
         requested_backend=base_artifact.requested_backend,
         annotation=base_artifact.annotation,
+        output_mode=base_artifact.output_mode,
     )
 
 
@@ -531,9 +532,22 @@ def _build_success_process_row(
     whole_slide: SlideSpec,
     artifact: TilingArtifacts,
 ) -> dict[str, Any]:
+    # A per-slide artifact with no annotation is binary tissue tiling, EXCEPT the merged
+    # SINGLE_OUTPUT annotation result (also annotation=None, but a union of annotation classes).
+    # Record output_mode and label the merged row "merged" so it is not mistaken for tissue.
+    if (
+        artifact.annotation is None
+        and artifact.output_mode == CoordinateOutputMode.SINGLE_OUTPUT
+    ):
+        annotation_label = "merged"
+    elif artifact.annotation is not None:
+        annotation_label = artifact.annotation
+    else:
+        annotation_label = "tissue"
     return {
         "sample_id": whole_slide.sample_id,
-        "annotation": artifact.annotation if artifact.annotation is not None else "tissue",
+        "annotation": annotation_label,
+        "output_mode": artifact.output_mode,
         "image_path": str(whole_slide.image_path),
         "mask_path": (
             str(whole_slide.mask_path) if whole_slide.mask_path is not None else None
@@ -629,6 +643,7 @@ def _build_failure_process_row(
     return {
         "sample_id": whole_slide.sample_id,
         "annotation": annotation,
+        "output_mode": None,
         "image_path": str(whole_slide.image_path),
         "mask_path": (
             str(whole_slide.mask_path) if whole_slide.mask_path is not None else None
@@ -684,6 +699,7 @@ def _save_per_annotation_artifact(
         backend=artifact.backend,
         requested_backend=artifact.requested_backend,
         annotation=annotation,
+        output_mode=artifact.output_mode,
     )
 
 

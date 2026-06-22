@@ -533,6 +533,9 @@ def test_tile_slides_single_output_emits_one_artifact_per_slide(monkeypatch, tmp
     assert set(rows["sample_id"]) == {"slide0", "slide1"}
     assert (rows["tiling_status"] == "success").all()
     assert (rows["num_tiles"] > 0).all()
+    # Merged single-output rows must be distinguishable from binary tissue tiling.
+    assert set(rows["annotation"]) == {"merged"}
+    assert (rows["output_mode"] == CoordinateOutputMode.SINGLE_OUTPUT).all()
 
 
 def test_tile_slides_sampling_rejects_unsupported_combos(monkeypatch, tmp_path):
