@@ -73,7 +73,7 @@ def test_tile_count_matches_physical_area_heuristic(
                 requested_tile_size_px=TILE_SIZE_PX,
                 tolerance=0.07,
                 overlap=overlap,
-                tissue_threshold=TISSUE_THRESHOLD,
+                min_coverage={"tissue": TISSUE_THRESHOLD},
             ),
             segmentation=SegmentationConfig(method="precomputed_mask"),
             num_workers=1,

@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from hs2p.configs import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig
+from hs2p.configs.resolvers import require_tissue_fraction
 from hs2p.progress import emit_progress, emit_progress_log
 from hs2p.tiling.result import ResolvedTissueMask, TilingResult
 from hs2p.tiling.single import (
@@ -162,7 +163,7 @@ def _compute_tiling_result(
             sam2_checkpoint_path=effective_segmentation.sam2_checkpoint_path,
             sam2_config_path=effective_segmentation.sam2_config_path,
             sam2_device=effective_segmentation.sam2_device,
-            min_tissue_fraction=tiling.tissue_threshold,
+            min_tissue_fraction=require_tissue_fraction(tiling),
             overlap=tiling.overlap,
             seg_downsample=effective_segmentation.downsample,
             tolerance=tiling.tolerance,
@@ -205,7 +206,7 @@ def _compute_tiling_result(
             sample_id=whole_slide.sample_id,
             requested_tile_size_px=tiling.requested_tile_size_px,
             requested_spacing_um=tiling.requested_spacing_um,
-            min_tissue_fraction=tiling.tissue_threshold,
+            min_tissue_fraction=require_tissue_fraction(tiling),
             overlap=tiling.overlap,
             tolerance=tiling.tolerance,
             seg_sthresh=effective_segmentation.sthresh,
@@ -365,7 +366,7 @@ def tile_slide(
         sam2_checkpoint_path=effective_segmentation.sam2_checkpoint_path,
         sam2_config_path=effective_segmentation.sam2_config_path,
         sam2_device=effective_segmentation.sam2_device,
-        min_tissue_fraction=effective_tiling.tissue_threshold,
+        min_tissue_fraction=require_tissue_fraction(effective_tiling),
         overlap=effective_tiling.overlap,
         seg_downsample=effective_segmentation.downsample,
         tolerance=effective_tiling.tolerance,

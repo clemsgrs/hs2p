@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .loader import default_config
@@ -21,7 +22,10 @@ class TilingConfig:
     requested_tile_size_px: int
     tolerance: float
     overlap: float
-    tissue_threshold: float
+    # Resolved per-class minimum coverage fractions; ``min_coverage["tissue"]`` is the
+    # tissue threshold. Excluded from __hash__ so the frozen dataclass stays hashable
+    # despite the mapping field.
+    min_coverage: Mapping[str, float] = field(hash=False)
     backend: str = AUTO_BACKEND
     independent_sampling: bool = False
 

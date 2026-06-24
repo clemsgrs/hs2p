@@ -88,7 +88,7 @@ def _configs() -> tuple[TilingConfig, SegmentationConfig, FilterConfig, PreviewC
         requested_tile_size_px=224,
         tolerance=0.07,
         overlap=0.0,
-        tissue_threshold=0.1,
+        min_coverage={"tissue": 0.1},
         backend="openslide",
     )
     segmentation = SegmentationConfig(
