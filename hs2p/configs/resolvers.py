@@ -10,22 +10,36 @@ from .models import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfi
 
 
 def resolve_tiling_config(cfg: Any) -> TilingConfig:
-    min_coverage = _merge_sampling_mapping(
-        cfg.tiling.masks.min_coverage,
-        field_name="min_coverage",
+    min_coverage = dict(
+        _merge_sampling_mapping(cfg.tiling.masks.min_coverage, field_name="min_coverage")
+        or {}
     )
     return TilingConfig(
         requested_spacing_um=cfg.tiling.params.requested_spacing_um,
         requested_tile_size_px=cfg.tiling.params.requested_tile_size_px,
         tolerance=cfg.tiling.params.tolerance,
         overlap=cfg.tiling.params.overlap,
-        # Carry the resolved per-class coverage map verbatim (the single source of truth).
-        # ``tissue`` is only meaningful for the binary-tissue path; a pure annotation-sampling
-        # config (e.g. only Gleason grades) need not declare it — read-sites default it to 0.0.
-        min_coverage=dict(min_coverage or {}),
+        min_coverage=min_coverage,
         independent_sampling=bool(cfg.tiling.independent_sampling),
         backend=cfg.tiling.backend,
     )
+
+
+def require_tissue_fraction(tiling: TilingConfig) -> float:
+    """Tissue-coverage threshold for the binary tissue-tiling path.
+
+    Used only where binary tissue tiling actually gates on the threshold; annotation
+    sampling gates on per-class coverage and never calls this. A missing ``tissue`` entry
+    is an error rather than a silent ``0.0`` (which would keep every tile and disable
+    tissue filtering). An explicit ``0.0`` is honoured as a deliberate opt-out.
+    """
+    value = tiling.min_coverage.get("tissue")
+    if value is None:
+        raise ValueError(
+            "tiling.masks.min_coverage.tissue is required for tissue tiling. Set it (e.g. "
+            "0.01), or sample specific annotations instead of binary tissue."
+        )
+    return float(value)
 
 
 def resolve_segmentation_config(cfg: Any) -> SegmentationConfig:
@@ -97,24 +111,30 @@ def resolve_sampling_request(
     spec = resolve_sampling_spec(cfg, tiling=tiling)
     if not spec.active_annotations:
         return None, None, None
-    default = build_default_sampling_spec(tiling)
-    is_untouched_default = dict(spec.pixel_mapping) == dict(default.pixel_mapping) and set(
+    # Compare against the default skeleton's constants, not a built default spec: an
+    # annotation-only config (no ``tissue`` threshold) must not trip the tissue requirement
+    # baked into build_default_sampling_spec just to detect the untouched default.
+    is_untouched_default = dict(spec.pixel_mapping) == _DEFAULT_PIXEL_MAPPING and set(
         spec.active_annotations
-    ) == set(default.active_annotations)
+    ) == set(_DEFAULT_ACTIVE_ANNOTATIONS)
     if is_untouched_default:
         return None, None, None
     return spec, resolve_sampling_strategy(cfg), resolve_output_mode(cfg)
 
 
+_DEFAULT_PIXEL_MAPPING = {"background": 0, "tissue": 1}
+_DEFAULT_ACTIVE_ANNOTATIONS = ("tissue",)
+
+
 def build_default_sampling_spec(tiling: TilingConfig) -> SamplingSpec:
     return SamplingSpec(
-        pixel_mapping={"background": 0, "tissue": 1},
+        pixel_mapping=dict(_DEFAULT_PIXEL_MAPPING),
         color_mapping={"background": None, "tissue": None},
         tissue_percentage={
             "background": None,
-            "tissue": tiling.min_coverage.get("tissue") or 0.0,
+            "tissue": require_tissue_fraction(tiling),
         },
-        active_annotations=("tissue",),
+        active_annotations=_DEFAULT_ACTIVE_ANNOTATIONS,
     )
 
 

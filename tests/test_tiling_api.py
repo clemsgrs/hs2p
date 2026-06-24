@@ -508,6 +508,44 @@ def test_tile_slide_allows_masked_slides_without_segmentation_config(
     assert captured["tissue_mask_path"] == Path("slide-mask.png")
 
 
+def test_tile_slide_errors_when_tissue_coverage_missing(
+    monkeypatch, segmentation_config, filter_config
+):
+    """Binary tissue tiling requires ``min_coverage.tissue``: a missing entry is an error,
+    not a silent ``0.0`` (which keeps every tile and disables tissue filtering). Annotation
+    sampling is unaffected — it never reads this default (see ``min_coverage`` without a
+    ``tissue`` key elsewhere)."""
+    _patch_preprocess_slide(
+        monkeypatch,
+        result=_build_preprocessing_result(
+            sample_id="slide-no-tissue",
+            image_path="slide.svs",
+            mask_path="slide-mask.png",
+            selection_strategy=CoordinateSelectionStrategy.MERGED_DEFAULT_TILING,
+            output_mode=CoordinateOutputMode.MERGED,
+        ),
+    )
+    tiling = TilingConfig(
+        requested_spacing_um=0.5,
+        requested_tile_size_px=224,
+        tolerance=0.07,
+        overlap=0.1,
+        min_coverage={},  # no tissue threshold
+        backend="asap",
+    )
+    with pytest.raises(ValueError, match="min_coverage.tissue is required"):
+        tile_slide(
+            SlideSpec(
+                sample_id="slide-no-tissue",
+                image_path=Path("slide.svs"),
+                mask_path=Path("slide-mask.png"),
+            ),
+            tiling=tiling,
+            segmentation=segmentation_config,
+            filtering=filter_config,
+        )
+
+
 def test_tile_slide_returns_named_arrays(
     monkeypatch, tiling_config, segmentation_config, filter_config
 ):

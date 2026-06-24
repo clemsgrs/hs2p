@@ -22,10 +22,9 @@ class TilingConfig:
     requested_tile_size_px: int
     tolerance: float
     overlap: float
-    # Resolved per-class minimum coverage fractions (the ``masks.min_coverage`` map).
-    # ``min_coverage.get("tissue")`` is the binary-tissue threshold (the sole source of
-    # truth — there is no separate ``tissue_threshold`` field). Excluded from __hash__
-    # since it is a mutable mapping; TilingConfig is otherwise frozen/hashable.
+    # Resolved per-class minimum coverage fractions; ``min_coverage["tissue"]`` is the
+    # tissue threshold. Excluded from __hash__ so the frozen dataclass stays hashable
+    # despite the mapping field.
     min_coverage: Mapping[str, float] = field(hash=False)
     backend: str = AUTO_BACKEND
     independent_sampling: bool = False
