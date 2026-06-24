@@ -52,7 +52,7 @@ def tiling_config() -> TilingConfig:
         requested_tile_size_px=224,
         tolerance=0.07,
         overlap=0.1,
-        tissue_threshold=0.2,
+        min_coverage={"tissue": 0.2},
         backend="asap",
     )
 
@@ -307,7 +307,7 @@ def _patch_preprocess_slide(
             "spacing_override": request.whole_slide.spacing_at_level_0,
             "requested_tile_size_px": request.tiling.requested_tile_size_px,
             "requested_spacing_um": request.tiling.requested_spacing_um,
-            "min_tissue_fraction": request.tiling.tissue_threshold,
+            "min_tissue_fraction": (request.tiling.min_coverage.get("tissue") or 0.0),
             "overlap": request.tiling.overlap,
             "tolerance": request.tiling.tolerance,
             "seg_downsample": (
@@ -553,7 +553,7 @@ def test_tile_slide_returns_named_arrays(
     assert result.requested_spacing_um == tiling_config.requested_spacing_um
     assert result.requested_tile_size_px == tiling_config.requested_tile_size_px
     assert result.overlap == tiling_config.overlap
-    assert result.min_tissue_fraction == tiling_config.tissue_threshold
+    assert result.min_tissue_fraction == (tiling_config.min_coverage.get("tissue") or 0.0)
     assert len(result.x) == 2
 
 
@@ -595,7 +595,7 @@ def test_compute_tiling_result_uses_preprocessing_core(
     assert captured["spacing_override"] == 0.25
     assert captured["requested_tile_size_px"] == tiling_config.requested_tile_size_px
     assert captured["requested_spacing_um"] == tiling_config.requested_spacing_um
-    assert captured["min_tissue_fraction"] == tiling_config.tissue_threshold
+    assert captured["min_tissue_fraction"] == (tiling_config.min_coverage.get("tissue") or 0.0)
     assert captured["overlap"] == tiling_config.overlap
     assert captured["seg_downsample"] == segmentation_config.downsample
     assert captured["tolerance"] == tiling_config.tolerance
@@ -1236,7 +1236,7 @@ def test_compute_request_passes_inner_workers_to_tile_extraction(
             requested_tile_size_px=224,
             tolerance=0.07,
             overlap=0.0,
-            tissue_threshold=0.1,
+            min_coverage={"tissue": 0.1},
         ),
         segmentation=SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
         resolved_mask=None,
@@ -1827,7 +1827,7 @@ def test_tile_slides_defaults_gpu_decode_to_disabled_for_saved_tiles(
             requested_tile_size_px=224,
             tolerance=0.07,
             overlap=0.1,
-            tissue_threshold=0.2,
+            min_coverage={"tissue": 0.2},
         ),
         segmentation=segmentation_config,
         filtering=filter_config,
@@ -1945,7 +1945,7 @@ def test_validate_tiling_artifacts_rejects_mismatched_tiling_config(
         requested_tile_size_px=tiling_config.requested_tile_size_px,
         tolerance=tiling_config.tolerance,
         overlap=tiling_config.overlap,
-        tissue_threshold=tiling_config.tissue_threshold,
+        min_coverage=tiling_config.min_coverage,
         backend=tiling_config.backend,
     )
 
@@ -1972,7 +1972,7 @@ def test_validate_tiling_artifacts_ignores_disabled_filter_threshold_mismatches(
         requested_tile_size_px=result.requested_tile_size_px,
         tolerance=result.tolerance,
         overlap=result.overlap,
-        tissue_threshold=result.min_tissue_fraction,
+        min_coverage={"tissue": result.min_tissue_fraction},
         backend=result.backend,
     )
     matching_segmentation = SegmentationConfig(
@@ -2030,7 +2030,7 @@ def test_validate_tiling_artifacts_ignores_tissue_method_for_precomputed_masks(
         requested_tile_size_px=result.requested_tile_size_px,
         tolerance=result.tolerance,
         overlap=result.overlap,
-        tissue_threshold=result.min_tissue_fraction,
+        min_coverage={"tissue": result.min_tissue_fraction},
         backend=result.backend,
     )
     incompatible_segmentation = SegmentationConfig(
@@ -2094,7 +2094,7 @@ def test_validate_tiling_artifacts_compares_requested_seg_downsample_not_resolve
         requested_tile_size_px=result.requested_tile_size_px,
         tolerance=result.tolerance,
         overlap=result.overlap,
-        tissue_threshold=result.min_tissue_fraction,
+        min_coverage={"tissue": result.min_tissue_fraction},
         backend=result.backend,
     )
     requested_segmentation = SegmentationConfig(
@@ -2148,7 +2148,7 @@ def test_validate_tiling_artifacts_rejects_mismatched_requested_seg_downsample(
         requested_tile_size_px=result.requested_tile_size_px,
         tolerance=result.tolerance,
         overlap=result.overlap,
-        tissue_threshold=result.min_tissue_fraction,
+        min_coverage={"tissue": result.min_tissue_fraction},
         backend=result.backend,
     )
     incompatible_segmentation = SegmentationConfig(
@@ -2203,7 +2203,7 @@ def test_validate_tiling_artifacts_rejects_mismatched_image_path(tmp_path: Path)
                 coordinates_npz_path=artifacts.coordinates_npz_path,
                 coordinates_meta_path=artifacts.coordinates_meta_path,
                 compatibility=_artifact_compatibility(
-                    tiling_config=TilingConfig(0.5, 224, 0.07, 0.0, 0.1, "asap"),
+                    tiling_config=TilingConfig(0.5, 224, 0.07, 0.0, {"tissue": 0.1}, "asap"),
                     segmentation_config=SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
                     filter_config=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
                 ),
@@ -2228,7 +2228,7 @@ def test_validate_tiling_artifacts_rejects_mismatched_mask_path(tmp_path: Path):
                 coordinates_npz_path=artifacts.coordinates_npz_path,
                 coordinates_meta_path=artifacts.coordinates_meta_path,
                 compatibility=_artifact_compatibility(
-                    tiling_config=TilingConfig(0.5, 224, 0.07, 0.0, 0.1, "asap"),
+                    tiling_config=TilingConfig(0.5, 224, 0.07, 0.0, {"tissue": 0.1}, "asap"),
                     segmentation_config=SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
                     filter_config=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
                 ),
@@ -3027,7 +3027,7 @@ def test_process_list_checkpoint_removes_temp_file_on_failure(monkeypatch, tmp_p
                 requested_tile_size_px=224,
                 tolerance=0.07,
                 overlap=0.1,
-                tissue_threshold=0.2,
+                min_coverage={"tissue": 0.2},
             ),
             segmentation=SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
             filtering=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
@@ -3194,7 +3194,7 @@ def test_config_dataclasses_apply_package_defaults_for_secondary_parameters():
         requested_tile_size_px=224,
         tolerance=0.07,
         overlap=0.0,
-        tissue_threshold=0.1,
+        min_coverage={"tissue": 0.1},
     )
     segmentation = SegmentationConfig(method="hsv", downsample=64)
     filtering = FilterConfig(ref_tile_size=224, a_t=4, a_h=2)
@@ -3342,7 +3342,7 @@ def test_maybe_load_existing_artifacts_zero_tiles_meta_only(tmp_path: Path):
         ),
         read_coordinates_from=tiles_dir,
             compatibility=_artifact_compatibility(
-                tiling_config=TilingConfig(0.5, 224, 0.07, 0.1, 0.2, "asap"),
+                tiling_config=TilingConfig(0.5, 224, 0.07, 0.1, {"tissue": 0.2}, "asap"),
                 segmentation_config=SegmentationConfig(
                     method="hsv",
                     downsample=64,

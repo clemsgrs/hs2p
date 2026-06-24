@@ -396,7 +396,7 @@ def test_tile_slide_with_sampling_returns_per_annotation_dict(monkeypatch):
         requested_tile_size_px=64,
         tolerance=0.05,
         overlap=0.0,
-        tissue_threshold=0.0,
+        min_coverage={"tissue": 0.0},
         backend="mock",
     )
     result = tile_slide(
@@ -496,7 +496,7 @@ def _mock_tiling():
         requested_tile_size_px=64,
         tolerance=0.05,
         overlap=0.0,
-        tissue_threshold=0.0,
+        min_coverage={"tissue": 0.0},
         backend="mock",
     )
 

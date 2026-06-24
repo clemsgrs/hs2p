@@ -19,9 +19,10 @@ def resolve_tiling_config(cfg: Any) -> TilingConfig:
         requested_tile_size_px=cfg.tiling.params.requested_tile_size_px,
         tolerance=cfg.tiling.params.tolerance,
         overlap=cfg.tiling.params.overlap,
+        # Carry the resolved per-class coverage map verbatim (the single source of truth).
         # ``tissue`` is only meaningful for the binary-tissue path; a pure annotation-sampling
-        # config (e.g. only Gleason grades) need not declare it, so default to 0.0 when absent.
-        tissue_threshold=float(min_coverage.get("tissue") or 0.0),
+        # config (e.g. only Gleason grades) need not declare it — read-sites default it to 0.0.
+        min_coverage=dict(min_coverage or {}),
         independent_sampling=bool(cfg.tiling.independent_sampling),
         backend=cfg.tiling.backend,
     )
@@ -111,7 +112,7 @@ def build_default_sampling_spec(tiling: TilingConfig) -> SamplingSpec:
         color_mapping={"background": None, "tissue": None},
         tissue_percentage={
             "background": None,
-            "tissue": tiling.tissue_threshold,
+            "tissue": tiling.min_coverage.get("tissue") or 0.0,
         },
         active_annotations=("tissue",),
     )

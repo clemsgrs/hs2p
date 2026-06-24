@@ -37,7 +37,7 @@ def _build_tiling_configs(
         requested_tile_size_px=224,
         tolerance=0.07,
         overlap=0.0,
-        tissue_threshold=tissue_pct,
+        min_coverage={"tissue": tissue_pct},
         backend=backend,
     )
     segmentation = SegmentationConfig(

@@ -302,7 +302,9 @@ def test_load_single_slide_result_from_config_builds_fresh_tiling_result(tmp_pat
         "    requested_tile_size_px: 224\n"
         "    tolerance: 0.05\n"
         "    overlap: 0.0\n"
-        "    tissue_threshold: 0.1\n"
+        "  masks:\n"
+        "    min_coverage:\n"
+        "      tissue: 0.1\n"
         "  preview:\n"
         "    save: false\n"
     )

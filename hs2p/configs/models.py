@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .loader import default_config
@@ -21,7 +22,11 @@ class TilingConfig:
     requested_tile_size_px: int
     tolerance: float
     overlap: float
-    tissue_threshold: float
+    # Resolved per-class minimum coverage fractions (the ``masks.min_coverage`` map).
+    # ``min_coverage.get("tissue")`` is the binary-tissue threshold (the sole source of
+    # truth — there is no separate ``tissue_threshold`` field). Excluded from __hash__
+    # since it is a mutable mapping; TilingConfig is otherwise frozen/hashable.
+    min_coverage: Mapping[str, float] = field(hash=False)
     backend: str = AUTO_BACKEND
     independent_sampling: bool = False
 

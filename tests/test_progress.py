@@ -133,7 +133,7 @@ def _tiling_config() -> TilingConfig:
         requested_tile_size_px=256,
         tolerance=0.05,
         overlap=0.0,
-        tissue_threshold=0.1,
+        min_coverage={"tissue": 0.1},
     )
 
 

@@ -224,7 +224,7 @@ def validate_tiling_artifacts(
         raise ValueError("precomputed tiles requested_tile_size_px mismatch")
     if result.overlap != compatibility.tiling.overlap:
         raise ValueError("precomputed tiles overlap mismatch")
-    if result.min_tissue_fraction != compatibility.tiling.tissue_threshold:
+    if result.min_tissue_fraction != (compatibility.tiling.min_coverage.get("tissue") or 0.0):
         raise ValueError("precomputed tiles tissue_threshold mismatch")
     if result.tolerance != compatibility.tiling.tolerance:
         raise ValueError("precomputed tiles tolerance mismatch")

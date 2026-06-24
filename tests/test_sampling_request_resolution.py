@@ -26,7 +26,7 @@ def test_default_config_routes_to_binary_tissue():
     tiling = resolve_tiling_config(cfg)
     sampling, strategy, output_mode = resolve_sampling_request(cfg, tiling=tiling)
     assert sampling is None and strategy is None and output_mode is None
-    assert tiling.tissue_threshold == 0.01
+    assert (tiling.min_coverage.get("tissue") or 0.0) == 0.01
 
 
 def test_annotation_config_triggers_sampling_without_tissue_threshold():
@@ -45,7 +45,7 @@ def test_annotation_config_triggers_sampling_without_tissue_threshold():
     )
     # No 'tissue' threshold must not raise here (it used to KeyError).
     tiling = resolve_tiling_config(cfg)
-    assert tiling.tissue_threshold == 0.0
+    assert (tiling.min_coverage.get("tissue") or 0.0) == 0.0
 
     sampling, strategy, output_mode = resolve_sampling_request(cfg, tiling=tiling)
     assert sampling is not None
