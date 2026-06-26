@@ -15,6 +15,13 @@ from hs2p.wsi.reader import open_slide, select_level, select_level_for_downsampl
 DEFAULT_SAM2_THUMBNAIL_SPACING_UM = 8.0
 DEFAULT_SAM2_THUMBNAIL_TOLERANCE = 0.05
 
+# Reading a mask level larger than this many pixels means the mask lacks a pyramid level
+# near the requested segmentation spacing (the read would be downsized to the seg grid
+# immediately afterward). Reading + np.unique(int64) on such a raster OOMs the process, so
+# fail fast with an actionable message instead. 256 Mpx ≈ 256 MB uint8 (+ ~2 GB transient
+# int64 unique) — safe, and ~52x above the largest healthy BEETLE mask read (4.9 Mpx).
+MAX_MASK_READ_PX = 256_000_000
+
 
 def _reduce_mask_channels(mask: np.ndarray) -> np.ndarray:
     if mask.ndim == 3:
@@ -86,6 +93,15 @@ def _read_discrete_mask_level(
     for tissue masks, or a class-value-subset check for multi-class annotation masks.
     """
     mask_size = mask_slide.level_dimensions[mask_level]
+    mw, mh = int(mask_size[0]), int(mask_size[1])
+    if mw * mh > MAX_MASK_READ_PX:
+        raise ValueError(
+            f"{label} {mask_path}: nearest level to the requested segmentation spacing is "
+            f"level {mask_level} at {mw}x{mh} ({mw * mh / 1e6:.0f} Mpx), exceeding "
+            f"MAX_MASK_READ_PX ({MAX_MASK_READ_PX / 1e6:.0f} Mpx). The mask likely lacks a "
+            f"pyramid level near that spacing — regenerate it as a multi-resolution pyramidal "
+            f"TIFF, or lower seg_downsample."
+        )
     backend_mask = _reduce_mask_channels(mask_slide.read_region((0, 0), mask_level, mask_size))
     if is_discrete(backend_mask):
         return _as_discrete_label_array(backend_mask)
