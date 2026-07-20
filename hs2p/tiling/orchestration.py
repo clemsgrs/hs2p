@@ -934,6 +934,7 @@ def _resolve_mask_for_request(
             )
             resolved_mask = resolve_tissue_mask(
                 slide=slide,
+                sample_id=request.whole_slide.sample_id,
                 tissue_method=effective_segmentation.method,
                 tissue_mask_path=request.whole_slide.mask_path,
                 tissue_mask_tissue_value=1,
@@ -1298,12 +1299,16 @@ def tile_slides(
     )
     resolved_masks: dict[int, ResolvedTissueMask] = {}
     mask_failures: dict[int, _MaskResolutionResponse] = {}
+    empty_masks = 0
     if mask_resolution_requests:
         emit_progress("tissue.started", total=len(mask_resolution_requests))
 
         def _record_mask_response(response: _MaskResolutionResponse) -> None:
+            nonlocal empty_masks
             if response.ok and response.resolved_mask is not None:
                 resolved_masks[response.input_index] = response.resolved_mask
+                if response.resolved_mask.is_empty_precomputed:
+                    empty_masks += 1
             else:
                 mask_failures[response.input_index] = response
             snapshot_completed = len(resolved_masks)
@@ -1313,6 +1318,7 @@ def tile_slides(
                 total=len(mask_resolution_requests),
                 completed=snapshot_completed,
                 failed=snapshot_failed,
+                empty_masks=empty_masks,
                 pending=max(
                     0, len(mask_resolution_requests) - snapshot_completed - snapshot_failed
                 ),
@@ -1344,6 +1350,7 @@ def tile_slides(
             total=len(mask_resolution_requests),
             completed=snapshot_completed,
             failed=snapshot_failed,
+            empty_masks=empty_masks,
             pending=max(
                 0, len(mask_resolution_requests) - snapshot_completed - snapshot_failed
             ),
@@ -1722,6 +1729,7 @@ def tile_slides(
             output_dir=str(output_dir),
             process_list_path=str(process_list_path),
             zero_tile_successes=snapshot["zero_tile_successes"],
+            empty_masks=empty_masks,
         )
         _finalize_all_pending_previews()
     finally:

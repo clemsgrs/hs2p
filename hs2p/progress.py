@@ -61,12 +61,12 @@ class TextReporter:
         if kind == "tissue.progress":
             return (
                 f"Tissue resolution: {payload['completed']}/{payload['total']} complete, "
-                f"{payload['failed']} failed"
+                f"{payload['failed']} failed, empty_masks={payload.get('empty_masks', 0)}"
             )
         if kind == "tissue.finished":
             return (
                 f"Tissue resolution finished: {payload['completed']}/{payload['total']} complete, "
-                f"{payload['failed']} failed"
+                f"{payload['failed']} failed, empty_masks={payload.get('empty_masks', 0)}"
             )
         if kind == "tiling.started":
             return f"Tiling slides ({payload['total']} total)..."
@@ -78,7 +78,8 @@ class TextReporter:
         if kind == "tiling.finished":
             return (
                 f"Tiling finished: {payload['completed']}/{payload['total']} complete, "
-                f"{payload['failed']} failed, {payload['discovered_tiles']} tiles"
+                f"{payload['failed']} failed, {payload['discovered_tiles']} tiles, "
+                f"empty_masks={payload.get('empty_masks', 0)}"
             )
         if kind == "preview.started":
             return f"Generating previews ({payload['total']} total)..."
@@ -169,7 +170,8 @@ class RichReporter:
                     task_id,
                     completed=payload["completed"] + payload["failed"],
                     description=(
-                        f"Tissue masks ({payload['completed']}/{payload['total']} resolved)"
+                        f"Tissue masks ({payload['completed']}/{payload['total']} resolved, "
+                        f"empty_masks={payload.get('empty_masks', 0)})"
                     ),
                 )
             return
@@ -179,6 +181,15 @@ class RichReporter:
                 self.progress.update(
                     task_id, completed=payload["completed"] + payload["failed"]
                 )
+            self._print_summary(
+                "Tissue Resolution",
+                [
+                    ("Masks", str(payload["total"])),
+                    ("Resolved", str(payload["completed"])),
+                    ("Failed", str(payload["failed"])),
+                    ("empty_masks", str(payload.get("empty_masks", 0))),
+                ],
+            )
             return
         if kind == "tiling.started":
             self._task_ids["tiling"] = self.progress.add_task(
@@ -206,6 +217,7 @@ class RichReporter:
                     ("Slides", str(payload["total"])),
                     ("Completed", str(payload["completed"])),
                     ("Failed", str(payload["failed"])),
+                    ("empty_masks", str(payload.get("empty_masks", 0))),
                     ("Zero-tile", str(payload["zero_tile_successes"])),
                     ("Total tiles", str(payload["discovered_tiles"])),
                 ],

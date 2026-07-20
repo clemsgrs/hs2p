@@ -179,13 +179,16 @@ def test_summarize_annotation_coverage_area_frac_and_est_tiles(patched_mask_open
     assert summary["necrosis"]["est_tiles"] == 0
 
 
-def test_resolve_annotation_masks_recovers_via_openslide_on_degenerate_read(monkeypatch):
-    """A backend that mis-decodes the mask to all-background (cucim + compressed minisblack)
-    is recovered by the openslide fallback."""
+def test_resolve_annotation_masks_accepts_empty_configured_backend_read_without_fallback(
+    monkeypatch,
+):
+    """A label-valid empty read is authoritative and never triggers another backend."""
     labeled = _label_mask()
     empty = np.zeros_like(labeled)
+    opened_backends = []
 
     def fake_open(path, backend=None):
+        opened_backends.append(backend)
         if str(backend).lower() == "openslide":
             return _FakeMaskSlide(labeled, BASE_SPACING)
         return _FakeMaskSlide(empty, BASE_SPACING)
@@ -197,46 +200,16 @@ def test_resolve_annotation_masks_recovers_via_openslide_on_degenerate_read(monk
         pixel_mapping=PIXEL_MAPPING,
         seg_downsample=1,
     )
-    assert int(np.count_nonzero(resolved.masks["tumor"])) == TUMOR_PX
-    assert int(np.count_nonzero(resolved.masks["stroma"])) == STROMA_PX
-    assert int(np.count_nonzero(resolved.masks["necrosis"])) == NECROSIS_PX
-
-
-def test_openslide_fallback_recovers_when_primary_read_rejects_all_zero(monkeypatch):
-    """No-background vocabulary + a degenerate all-zero primary read.
-
-    With no declared 0, the all-zero mis-decoded level fails the discreteness guard and the
-    primary read *raises* (rather than returning an empty mask). The openslide fallback must
-    still kick in and recover the labels — otherwise the slide errors out.
-    """
-    # Fully-labeled raster (only values 1/2, no background) so the openslide read validates.
-    labeled = np.empty((SLIDE_H, SLIDE_W), dtype=np.uint8)
-    labeled[:, : SLIDE_W // 2] = 1
-    labeled[:, SLIDE_W // 2 :] = 2
-    empty = np.zeros_like(labeled)
-
-    def fake_open(path, backend=None):
-        if str(backend).lower() == "openslide":
-            return _FakeMaskSlide(labeled, BASE_SPACING)
-        return _FakeMaskSlide(empty, BASE_SPACING)  # cucim mis-decode → all zero → rejected
-
-    monkeypatch.setattr(maskmod, "open_slide", fake_open)
-    resolved = resolve_annotation_masks(
-        slide=_mock_slide(),
-        mask_path="/fake/slide_mask.tif",
-        pixel_mapping={"tumor": 1, "stroma": 2},
-        seg_downsample=1,
+    assert opened_backends == ["mock"]
+    assert all(
+        int(np.count_nonzero(resolved.masks[name])) == 0
+        for name in ("tumor", "stroma", "necrosis")
     )
-    assert int(np.count_nonzero(resolved.masks["tumor"])) == SLIDE_H * (SLIDE_W // 2)
-    assert int(np.count_nonzero(resolved.masks["stroma"])) == SLIDE_H * (SLIDE_W // 2)
 
 
-def test_openslide_fallback_accepts_valid_all_zero_after_primary_error(monkeypatch):
-    """Primary read raises (e.g. a decode error), openslide recovers a valid all-zero mask.
-
-    With background (0) declared, an all-zero raster is a legitimate read — the fallback must
-    be accepted even though it has no foreground, instead of re-raising the primary error.
-    """
+def test_annotation_backend_exception_fails_with_context_without_fallback(monkeypatch):
+    """Decoder errors identify the authoritative backend and offer an operator action."""
+    opened_backends = []
 
     class _RaisingMaskSlide:
         spacing = BASE_SPACING
@@ -249,22 +222,52 @@ def test_openslide_fallback_accepts_valid_all_zero_after_primary_error(monkeypat
         def close(self):
             return None
 
-    empty = np.zeros((SLIDE_H, SLIDE_W), dtype=np.uint8)
-
     def fake_open(path, backend=None):
-        if str(backend).lower() == "openslide":
-            return _FakeMaskSlide(empty, BASE_SPACING)  # valid: 0 is declared background
-        return _RaisingMaskSlide()  # primary backend raises
+        opened_backends.append(backend)
+        return _RaisingMaskSlide()
 
     monkeypatch.setattr(maskmod, "open_slide", fake_open)
-    resolved = resolve_annotation_masks(
-        slide=_mock_slide(),
-        mask_path="/fake/slide_mask.tif",
-        pixel_mapping={"background": 0, "tumor": 1},
-        seg_downsample=1,
-    )
-    assert int(np.count_nonzero(resolved.masks["tumor"])) == 0
-    assert int(np.count_nonzero(resolved.masks["background"])) == SLIDE_H * SLIDE_W
+    with pytest.raises(RuntimeError) as excinfo:
+        resolve_annotation_masks(
+            slide=_mock_slide(),
+            mask_path="/fake/slide_mask.tif",
+            pixel_mapping={"tumor": 1, "stroma": 2},
+            seg_downsample=1,
+        )
+
+    message = str(excinfo.value)
+    assert opened_backends == ["mock"]
+    assert "Annotation mask" in message
+    assert "/fake/slide_mask.tif" in message
+    assert "backend=mock" in message
+    assert "backend decode error" in message
+    assert "select another backend" in message.lower()
+    assert "regenerate" in message.lower()
+
+
+def test_invalid_annotation_labels_fail_without_an_openslide_fallback(monkeypatch):
+    """Label validation fails on the configured backend without trying a valid alternate."""
+    invalid = np.full((SLIDE_H, SLIDE_W), 3, dtype=np.uint8)
+    valid_alternate = np.zeros((SLIDE_H, SLIDE_W), dtype=np.uint8)
+    opened_backends = []
+
+    def fake_open(path, backend=None):
+        opened_backends.append(backend)
+        if str(backend).lower() == "openslide":
+            return _FakeMaskSlide(valid_alternate, BASE_SPACING)
+        return _FakeMaskSlide(invalid, BASE_SPACING)
+
+    monkeypatch.setattr(maskmod, "open_slide", fake_open)
+    with pytest.raises(ValueError) as excinfo:
+        resolve_annotation_masks(
+            slide=_mock_slide(),
+            mask_path="/fake/slide_mask.tif",
+            pixel_mapping={"background": 0, "tumor": 1},
+            seg_downsample=1,
+        )
+
+    assert opened_backends == ["mock"]
+    assert "non-discrete labels" in str(excinfo.value)
 
 
 def test_resolve_annotation_masks_genuinely_empty_stays_empty(monkeypatch):

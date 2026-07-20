@@ -136,6 +136,7 @@ pip install "hs2p[all]"
 When stdout is interactive, the entrypoint uses `rich` live progress:
 
 - shows discovered tile totals during the run
+- reports `empty_masks` while resolving precomputed tissue masks and in final summaries
 - finishes with a summary panel including output locations and `process_list.csv`
 
 When stdout is non-interactive, `hs2p` falls back to concise plain-text progress and summary logs.
