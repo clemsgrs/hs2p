@@ -52,6 +52,10 @@ class ResolvedTissueMask:
         if self.mask_path is not None:
             object.__setattr__(self, "mask_path", Path(self.mask_path))
 
+    @property
+    def is_empty_precomputed(self) -> bool:
+        return self.tissue_method == "precomputed_mask" and not np.any(self.tissue_mask)
+
 
 @dataclass(frozen=True)
 class ResolvedAnnotationMasks:

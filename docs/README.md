@@ -10,3 +10,5 @@
   - Throughput findings and the benchmark entrypoints in `scripts/`
 - [Tissue mask generation](tissue-mask-generation.md)
   - Standalone pyramidal tissue-mask generation outside the main tiling pipeline
+- Architecture decisions
+  - [ADR 0001: Use one authoritative backend for mask decoding](adr/0001-authoritative-mask-decoding.md)

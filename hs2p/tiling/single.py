@@ -641,6 +641,7 @@ def preprocess_slide(
     try:
         resolved_mask = resolve_tissue_mask(
             slide=slide,
+            sample_id=sample_id,
             tissue_mask_path=tissue_mask_path,
             tissue_mask_tissue_value=tissue_mask_tissue_value,
             tissue_method=tissue_method,

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+from typing import NoReturn
 
 import cv2
 import numpy as np
-from PIL import Image
 
 from hs2p.configs import SegmentationConfig
 from hs2p.segmentation import segment_tissue_image
@@ -14,6 +15,7 @@ from hs2p.wsi.reader import open_slide, select_level, select_level_for_downsampl
 
 DEFAULT_SAM2_THUMBNAIL_SPACING_UM = 8.0
 DEFAULT_SAM2_THUMBNAIL_TOLERANCE = 0.05
+logger = logging.getLogger(__name__)
 
 # Reading a mask level larger than this many pixels means the mask lacks a pyramid level
 # near the requested segmentation spacing (the read would be downsized to the seg grid
@@ -61,21 +63,21 @@ def _is_discrete_binary_mask(mask: np.ndarray, *, tissue_value: int) -> bool:
     return len(values) <= 2 and len(non_tissue) <= 1
 
 
-def _read_exact_tiff_mask_level(mask_path: str | Path, *, mask_level: int) -> np.ndarray:
-    path = Path(mask_path)
-    with Image.open(path) as image:
-        n_frames = int(getattr(image, "n_frames", 1))
-        if mask_level >= n_frames:
-            raise ValueError(
-                f"Mask level {mask_level} is unavailable in TIFF mask {path} (n_frames={n_frames})"
-            )
-        image.seek(mask_level)
-        return np.asarray(image)
-
-
 def _is_label_subset(mask: np.ndarray, *, valid_values: set[int]) -> bool:
     values = {int(value) for value in np.unique(mask.astype(np.int64, copy=False)).tolist()}
     return values <= valid_values
+
+
+def _raise_mask_decode_error(
+    *, label: str, mask_path: str | Path, backend: str, error: Exception
+) -> NoReturn:
+    message = (
+        f"{label} decode failed for path={Path(mask_path)} with backend={backend}: {error}. "
+        "Select another backend or regenerate the mask."
+    )
+    if isinstance(error, ValueError):
+        raise ValueError(message) from error
+    raise RuntimeError(message) from error
 
 
 def _read_discrete_mask_level(
@@ -86,8 +88,7 @@ def _read_discrete_mask_level(
     is_discrete,
     label: str,
 ) -> np.ndarray:
-    """Read a mask level, preferring the backend read but falling back to an exact TIFF read
-    when the backend's (possibly interpolated) downsampled level is not label-discrete.
+    """Read and validate one mask level through the already-selected backend.
 
     ``is_discrete`` is the predicate that decides acceptability — a single-tissue-value check
     for tissue masks, or a class-value-subset check for multi-class annotation masks.
@@ -106,13 +107,6 @@ def _read_discrete_mask_level(
     if is_discrete(backend_mask):
         return _as_discrete_label_array(backend_mask)
 
-    suffix = Path(mask_path).suffix.lower()
-    if suffix in {".tif", ".tiff"}:
-        exact_mask = _reduce_mask_channels(
-            _read_exact_tiff_mask_level(mask_path, mask_level=mask_level)
-        )
-        if is_discrete(exact_mask):
-            return _as_discrete_label_array(exact_mask)
     values = np.unique(backend_mask.astype(np.int64, copy=False))
     raise ValueError(
         f"{label} read produced non-discrete labels "
@@ -160,24 +154,32 @@ def load_precomputed_tissue_mask(
     seg_level: int,
     tissue_value: int,
 ) -> tuple[np.ndarray, int, float]:
-    mask_slide = open_slide(mask_path, backend=slide.backend_name)
     try:
-        seg_size = slide.level_dimensions[seg_level]
-        seg_spacing_um = float(slide.spacing) * float(
-            _normalize_level_downsamples(slide.level_downsamples)[seg_level]
-        )
-        mask_level, mask_spacing_um = _select_mask_level(
-            mask_slide=mask_slide,
-            requested_spacing_um=seg_spacing_um,
-        )
-        raw_mask = _read_mask_level(
+        mask_slide = open_slide(mask_path, backend=slide.backend_name)
+        try:
+            seg_size = slide.level_dimensions[seg_level]
+            seg_spacing_um = float(slide.spacing) * float(
+                _normalize_level_downsamples(slide.level_downsamples)[seg_level]
+            )
+            mask_level, mask_spacing_um = _select_mask_level(
+                mask_slide=mask_slide,
+                requested_spacing_um=seg_spacing_um,
+            )
+            raw_mask = _read_mask_level(
+                mask_path=mask_path,
+                mask_slide=mask_slide,
+                mask_level=mask_level,
+                tissue_value=tissue_value,
+            )
+        finally:
+            mask_slide.close()
+    except Exception as exc:
+        _raise_mask_decode_error(
+            label="Precomputed tissue mask",
             mask_path=mask_path,
-            mask_slide=mask_slide,
-            mask_level=mask_level,
-            tissue_value=tissue_value,
+            backend=slide.backend_name,
+            error=exc,
         )
-    finally:
-        mask_slide.close()
 
     if raw_mask.shape[:2] != (int(seg_size[1]), int(seg_size[0])):
         raw_mask = cv2.resize(
@@ -252,6 +254,7 @@ def prepare_sam2_thumbnail(
 def resolve_tissue_mask(
     *,
     slide,
+    sample_id: str | None = None,
     tissue_method: str | None = None,
     tissue_mask_path: str | Path | None,
     tissue_mask_tissue_value: int = 1,
@@ -277,6 +280,18 @@ def resolve_tissue_mask(
             seg_level=seg_level,
             tissue_value=int(tissue_mask_tissue_value),
         )
+        if not np.any(mask):
+            logger.warning(
+                "Empty precomputed tissue mask: sample_id=%s mask_path=%s backend=%s "
+                "mask_level=%s tissue_value=%s. The configured backend returned a valid "
+                "mask containing no configured tissue value; verify that the mask is "
+                "intentionally empty, select another backend, or regenerate the mask.",
+                sample_id if sample_id is not None else "<unknown>",
+                Path(tissue_mask_path),
+                slide.backend_name,
+                mask_level,
+                int(tissue_mask_tissue_value),
+            )
         return ResolvedTissueMask(
             tissue_mask=mask,
             tissue_method="precomputed_mask",
@@ -392,23 +407,12 @@ def load_annotation_label_mask(
     binarization) and validates against the annotation pixel-value set rather than a single
     tissue value. Resampling is nearest-neighbor — any averaging would invent class indices.
 
-    Robustness guard: some backends mis-decode intermediate levels of a compressed
-    single-channel (minisblack) pyramid and return an all-background level (observed with
-    cucim + LZW/deflate masks, where openslide decodes the same level correctly). We retry via
-    openslide and prefer that result when it recovers labels — costless when the primary read
-    already carries labels, and safe for genuinely-empty masks (openslide would agree).
-
-    The degenerate read shows up two ways depending on the label vocabulary: if the background
-    value is declared, the all-background level reads as a valid (empty) mask; if it is not
-    (e.g. ``{tumor: 1, stroma: 2}`` with no ``0``), the discreteness guard *rejects* the
-    all-zero level and raises. Both must trigger the openslide retry, so the primary read is
-    guarded and its error only surfaces if openslide fails to recover.
+    The slide's configured backend is authoritative: its validated output is returned as-is,
+    including a valid single-value mask. Decoder failures are not retried through another
+    backend.
     """
-    backend_name = str(getattr(slide, "backend_name", "")).lower()
-    primary_error: Exception | None = None
-    raw_mask = mask_level = mask_spacing_um = None
     try:
-        raw_mask, mask_level, mask_spacing_um = _read_label_mask_at_seg(
+        return _read_label_mask_at_seg(
             mask_path=mask_path,
             slide=slide,
             seg_level=seg_level,
@@ -416,34 +420,12 @@ def load_annotation_label_mask(
             backend=slide.backend_name,
         )
     except Exception as exc:
-        primary_error = exc
-
-    degenerate = primary_error is not None or not raw_mask.any()
-    fallback = None
-    if degenerate and backend_name != "openslide":
-        try:
-            fallback = _read_label_mask_at_seg(
-                mask_path=mask_path,
-                slide=slide,
-                seg_level=seg_level,
-                valid_values=valid_values,
-                backend="openslide",
-            )
-        except Exception:
-            fallback = None
-    if fallback is not None:
-        fb_mask, fb_level, fb_spacing = fallback
-        # When the primary read *raised*, any validated fallback is acceptable — including a
-        # legitimately all-zero mask (a genuinely empty raster, or a label mapped to 0 now
-        # that no value is reserved). The ``.any()`` gate applies only to the all-background
-        # *successful*-primary recovery heuristic, where we prefer openslide solely when it
-        # actually recovers labels rather than swapping one empty read for another.
-        if primary_error is not None or fb_mask.any():
-            return fb_mask, fb_level, fb_spacing
-
-    if primary_error is not None:
-        raise primary_error
-    return raw_mask, mask_level, mask_spacing_um
+        _raise_mask_decode_error(
+            label="Annotation mask",
+            mask_path=mask_path,
+            backend=slide.backend_name,
+            error=exc,
+        )
 
 
 def resolve_annotation_masks(

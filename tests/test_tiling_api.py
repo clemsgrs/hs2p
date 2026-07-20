@@ -1399,17 +1399,23 @@ def test_tile_slides_emits_tissue_progress_before_tiling_progress(
         progress_events.append((kind, payload))
 
     def _fake_resolve_mask_for_request(request):
+        is_empty = request.whole_slide.sample_id == "slide-1"
         return orchestration_mod._MaskResolutionResponse(
             input_index=request.input_index,
             whole_slide=request.whole_slide,
             ok=True,
             resolved_mask=preprocessing_mod.ResolvedTissueMask(
-                tissue_mask=np.zeros((8, 8), dtype=np.uint8),
-                tissue_method="hsv",
+                tissue_mask=np.full(
+                    (8, 8), 0 if is_empty else 255, dtype=np.uint8
+                ),
+                tissue_method="precomputed_mask",
                 requested_seg_downsample=64,
                 seg_downsample=64,
                 seg_level=0,
                 seg_spacing_um=0.5,
+                mask_path=Path(f"{request.whole_slide.sample_id}-mask.tif"),
+                tissue_mask_tissue_value=1,
+                mask_level=0,
             ),
             requested_backend=request.tiling.requested_backend,
             backend=request.tiling.backend,
@@ -1475,6 +1481,12 @@ def test_tile_slides_emits_tissue_progress_before_tiling_progress(
     assert kinds.index("tissue.finished") < kinds.index("tiling.started")
     assert kinds.count("tissue.progress") == 2
     assert kinds.count("tiling.progress") == 2
+    tissue_payloads = [
+        payload
+        for kind, payload in progress_events
+        if kind in {"tissue.progress", "tissue.finished"}
+    ]
+    assert [payload["empty_masks"] for payload in tissue_payloads] == [1, 1, 1]
 
 
 def test_tile_slides_uses_process_pool_for_tissue_resolution(

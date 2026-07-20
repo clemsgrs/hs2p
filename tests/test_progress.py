@@ -238,6 +238,7 @@ def test_rich_tiling_summary_uses_zero_tile_label_without_process_list(monkeypat
                 "failed": 1,
                 "zero_tile_successes": 4,
                 "discovered_tiles": 7,
+                "empty_masks": 1,
                 "process_list_path": "ignored.csv",
             },
         )
@@ -248,6 +249,7 @@ def test_rich_tiling_summary_uses_zero_tile_label_without_process_list(monkeypat
         ("Slides", "3"),
         ("Completed", "2"),
         ("Failed", "1"),
+        ("empty_masks", "1"),
         ("Zero-tile", "4"),
         ("Total tiles", "7"),
     ]
@@ -260,11 +262,18 @@ def test_rich_tissue_progress_uses_a_separate_task(monkeypatch):
     _install_fake_rich_progress(monkeypatch)
     _install_fake_rich_summary_types(monkeypatch)
 
+    captured = {}
+
     class FakeConsole:
         def print(self, *args, **kwargs):
             return None
 
     reporter = progress.RichReporter(output_dir="out", console=FakeConsole())
+    monkeypatch.setattr(
+        reporter,
+        "_print_summary",
+        lambda title, rows: captured.update({"title": title, "rows": rows}),
+    )
 
     reporter.emit(
         progress.ProgressEvent(
@@ -280,12 +289,38 @@ def test_rich_tissue_progress_uses_a_separate_task(monkeypatch):
                 "completed": 2,
                 "failed": 1,
                 "pending": 0,
+                "empty_masks": 1,
             },
         )
     )
 
-    assert reporter.progress.tasks[1]["description"] == "Tissue masks (2/3 resolved)"
+    assert (
+        reporter.progress.tasks[1]["description"]
+        == "Tissue masks (2/3 resolved, empty_masks=1)"
+    )
     assert reporter.progress.tasks[1]["completed"] == 3
+
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="tissue.finished",
+            payload={
+                "total": 3,
+                "completed": 2,
+                "failed": 1,
+                "pending": 0,
+                "empty_masks": 1,
+            },
+        )
+    )
+    assert captured == {
+        "title": "Tissue Resolution",
+        "rows": [
+            ("Masks", "3"),
+            ("Resolved", "2"),
+            ("Failed", "1"),
+            ("empty_masks", "1"),
+        ],
+    }
 
 
 def test_tiling_main_installs_progress_reporter_only_during_pipeline_run(
@@ -507,6 +542,7 @@ def test_tile_slides_emits_progress_for_reused_success_and_failure(
         "output_dir": str(run_dir),
         "process_list_path": str(run_dir / "process_list.csv"),
         "zero_tile_successes": 0,
+        "empty_masks": 0,
     }
 
 def test_progress_aware_logging_routes_stdout_through_active_reporter():
@@ -542,6 +578,55 @@ def test_text_reporter_formats_backend_selection_line(capsys):
 
     out = capsys.readouterr().out.strip()
     assert out == "[backend] slide-1: selected cuCIM for auto backend"
+
+
+def test_text_reporter_exposes_empty_masks_in_progress_and_final_summaries(capsys):
+    import hs2p.progress as progress
+
+    reporter = progress.TextReporter()
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="tissue.progress",
+            payload={
+                "total": 3,
+                "completed": 2,
+                "failed": 0,
+                "pending": 1,
+                "empty_masks": 1,
+            },
+        )
+    )
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="tissue.finished",
+            payload={
+                "total": 3,
+                "completed": 3,
+                "failed": 0,
+                "pending": 0,
+                "empty_masks": 1,
+            },
+        )
+    )
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="tiling.finished",
+            payload={
+                "total": 3,
+                "completed": 3,
+                "failed": 0,
+                "pending": 0,
+                "discovered_tiles": 9,
+                "empty_masks": 1,
+            },
+        )
+    )
+
+    assert capsys.readouterr().out.strip().splitlines() == [
+        "Tissue resolution: 2/3 complete, 0 failed, empty_masks=1",
+        "Tissue resolution finished: 3/3 complete, 0 failed, empty_masks=1",
+        "Tiling finished: 3/3 complete, 0 failed, 9 tiles, empty_masks=1",
+    ]
 
 
 def test_text_reporter_formats_preview_progress_line(capsys):
