@@ -54,6 +54,7 @@ def tiling_config() -> TilingConfig:
         overlap=0.1,
         min_coverage={"tissue": 0.2},
         backend="asap",
+        mask_backend="asap",
     )
 
 
@@ -532,6 +533,7 @@ def test_tile_slide_errors_when_tissue_coverage_missing(
         overlap=0.1,
         min_coverage={},  # no tissue threshold
         backend="asap",
+        mask_backend="asap",
     )
     with pytest.raises(ValueError, match="min_coverage.tissue is required"):
         tile_slide(
@@ -718,6 +720,8 @@ def test_save_tiling_result_writes_preprocessing_npz_and_json(tmp_path: Path):
         "mask_path": None,
         "backend": "asap",
         "requested_backend": "asap",
+        "mask_backend": None,
+        "requested_mask_backend": None,
     }
     assert meta["tiling"]["requested_spacing_um"] == 0.5
     assert meta["tiling"]["requested_tile_size_px"] == 224
@@ -1856,15 +1860,6 @@ def test_tile_slides_defaults_gpu_decode_to_disabled_for_saved_tiles(
 
     monkeypatch.setattr(
         orchestration_mod,
-        "resolve_backend",
-        lambda *args, **kwargs: SimpleNamespace(
-            backend="cucim",
-            requested_backend="cucim",
-            reason=None,
-        ),
-    )
-    monkeypatch.setattr(
-        orchestration_mod,
         "_compute_and_save_tiling_artifacts_from_request",
         _fake_compute_and_save,
     )
@@ -2345,6 +2340,8 @@ def test_tile_slides_writes_process_list_and_can_reuse_precomputed_tiles(
         "mask_path",
         "requested_backend",
         "backend",
+        "requested_mask_backend",
+        "mask_backend",
         "tiling_status",
         "num_tiles",
         "coordinates_npz_path",
@@ -2671,6 +2668,8 @@ def test_tile_slides_resume_marks_stale_artifact_as_failed(
                 "mask_path": np.nan,
                 "requested_backend": "asap",
                 "backend": "asap",
+                "requested_mask_backend": np.nan,
+                "mask_backend": np.nan,
                 "tiling_status": "success",
                 "num_tiles": artifacts.num_tiles,
                 "coordinates_npz_path": str(artifacts.coordinates_npz_path),
@@ -2736,6 +2735,8 @@ def test_tile_slides_resume_preserves_extra_columns_and_existing_preview_paths(
                 "mask_path": np.nan,
                 "requested_backend": "asap",
                 "backend": "asap",
+                "requested_mask_backend": np.nan,
+                "mask_backend": np.nan,
                 "tiling_status": "success",
                 "num_tiles": artifacts.num_tiles,
                 "coordinates_npz_path": str(artifacts.coordinates_npz_path),

@@ -12,3 +12,4 @@
   - Standalone pyramidal tissue-mask generation outside the main tiling pipeline
 - Architecture decisions
   - [ADR 0001: Use one authoritative backend for mask decoding](adr/0001-authoritative-mask-decoding.md)
+  - [ADR 0002: Resolve the mask backend independently from the slide backend](adr/0002-independent-mask-backend.md)

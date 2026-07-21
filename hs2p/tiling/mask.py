@@ -11,11 +11,33 @@ from hs2p.configs import SegmentationConfig
 from hs2p.segmentation import segment_tissue_image
 from hs2p.tiling.contours import _normalize_level_downsamples
 from hs2p.tiling.result import ResolvedAnnotationMasks, ResolvedTissueMask, Sam2Thumbnail
-from hs2p.wsi.reader import open_slide, select_level, select_level_for_downsample
+from hs2p.wsi.reader import (
+    AUTO_BACKEND,
+    open_slide,
+    resolve_backend,
+    select_level,
+    select_level_for_downsample,
+)
 
 DEFAULT_SAM2_THUMBNAIL_SPACING_UM = 8.0
 DEFAULT_SAM2_THUMBNAIL_TOLERANCE = 0.05
 logger = logging.getLogger(__name__)
+
+
+def _resolve_mask_backend(
+    mask_path: str | Path, mask_backend: str | None, *, default: str = AUTO_BACKEND
+) -> str:
+    """Resolve the concrete backend used to read a source mask, from the mask path alone.
+
+    ``mask_backend`` is the *requested* mask backend: a concrete name is authoritative and
+    returned without a probe; ``"auto"`` triggers openability-only auto-selection over the mask
+    path; ``None`` means "not specified by the caller" and falls back to ``default`` (the
+    pipeline always passes an explicit resolved backend, so the fallback only applies to direct
+    low-level calls). This is the mask-role half of the shared backend-resolution seam (#163):
+    the slide backend is resolved separately from the slide path and never consulted here.
+    """
+    requested = mask_backend if mask_backend is not None else default
+    return resolve_backend(requested, wsi_path=Path(mask_path)).backend
 
 # Reading a mask level larger than this many pixels means the mask lacks a pyramid level
 # near the requested segmentation spacing (the read would be downsized to the seg grid
@@ -153,9 +175,13 @@ def load_precomputed_tissue_mask(
     slide,
     seg_level: int,
     tissue_value: int,
+    mask_backend: str | None = None,
 ) -> tuple[np.ndarray, int, float]:
+    resolved_mask_backend = _resolve_mask_backend(
+        mask_path, mask_backend, default=str(getattr(slide, "backend_name", AUTO_BACKEND))
+    )
     try:
-        mask_slide = open_slide(mask_path, backend=slide.backend_name)
+        mask_slide = open_slide(mask_path, backend=resolved_mask_backend)
         try:
             seg_size = slide.level_dimensions[seg_level]
             seg_spacing_um = float(slide.spacing) * float(
@@ -177,7 +203,7 @@ def load_precomputed_tissue_mask(
         _raise_mask_decode_error(
             label="Precomputed tissue mask",
             mask_path=mask_path,
-            backend=slide.backend_name,
+            backend=resolved_mask_backend,
             error=exc,
         )
 
@@ -266,8 +292,19 @@ def resolve_tissue_mask(
     sam2_checkpoint_path: str | Path | None = None,
     sam2_config_path: str | Path | None = None,
     sam2_device: str = "cpu",
+    mask_backend: str | None = None,
+    requested_mask_backend: str | None = None,
 ) -> ResolvedTissueMask:
     if tissue_mask_path is not None:
+        default_mask_backend = str(getattr(slide, "backend_name", AUTO_BACKEND))
+        resolved_mask_backend = _resolve_mask_backend(
+            tissue_mask_path, mask_backend, default=default_mask_backend
+        )
+        requested_mask_backend = (
+            requested_mask_backend
+            if requested_mask_backend is not None
+            else (mask_backend if mask_backend is not None else default_mask_backend)
+        )
         normalized_downsamples = _normalize_level_downsamples(slide.level_downsamples)
         seg_level = select_level_for_downsample(
             float(seg_downsample),
@@ -279,16 +316,18 @@ def resolve_tissue_mask(
             slide=slide,
             seg_level=seg_level,
             tissue_value=int(tissue_mask_tissue_value),
+            mask_backend=resolved_mask_backend,
         )
         if not np.any(mask):
             logger.warning(
                 "Empty precomputed tissue mask: sample_id=%s mask_path=%s backend=%s "
-                "mask_level=%s tissue_value=%s. The configured backend returned a valid "
-                "mask containing no configured tissue value; verify that the mask is "
-                "intentionally empty, select another backend, or regenerate the mask.",
+                "mask_level=%s tissue_value=%s. The mask backend returned a valid mask "
+                "containing no configured tissue value; the mask may be genuinely empty or "
+                "incorrectly decoded — verify it is intentionally empty, select another mask "
+                "backend, or regenerate the mask.",
                 sample_id if sample_id is not None else "<unknown>",
                 Path(tissue_mask_path),
-                slide.backend_name,
+                resolved_mask_backend,
                 mask_level,
                 int(tissue_mask_tissue_value),
             )
@@ -303,6 +342,8 @@ def resolve_tissue_mask(
             tissue_mask_tissue_value=int(tissue_mask_tissue_value),
             mask_level=mask_level,
             mask_spacing_um=mask_spacing_um,
+            mask_backend=resolved_mask_backend,
+            requested_mask_backend=requested_mask_backend,
         )
 
     if not tissue_method:
@@ -400,6 +441,7 @@ def load_annotation_label_mask(
     slide,
     seg_level: int,
     valid_values: set[int],
+    mask_backend: str | None = None,
 ) -> tuple[np.ndarray, int, float]:
     """Read a multi-class annotation label raster resampled to the slide's ``seg_level`` grid.
 
@@ -407,23 +449,26 @@ def load_annotation_label_mask(
     binarization) and validates against the annotation pixel-value set rather than a single
     tissue value. Resampling is nearest-neighbor — any averaging would invent class indices.
 
-    The slide's configured backend is authoritative: its validated output is returned as-is,
+    The mask's own resolved backend is authoritative: its validated output is returned as-is,
     including a valid single-value mask. Decoder failures are not retried through another
     backend.
     """
+    resolved_mask_backend = _resolve_mask_backend(
+        mask_path, mask_backend, default=str(getattr(slide, "backend_name", AUTO_BACKEND))
+    )
     try:
         return _read_label_mask_at_seg(
             mask_path=mask_path,
             slide=slide,
             seg_level=seg_level,
             valid_values=valid_values,
-            backend=slide.backend_name,
+            backend=resolved_mask_backend,
         )
     except Exception as exc:
         _raise_mask_decode_error(
             label="Annotation mask",
             mask_path=mask_path,
-            backend=slide.backend_name,
+            backend=resolved_mask_backend,
             error=exc,
         )
 
@@ -435,6 +480,8 @@ def resolve_annotation_masks(
     pixel_mapping: dict[str, int],
     seg_downsample: int = 64,
     tissue_method: str = "precomputed_mask",
+    mask_backend: str | None = None,
+    requested_mask_backend: str | None = None,
 ) -> ResolvedAnnotationMasks:
     """Read an annotation mask into one binary mask per declared label at ``seg_downsample``.
 
@@ -454,6 +501,15 @@ def resolve_annotation_masks(
     if mask_path is None:
         raise ValueError("resolve_annotation_masks requires a mask_path")
 
+    default_mask_backend = str(getattr(slide, "backend_name", AUTO_BACKEND))
+    resolved_mask_backend = _resolve_mask_backend(
+        mask_path, mask_backend, default=default_mask_backend
+    )
+    requested_mask_backend = (
+        requested_mask_backend
+        if requested_mask_backend is not None
+        else (mask_backend if mask_backend is not None else default_mask_backend)
+    )
     normalized_downsamples = _normalize_level_downsamples(slide.level_downsamples)
     seg_level = select_level_for_downsample(
         float(seg_downsample),
@@ -466,6 +522,7 @@ def resolve_annotation_masks(
         slide=slide,
         seg_level=seg_level,
         valid_values=valid_values,
+        mask_backend=resolved_mask_backend,
     )
     masks = {
         name: np.where(raw_mask == int(value), np.uint8(255), np.uint8(0)).astype(np.uint8)
@@ -482,6 +539,8 @@ def resolve_annotation_masks(
         mask_path=mask_path,
         mask_level=mask_level,
         mask_spacing_um=mask_spacing_um,
+        mask_backend=resolved_mask_backend,
+        requested_mask_backend=requested_mask_backend,
     )
 
 

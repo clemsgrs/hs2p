@@ -79,7 +79,8 @@ def test_success_row_has_all_required_columns():
     )
     expected_columns = {
         "sample_id", "annotation", "output_mode", "image_path", "mask_path",
-        "requested_backend", "backend", "tiling_status", "num_tiles",
+        "requested_backend", "backend", "requested_mask_backend", "mask_backend",
+        "tiling_status", "num_tiles",
         "coordinates_npz_path", "coordinates_meta_path", "tiles_tar_path",
         "mask_preview_path", "tiling_preview_path",
         "error", "traceback",
@@ -95,7 +96,8 @@ def test_failure_row_has_all_required_columns():
     )
     expected_columns = {
         "sample_id", "annotation", "output_mode", "image_path", "mask_path",
-        "requested_backend", "backend", "tiling_status", "num_tiles",
+        "requested_backend", "backend", "requested_mask_backend", "mask_backend",
+        "tiling_status", "num_tiles",
         "coordinates_npz_path", "coordinates_meta_path", "tiles_tar_path",
         "mask_preview_path", "tiling_preview_path",
         "error", "traceback",

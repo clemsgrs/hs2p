@@ -164,7 +164,8 @@ Internally, the shared coordinate engine still uses a generic `mask_path`.
 
 ## Backend selection
 
-`TilingConfig.backend` supports:
+`TilingConfig.backend` (slide reader) and `TilingConfig.mask_backend` (source-mask reader)
+each support:
 
 - `auto`
 - `cucim`
@@ -172,4 +173,20 @@ Internally, the shared coordinate engine still uses a generic `mask_path`.
 - `openslide`
 - `asap`
 
-`auto` prefers `cucim -> vips -> openslide -> asap`.
+`auto` prefers `cucim -> vips -> openslide -> asap`. Both fields reject null and unknown
+values when the `TilingConfig` is constructed.
+
+The slide backend is resolved from the slide path and the mask backend from the source-mask
+path — independently, with the same openability-only `auto` policy (no label-semantics
+inspection, no retry after selection). An explicit mask backend applies to every source-mask
+read: precomputed tissue masks, annotation masks, the low-level readers
+(`resolve_tissue_mask`, `resolve_annotation_masks`, `load_precomputed_tissue_mask`,
+`load_annotation_label_mask`, all of which accept a `mask_backend`), `overlay_mask_on_slide`,
+`WSI(..., mask_path=..., mask_backend=...)`, and deferred preview reads. A slide with no source
+mask never resolves or validates mask-backend availability, and its mask provenance is null.
+
+`TilingResult`, `TilingArtifacts`, the tiling metadata, and `process_list.csv` record both the
+requested and resolved slide and mask backends separately (`requested_backend` / `backend` and
+`requested_mask_backend` / `mask_backend`); requested values are provenance only. Resume
+compares the resolved slide backend and, when a source mask exists, the resolved mask backend,
+and does not reject artifacts merely because a requested value differs.

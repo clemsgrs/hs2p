@@ -65,12 +65,16 @@ class WSI(object):
         backend: str,
         mask_path: Path | None = None,
         spacing_at_level_0: float | None = None,
+        mask_backend: str = "auto",
     ):
         self.path = path
         self.name = path.stem.replace(" ", "_")
         self.fmt = path.suffix
+        # Slide and mask backends resolve independently from their own paths (#163): the slide
+        # backend from ``path`` only, the mask backend from ``mask_path`` only. A slide with no
+        # mask leaves both mask-provenance attributes ``None``.
         self.requested_backend = backend
-        selection = resolve_backend(backend, wsi_path=path, mask_path=mask_path)
+        selection = resolve_backend(backend, wsi_path=path)
         self.backend = selection.backend
         self.reader = open_slide(
             path,
@@ -88,10 +92,15 @@ class WSI(object):
 
         self.mask_path = mask_path
         self.mask_reader = None
+        self.requested_mask_backend: str | None = None
+        self.mask_backend: str | None = None
         if mask_path is not None:
+            self.requested_mask_backend = mask_backend
+            mask_selection = resolve_backend(mask_backend, wsi_path=mask_path)
+            self.mask_backend = mask_selection.backend
             self.mask_reader = open_slide(
                 mask_path,
-                backend=self.backend,
+                backend=self.mask_backend,
             )
 
     def get_slide(self, level: int) -> np.ndarray:

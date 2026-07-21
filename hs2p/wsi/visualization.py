@@ -254,6 +254,7 @@ def overlay_mask_on_slide(
     outer_border_color: tuple[int, int, int] = DEFAULT_TISSUE_BORDER_COLOR,
     hole_border_color: tuple[int, int, int] = DEFAULT_TISSUE_HOLE_COLOR,
     stroke_thickness: int | None = None,
+    mask_backend: str = "auto",
 ):
     wsi_object = WSI(path=wsi_path, backend=backend)
 
@@ -275,9 +276,10 @@ def overlay_mask_on_slide(
         )
         width, height = wsi.size
     if annotation_mask_path is not None:
+        # The mask is decoded with its own resolved backend, independent of the slide's (#163).
         mask_object = WSI(
             path=annotation_mask_path,
-            backend=backend,
+            backend=mask_backend,
         )
         mask_arr = read_aligned_mask(
             mask_obj=mask_object.reader,
@@ -369,6 +371,7 @@ def write_coordinate_preview(
     palette: np.ndarray | None = None,
     pixel_mapping: dict[str, int] | None = None,
     color_mapping: dict[str, list[int] | None] | None = None,
+    mask_backend: str = "auto",
 ):
     wsi = WSI(wsi_path, backend=backend)
     vis_level = wsi.get_best_level_for_downsample_custom(downsample)
@@ -378,7 +381,8 @@ def write_coordinate_preview(
         # methods). A WSI exposes ``spacings`` but not ``read_level``, so handing it the
         # WSI raised ``'WSI' object has no attribute 'read_level'``. This mirrors the
         # mask-preview path (``overlay_mask_on_slide`` uses ``mask_obj=mask_object.reader``).
-        mask = WSI(mask_path, backend=backend).reader
+        # The mask uses its own resolved backend, independent of the slide's (#163).
+        mask = WSI(mask_path, backend=mask_backend).reader
     else:
         mask = None
 

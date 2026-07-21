@@ -5,6 +5,30 @@ from pathlib import Path
 from .loader import default_config
 
 AUTO_BACKEND = "auto"
+# Backend names accepted by configuration validation. Kept in lockstep with the runtime
+# registry in ``hs2p.wsi.reader._BACKENDS`` (plus ``auto``); duplicated here so the config
+# layer validates without importing the (heavier) WSI reader package at model-definition time.
+VALID_BACKENDS: frozenset[str] = frozenset(
+    {AUTO_BACKEND, "cucim", "asap", "openslide", "vips"}
+)
+
+
+def _validate_backend_name(value: object, *, field: str) -> str:
+    """Reject null and unknown backend names for a config field.
+
+    Both ``backend`` and ``mask_backend`` accept only ``auto`` plus the four concrete
+    backends. ``None`` and unknown strings are configuration errors — including when a
+    :class:`TilingConfig` is constructed directly in Python.
+    """
+    if not isinstance(value, str):
+        raise TypeError(
+            f"tiling.{field} must be one of {sorted(VALID_BACKENDS)}, got {value!r}"
+        )
+    if value not in VALID_BACKENDS:
+        raise ValueError(
+            f"tiling.{field} must be one of {sorted(VALID_BACKENDS)}, got {value!r}"
+        )
+    return value
 
 _DEFAULT_TILING = default_config.tiling
 _DEFAULT_TILING_PARAMS = _DEFAULT_TILING.params
@@ -27,12 +51,24 @@ class TilingConfig:
     # despite the mapping field.
     min_coverage: Mapping[str, float] = field(hash=False)
     backend: str = AUTO_BACKEND
+    mask_backend: str = AUTO_BACKEND
     independent_sampling: bool = False
+    # Provenance: the backends originally requested in config, preserved verbatim across the
+    # runtime ``replace(tiling, backend=<resolved>)`` auto-resolution step. Default ``None`` is
+    # a sentinel meaning "not explicitly supplied" — ``__post_init__`` fills it from the
+    # as-constructed ``backend``/``mask_backend`` so a freshly built config reports what was
+    # requested, while a resolved config keeps the original request rather than echoing the
+    # resolved value back as the request.
+    requested_backend: str | None = None
+    requested_mask_backend: str | None = None
 
-    @property
-    def requested_backend(self) -> str:
-        """Backend requested by config before runtime auto-resolution."""
-        return self.backend
+    def __post_init__(self) -> None:
+        _validate_backend_name(self.backend, field="backend")
+        _validate_backend_name(self.mask_backend, field="mask_backend")
+        if self.requested_backend is None:
+            object.__setattr__(self, "requested_backend", self.backend)
+        if self.requested_mask_backend is None:
+            object.__setattr__(self, "requested_mask_backend", self.mask_backend)
 
 
 @dataclass(frozen=True)

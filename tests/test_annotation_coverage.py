@@ -30,6 +30,20 @@ PIXEL_MAPPING = {"background": 0, "tumor": 1, "stroma": 2, "necrosis": 3}
 TUMOR_PX, STROMA_PX, NECROSIS_PX = 40000, 40000, 1600
 
 
+def _fake_resolve_backends(
+    *, requested_slide_backend, requested_mask_backend, wsi_path, mask_path=None
+):
+    from hs2p.wsi.backend import BackendSelection, ResolvedBackends
+
+    sel = BackendSelection(backend="asap", reason=None, tried=("asap",))
+    return ResolvedBackends(
+        slide=sel,
+        mask=None if mask_path is None else sel,
+        requested_slide_backend=requested_slide_backend,
+        requested_mask_backend=None if mask_path is None else requested_mask_backend,
+    )
+
+
 def _label_mask() -> np.ndarray:
     mask = np.zeros((SLIDE_H, SLIDE_W), dtype=np.uint8)
     mask[0:200, 0:200] = 1
@@ -383,11 +397,7 @@ def test_tile_slide_with_sampling_returns_per_annotation_dict(monkeypatch):
 
     monkeypatch.setattr(singlemod, "open_slide", fake_open)
     monkeypatch.setattr(maskmod, "open_slide", fake_open)
-    monkeypatch.setattr(
-        orchmod,
-        "resolve_backend",
-        lambda *a, **k: SimpleNamespace(backend="mock", reason=None),
-    )
+    monkeypatch.setattr(orchmod, "resolve_backends", _fake_resolve_backends)
 
     whole_slide = SlideSpec(
         sample_id="slide0",
@@ -400,7 +410,7 @@ def test_tile_slide_with_sampling_returns_per_annotation_dict(monkeypatch):
         tolerance=0.05,
         overlap=0.0,
         min_coverage={"tissue": 0.0},
-        backend="mock",
+        backend="asap",
     )
     result = tile_slide(
         whole_slide,
@@ -475,11 +485,7 @@ def _patch_tile_slides_open(monkeypatch):
 
     monkeypatch.setattr(singlemod, "open_slide", fake_open)
     monkeypatch.setattr(maskmod, "open_slide", fake_open)
-    monkeypatch.setattr(
-        orchmod,
-        "resolve_backend",
-        lambda *a, **k: SimpleNamespace(backend="mock", reason=None),
-    )
+    monkeypatch.setattr(orchmod, "resolve_backends", _fake_resolve_backends)
 
 
 def _slides(n):
@@ -500,7 +506,7 @@ def _mock_tiling():
         tolerance=0.05,
         overlap=0.0,
         min_coverage={"tissue": 0.0},
-        backend="mock",
+        backend="asap",
     )
 
 

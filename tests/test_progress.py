@@ -411,6 +411,8 @@ def test_tile_slides_emits_progress_for_reused_success_and_failure(
                 "mask_path": np.nan,
                 "requested_backend": "asap",
                 "backend": "asap",
+                "requested_mask_backend": np.nan,
+                "mask_backend": np.nan,
                 "tiling_status": "success",
                 "num_tiles": 2,
                 "coordinates_npz_path": str(run_dir / "tiles" / "slide-a.coordinates.npz"),
@@ -458,9 +460,11 @@ def test_tile_slides_emits_progress_for_reused_success_and_failure(
             mask_preview_path=None,
             requested_backend=None,
             backend=None,
-                error="boom",
-                traceback_text="traceback",
-            )
+            requested_mask_backend=None,
+            mask_backend=None,
+            error="boom",
+            traceback_text="traceback",
+        )
 
     def _fake_resolve_mask_for_request(request):
         return orchestration_mod._MaskResolutionResponse(

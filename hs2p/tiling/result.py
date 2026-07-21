@@ -47,6 +47,11 @@ class ResolvedTissueMask:
     tissue_mask_tissue_value: int | None = None
     mask_level: int | None = None
     mask_spacing_um: float | None = None
+    # Mask-role backend provenance (#163). ``mask_backend`` is the backend that decoded the
+    # source mask; ``requested_mask_backend`` is what was asked for. Both are ``None`` when
+    # there is no source mask (generated HSV/SAM2 tissue).
+    mask_backend: str | None = None
+    requested_mask_backend: str | None = None
 
     def __post_init__(self) -> None:
         if self.mask_path is not None:
@@ -71,6 +76,10 @@ class ResolvedAnnotationMasks:
     mask_path: str | Path | None = None
     mask_level: int | None = None
     mask_spacing_um: float | None = None
+    # Mask-role backend provenance (#163): the backend that decoded the annotation mask and
+    # the requested value. An annotation mask always has a source, so these are set.
+    mask_backend: str | None = None
+    requested_mask_backend: str | None = None
 
     def __post_init__(self) -> None:
         if self.mask_path is not None:
@@ -158,6 +167,11 @@ class TilingResult:
     tissue_mask_tissue_value: int | None = None
     mask_level: int | None = None
     mask_spacing_um: float | None = None
+    # Mask-role backend provenance, resolved independently from the source-mask path (#163).
+    # Both are ``None`` for a maskless result (HSV/SAM2 tissue segmentation), which never
+    # resolves or validates mask-backend availability.
+    mask_backend: str | None = None
+    requested_mask_backend: str | None = None
     contours: ContourResult | None = None
     annotation: str | None = None
     selection_strategy: str | None = None

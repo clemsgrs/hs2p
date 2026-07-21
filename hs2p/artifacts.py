@@ -40,6 +40,8 @@ class TilingArtifacts:
     tiling_preview_path: Path | None = None
     backend: str | None = None
     requested_backend: str | None = None
+    mask_backend: str | None = None
+    requested_mask_backend: str | None = None
     annotation: str | None = None
     output_mode: str | None = None
 
@@ -52,6 +54,9 @@ class CompatibilitySpec:
     selection_strategy: str | None = None
     output_mode: str | None = None
     annotation: str | None = None
+    # Resolved mask backend for the slide's source mask (None when the slide has no mask).
+    # Resume compares this against the persisted resolved mask backend.
+    mask_backend: str | None = None
 
 
 def _validate_vector(name: str, value: np.ndarray | None) -> int | None:
@@ -144,6 +149,8 @@ def save_tiling_result(
         num_tiles=len(result.x),
         backend=result.backend,
         requested_backend=result.requested_backend,
+        mask_backend=result.mask_backend,
+        requested_mask_backend=result.requested_mask_backend,
         annotation=annotation,
         output_mode=result.output_mode,
     )
@@ -218,6 +225,11 @@ def validate_tiling_artifacts(
         )
     if result.backend != compatibility.tiling.backend:
         raise ValueError("precomputed tiles backend mismatch")
+    # Resume compares *resolved* backends, never requested ones: a run resumed with a
+    # different requested value that resolves to the same backend is still compatible. The
+    # mask backend is compared only when the slide actually has a source mask.
+    if whole_slide.mask_path is not None and result.mask_backend != compatibility.mask_backend:
+        raise ValueError("precomputed tiles mask_backend mismatch")
     if result.requested_spacing_um != compatibility.tiling.requested_spacing_um:
         raise ValueError("precomputed tiles requested_spacing_um mismatch")
     if result.requested_tile_size_px != compatibility.tiling.requested_tile_size_px:
@@ -313,6 +325,8 @@ def validate_tiling_artifacts(
         num_tiles=len(result.x),
         backend=result.backend,
         requested_backend=result.requested_backend,
+        mask_backend=result.mask_backend,
+        requested_mask_backend=result.requested_mask_backend,
     )
 
 

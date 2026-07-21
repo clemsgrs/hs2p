@@ -77,6 +77,66 @@ class BackendSelection:
 
 
 @dataclass(frozen=True)
+class ResolvedBackends:
+    """Slide- and mask-role backend resolution, keeping requested and resolved values apart.
+
+    The single seam every read path shares (#163): the slide backend is resolved from the
+    slide path alone and the mask backend from the mask path alone — neither role's
+    openability probe influences the other. When a slide has no source mask, ``mask`` is
+    ``None`` and both mask-provenance fields are ``None``: a maskless run never resolves or
+    validates mask-backend availability.
+    """
+
+    slide: BackendSelection
+    mask: BackendSelection | None
+    requested_slide_backend: str
+    requested_mask_backend: str | None
+
+    @property
+    def slide_backend(self) -> str:
+        return self.slide.backend
+
+    @property
+    def mask_backend(self) -> str | None:
+        return None if self.mask is None else self.mask.backend
+
+
+def resolve_backends(
+    *,
+    requested_slide_backend: str,
+    requested_mask_backend: str | None,
+    wsi_path: str | Path,
+    mask_path: str | Path | None = None,
+) -> ResolvedBackends:
+    """Resolve slide and mask backends independently from their own paths.
+
+    Slide ``auto`` and mask ``auto`` share the same openability-only selection policy
+    (:func:`resolve_backend`); an explicit backend is authoritative and returned without a
+    probe. A slide with no ``mask_path`` resolves only the slide role.
+    """
+    requested_slide = (requested_slide_backend or AUTO_BACKEND).strip().lower()
+    slide_selection = resolve_backend(requested_slide, wsi_path=Path(wsi_path))
+    if mask_path is None:
+        return ResolvedBackends(
+            slide=slide_selection,
+            mask=None,
+            requested_slide_backend=requested_slide,
+            requested_mask_backend=None,
+        )
+    requested_mask = (
+        requested_mask_backend if requested_mask_backend is not None else AUTO_BACKEND
+    )
+    requested_mask = (requested_mask or AUTO_BACKEND).strip().lower()
+    mask_selection = resolve_backend(requested_mask, wsi_path=Path(mask_path))
+    return ResolvedBackends(
+        slide=slide_selection,
+        mask=mask_selection,
+        requested_slide_backend=requested_slide,
+        requested_mask_backend=requested_mask,
+    )
+
+
+@dataclass(frozen=True)
 class _BackendSpec:
     name: str
     opener: Callable[..., SlideReader]
@@ -243,9 +303,11 @@ __all__ = [
     "BackendSelection",
     "BatchRegionReader",
     "LevelSelection",
+    "ResolvedBackends",
     "SlideReader",
     "open_slide",
     "resolve_backend",
+    "resolve_backends",
     "select_level",
     "select_level_for_downsample",
 ]
