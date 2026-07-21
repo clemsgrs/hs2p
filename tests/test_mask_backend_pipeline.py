@@ -354,6 +354,12 @@ def test_wsi_resolves_mask_backend_independently(monkeypatch):
 
     monkeypatch.setattr(wsi_mod, "resolve_backend", _fake_resolve_backend)
     monkeypatch.setattr(wsi_mod, "open_slide", _fake_open_slide)
+    # The attached mask now opens through the centralized ``open_mask_reader`` helper (#163),
+    # which resolves + opens via the reader module's own globals — patch those too.
+    import hs2p.wsi.reader as reader_mod
+
+    monkeypatch.setattr(reader_mod, "resolve_backend", _fake_resolve_backend)
+    monkeypatch.setattr(reader_mod, "open_slide", _fake_open_slide)
 
     wsi = wsi_mod.WSI(
         path=Path("/data/slide.svs"),
@@ -391,7 +397,18 @@ def test_overlay_mask_on_slide_reads_mask_with_its_own_backend(monkeypatch):
         def get_level_spacing(self, level):
             return 0.5
 
+    def _fake_open_mask_reader(mask_path, *, mask_backend="auto"):
+        # The mask opens through the centralized helper with its own resolved backend (#163).
+        backends.append(mask_backend)
+        reader = SimpleNamespace(
+            read_level=lambda level: np.zeros((10, 10, 3), np.uint8),
+            spacings=[0.5],
+            level_downsamples=[(1.0, 1.0)],
+        )
+        return reader, mask_backend
+
     monkeypatch.setattr(vis_mod, "WSI", _FakeWSI)
+    monkeypatch.setattr(vis_mod, "open_mask_reader", _fake_open_mask_reader)
     monkeypatch.setattr(
         vis_mod, "read_aligned_mask", lambda **kwargs: np.zeros((10, 10), np.uint8)
     )
@@ -402,5 +419,5 @@ def test_overlay_mask_on_slide_reads_mask_with_its_own_backend(monkeypatch):
         backend="asap",
         mask_backend="openslide",
     )
-    # first WSI is the slide (asap), second is the mask (openslide)
+    # first the slide WSI (asap), then the mask via open_mask_reader (openslide)
     assert backends == ["asap", "openslide"]

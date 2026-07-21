@@ -141,3 +141,59 @@ def test_failure_row_tiling_status_is_failed():
     )
     assert row["tiling_status"] == "failed"
     assert row["num_tiles"] == 0
+
+
+# --- resume metadata merge ignores requested_backend (Finding 5) -------------------------
+
+
+def _resume_row(**overrides):
+    row = dict(
+        sample_id="slide-1",
+        tiling_status="success",
+        num_tiles=5,
+        coordinates_npz_path="tiles/slide-1.npz",
+        coordinates_meta_path="tiles/slide-1.meta.json",
+        tiles_tar_path=None,
+        requested_backend="auto",
+        backend="openslide",
+        mask_backend=None,
+        tiling_preview_path=None,
+    )
+    row.update(overrides)
+    return row
+
+
+def test_resume_merge_carries_external_columns_when_only_requested_backend_differs(tmp_path):
+    """When only requested_backend differs but the resolved backend matches, the existing row's
+    external columns and preview path must carry forward into the new row."""
+    preview_file = tmp_path / "slide-1.tiling.jpg"
+    preview_file.write_bytes(b"x")
+    row = _resume_row(requested_backend="auto", tiling_preview_path=None)
+    existing_row = _resume_row(
+        requested_backend="openslide",  # differs from this run, same resolved backend
+        tiling_preview_path=str(preview_file),
+        feature_status="done",
+        feature_path="features/slide-1.pt",
+    )
+    merged = orchestration_mod._merge_existing_resume_metadata(row, existing_row)
+    assert merged["feature_status"] == "done"
+    assert merged["feature_path"] == "features/slide-1.pt"
+    assert Path(merged["tiling_preview_path"]) == preview_file
+
+
+def test_resume_merge_skipped_when_resolved_backend_differs(tmp_path):
+    """The resolved backend guard still holds: a genuinely different backend skips the merge."""
+    preview_file = tmp_path / "slide-1.tiling.jpg"
+    preview_file.write_bytes(b"x")
+    row = _resume_row(requested_backend="auto", backend="openslide", tiling_preview_path=None)
+    existing_row = _resume_row(
+        requested_backend="cucim",
+        backend="cucim",  # resolved backend genuinely differs
+        tiling_preview_path=str(preview_file),
+        feature_status="done",
+        feature_path="features/slide-1.pt",
+    )
+    merged = orchestration_mod._merge_existing_resume_metadata(row, existing_row)
+    assert "feature_status" not in merged
+    assert "feature_path" not in merged
+    assert merged["tiling_preview_path"] is None

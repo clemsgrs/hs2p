@@ -535,6 +535,13 @@ class _SlideWork:
     compute_request: Any | None = None
     error: str | None = None
     traceback_text: str | None = None
+    # Backend provenance for the planning/resume-validation failure row: requested values are
+    # always known (from the base tiling config); resolved values are captured only when the
+    # backend seam ran before the failure, else left null.
+    requested_backend: str | None = None
+    backend: str | None = None
+    requested_mask_backend: str | None = None
+    mask_backend: str | None = None
 
 
 @dataclass(frozen=True)
@@ -702,7 +709,6 @@ def _same_tiling_artifacts(row: dict[str, Any], existing_row: dict[str, Any]) ->
         and _same_optional_path(row.get("coordinates_npz_path"), existing_row.get("coordinates_npz_path"))
         and _same_optional_path(row.get("coordinates_meta_path"), existing_row.get("coordinates_meta_path"))
         and _same_optional_path(row.get("tiles_tar_path"), existing_row.get("tiles_tar_path"))
-        and _same_optional_value(row.get("requested_backend"), existing_row.get("requested_backend"))
         and _same_optional_value(row.get("backend"), existing_row.get("backend"))
         and _same_optional_value(row.get("mask_backend"), existing_row.get("mask_backend"))
     )
@@ -1242,6 +1248,7 @@ def tile_slides(
     planned_work: list[_SlideWork] = []
     compute_requests: list[_ComputeRequest] = []
     for whole_slide in whole_slides:
+        effective_tiling = None
         try:
             effective_tiling = _resolve_effective_backends(whole_slide, tiling)
             has_mask = whole_slide.mask_path is not None
@@ -1334,11 +1341,27 @@ def tile_slides(
             )
             compute_requests.append(compute_request)
         except Exception as exc:
+            # Requested provenance is always known; resolved backends are known only if the
+            # seam ran (``effective_tiling`` is not None). Mask provenance stays null when the
+            # slide has no source mask.
+            has_mask = whole_slide.mask_path is not None
             planned_work.append(
                 _SlideWork(
                     whole_slide=whole_slide,
                     error=str(exc),
                     traceback_text=traceback.format_exc(),
+                    requested_backend=tiling.requested_backend,
+                    backend=(
+                        effective_tiling.backend if effective_tiling is not None else None
+                    ),
+                    requested_mask_backend=(
+                        tiling.requested_mask_backend if has_mask else None
+                    ),
+                    mask_backend=(
+                        effective_tiling.mask_backend
+                        if (effective_tiling is not None and has_mask)
+                        else None
+                    ),
                 )
             )
     # Annotation sampling resolves its (multi-class) mask inside the shared compute core, so
@@ -1508,8 +1531,10 @@ def tile_slides(
                         whole_slide=previous_pending.whole_slide,
                         error=str(exc),
                         traceback_text=traceback.format_exc(),
-                        requested_backend=None,
-                        backend=None,
+                        requested_backend=previous_pending.base_artifact.requested_backend,
+                        backend=previous_pending.base_artifact.backend,
+                        requested_mask_backend=previous_pending.base_artifact.requested_mask_backend,
+                        mask_backend=previous_pending.base_artifact.mask_backend,
                     )
                 )
                 failed_previews += 1
@@ -1684,8 +1709,10 @@ def tile_slides(
                         whole_slide=planned.whole_slide,
                         error=planned.error,
                         traceback_text=planned.traceback_text or "",
-                        requested_backend=None,
-                        backend=None,
+                        requested_backend=planned.requested_backend,
+                        backend=planned.backend,
+                        requested_mask_backend=planned.requested_mask_backend,
+                        mask_backend=planned.mask_backend,
                     )
                 )
                 continue

@@ -202,6 +202,63 @@ def test_resolve_annotation_masks_uses_mask_backend(monkeypatch):
     assert opened == ["openslide"]
 
 
+def test_resolve_tissue_mask_direct_call_omitting_backend_resolves_from_mask_path(monkeypatch):
+    """A direct caller who omits ``mask_backend`` resolves the mask independently from the mask
+    path via ``auto`` — NOT forced to the slide's resolved backend — and records the requested
+    provenance as ``"auto"``."""
+    opened: list[str] = []
+
+    def _open(path, backend=None):
+        opened.append(backend)
+        return _ArrayMaskSlide(np.array([[0, 1], [0, 0]], dtype=np.uint8))
+
+    def _fake_resolve(requested, *, wsi_path, mask_path=None):
+        # ``auto`` resolution over the mask's own path selects openslide; the slide's resolved
+        # backend (asap) must not be consulted.
+        if requested == "auto":
+            return reader_mod.BackendSelection(backend="openslide")
+        return reader_mod.BackendSelection(backend=requested)
+
+    monkeypatch.setattr(mask_mod, "open_slide", _open)
+    monkeypatch.setattr(mask_mod, "resolve_backend", _fake_resolve)
+    result = resolve_tissue_mask(
+        slide=_wsi(backend_name="asap"),
+        tissue_mask_path="/masks/m.tif",
+        tissue_mask_tissue_value=1,
+        seg_downsample=1,
+    )
+    assert opened == ["openslide"]
+    assert result.requested_mask_backend == "auto"
+    assert result.mask_backend == "openslide"
+
+
+def test_resolve_annotation_masks_direct_call_omitting_backend_resolves_from_mask_path(monkeypatch):
+    """The annotation counterpart: omitting ``mask_backend`` resolves the mask from its own
+    path via ``auto`` (not the slide backend) and records requested provenance ``"auto"``."""
+    opened: list[str] = []
+
+    def _open(path, backend=None):
+        opened.append(backend)
+        return _ArrayMaskSlide(np.array([[0, 1], [0, 0]], dtype=np.uint8))
+
+    def _fake_resolve(requested, *, wsi_path, mask_path=None):
+        if requested == "auto":
+            return reader_mod.BackendSelection(backend="openslide")
+        return reader_mod.BackendSelection(backend=requested)
+
+    monkeypatch.setattr(mask_mod, "open_slide", _open)
+    monkeypatch.setattr(mask_mod, "resolve_backend", _fake_resolve)
+    result = resolve_annotation_masks(
+        slide=_wsi(backend_name="asap"),
+        mask_path="/masks/a.tif",
+        pixel_mapping={"background": 0, "tumor": 1},
+        seg_downsample=1,
+    )
+    assert opened == ["openslide"]
+    assert result.requested_mask_backend == "auto"
+    assert result.mask_backend == "openslide"
+
+
 def test_mask_decode_error_names_resolved_mask_backend(monkeypatch):
     def _open(path, backend=None):
         raise RuntimeError("codec unavailable")
@@ -219,6 +276,49 @@ def test_mask_decode_error_names_resolved_mask_backend(monkeypatch):
     assert "/masks/broken.tif" in message
     assert "backend=openslide" in message
     assert "cucim" not in message
+
+
+# --- centralized mask-open helper (Finding 6) -------------------------------------------
+
+
+def test_open_mask_reader_incompatible_backend_raises_actionable_error(monkeypatch):
+    """An open failure names the mask path and the requested backend, not a raw codec error."""
+
+    def _boom(path, backend=reader_mod.AUTO_BACKEND, **kwargs):
+        raise RuntimeError("codec: unsupported compression scheme")
+
+    monkeypatch.setattr(reader_mod, "open_slide", _boom)
+    with pytest.raises(RuntimeError) as excinfo:
+        reader_mod.open_mask_reader("/masks/incompatible.tif", mask_backend="cucim")
+    message = str(excinfo.value)
+    assert "/masks/incompatible.tif" in message
+    assert "cucim" in message
+    assert "codec" in message
+    assert "Select another mask backend" in message
+
+
+def test_open_mask_reader_value_error_cause_reraises_as_value_error(monkeypatch):
+    def _boom(path, backend=reader_mod.AUTO_BACKEND, **kwargs):
+        raise ValueError("bad mask geometry")
+
+    monkeypatch.setattr(reader_mod, "open_slide", _boom)
+    with pytest.raises(ValueError) as excinfo:
+        reader_mod.open_mask_reader("/masks/bad.tif", mask_backend="openslide")
+    message = str(excinfo.value)
+    assert "/masks/bad.tif" in message
+    assert "openslide" in message
+
+
+def test_open_mask_reader_returns_reader_and_resolved_backend(monkeypatch):
+    sentinel = object()
+
+    def _open(path, backend=reader_mod.AUTO_BACKEND, **kwargs):
+        return sentinel
+
+    monkeypatch.setattr(reader_mod, "open_slide", _open)
+    reader, resolved = reader_mod.open_mask_reader("/masks/m.tif", mask_backend="asap")
+    assert reader is sentinel
+    assert resolved == "asap"
 
 
 def test_empty_precomputed_warning_names_resolved_mask_backend(monkeypatch, caplog):

@@ -221,15 +221,16 @@ def test_wsi_opens_slide_and_mask_readers_with_resolved_backend(monkeypatch):
         seen_calls.append((path, backend, spacing_override))
         return _FakeSlideReader()
 
-    monkeypatch.setattr(
-        wsi_mod,
-        "resolve_backend",
-        lambda requested_backend, *, wsi_path, mask_path=None: backend_mod.BackendSelection(
-            backend="cucim",
-            tried=("cucim",),
-        ),
-    )
+    def _fake_resolve_backend(requested_backend, *, wsi_path, mask_path=None):
+        return backend_mod.BackendSelection(backend="cucim", tried=("cucim",))
+
+    monkeypatch.setattr(wsi_mod, "resolve_backend", _fake_resolve_backend)
     monkeypatch.setattr(wsi_mod, "open_slide", _fake_open_slide)
+    # The attached mask opens through the centralized ``open_mask_reader`` helper (#163), which
+    # resolves + opens via the reader module's own globals — patch those so the mask open is
+    # captured alongside the slide open.
+    monkeypatch.setattr(reader_mod, "resolve_backend", _fake_resolve_backend)
+    monkeypatch.setattr(reader_mod, "open_slide", _fake_open_slide)
 
     wsi_mod.WSI(
         path=Path("/tmp/slide.tiff"),

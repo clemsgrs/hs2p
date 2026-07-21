@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from hs2p.wsi.backend import open_slide, resolve_backend
+from hs2p.wsi.backend import open_mask_reader, open_slide, resolve_backend
 from hs2p.wsi.geometry import plan_spacing_read, select_level
 
 Image.MAX_IMAGE_PIXELS = 933120000
@@ -95,12 +95,12 @@ class WSI(object):
         self.requested_mask_backend: str | None = None
         self.mask_backend: str | None = None
         if mask_path is not None:
+            # The mask opens through its own resolved backend, independent of the slide's (#163),
+            # via the centralized helper so an open failure names the mask path and requested
+            # backend rather than surfacing a raw codec error.
             self.requested_mask_backend = mask_backend
-            mask_selection = resolve_backend(mask_backend, wsi_path=mask_path)
-            self.mask_backend = mask_selection.backend
-            self.mask_reader = open_slide(
-                mask_path,
-                backend=self.mask_backend,
+            self.mask_reader, self.mask_backend = open_mask_reader(
+                mask_path, mask_backend=mask_backend
             )
 
     def get_slide(self, level: int) -> np.ndarray:

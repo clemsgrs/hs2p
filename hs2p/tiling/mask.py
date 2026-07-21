@@ -24,19 +24,18 @@ DEFAULT_SAM2_THUMBNAIL_TOLERANCE = 0.05
 logger = logging.getLogger(__name__)
 
 
-def _resolve_mask_backend(
-    mask_path: str | Path, mask_backend: str | None, *, default: str = AUTO_BACKEND
-) -> str:
+def _resolve_mask_backend(mask_path: str | Path, mask_backend: str | None) -> str:
     """Resolve the concrete backend used to read a source mask, from the mask path alone.
 
     ``mask_backend`` is the *requested* mask backend: a concrete name is authoritative and
     returned without a probe; ``"auto"`` triggers openability-only auto-selection over the mask
-    path; ``None`` means "not specified by the caller" and falls back to ``default`` (the
-    pipeline always passes an explicit resolved backend, so the fallback only applies to direct
-    low-level calls). This is the mask-role half of the shared backend-resolution seam (#163):
-    the slide backend is resolved separately from the slide path and never consulted here.
+    path; ``None`` means "not specified by the caller" and maps to ``AUTO_BACKEND`` — a direct
+    low-level caller who omits the backend resolves the mask independently from the mask path,
+    never inheriting the slide's backend. This is the mask-role half of the shared
+    backend-resolution seam (#163): the slide backend is resolved separately from the slide
+    path and never consulted here.
     """
-    requested = mask_backend if mask_backend is not None else default
+    requested = mask_backend if mask_backend is not None else AUTO_BACKEND
     return resolve_backend(requested, wsi_path=Path(mask_path)).backend
 
 # Reading a mask level larger than this many pixels means the mask lacks a pyramid level
@@ -177,9 +176,7 @@ def load_precomputed_tissue_mask(
     tissue_value: int,
     mask_backend: str | None = None,
 ) -> tuple[np.ndarray, int, float]:
-    resolved_mask_backend = _resolve_mask_backend(
-        mask_path, mask_backend, default=str(getattr(slide, "backend_name", AUTO_BACKEND))
-    )
+    resolved_mask_backend = _resolve_mask_backend(mask_path, mask_backend)
     try:
         mask_slide = open_slide(mask_path, backend=resolved_mask_backend)
         try:
@@ -296,14 +293,11 @@ def resolve_tissue_mask(
     requested_mask_backend: str | None = None,
 ) -> ResolvedTissueMask:
     if tissue_mask_path is not None:
-        default_mask_backend = str(getattr(slide, "backend_name", AUTO_BACKEND))
-        resolved_mask_backend = _resolve_mask_backend(
-            tissue_mask_path, mask_backend, default=default_mask_backend
-        )
+        resolved_mask_backend = _resolve_mask_backend(tissue_mask_path, mask_backend)
         requested_mask_backend = (
             requested_mask_backend
             if requested_mask_backend is not None
-            else (mask_backend if mask_backend is not None else default_mask_backend)
+            else (mask_backend if mask_backend is not None else AUTO_BACKEND)
         )
         normalized_downsamples = _normalize_level_downsamples(slide.level_downsamples)
         seg_level = select_level_for_downsample(
@@ -453,9 +447,7 @@ def load_annotation_label_mask(
     including a valid single-value mask. Decoder failures are not retried through another
     backend.
     """
-    resolved_mask_backend = _resolve_mask_backend(
-        mask_path, mask_backend, default=str(getattr(slide, "backend_name", AUTO_BACKEND))
-    )
+    resolved_mask_backend = _resolve_mask_backend(mask_path, mask_backend)
     try:
         return _read_label_mask_at_seg(
             mask_path=mask_path,
@@ -501,14 +493,11 @@ def resolve_annotation_masks(
     if mask_path is None:
         raise ValueError("resolve_annotation_masks requires a mask_path")
 
-    default_mask_backend = str(getattr(slide, "backend_name", AUTO_BACKEND))
-    resolved_mask_backend = _resolve_mask_backend(
-        mask_path, mask_backend, default=default_mask_backend
-    )
+    resolved_mask_backend = _resolve_mask_backend(mask_path, mask_backend)
     requested_mask_backend = (
         requested_mask_backend
         if requested_mask_backend is not None
-        else (mask_backend if mask_backend is not None else default_mask_backend)
+        else (mask_backend if mask_backend is not None else AUTO_BACKEND)
     )
     normalized_downsamples = _normalize_level_downsamples(slide.level_downsamples)
     seg_level = select_level_for_downsample(

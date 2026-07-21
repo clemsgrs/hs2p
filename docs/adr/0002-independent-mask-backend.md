@@ -22,10 +22,23 @@ selected decoder is authoritative for that read (ADR 0001 still holds).
 
 Both fields accept only `auto`, `cucim`, `asap`, `openslide`, `vips`; null and unknown values
 fail configuration validation, including when a `TilingConfig` is constructed directly in
-Python. A slide with no source mask never resolves or validates mask-backend availability, and
-its mask provenance is null. An explicit mask backend applies to every source-mask read —
+Python (which is keyword-only, and validates the `requested_*` provenance fields on the same
+allowlist). A slide with no source mask never resolves or validates mask-backend availability,
+and its mask provenance is null. An explicit mask backend applies to every source-mask read —
 precomputed tissue masks, annotation masks, the public low-level readers, overlays, and
 deferred preview reads.
+
+The public low-level mask readers are decoupled from the slide backend: called **without** a
+`mask_backend` (omitted or `None`) they resolve the mask backend independently from the mask
+path via `auto`, never inheriting the slide's backend, and record `requested_mask_backend ==
+"auto"`. The high-level pipeline is unaffected because it always passes an explicit resolved
+`mask_backend`.
+
+Opening a source mask is centralized through one helper (`open_mask_reader`) so an open failure
+— from backend resolution or the open itself — is reraised with actionable context naming the
+mask path and the requested backend (and the resolved backend when known), rather than a raw
+codec error; the remedy is to set `mask_backend` explicitly. Overlays and the `WSI` attached-mask
+path route through this helper.
 
 Requested and resolved values are kept separate for both roles (`requested_backend` /
 `backend`, `requested_mask_backend` / `mask_backend`) and persisted in the tiling metadata,

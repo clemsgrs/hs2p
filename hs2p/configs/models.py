@@ -38,7 +38,7 @@ _DEFAULT_PREVIEW = _DEFAULT_TILING.preview
 _DEFAULT_MASKS = _DEFAULT_TILING.masks
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class TilingConfig:
     """Control tile extraction at a target physical resolution."""
 
@@ -67,8 +67,14 @@ class TilingConfig:
         _validate_backend_name(self.mask_backend, field="mask_backend")
         if self.requested_backend is None:
             object.__setattr__(self, "requested_backend", self.backend)
+        else:
+            _validate_backend_name(self.requested_backend, field="requested_backend")
         if self.requested_mask_backend is None:
             object.__setattr__(self, "requested_mask_backend", self.mask_backend)
+        else:
+            _validate_backend_name(
+                self.requested_mask_backend, field="requested_mask_backend"
+            )
 
 
 @dataclass(frozen=True)

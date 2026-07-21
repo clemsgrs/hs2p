@@ -2248,7 +2248,7 @@ def test_validate_tiling_artifacts_rejects_mismatched_image_path(tmp_path: Path)
                 coordinates_npz_path=artifacts.coordinates_npz_path,
                 coordinates_meta_path=artifacts.coordinates_meta_path,
                 compatibility=_artifact_compatibility(
-                    tiling_config=TilingConfig(0.5, 224, 0.07, 0.0, {"tissue": 0.1}, "asap"),
+                    tiling_config=TilingConfig(requested_spacing_um=0.5, requested_tile_size_px=224, tolerance=0.07, overlap=0.0, min_coverage={"tissue": 0.1}, backend="asap"),
                     segmentation_config=SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
                     filter_config=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
                 ),
@@ -2273,7 +2273,7 @@ def test_validate_tiling_artifacts_rejects_mismatched_mask_path(tmp_path: Path):
                 coordinates_npz_path=artifacts.coordinates_npz_path,
                 coordinates_meta_path=artifacts.coordinates_meta_path,
                 compatibility=_artifact_compatibility(
-                    tiling_config=TilingConfig(0.5, 224, 0.07, 0.0, {"tissue": 0.1}, "asap"),
+                    tiling_config=TilingConfig(requested_spacing_um=0.5, requested_tile_size_px=224, tolerance=0.07, overlap=0.0, min_coverage={"tissue": 0.1}, backend="asap"),
                     segmentation_config=SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
                     filter_config=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
                 ),
@@ -3393,7 +3393,7 @@ def test_maybe_load_existing_artifacts_zero_tiles_meta_only(tmp_path: Path):
         ),
         read_coordinates_from=tiles_dir,
             compatibility=_artifact_compatibility(
-                tiling_config=TilingConfig(0.5, 224, 0.07, 0.1, {"tissue": 0.2}, "asap"),
+                tiling_config=TilingConfig(requested_spacing_um=0.5, requested_tile_size_px=224, tolerance=0.07, overlap=0.1, min_coverage={"tissue": 0.2}, backend="asap"),
                 segmentation_config=SegmentationConfig(
                     method="hsv",
                     downsample=64,
@@ -3449,3 +3449,152 @@ def test_build_failure_process_row_records_backend_provenance():
     assert row["requested_backend"] == "auto"
     assert row["backend"] == "openslide"
     assert row["tiling_status"] == "failed"
+
+
+def test_tile_slides_deferred_preview_failure_records_base_artifact_backends(
+    monkeypatch,
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    """A deferred tiling-preview failure records the slide's resolved backend provenance from
+    the base artifact, not null slide-backend columns (Finding 4a)."""
+    _patch_preprocess_slide(
+        monkeypatch,
+        result=_build_preprocessing_result(
+            sample_id="slide-preview",
+            image_path="slide-preview.svs",
+            mask_path=None,
+        ),
+    )
+
+    def _boom(**kwargs):
+        raise RuntimeError("preview boom")
+
+    monkeypatch.setattr(orchestration_mod, "_write_tiling_preview_from_artifacts", _boom)
+    monkeypatch.setattr(orchestration_mod, "write_tiling_preview", _boom)
+
+    artifacts = tile_slides(
+        [SlideSpec(sample_id="slide-preview", image_path=Path("slide-preview.svs"))],
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        preview=PreviewConfig(save_tiling_preview=True),
+        output_dir=tmp_path,
+    )
+
+    assert artifacts == []
+    df = pd.read_csv(tmp_path / "process_list.csv")
+    row = df[df["sample_id"] == "slide-preview"].iloc[0]
+    assert row["tiling_status"] == "failed"
+    assert row["requested_backend"] == "asap"
+    assert row["backend"] == "asap"
+    # Maskless base artifact ⇒ null mask provenance, carried through faithfully.
+    assert pd.isna(row["mask_backend"])
+    assert pd.isna(row["requested_mask_backend"])
+
+
+def test_tile_slides_resume_validation_failure_records_requested_and_resolved_backends(
+    monkeypatch,
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    """A resume-validation rejection records BOTH requested and resolved backends (the seam ran
+    before validation failed), for slide and mask roles (Finding 4b)."""
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    pd.DataFrame(
+        [
+            {
+                "sample_id": "slide-x",
+                "annotation": "tissue",
+                "output_mode": None,
+                "image_path": "slide-x.svs",
+                "mask_path": "slide-x-mask.tif",
+                "requested_backend": "asap",
+                "backend": "asap",
+                "requested_mask_backend": "asap",
+                "mask_backend": "asap",
+                "tiling_status": "success",
+                "num_tiles": 2,
+                "coordinates_npz_path": "tiles/slide-x.npz",
+                "coordinates_meta_path": "tiles/slide-x.meta.json",
+                "tiles_tar_path": np.nan,
+                "mask_preview_path": np.nan,
+                "tiling_preview_path": np.nan,
+                "error": np.nan,
+                "traceback": np.nan,
+            }
+        ]
+    ).to_csv(run_dir / "process_list.csv", index=False)
+
+    def _reject(**kwargs):
+        raise ValueError("backend mismatch")
+
+    monkeypatch.setattr(orchestration_mod, "validate_tiling_artifacts", _reject)
+
+    artifacts = tile_slides(
+        [
+            SlideSpec(
+                sample_id="slide-x",
+                image_path=Path("slide-x.svs"),
+                mask_path=Path("slide-x-mask.tif"),
+            )
+        ],
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        output_dir=run_dir,
+        resume=True,
+    )
+
+    assert artifacts == []
+    df = pd.read_csv(run_dir / "process_list.csv")
+    row = df[df["sample_id"] == "slide-x"].iloc[0]
+    assert row["tiling_status"] == "failed"
+    assert row["requested_backend"] == "asap"
+    assert row["backend"] == "asap"
+    assert row["requested_mask_backend"] == "asap"
+    assert row["mask_backend"] == "asap"
+
+
+def test_tile_slides_backend_resolution_failure_records_requested_with_null_resolved(
+    monkeypatch,
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    """A pure backend-resolution failure records the requested backends with null resolved
+    values (the seam never produced an effective tiling) (Finding 4b)."""
+
+    def _boom(whole_slide, tiling, *, emit=True):
+        raise RuntimeError("backend probe failed")
+
+    monkeypatch.setattr(orchestration_mod, "_resolve_effective_backends", _boom)
+
+    artifacts = tile_slides(
+        [
+            SlideSpec(
+                sample_id="slide-x",
+                image_path=Path("slide-x.svs"),
+                mask_path=Path("slide-x-mask.tif"),
+            )
+        ],
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        output_dir=tmp_path,
+    )
+
+    assert artifacts == []
+    df = pd.read_csv(tmp_path / "process_list.csv")
+    row = df[df["sample_id"] == "slide-x"].iloc[0]
+    assert row["tiling_status"] == "failed"
+    assert row["requested_backend"] == "asap"
+    assert pd.isna(row["backend"])
+    assert row["requested_mask_backend"] == "asap"
+    assert pd.isna(row["mask_backend"])

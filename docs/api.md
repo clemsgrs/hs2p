@@ -185,8 +185,20 @@ read: precomputed tissue masks, annotation masks, the low-level readers
 `WSI(..., mask_path=..., mask_backend=...)`, and deferred preview reads. A slide with no source
 mask never resolves or validates mask-backend availability, and its mask provenance is null.
 
+A low-level mask reader called **without** a `mask_backend` (omitted or `None`) resolves the
+mask backend independently from the mask path via `auto` — it never inherits the slide's
+backend — and records `requested_mask_backend == "auto"`. The high-level pipeline is unaffected
+because it always passes an explicit resolved `mask_backend`. `TilingConfig` is keyword-only, so
+every field (including `mask_backend`) must be passed by name.
+
+Opening a source mask that the selected backend cannot decode fails with actionable context
+naming the mask path and the requested backend (and the resolved backend when known) rather than
+surfacing a raw codec error — for example
+`Mask open failed for path=... with backend=<resolved> (requested=<requested>): <error>. Select
+another mask backend or verify the mask file.` The remedy is to set `mask_backend` explicitly.
+
 `TilingResult`, `TilingArtifacts`, the tiling metadata, and `process_list.csv` record both the
 requested and resolved slide and mask backends separately (`requested_backend` / `backend` and
 `requested_mask_backend` / `mask_backend`); requested values are provenance only. Resume
 compares the resolved slide backend and, when a source mask exists, the resolved mask backend,
-and does not reject artifacts merely because a requested value differs.
+and does not reject artifacts merely because a requested value differs (including `requested_backend`).

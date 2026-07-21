@@ -121,6 +121,7 @@ def test_precomputed_tissue_path_routes_through_guard(monkeypatch):
             slide=slide,
             seg_level=1,
             tissue_value=1,
+            mask_backend="asap",
         )
 
     _assert_oversized_message(
@@ -144,6 +145,7 @@ def test_annotation_path_routes_through_guard(monkeypatch):
             slide=slide,
             seg_level=1,
             valid_values={0, 1},
+            mask_backend="openslide",
         )
 
     _assert_oversized_message(
@@ -191,6 +193,7 @@ def test_precomputed_tissue_path_passthrough_under_cap(monkeypatch):
         slide=slide,
         seg_level=1,
         tissue_value=1,
+        mask_backend="asap",
     )
 
     assert mask.shape == (25, 25)
@@ -211,6 +214,7 @@ def test_annotation_path_passthrough_under_cap(monkeypatch):
         slide=slide,
         seg_level=1,
         valid_values={0, 1},
+        mask_backend="openslide",
     )
 
     assert mask.shape == (25, 25)

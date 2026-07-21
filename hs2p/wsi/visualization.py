@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from .backend import open_mask_reader
 from .masks import read_aligned_mask
 from .preview import (
     build_overlay_alpha,
@@ -276,13 +277,14 @@ def overlay_mask_on_slide(
         )
         width, height = wsi.size
     if annotation_mask_path is not None:
-        # The mask is decoded with its own resolved backend, independent of the slide's (#163).
-        mask_object = WSI(
-            path=annotation_mask_path,
-            backend=mask_backend,
+        # The mask is decoded with its own resolved backend, independent of the slide's (#163),
+        # through the centralized helper so an open failure names the mask path and requested
+        # backend rather than surfacing a raw codec error.
+        mask_reader, _ = open_mask_reader(
+            annotation_mask_path, mask_backend=mask_backend
         )
         mask_arr = read_aligned_mask(
-            mask_obj=mask_object.reader,
+            mask_obj=mask_reader,
             slide_spacing=wsi_object.get_level_spacing(vis_level),
             slide_dimensions=(base_width, base_height),
         )
@@ -380,9 +382,10 @@ def write_coordinate_preview(
         # path: ``read_aligned_mask`` calls ``read_level``/``spacings`` (reader/backend
         # methods). A WSI exposes ``spacings`` but not ``read_level``, so handing it the
         # WSI raised ``'WSI' object has no attribute 'read_level'``. This mirrors the
-        # mask-preview path (``overlay_mask_on_slide`` uses ``mask_obj=mask_object.reader``).
-        # The mask uses its own resolved backend, independent of the slide's (#163).
-        mask = WSI(mask_path, backend=mask_backend).reader
+        # mask-preview path (``overlay_mask_on_slide`` uses the reader from ``open_mask_reader``).
+        # The mask uses its own resolved backend, independent of the slide's (#163), via the
+        # centralized helper so an open failure names the mask path and requested backend.
+        mask, _ = open_mask_reader(mask_path, mask_backend=mask_backend)
     else:
         mask = None
 
