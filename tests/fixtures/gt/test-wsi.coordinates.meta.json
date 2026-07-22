@@ -24,8 +24,10 @@
   "provenance": {
     "backend": "asap",
     "image_path": "/workspace/tests/fixtures/input/test-wsi.tif",
+    "mask_backend": "cucim",
     "mask_path": "/workspace/tests/fixtures/input/test-mask.tif",
     "requested_backend": "asap",
+    "requested_mask_backend": "auto",
     "sample_id": "test-wsi"
   },
   "segmentation": {
@@ -55,13 +57,13 @@
     ]
   },
   "tiling": {
-    "read_spacing_um": 0.25200000393750005,
-    "read_tile_size_px": 444,
     "is_within_tolerance": true,
     "min_tissue_fraction": 0.1,
     "n_tiles": 459,
     "overlap": 0.0,
     "read_level": 0,
+    "read_spacing_um": 0.25200000393750005,
+    "read_tile_size_px": 444,
     "requested_spacing_um": 0.5,
     "requested_tile_size_px": 224,
     "step_px_lv0": 444,

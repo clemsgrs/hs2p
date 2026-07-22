@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from .backend import open_mask_reader
 from .masks import read_aligned_mask
 from .preview import (
     build_overlay_alpha,
@@ -254,6 +255,7 @@ def overlay_mask_on_slide(
     outer_border_color: tuple[int, int, int] = DEFAULT_TISSUE_BORDER_COLOR,
     hole_border_color: tuple[int, int, int] = DEFAULT_TISSUE_HOLE_COLOR,
     stroke_thickness: int | None = None,
+    mask_backend: str = "auto",
 ):
     wsi_object = WSI(path=wsi_path, backend=backend)
 
@@ -275,12 +277,14 @@ def overlay_mask_on_slide(
         )
         width, height = wsi.size
     if annotation_mask_path is not None:
-        mask_object = WSI(
-            path=annotation_mask_path,
-            backend=backend,
+        # The mask is decoded with its own resolved backend, independent of the slide's (#163),
+        # through the centralized helper so an open failure names the mask path and requested
+        # backend rather than surfacing a raw codec error.
+        mask_reader, _ = open_mask_reader(
+            annotation_mask_path, mask_backend=mask_backend
         )
         mask_arr = read_aligned_mask(
-            mask_obj=mask_object.reader,
+            mask_obj=mask_reader,
             slide_spacing=wsi_object.get_level_spacing(vis_level),
             slide_dimensions=(base_width, base_height),
         )
@@ -369,6 +373,7 @@ def write_coordinate_preview(
     palette: np.ndarray | None = None,
     pixel_mapping: dict[str, int] | None = None,
     color_mapping: dict[str, list[int] | None] | None = None,
+    mask_backend: str = "auto",
 ):
     wsi = WSI(wsi_path, backend=backend)
     vis_level = wsi.get_best_level_for_downsample_custom(downsample)
@@ -377,8 +382,10 @@ def write_coordinate_preview(
         # path: ``read_aligned_mask`` calls ``read_level``/``spacings`` (reader/backend
         # methods). A WSI exposes ``spacings`` but not ``read_level``, so handing it the
         # WSI raised ``'WSI' object has no attribute 'read_level'``. This mirrors the
-        # mask-preview path (``overlay_mask_on_slide`` uses ``mask_obj=mask_object.reader``).
-        mask = WSI(mask_path, backend=backend).reader
+        # mask-preview path (``overlay_mask_on_slide`` uses the reader from ``open_mask_reader``).
+        # The mask uses its own resolved backend, independent of the slide's (#163), via the
+        # centralized helper so an open failure names the mask path and requested backend.
+        mask, _ = open_mask_reader(mask_path, mask_backend=mask_backend)
     else:
         mask = None
 

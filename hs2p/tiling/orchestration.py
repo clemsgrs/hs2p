@@ -34,7 +34,7 @@ from hs2p.wsi import (
     save_overlay_preview,
     write_coordinate_preview,
 )
-from hs2p.wsi.backend import resolve_backend
+from hs2p.wsi.backend import resolve_backends
 from hs2p.wsi.reader import open_slide as open_preprocessing_slide
 from hs2p.preprocessing import resolve_tissue_mask
 from hs2p.artifacts import (
@@ -49,6 +49,48 @@ from hs2p.artifacts import (
     validate_required_columns,
     validate_tiling_artifacts,
 )
+
+
+def _resolve_effective_backends(
+    whole_slide: SlideSpec, tiling: TilingConfig, *, emit: bool = True
+) -> TilingConfig:
+    """Resolve the slide and mask backends for one slide through the shared seam and fold the
+    resolved values into ``tiling`` (``backend`` / ``mask_backend``), preserving the requested
+    values as provenance.
+
+    Slide and mask backends are resolved independently from their own paths (#163). When a
+    backend was ``auto`` and the probe selected one, a ``backend.selected`` (slide) or
+    ``mask_backend.selected`` (mask) progress event is emitted with the selection reason. A
+    maskless slide leaves ``mask_backend`` at its requested value; the null mask provenance is
+    stamped on the result/rows downstream from the absence of a source mask.
+    """
+    resolved = resolve_backends(
+        requested_slide_backend=tiling.requested_backend,
+        requested_mask_backend=tiling.requested_mask_backend,
+        wsi_path=whole_slide.image_path,
+        mask_path=whole_slide.mask_path,
+    )
+    if emit and resolved.slide.reason is not None:
+        emit_progress(
+            "backend.selected",
+            sample_id=whole_slide.sample_id,
+            backend=resolved.slide_backend,
+            reason=resolved.slide.reason,
+        )
+    if emit and resolved.mask is not None and resolved.mask.reason is not None:
+        emit_progress(
+            "mask_backend.selected",
+            sample_id=whole_slide.sample_id,
+            mask_path=str(whole_slide.mask_path),
+            backend=resolved.mask_backend,
+            reason=resolved.mask.reason,
+        )
+    updates: dict[str, str] = {}
+    if resolved.slide_backend != tiling.backend:
+        updates["backend"] = resolved.slide_backend
+    if resolved.mask_backend is not None and resolved.mask_backend != tiling.mask_backend:
+        updates["mask_backend"] = resolved.mask_backend
+    return tiling if not updates else replace(tiling, **updates)
 
 
 def _write_mask_preview(
@@ -152,6 +194,9 @@ def _compute_tiling_result(
             sample_id=whole_slide.sample_id,
             tissue_mask_path=whole_slide.mask_path,
             backend=tiling.backend,
+            requested_backend=tiling.requested_backend,
+            mask_backend=tiling.mask_backend,
+            requested_mask_backend=tiling.requested_mask_backend,
             spacing_override=whole_slide.spacing_at_level_0,
             requested_tile_size_px=tiling.requested_tile_size_px,
             requested_spacing_um=tiling.requested_spacing_um,
@@ -278,6 +323,9 @@ def _run_per_annotation(
         selection_strategy=selection_strategy,
         sample_id=whole_slide.sample_id,
         backend=tiling.backend,
+        requested_backend=tiling.requested_backend,
+        mask_backend=tiling.mask_backend,
+        requested_mask_backend=tiling.requested_mask_backend,
         spacing_override=whole_slide.spacing_at_level_0,
         requested_tile_size_px=tiling.requested_tile_size_px,
         requested_spacing_um=tiling.requested_spacing_um,
@@ -318,23 +366,7 @@ def tile_slide(
     """Tile a single slide. With ``sampling`` provided, performs annotation-aware sampling
     and returns one :class:`TilingResult` per active annotation (``{annotation: result}``);
     otherwise tiles tissue and returns a single :class:`TilingResult`."""
-    backend_selection = resolve_backend(
-        tiling.requested_backend,
-        wsi_path=whole_slide.image_path,
-        mask_path=whole_slide.mask_path,
-    )
-    if backend_selection.reason is not None:
-        emit_progress(
-            "backend.selected",
-            sample_id=whole_slide.sample_id,
-            backend=backend_selection.backend,
-            reason=backend_selection.reason,
-        )
-    effective_tiling = (
-        tiling
-        if backend_selection.backend == tiling.requested_backend
-        else replace(tiling, backend=backend_selection.backend)
-    )
+    effective_tiling = _resolve_effective_backends(whole_slide, tiling)
     effective_segmentation = _resolve_effective_segmentation(
         whole_slide=whole_slide,
         segmentation=segmentation,
@@ -355,6 +387,9 @@ def tile_slide(
         sample_id=whole_slide.sample_id,
         tissue_mask_path=whole_slide.mask_path,
         backend=effective_tiling.backend,
+        requested_backend=effective_tiling.requested_backend,
+        mask_backend=effective_tiling.mask_backend,
+        requested_mask_backend=effective_tiling.requested_mask_backend,
         spacing_override=whole_slide.spacing_at_level_0,
         requested_tile_size_px=effective_tiling.requested_tile_size_px,
         requested_spacing_um=effective_tiling.requested_spacing_um,
@@ -479,6 +514,8 @@ def write_annotation_tiling_preview(
         palette=palette,
         pixel_mapping=pixel_mapping,
         color_mapping=color_mapping,
+        # Deferred preview mask read uses the mask's own resolved backend (#163).
+        mask_backend=getattr(result, "mask_backend", None) or "auto",
     )
     return preview_path
 
@@ -498,6 +535,13 @@ class _SlideWork:
     compute_request: Any | None = None
     error: str | None = None
     traceback_text: str | None = None
+    # Backend provenance for the planning/resume-validation failure row: requested values are
+    # always known (from the base tiling config); resolved values are captured only when the
+    # backend seam ran before the failure, else left null.
+    requested_backend: str | None = None
+    backend: str | None = None
+    requested_mask_backend: str | None = None
+    mask_backend: str | None = None
 
 
 @dataclass(frozen=True)
@@ -532,6 +576,8 @@ class _ComputeResponse:
     result: TilingResult | None = None
     requested_backend: str | None = None
     backend: str | None = None
+    requested_mask_backend: str | None = None
+    mask_backend: str | None = None
     mask_preview_path: Path | None = None
     error: str | None = None
     traceback_text: str | None = None
@@ -556,6 +602,8 @@ class _MaskResolutionResponse:
     resolved_mask: ResolvedTissueMask | None = None
     requested_backend: str | None = None
     backend: str | None = None
+    requested_mask_backend: str | None = None
+    mask_backend: str | None = None
     error: str | None = None
     traceback_text: str | None = None
 
@@ -576,6 +624,8 @@ def _build_success_artifact(
         tiling_preview_path=tiling_preview_path,
         backend=base_artifact.backend,
         requested_backend=base_artifact.requested_backend,
+        mask_backend=base_artifact.mask_backend,
+        requested_mask_backend=base_artifact.requested_mask_backend,
         annotation=base_artifact.annotation,
         output_mode=base_artifact.output_mode,
     )
@@ -608,6 +658,8 @@ def _build_success_process_row(
         ),
         "requested_backend": artifact.requested_backend,
         "backend": artifact.backend,
+        "requested_mask_backend": artifact.requested_mask_backend,
+        "mask_backend": artifact.mask_backend,
         "tiling_status": "success",
         "num_tiles": artifact.num_tiles,
         "coordinates_npz_path": str(artifact.coordinates_npz_path) if artifact.coordinates_npz_path is not None else np.nan,
@@ -657,8 +709,8 @@ def _same_tiling_artifacts(row: dict[str, Any], existing_row: dict[str, Any]) ->
         and _same_optional_path(row.get("coordinates_npz_path"), existing_row.get("coordinates_npz_path"))
         and _same_optional_path(row.get("coordinates_meta_path"), existing_row.get("coordinates_meta_path"))
         and _same_optional_path(row.get("tiles_tar_path"), existing_row.get("tiles_tar_path"))
-        and _same_optional_value(row.get("requested_backend"), existing_row.get("requested_backend"))
         and _same_optional_value(row.get("backend"), existing_row.get("backend"))
+        and _same_optional_value(row.get("mask_backend"), existing_row.get("mask_backend"))
     )
 
 
@@ -693,6 +745,8 @@ def _build_failure_process_row(
     annotation: str = "tissue",
     requested_backend: str | None = None,
     backend: str | None = None,
+    requested_mask_backend: str | None = None,
+    mask_backend: str | None = None,
 ) -> dict[str, Any]:
     return {
         "sample_id": whole_slide.sample_id,
@@ -704,6 +758,8 @@ def _build_failure_process_row(
         ),
         "requested_backend": requested_backend,
         "backend": backend,
+        "requested_mask_backend": requested_mask_backend,
+        "mask_backend": mask_backend,
         "tiling_status": "failed",
         "num_tiles": 0,
         "coordinates_npz_path": np.nan,
@@ -757,6 +813,8 @@ def _save_per_annotation_artifact(
         tiling_preview_path=artifact.tiling_preview_path,
         backend=artifact.backend,
         requested_backend=artifact.requested_backend,
+        mask_backend=artifact.mask_backend,
+        requested_mask_backend=artifact.requested_mask_backend,
         annotation=annotation,
         output_mode=artifact.output_mode,
     )
@@ -822,6 +880,8 @@ def _compute_and_save_per_annotation(request: _ComputeRequest) -> _ComputeRespon
         result=None,
         requested_backend=request.tiling.requested_backend,
         backend=request.tiling.backend,
+        requested_mask_backend=request.tiling.requested_mask_backend,
+        mask_backend=request.tiling.mask_backend,
         mask_preview_path=mask_preview_path,
     )
 
@@ -878,6 +938,8 @@ def _compute_and_save_tiling_artifacts_from_request(
             tiling_preview_path=artifact.tiling_preview_path,
             backend=artifact.backend,
             requested_backend=artifact.requested_backend,
+            mask_backend=artifact.mask_backend,
+            requested_mask_backend=artifact.requested_mask_backend,
         )
         mask_preview_path = (
             request.mask_preview_path
@@ -885,6 +947,7 @@ def _compute_and_save_tiling_artifacts_from_request(
             and request.mask_preview_path.is_file()
             else None
         )
+        has_mask = request.whole_slide.mask_path is not None
         return _ComputeResponse(
             input_index=request.input_index,
             whole_slide=request.whole_slide,
@@ -893,15 +956,24 @@ def _compute_and_save_tiling_artifacts_from_request(
             result=result if request.include_result else None,
             requested_backend=request.tiling.requested_backend,
             backend=effective_tiling.backend,
+            requested_mask_backend=(
+                request.tiling.requested_mask_backend if has_mask else None
+            ),
+            mask_backend=request.tiling.mask_backend if has_mask else None,
             mask_preview_path=mask_preview_path,
         )
     except Exception as exc:
+        has_mask = request.whole_slide.mask_path is not None
         return _ComputeResponse(
             input_index=request.input_index,
             whole_slide=request.whole_slide,
             ok=False,
             requested_backend=request.tiling.requested_backend,
             backend=request.tiling.backend,
+            requested_mask_backend=(
+                request.tiling.requested_mask_backend if has_mask else None
+            ),
+            mask_backend=request.tiling.mask_backend if has_mask else None,
             error=str(exc),
             traceback_text=traceback.format_exc(),
         )
@@ -910,18 +982,15 @@ def _compute_and_save_tiling_artifacts_from_request(
 def _resolve_mask_for_request(
     request: _MaskResolutionRequest,
 ) -> _MaskResolutionResponse:
+    # ``request.tiling`` already carries the slide and mask backends resolved for this slide by
+    # the shared seam (``_resolve_effective_backends``); no second resolution here.
+    effective_tiling = request.tiling
+    has_mask = request.whole_slide.mask_path is not None
+    mask_backend = effective_tiling.mask_backend if has_mask else None
+    requested_mask_backend = (
+        effective_tiling.requested_mask_backend if has_mask else None
+    )
     try:
-        effective_tiling = request.tiling
-        backend_selection = resolve_backend(
-            effective_tiling.backend,
-            wsi_path=request.whole_slide.image_path,
-            mask_path=request.whole_slide.mask_path,
-        )
-        effective_tiling = (
-            effective_tiling
-            if backend_selection.backend == effective_tiling.requested_backend
-            else replace(effective_tiling, backend=backend_selection.backend)
-        )
         slide = open_preprocessing_slide(
             request.whole_slide.image_path,
             backend=effective_tiling.backend,
@@ -946,6 +1015,8 @@ def _resolve_mask_for_request(
                 sam2_checkpoint_path=effective_segmentation.sam2_checkpoint_path,
                 sam2_config_path=effective_segmentation.sam2_config_path,
                 sam2_device=effective_segmentation.sam2_device,
+                mask_backend=effective_tiling.mask_backend,
+                requested_mask_backend=effective_tiling.requested_mask_backend,
             )
         finally:
             slide.close()
@@ -954,16 +1025,20 @@ def _resolve_mask_for_request(
             whole_slide=request.whole_slide,
             ok=True,
             resolved_mask=resolved_mask,
-            requested_backend=request.tiling.requested_backend,
+            requested_backend=effective_tiling.requested_backend,
             backend=effective_tiling.backend,
+            requested_mask_backend=requested_mask_backend,
+            mask_backend=mask_backend,
         )
     except Exception as exc:
         return _MaskResolutionResponse(
             input_index=request.input_index,
             whole_slide=request.whole_slide,
             ok=False,
-            requested_backend=request.tiling.requested_backend,
-            backend=request.tiling.backend,
+            requested_backend=effective_tiling.requested_backend,
+            backend=effective_tiling.backend,
+            requested_mask_backend=requested_mask_backend,
+            mask_backend=mask_backend,
             error=str(exc),
             traceback_text=traceback.format_exc(),
         )
@@ -975,12 +1050,17 @@ def _resolve_mask_for_request_safe(
     try:
         return _resolve_mask_for_request(request)
     except Exception as exc:
+        has_mask = request.whole_slide.mask_path is not None
         return _MaskResolutionResponse(
             input_index=request.input_index,
             whole_slide=request.whole_slide,
             ok=False,
             requested_backend=request.tiling.requested_backend,
             backend=request.tiling.backend,
+            requested_mask_backend=(
+                request.tiling.requested_mask_backend if has_mask else None
+            ),
+            mask_backend=request.tiling.mask_backend if has_mask else None,
             error=str(exc),
             traceback_text=traceback.format_exc(),
         )
@@ -1148,6 +1228,8 @@ def tile_slides(
                 "mask_path",
                 "requested_backend",
                 "backend",
+                "requested_mask_backend",
+                "mask_backend",
                 "tiling_status",
                 "num_tiles",
                 "coordinates_npz_path",
@@ -1161,35 +1243,18 @@ def tile_slides(
         for row in existing_df.to_dict(orient="records"):
             if row.get("tiling_status") == "success":
                 existing_successes[str(row["sample_id"])] = row
-    compatibility_specs: dict[tuple[bool, str], CompatibilitySpec] = {}
-
-    def _resolve_effective_tiling(whole_slide: SlideSpec) -> TilingConfig:
-        backend_selection = resolve_backend(
-            tiling.backend,
-            wsi_path=whole_slide.image_path,
-            mask_path=whole_slide.mask_path,
-        )
-        if backend_selection.reason is not None:
-            emit_progress(
-                "backend.selected",
-                sample_id=whole_slide.sample_id,
-                backend=backend_selection.backend,
-                reason=backend_selection.reason,
-            )
-        return (
-            tiling
-            if backend_selection.backend == tiling.requested_backend
-            else replace(tiling, backend=backend_selection.backend)
-        )
+    compatibility_specs: dict[tuple[bool, str, str | None], CompatibilitySpec] = {}
 
     planned_work: list[_SlideWork] = []
     compute_requests: list[_ComputeRequest] = []
     for whole_slide in whole_slides:
+        effective_tiling = None
         try:
-            effective_tiling = _resolve_effective_tiling(whole_slide)
-            key = (whole_slide.mask_path is not None, effective_tiling.backend)
+            effective_tiling = _resolve_effective_backends(whole_slide, tiling)
+            has_mask = whole_slide.mask_path is not None
+            resolved_mask_backend = effective_tiling.mask_backend if has_mask else None
+            key = (has_mask, effective_tiling.backend, resolved_mask_backend)
             if key not in compatibility_specs:
-                has_mask = whole_slide.mask_path is not None
                 compatibility_specs[key] = CompatibilitySpec(
                     tiling=effective_tiling,
                     segmentation=_resolve_effective_segmentation(
@@ -1203,6 +1268,7 @@ def tile_slides(
                     output_mode=(
                         CoordinateOutputMode.MERGED if has_mask else None
                     ),
+                    mask_backend=resolved_mask_backend,
                 )
             compatibility = compatibility_specs[key]
             artifact: TilingArtifacts | None = None
@@ -1275,11 +1341,27 @@ def tile_slides(
             )
             compute_requests.append(compute_request)
         except Exception as exc:
+            # Requested provenance is always known; resolved backends are known only if the
+            # seam ran (``effective_tiling`` is not None). Mask provenance stays null when the
+            # slide has no source mask.
+            has_mask = whole_slide.mask_path is not None
             planned_work.append(
                 _SlideWork(
                     whole_slide=whole_slide,
                     error=str(exc),
                     traceback_text=traceback.format_exc(),
+                    requested_backend=tiling.requested_backend,
+                    backend=(
+                        effective_tiling.backend if effective_tiling is not None else None
+                    ),
+                    requested_mask_backend=(
+                        tiling.requested_mask_backend if has_mask else None
+                    ),
+                    mask_backend=(
+                        effective_tiling.mask_backend
+                        if (effective_tiling is not None and has_mask)
+                        else None
+                    ),
                 )
             )
     # Annotation sampling resolves its (multi-class) mask inside the shared compute core, so
@@ -1449,8 +1531,10 @@ def tile_slides(
                         whole_slide=previous_pending.whole_slide,
                         error=str(exc),
                         traceback_text=traceback.format_exc(),
-                        requested_backend=None,
-                        backend=None,
+                        requested_backend=previous_pending.base_artifact.requested_backend,
+                        backend=previous_pending.base_artifact.backend,
+                        requested_mask_backend=previous_pending.base_artifact.requested_mask_backend,
+                        mask_backend=previous_pending.base_artifact.mask_backend,
                     )
                 )
                 failed_previews += 1
@@ -1488,6 +1572,8 @@ def tile_slides(
                     traceback_text=response.traceback_text or "",
                     requested_backend=response.requested_backend,
                     backend=response.backend,
+                    requested_mask_backend=response.requested_mask_backend,
+                    mask_backend=response.mask_backend,
                 )
             )
             return
@@ -1623,8 +1709,10 @@ def tile_slides(
                         whole_slide=planned.whole_slide,
                         error=planned.error,
                         traceback_text=planned.traceback_text or "",
-                        requested_backend=None,
-                        backend=None,
+                        requested_backend=planned.requested_backend,
+                        backend=planned.backend,
+                        requested_mask_backend=planned.requested_mask_backend,
+                        mask_backend=planned.mask_backend,
                     )
                 )
                 continue
@@ -1642,6 +1730,8 @@ def tile_slides(
                         traceback_text=failure.traceback_text or "",
                         requested_backend=failure.requested_backend,
                         backend=failure.backend,
+                        requested_mask_backend=failure.requested_mask_backend,
+                        mask_backend=failure.mask_backend,
                     )
                 )
                 continue

@@ -30,6 +30,31 @@ PIXEL_MAPPING = {"background": 0, "tumor": 1, "stroma": 2, "necrosis": 3}
 TUMOR_PX, STROMA_PX, NECROSIS_PX = 40000, 40000, 1600
 
 
+def _fake_resolve_backends(
+    *, requested_slide_backend, requested_mask_backend, wsi_path, mask_path=None
+):
+    from hs2p.wsi.backend import BackendSelection, ResolvedBackends
+
+    sel = BackendSelection(backend="asap", reason=None, tried=("asap",))
+    return ResolvedBackends(
+        slide=sel,
+        mask=None if mask_path is None else sel,
+        requested_slide_backend=requested_slide_backend,
+        requested_mask_backend=None if mask_path is None else requested_mask_backend,
+    )
+
+
+def _mock_resolve_backend(requested_backend, *, wsi_path, mask_path=None):
+    """Stand in for the mask-path openability probe: ``auto`` resolves to the sentinel ``mock``
+    backend (these tests read masks from fake paths, so a real probe cannot run). A direct
+    mask reader that omits ``mask_backend`` now resolves independently from the mask path via
+    ``auto`` (#163) rather than inheriting the slide backend."""
+    from hs2p.wsi.backend import BackendSelection
+
+    resolved = "mock" if requested_backend == "auto" else requested_backend
+    return BackendSelection(backend=resolved, tried=(resolved,))
+
+
 def _label_mask() -> np.ndarray:
     mask = np.zeros((SLIDE_H, SLIDE_W), dtype=np.uint8)
     mask[0:200, 0:200] = 1
@@ -74,6 +99,7 @@ def patched_mask_open(monkeypatch):
         "open_slide",
         lambda path, backend=None: _FakeMaskSlide(mask, BASE_SPACING),
     )
+    monkeypatch.setattr(maskmod, "resolve_backend", _mock_resolve_backend)
     return mask
 
 
@@ -114,6 +140,7 @@ def test_resolve_annotation_masks_preserves_uint16_labels_above_255(monkeypatch)
         "open_slide",
         lambda path, backend=None: _FakeMaskSlide(mask, BASE_SPACING),
     )
+    monkeypatch.setattr(maskmod, "resolve_backend", _mock_resolve_backend)
 
     resolved = resolve_annotation_masks(
         slide=_mock_slide(),
@@ -136,6 +163,7 @@ def test_resolve_annotation_masks_background_is_optional(monkeypatch):
         "open_slide",
         lambda path, backend=None: _FakeMaskSlide(mask, BASE_SPACING),
     )
+    monkeypatch.setattr(maskmod, "resolve_backend", _mock_resolve_backend)
 
     resolved = resolve_annotation_masks(
         slide=_mock_slide(),
@@ -194,6 +222,7 @@ def test_resolve_annotation_masks_accepts_empty_configured_backend_read_without_
         return _FakeMaskSlide(empty, BASE_SPACING)
 
     monkeypatch.setattr(maskmod, "open_slide", fake_open)
+    monkeypatch.setattr(maskmod, "resolve_backend", _mock_resolve_backend)
     resolved = resolve_annotation_masks(
         slide=_mock_slide(),
         mask_path="/fake/slide_mask.tif",
@@ -227,6 +256,7 @@ def test_annotation_backend_exception_fails_with_context_without_fallback(monkey
         return _RaisingMaskSlide()
 
     monkeypatch.setattr(maskmod, "open_slide", fake_open)
+    monkeypatch.setattr(maskmod, "resolve_backend", _mock_resolve_backend)
     with pytest.raises(RuntimeError) as excinfo:
         resolve_annotation_masks(
             slide=_mock_slide(),
@@ -258,6 +288,7 @@ def test_invalid_annotation_labels_fail_without_an_openslide_fallback(monkeypatc
         return _FakeMaskSlide(invalid, BASE_SPACING)
 
     monkeypatch.setattr(maskmod, "open_slide", fake_open)
+    monkeypatch.setattr(maskmod, "resolve_backend", _mock_resolve_backend)
     with pytest.raises(ValueError) as excinfo:
         resolve_annotation_masks(
             slide=_mock_slide(),
@@ -280,6 +311,7 @@ def test_resolve_annotation_masks_genuinely_empty_stays_empty(monkeypatch):
     monkeypatch.setattr(
         maskmod, "open_slide", lambda path, backend=None: _FakeMaskSlide(empty, BASE_SPACING)
     )
+    monkeypatch.setattr(maskmod, "resolve_backend", _mock_resolve_backend)
     resolved = resolve_annotation_masks(
         slide=_mock_slide(),
         mask_path="/fake/slide_mask.tif",
@@ -333,6 +365,7 @@ def patched_slide_and_mask_open(monkeypatch):
 
     monkeypatch.setattr(singlemod, "open_slide", fake_open)
     monkeypatch.setattr(maskmod, "open_slide", fake_open)
+    monkeypatch.setattr(maskmod, "resolve_backend", _mock_resolve_backend)
 
 
 @pytest.mark.parametrize(
@@ -383,11 +416,7 @@ def test_tile_slide_with_sampling_returns_per_annotation_dict(monkeypatch):
 
     monkeypatch.setattr(singlemod, "open_slide", fake_open)
     monkeypatch.setattr(maskmod, "open_slide", fake_open)
-    monkeypatch.setattr(
-        orchmod,
-        "resolve_backend",
-        lambda *a, **k: SimpleNamespace(backend="mock", reason=None),
-    )
+    monkeypatch.setattr(orchmod, "resolve_backends", _fake_resolve_backends)
 
     whole_slide = SlideSpec(
         sample_id="slide0",
@@ -400,7 +429,7 @@ def test_tile_slide_with_sampling_returns_per_annotation_dict(monkeypatch):
         tolerance=0.05,
         overlap=0.0,
         min_coverage={"tissue": 0.0},
-        backend="mock",
+        backend="asap",
     )
     result = tile_slide(
         whole_slide,
@@ -475,11 +504,7 @@ def _patch_tile_slides_open(monkeypatch):
 
     monkeypatch.setattr(singlemod, "open_slide", fake_open)
     monkeypatch.setattr(maskmod, "open_slide", fake_open)
-    monkeypatch.setattr(
-        orchmod,
-        "resolve_backend",
-        lambda *a, **k: SimpleNamespace(backend="mock", reason=None),
-    )
+    monkeypatch.setattr(orchmod, "resolve_backends", _fake_resolve_backends)
 
 
 def _slides(n):
@@ -500,7 +525,7 @@ def _mock_tiling():
         tolerance=0.05,
         overlap=0.0,
         min_coverage={"tissue": 0.0},
-        backend="mock",
+        backend="asap",
     )
 
 

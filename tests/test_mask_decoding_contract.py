@@ -57,6 +57,7 @@ def test_invalid_tissue_labels_fail_without_a_direct_tiff_read(monkeypatch):
             slide=_wsi(),
             seg_level=0,
             tissue_value=1,
+            mask_backend="cucim",
         )
 
     assert direct_reads == []
@@ -83,6 +84,7 @@ def test_tissue_backend_exception_fails_without_an_alternate_read(monkeypatch):
             slide=_wsi(),
             seg_level=0,
             tissue_value=1,
+            mask_backend="cucim",
         )
 
     assert opened_backends == ["cucim"]
@@ -114,6 +116,7 @@ def test_empty_precomputed_tissue_mask_succeeds_with_one_contextual_warning(
         tissue_mask_path=mask_path,
         tissue_mask_tissue_value=7,
         seg_downsample=1,
+        mask_backend="cucim",
     )
 
     assert np.array_equal(resolved.tissue_mask, np.zeros((2, 2), dtype=np.uint8))
@@ -149,6 +152,7 @@ def test_nonempty_precomputed_tissue_mask_uses_one_backend_without_warning(
         tissue_mask_path="/masks/nonempty.tif",
         tissue_mask_tissue_value=7,
         seg_downsample=1,
+        mask_backend="cucim",
     )
 
     assert opened_backends == ["cucim"]
@@ -207,6 +211,7 @@ def test_single_value_annotation_mask_succeeds_without_empty_mask_warning(
         mask_path="/masks/annotations.tif",
         pixel_mapping={"background": 0, "tumor": 1},
         seg_downsample=1,
+        mask_backend="cucim",
     )
 
     assert np.all(resolved.masks["background"] == 255)

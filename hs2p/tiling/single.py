@@ -196,6 +196,8 @@ def build_tiling_result_from_mask(
         tissue_mask_tissue_value=resolved_mask.tissue_mask_tissue_value,
         mask_level=resolved_mask.mask_level,
         mask_spacing_um=resolved_mask.mask_spacing_um,
+        mask_backend=resolved_mask.mask_backend,
+        requested_mask_backend=resolved_mask.requested_mask_backend,
         contours=contours,
         annotation=annotation,
         selection_strategy=selection_strategy,
@@ -218,6 +220,8 @@ def _annotation_to_resolved_tissue_mask(
         tissue_mask_tissue_value=None,
         mask_level=resolved_masks.mask_level,
         mask_spacing_um=resolved_masks.mask_spacing_um,
+        mask_backend=resolved_masks.mask_backend,
+        requested_mask_backend=resolved_masks.requested_mask_backend,
     )
 
 
@@ -354,6 +358,8 @@ def _build_joint_annotation_results(
         tissue_mask_tissue_value=None,
         mask_level=resolved_masks.mask_level,
         mask_spacing_um=resolved_masks.mask_spacing_um,
+        mask_backend=resolved_masks.mask_backend,
+        requested_mask_backend=resolved_masks.requested_mask_backend,
     )
 
     base_result = build_tiling_result_from_mask(
@@ -599,6 +605,9 @@ def preprocess_slide(
     tissue_mask_path: str | Path | None = None,
     tissue_mask_tissue_value: int = 1,
     backend: str = "auto",
+    requested_backend: str | None = None,
+    mask_backend: str | None = None,
+    requested_mask_backend: str | None = None,
     spacing_override: float | None = None,
     requested_tile_size_px: int = 256,
     requested_spacing_um: float = 0.5,
@@ -653,13 +662,15 @@ def preprocess_slide(
             sam2_checkpoint_path=sam2_checkpoint_path,
             sam2_config_path=sam2_config_path,
             sam2_device=sam2_device,
+            mask_backend=mask_backend,
+            requested_mask_backend=requested_mask_backend,
         )
         return build_tiling_result_from_mask(
             slide=slide,
             resolved_mask=resolved_mask,
             image_path=image_path,
             backend=slide.backend_name,
-            requested_backend=backend,
+            requested_backend=requested_backend if requested_backend is not None else backend,
             sample_id=sample_id,
             requested_tile_size_px=requested_tile_size_px,
             requested_spacing_um=requested_spacing_um,
@@ -702,6 +713,9 @@ def preprocess_slide_per_annotation(
     selection_strategy: str,
     sample_id: str | None = None,
     backend: str = "auto",
+    requested_backend: str | None = None,
+    mask_backend: str | None = None,
+    requested_mask_backend: str | None = None,
     spacing_override: float | None = None,
     requested_tile_size_px: int = 256,
     requested_spacing_um: float = 0.5,
@@ -745,6 +759,8 @@ def preprocess_slide_per_annotation(
             mask_path=mask_path,
             pixel_mapping=pixel_mapping,
             seg_downsample=seg_downsample,
+            mask_backend=mask_backend,
+            requested_mask_backend=requested_mask_backend,
         )
         if mask_preview is not None:
             _render_annotation_mask_preview(
@@ -760,7 +776,7 @@ def preprocess_slide_per_annotation(
             selection_strategy=selection_strategy,
             image_path=image_path,
             backend=slide.backend_name,
-            requested_backend=backend,
+            requested_backend=requested_backend if requested_backend is not None else backend,
             sample_id=sample_id,
             requested_tile_size_px=requested_tile_size_px,
             requested_spacing_um=requested_spacing_um,

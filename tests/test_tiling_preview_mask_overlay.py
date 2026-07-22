@@ -90,6 +90,9 @@ def _configs() -> tuple[TilingConfig, SegmentationConfig, FilterConfig, PreviewC
         overlap=0.0,
         min_coverage={"tissue": 0.1},
         backend="openslide",
+        # The deflate-compressed multi-label mask must decode through openslide; auto
+        # (openability-only) could select a decoder that opens but cannot decode it (#163).
+        mask_backend="openslide",
     )
     segmentation = SegmentationConfig(
         method="hsv",

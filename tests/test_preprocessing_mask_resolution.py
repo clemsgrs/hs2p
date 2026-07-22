@@ -70,6 +70,9 @@ def test_resolve_tissue_mask_uses_precomputed_mask_without_segmentation(
         tissue_mask_path=Path("mask.png"),
         tissue_method="sam2",
         seg_downsample=64,
+        # A direct caller resolves the mask backend from the mask path (#163); pass it
+        # explicitly here since the fake mask path cannot be probed.
+        mask_backend="asap",
     )
 
     assert resolved.tissue_method == "precomputed_mask"
@@ -156,6 +159,7 @@ def test_resolve_tissue_mask_allows_precomputed_masks_without_a_method(
     resolved = preprocessing_mod.resolve_tissue_mask(
         slide=slide,
         tissue_mask_path=Path("mask.png"),
+        mask_backend="asap",
     )
 
     assert resolved.tissue_method == "precomputed_mask"

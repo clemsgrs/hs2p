@@ -47,6 +47,7 @@ Start from [`hs2p/configs/default.yaml`](../hs2p/configs/default.yaml), then edi
 - `csv`
 - `output_dir`
 - `tiling.backend`
+- `tiling.mask_backend`
 - `tiling.params.requested_spacing_um`
 - `tiling.params.requested_tile_size_px`
 
@@ -74,7 +75,7 @@ pip install "hs2p[cucim]"
 pip install "hs2p[all]"
 ```
 
-`tiling.backend` supports:
+`tiling.backend` (slide reader) and `tiling.mask_backend` (source-mask reader) both support:
 
 - `auto`
 - `cucim`
@@ -82,7 +83,33 @@ pip install "hs2p[all]"
 - `openslide`
 - `asap`
 
-`auto` prefers `cucim -> vips -> openslide -> asap`.
+`auto` prefers `cucim -> vips -> openslide -> asap`. Null and any other value are rejected up
+front by configuration validation (including when constructing `TilingConfig` directly in
+Python).
+
+### Independent slide and mask backends
+
+The slide backend and the mask backend are resolved **independently, each from its own path**:
+`tiling.backend` from the slide path, `tiling.mask_backend` from the source-mask path. They
+share the same selection policy — `auto` checks **openability only** (it opens and closes the
+file to pick the first backend that can open it) and never inspects the decoded label
+semantics or retries after selection. A slide with no source mask never resolves or validates
+mask-backend availability, and its mask provenance is recorded as null.
+
+Because `auto` is openability-only, a backend that can *open* but not *decode* a mask (e.g.
+cuCIM opening a deflate-compressed label TIFF whose pixels it cannot decode) can be selected
+and then fail at read time. When that happens, set `tiling.mask_backend` explicitly to a
+backend that decodes the mask (e.g. `openslide`). An unknown mask backend fails at
+configuration time; an unavailable or incompatible one fails only when the mask is read, with
+the mask path and requested backend named in the error.
+
+Both the requested and resolved slide and mask backends are recorded as provenance in the
+tiling metadata, `TilingArtifacts`, and `process_list.csv` (`requested_backend` / `backend`
+and `requested_mask_backend` / `mask_backend`). Requested values are provenance only. On
+`resume`, compatibility compares the **resolved** slide backend and — when the slide has a
+source mask — the **resolved** mask backend; artifacts are not rejected merely because a
+requested value differs. Pre-#163 metadata and `process_list.csv` files (without the mask
+backend fields/columns) are rejected clearly rather than loaded.
 
 ## Config areas
 

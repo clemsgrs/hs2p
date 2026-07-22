@@ -29,6 +29,8 @@ _PROVENANCE_KEYS = {
     "mask_path",
     "backend",
     "requested_backend",
+    "mask_backend",
+    "requested_mask_backend",
 }
 _SLIDE_KEYS = {
     "dimensions",
@@ -97,6 +99,8 @@ def _build_tiling_metadata(result: TilingResult) -> dict[str, Any]:
         "mask_path": str(result.mask_path) if result.mask_path is not None else None,
         "backend": result.backend,
         "requested_backend": result.requested_backend,
+        "mask_backend": result.mask_backend,
+        "requested_mask_backend": result.requested_mask_backend,
     }
     slide = {
         "dimensions": result.slide_dimensions,
@@ -376,6 +380,8 @@ def _load_tiling_result(*, npz_path: "Path | None", meta: dict[str, Any]) -> Til
         image_path=provenance["image_path"],
         backend=provenance["backend"],
         requested_backend=provenance["requested_backend"],
+        mask_backend=provenance["mask_backend"],
+        requested_mask_backend=provenance["requested_mask_backend"],
         tolerance=tiling["tolerance"],
         step_px_lv0=tiling["step_px_lv0"],
         tissue_method=segmentation["tissue_method"],

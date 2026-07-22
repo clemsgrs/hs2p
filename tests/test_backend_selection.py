@@ -59,13 +59,31 @@ def _make_tiling_result(sample_id: str = "slide-1") -> preprocessing_mod.TilingR
 
 
 def _cucim_auto_backend_selection(
-    requested_backend: str, *, wsi_path: Path, mask_path
+    requested_backend: str, *, wsi_path: Path, mask_path=None
 ) -> backend_mod.BackendSelection:
     del requested_backend, wsi_path, mask_path
     return backend_mod.BackendSelection(
         backend="cucim",
         reason="selected cuCIM for auto backend",
         tried=("cucim",),
+    )
+
+
+def _cucim_auto_resolve_backends(
+    *, requested_slide_backend: str, requested_mask_backend, wsi_path: Path, mask_path=None
+) -> backend_mod.ResolvedBackends:
+    del wsi_path
+    slide = _cucim_auto_backend_selection("auto", wsi_path=Path("slide.svs"))
+    mask = (
+        None
+        if mask_path is None
+        else _cucim_auto_backend_selection("auto", wsi_path=Path(mask_path))
+    )
+    return backend_mod.ResolvedBackends(
+        slide=slide,
+        mask=mask,
+        requested_slide_backend=requested_slide_backend,
+        requested_mask_backend=None if mask_path is None else requested_mask_backend,
     )
 
 
@@ -203,15 +221,16 @@ def test_wsi_opens_slide_and_mask_readers_with_resolved_backend(monkeypatch):
         seen_calls.append((path, backend, spacing_override))
         return _FakeSlideReader()
 
-    monkeypatch.setattr(
-        wsi_mod,
-        "resolve_backend",
-        lambda requested_backend, *, wsi_path, mask_path=None: backend_mod.BackendSelection(
-            backend="cucim",
-            tried=("cucim",),
-        ),
-    )
+    def _fake_resolve_backend(requested_backend, *, wsi_path, mask_path=None):
+        return backend_mod.BackendSelection(backend="cucim", tried=("cucim",))
+
+    monkeypatch.setattr(wsi_mod, "resolve_backend", _fake_resolve_backend)
     monkeypatch.setattr(wsi_mod, "open_slide", _fake_open_slide)
+    # The attached mask opens through the centralized ``open_mask_reader`` helper (#163), which
+    # resolves + opens via the reader module's own globals — patch those so the mask open is
+    # captured alongside the slide open.
+    monkeypatch.setattr(reader_mod, "resolve_backend", _fake_resolve_backend)
+    monkeypatch.setattr(reader_mod, "open_slide", _fake_open_slide)
 
     wsi_mod.WSI(
         path=Path("/tmp/slide.tiff"),
@@ -232,7 +251,7 @@ def test_tile_slide_uses_resolved_backend_for_hash_and_result(monkeypatch):
         captured["backend"] = kwargs["backend"]
         return _make_tiling_result()
 
-    monkeypatch.setattr(orchestration_mod, "resolve_backend", _cucim_auto_backend_selection)
+    monkeypatch.setattr(orchestration_mod, "resolve_backends", _cucim_auto_resolve_backends)
     monkeypatch.setattr(orchestration_mod, "preprocess_slide", _fake_preprocess_slide)
 
     result = api_mod.tile_slide(
@@ -259,7 +278,7 @@ def test_tile_slide_emits_backend_selection_progress_event(monkeypatch):
 
     reporter = RecordingReporter()
 
-    monkeypatch.setattr(orchestration_mod, "resolve_backend", _cucim_auto_backend_selection)
+    monkeypatch.setattr(orchestration_mod, "resolve_backends", _cucim_auto_resolve_backends)
     monkeypatch.setattr(
         orchestration_mod,
         "preprocess_slide",

@@ -22,6 +22,7 @@ def resolve_tiling_config(cfg: Any) -> TilingConfig:
         min_coverage=min_coverage,
         independent_sampling=bool(cfg.tiling.independent_sampling),
         backend=cfg.tiling.backend,
+        mask_backend=getattr(cfg.tiling, "mask_backend", "auto"),
     )
 
 

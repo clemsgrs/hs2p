@@ -110,6 +110,15 @@ class TextReporter:
             if reason:
                 return f"[backend] {payload['sample_id']}: {reason}"
             return f"[backend] {payload['sample_id']}: using {payload['backend']}"
+        if kind == "mask_backend.selected":
+            reason = payload.get("reason")
+            mask_path = payload.get("mask_path")
+            if reason:
+                return f"[mask backend] {payload['sample_id']} ({mask_path}): {reason}"
+            return (
+                f"[mask backend] {payload['sample_id']} ({mask_path}): "
+                f"using {payload['backend']}"
+            )
         if kind == "run.finished":
             return f"Run finished successfully. Output: {payload['output_dir']}"
         if kind == "run.failed":
@@ -293,6 +302,17 @@ class RichReporter:
                 self.console.print(f"[backend] {sample_id}: {reason}")
             else:
                 self.console.print(f"[backend] {sample_id}: using {payload['backend']}")
+            return
+        if kind == "mask_backend.selected":
+            sample_id = payload["sample_id"]
+            reason = payload.get("reason")
+            mask_path = payload.get("mask_path")
+            if reason:
+                self.console.print(f"[mask backend] {sample_id} ({mask_path}): {reason}")
+            else:
+                self.console.print(
+                    f"[mask backend] {sample_id} ({mask_path}): using {payload['backend']}"
+                )
             return
         if kind == "run.finished":
             self._print_summary(
