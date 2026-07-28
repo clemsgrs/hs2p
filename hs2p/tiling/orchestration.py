@@ -645,6 +645,7 @@ class _MaskResolutionResponse:
 def _build_success_artifact(
     *,
     base_artifact: TilingArtifacts,
+    tiles_tar_path: Path | None = None,
     mask_preview_path: Path | None,
     tiling_preview_path: Path | None,
 ) -> TilingArtifacts:
@@ -653,7 +654,11 @@ def _build_success_artifact(
         coordinates_npz_path=base_artifact.coordinates_npz_path,
         coordinates_meta_path=base_artifact.coordinates_meta_path,
         num_tiles=base_artifact.num_tiles,
-        tiles_tar_path=base_artifact.tiles_tar_path,
+        tiles_tar_path=(
+            tiles_tar_path
+            if tiles_tar_path is not None
+            else base_artifact.tiles_tar_path
+        ),
         mask_preview_path=mask_preview_path,
         tiling_preview_path=tiling_preview_path,
         backend=base_artifact.backend,
@@ -704,13 +709,6 @@ def _build_success_process_row(
         "error": np.nan,
         "traceback": np.nan,
     }
-
-
-def _existing_file_path(value: Any) -> Path | None:
-    path = optional_path(value)
-    if path is None or not path.is_file():
-        return None
-    return path
 
 
 def _same_optional_path(left: Any, right: Any) -> bool:
@@ -765,7 +763,7 @@ def _merge_existing_resume_metadata(
     for key in ("mask_preview_path", "tiling_preview_path"):
         if key not in existing_row:
             continue
-        existing_path = _existing_file_path(existing_row.get(key))
+        existing_path = optional_path(existing_row.get(key))
         if existing_path is not None and optional_path(merged.get(key)) is None:
             merged[key] = str(existing_path)
     return merged
@@ -1372,8 +1370,9 @@ def tile_slides(
                 )
                 artifact = _build_success_artifact(
                     base_artifact=artifact,
-                    mask_preview_path=_existing_file_path(row.get("mask_preview_path")),
-                    tiling_preview_path=_existing_file_path(row.get("tiling_preview_path")),
+                    tiles_tar_path=optional_path(row.get("tiles_tar_path")),
+                    mask_preview_path=optional_path(row.get("mask_preview_path")),
+                    tiling_preview_path=optional_path(row.get("tiling_preview_path")),
                 )
             if read_coordinates_from is not None and artifact is None:
                 artifact = maybe_load_existing_artifacts(
