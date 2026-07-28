@@ -20,14 +20,6 @@ from hs2p.wsi import iter_tile_arrays_from_result
 from hs2p.wsi.streaming.plans import GroupedReadPlan, iter_grouped_read_plans
 
 
-_extract_tiles_to_tar = extract_tiles_to_tar
-
-
-def extract_tiles_to_tar(*args, **kwargs):
-    kwargs.setdefault("jpeg_backend", "pil")
-    return _extract_tiles_to_tar(*args, **kwargs)
-
-
 def _make_tiling_result(
     num_tiles: int = 3,
     tile_size: int = 256,
@@ -443,7 +435,11 @@ class TestExtractTilesToTar:
         )
 
         with patch("hs2p.wsi.streaming.stream.open_slide", return_value=mock_reader):
-            tar_path, _ = _extract_tiles_to_tar(result, output_dir=tmp_path)
+            tar_path, _ = extract_tiles_to_tar(
+                result,
+                output_dir=tmp_path,
+                jpeg_backend="turbojpeg",
+            )
 
         assert tar_path.is_file()
         assert captured == {
@@ -451,6 +447,23 @@ class TestExtractTilesToTar:
             "pixel_format": 0,
             "jpeg_subsample": 2,
         }
+
+    def test_missing_turbojpeg_fails_actionably_before_tile_materialization(
+        self, tmp_path: Path
+    ):
+        result = _make_tiling_result(num_tiles=1)
+
+        with pytest.raises(
+            ImportError,
+            match=r"pip install 'hs2p\[turbojpeg\]'",
+        ):
+            extract_tiles_to_tar(
+                result,
+                output_dir=tmp_path,
+                jpeg_backend="turbojpeg",
+            )
+
+        assert not (tmp_path / "tiles").exists()
 
     def test_uses_pil_encoding_when_requested(self, tmp_path: Path, monkeypatch):
         result = _make_tiling_result(num_tiles=1)

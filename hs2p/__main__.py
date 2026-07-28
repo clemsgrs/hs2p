@@ -59,7 +59,7 @@ def main(args):
             sampling, selection_strategy, output_mode = resolve_sampling_request(
                 cfg, tiling=tiling
             )
-            jpeg_backend = str(getattr(cfg.speed, "jpeg_backend", "turbojpeg"))
+            jpeg_backend = str(getattr(cfg.speed, "jpeg_backend", "pil"))
             progress.emit_progress(
                 "run.started",
                 command="tiling",

@@ -1196,10 +1196,11 @@ def test_tile_slides_assigns_inner_workers_when_batch_is_small(
     segmentation_config: SegmentationConfig,
     filter_config: FilterConfig,
 ):
-    seen = {"pool_processes": None, "inner_workers": []}
+    seen = {"pool_processes": None, "inner_workers": [], "jpeg_backends": []}
 
     def _fake_compute_and_save(request):
         seen["inner_workers"].append(request.num_workers)
+        seen["jpeg_backends"].append(request.jpeg_backend)
         tiles_dir = Path(request.output_dir) / "tiles"
         tiles_dir.mkdir(parents=True, exist_ok=True)
         npz_path = tiles_dir / f"{request.whole_slide.sample_id}.coordinates.npz"
@@ -1261,6 +1262,37 @@ def test_tile_slides_assigns_inner_workers_when_batch_is_small(
 
     assert seen["pool_processes"] == 2
     assert seen["inner_workers"] == [4, 4]
+    assert seen["jpeg_backends"] == ["pil", "pil"]
+
+
+def test_tile_slides_rejects_missing_turbojpeg_before_slide_compute(
+    monkeypatch,
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    monkeypatch.setattr(
+        orchestration_mod,
+        "_compute_and_save_tiling_artifacts_from_request",
+        lambda request: pytest.fail(
+            f"slide computation started for {request.whole_slide.sample_id}"
+        ),
+    )
+
+    with pytest.raises(
+        ImportError,
+        match=r"pip install 'hs2p\[turbojpeg\]'",
+    ):
+        tile_slides(
+            [SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs"))],
+            tiling=tiling_config,
+            segmentation=segmentation_config,
+            filtering=filter_config,
+            output_dir=tmp_path,
+            save_tiles=True,
+            jpeg_backend="turbojpeg",
+        )
 
 
 def test_compute_request_passes_inner_workers_to_tile_extraction(
