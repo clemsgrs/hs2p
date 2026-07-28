@@ -29,6 +29,7 @@ _PROVENANCE_KEYS = {
     "mask_path",
     "backend",
     "requested_backend",
+    "spacing_at_level_0",
     "mask_backend",
     "requested_mask_backend",
 }
@@ -61,6 +62,8 @@ _SEGMENTATION_KEYS = {
     "sthresh_up",
     "mthresh",
     "close",
+    "sam2_checkpoint_path",
+    "sam2_config_path",
     "mask_path",
     "ref_tile_size_px",
     "tissue_mask_tissue_value",
@@ -99,6 +102,7 @@ def _build_tiling_metadata(result: TilingResult) -> dict[str, Any]:
         "mask_path": str(result.mask_path) if result.mask_path is not None else None,
         "backend": result.backend,
         "requested_backend": result.requested_backend,
+        "spacing_at_level_0": result.spacing_at_level_0,
         "mask_backend": result.mask_backend,
         "requested_mask_backend": result.requested_mask_backend,
     }
@@ -131,6 +135,16 @@ def _build_tiling_metadata(result: TilingResult) -> dict[str, Any]:
         "sthresh_up": result.seg_sthresh_up,
         "mthresh": result.seg_mthresh,
         "close": result.seg_close,
+        "sam2_checkpoint_path": (
+            str(result.sam2_checkpoint_path)
+            if result.sam2_checkpoint_path is not None
+            else None
+        ),
+        "sam2_config_path": (
+            str(result.sam2_config_path)
+            if result.sam2_config_path is not None
+            else None
+        ),
         "mask_path": str(result.mask_path) if result.mask_path is not None else None,
         "ref_tile_size_px": result.ref_tile_size_px,
         "tissue_mask_tissue_value": result.tissue_mask_tissue_value,
@@ -380,6 +394,7 @@ def _load_tiling_result(*, npz_path: "Path | None", meta: dict[str, Any]) -> Til
         image_path=provenance["image_path"],
         backend=provenance["backend"],
         requested_backend=provenance["requested_backend"],
+        spacing_at_level_0=provenance["spacing_at_level_0"],
         mask_backend=provenance["mask_backend"],
         requested_mask_backend=provenance["requested_mask_backend"],
         tolerance=tiling["tolerance"],
@@ -393,6 +408,8 @@ def _load_tiling_result(*, npz_path: "Path | None", meta: dict[str, Any]) -> Til
         seg_sthresh_up=segmentation["sthresh_up"],
         seg_mthresh=segmentation["mthresh"],
         seg_close=segmentation["close"],
+        sam2_checkpoint_path=segmentation["sam2_checkpoint_path"],
+        sam2_config_path=segmentation["sam2_config_path"],
         ref_tile_size_px=segmentation["ref_tile_size_px"],
         a_t=filtering["a_t"],
         a_h=filtering["a_h"],

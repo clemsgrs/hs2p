@@ -52,6 +52,8 @@ The metadata file is structured into:
 - `mask_path`
 - `backend`
 - `requested_backend`
+- `spacing_at_level_0`
+  - the explicit level-0 spacing override, or `null` when no override was used
 
 ### `slide`
 
@@ -86,6 +88,9 @@ When `is_within_tolerance` is true, `tile_size_lv0` and `step_px_lv0` reflect th
 - `sthresh_up`
 - `mthresh`
 - `close`
+- `sam2_checkpoint_path`
+- `sam2_config_path`
+  - path-based SAM2 segmentation identity; both are `null` for non-SAM2 artifacts
 - `mask_path`
 - `ref_tile_size_px`
 - `tissue_mask_tissue_value`
@@ -157,8 +162,16 @@ Existing artifacts are validated against their structured metadata:
 
 - slide identity
 - mask path
+- explicit level-0 spacing override presence and value
 - backend
 - requested spacing and tile size
 - overlap and minimum tissue fraction
 - segmentation and filtering settings
+- SAM2 checkpoint and model-config paths for SAM2 segmentation
 - sampling selection/output metadata when relevant
+
+Source identities are intentionally path-only. Artifact validation does not hash, stat, or
+reopen a slide, mask, SAM2 checkpoint, or SAM2 model config solely to detect an in-place
+replacement at the same path. Keeping the contents behind those paths stable is the user's
+responsibility. After replacing a source in place, remove the reusable coordinate artifact or
+write the replacement under a new path so incompatible coordinates are not reused.

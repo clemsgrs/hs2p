@@ -104,6 +104,12 @@ class SegmentationConfig:
         else None
     )
 
+    def __post_init__(self) -> None:
+        for field_name in ("sam2_checkpoint_path", "sam2_config_path"):
+            value = getattr(self, field_name)
+            if value is not None:
+                object.__setattr__(self, field_name, Path(value))
+
 
 @dataclass(frozen=True)
 class FilterConfig:

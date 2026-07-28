@@ -28,7 +28,8 @@
     "mask_path": "/workspace/tests/fixtures/input/test-mask.tif",
     "requested_backend": "asap",
     "requested_mask_backend": "auto",
-    "sample_id": "test-wsi"
+    "sample_id": "test-wsi",
+    "spacing_at_level_0": null
   },
   "segmentation": {
     "close": 4,
@@ -38,6 +39,8 @@
     "mthresh": 7,
     "ref_tile_size_px": 16,
     "requested_seg_downsample": 64,
+    "sam2_checkpoint_path": null,
+    "sam2_config_path": null,
     "seg_downsample": 64,
     "seg_level": 0,
     "seg_spacing_um": 0.0,
