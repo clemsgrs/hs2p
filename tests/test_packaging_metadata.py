@@ -1,5 +1,9 @@
-import tomllib
 from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    import tomli as tomllib
 
 
 def test_turbojpeg_extra_is_dedicated_and_included_in_all():
