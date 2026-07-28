@@ -223,6 +223,12 @@ def validate_tiling_artifacts(
             f"Precomputed tiles mask_path mismatch for {whole_slide.sample_id}: "
             f"expected {whole_slide.mask_path}, found {result.mask_path}"
         )
+    if result.spacing_at_level_0 != whole_slide.spacing_at_level_0:
+        raise ValueError(
+            f"Precomputed tiles spacing_at_level_0 mismatch for {whole_slide.sample_id}: "
+            f"expected {whole_slide.spacing_at_level_0}, "
+            f"found {result.spacing_at_level_0}"
+        )
     if result.backend != compatibility.tiling.backend:
         raise ValueError("precomputed tiles backend mismatch")
     # Resume compares *resolved* backends, never requested ones: a run resumed with a
@@ -252,6 +258,17 @@ def validate_tiling_artifacts(
         raise ValueError("precomputed tiles close mismatch")
     if result.mask_path is None and result.tissue_method != compatibility.segmentation.method:
         raise ValueError("precomputed tiles tissue_method mismatch")
+    if (
+        str(result.tissue_method).lower() == "sam2"
+        and result.sam2_checkpoint_path
+        != compatibility.segmentation.sam2_checkpoint_path
+    ):
+        raise ValueError("precomputed tiles sam2_checkpoint_path mismatch")
+    if (
+        str(result.tissue_method).lower() == "sam2"
+        and result.sam2_config_path != compatibility.segmentation.sam2_config_path
+    ):
+        raise ValueError("precomputed tiles sam2_config_path mismatch")
     if result.ref_tile_size_px != compatibility.filtering.ref_tile_size:
         raise ValueError("precomputed tiles ref_tile_size mismatch")
     if result.a_t != compatibility.filtering.a_t:

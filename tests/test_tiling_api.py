@@ -183,6 +183,9 @@ def _build_preprocessing_result(
     tissue_fractions: np.ndarray | None = None,
     backend: str = "asap",
     requested_backend: str = "asap",
+    spacing_at_level_0: float | None = None,
+    sam2_checkpoint_path: str | Path | None = None,
+    sam2_config_path: str | Path | None = None,
     read_level: int = 1,
     read_spacing_um: float = 1.0,
     read_tile_size_px: int = 448,
@@ -231,6 +234,7 @@ def _build_preprocessing_result(
         image_path=image_path,
         backend=backend,
         requested_backend=requested_backend,
+        spacing_at_level_0=spacing_at_level_0,
         tolerance=0.07,
         step_px_lv0=step_px_lv0,
         tissue_method="precomputed_mask" if mask_path is not None else "hsv",
@@ -242,6 +246,8 @@ def _build_preprocessing_result(
         seg_sthresh_up=255,
         seg_mthresh=7,
         seg_close=4,
+        sam2_checkpoint_path=sam2_checkpoint_path,
+        sam2_config_path=sam2_config_path,
         ref_tile_size_px=224,
         a_t=4,
         a_h=2,
@@ -720,9 +726,12 @@ def test_save_tiling_result_writes_preprocessing_npz_and_json(tmp_path: Path):
         "mask_path": None,
         "backend": "asap",
         "requested_backend": "asap",
+        "spacing_at_level_0": None,
         "mask_backend": None,
         "requested_mask_backend": None,
     }
+    assert meta["segmentation"]["sam2_checkpoint_path"] is None
+    assert meta["segmentation"]["sam2_config_path"] is None
     assert meta["tiling"]["requested_spacing_um"] == 0.5
     assert meta["tiling"]["requested_tile_size_px"] == 224
     assert meta["tiling"]["read_level"] == 0
@@ -2007,6 +2016,72 @@ def test_validate_tiling_artifacts_rejects_mismatched_tiling_config(
         )
 
 
+def test_validate_tiling_artifacts_reuses_matching_explicit_level0_spacing(
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    result = _build_preprocessing_result(
+        sample_id="slide-spacing",
+        image_path="slide-spacing.svs",
+        spacing_at_level_0=0.25,
+    )
+    artifacts = save_tiling_result(result, output_dir=tmp_path)
+
+    validated = validate_tiling_artifacts(
+        whole_slide=SlideSpec(
+            sample_id="slide-spacing",
+            image_path=Path("slide-spacing.svs"),
+            spacing_at_level_0=0.25,
+        ),
+        coordinates_npz_path=artifacts.coordinates_npz_path,
+        coordinates_meta_path=artifacts.coordinates_meta_path,
+        compatibility=_artifact_compatibility(
+            tiling_config=tiling_config,
+            segmentation_config=segmentation_config,
+            filter_config=filter_config,
+        ),
+    )
+
+    loaded = load_tiling_result(
+        artifacts.coordinates_npz_path,
+        artifacts.coordinates_meta_path,
+    )
+    assert loaded.spacing_at_level_0 == 0.25
+    assert validated.coordinates_meta_path == artifacts.coordinates_meta_path
+
+
+def test_maybe_load_existing_artifacts_rejects_changed_explicit_level0_spacing(
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    result = _build_preprocessing_result(
+        sample_id="slide-spacing",
+        image_path="slide-spacing.svs",
+        spacing_at_level_0=0.25,
+    )
+    tiles_dir = tmp_path / "tiles"
+    save_tiling_result(result, output_dir=tmp_path)
+
+    with pytest.raises(ValueError, match="spacing_at_level_0 mismatch"):
+        maybe_load_existing_artifacts(
+            whole_slide=SlideSpec(
+                sample_id="slide-spacing",
+                image_path=Path("slide-spacing.svs"),
+                spacing_at_level_0=0.5,
+            ),
+            read_coordinates_from=tiles_dir,
+            compatibility=_artifact_compatibility(
+                tiling_config=tiling_config,
+                segmentation_config=segmentation_config,
+                filter_config=filter_config,
+            ),
+        )
+
+
 def test_validate_tiling_artifacts_ignores_disabled_filter_threshold_mismatches(
     tmp_path: Path,
 ):
@@ -2143,7 +2218,7 @@ def test_validate_tiling_artifacts_compares_requested_seg_downsample_not_resolve
         backend=result.backend,
     )
     requested_segmentation = SegmentationConfig(
-        method="sam2",
+        method=result.tissue_method,
         downsample=64,  # user-requested; differs from the resolved 16
         sthresh=result.seg_sthresh,
         sthresh_up=result.seg_sthresh_up,
@@ -2180,6 +2255,135 @@ def test_validate_tiling_artifacts_compares_requested_seg_downsample_not_resolve
         ),
     )
     assert validated.coordinates_meta_path == artifacts.coordinates_meta_path
+
+
+def test_validate_tiling_artifacts_reuses_matching_sam2_model_paths(
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    filter_config: FilterConfig,
+):
+    checkpoint_path = Path("models/sam2.pt")
+    config_path = Path("models/sam2.yaml")
+    result = _build_preprocessing_result(
+        sample_id="slide-sam2-identity",
+        image_path="slide-sam2-identity.svs",
+        sam2_checkpoint_path=checkpoint_path,
+        sam2_config_path=config_path,
+    )
+    result.tissue_method = "sam2"
+    artifacts = save_tiling_result(result, output_dir=tmp_path)
+    segmentation = SegmentationConfig(
+        method="sam2",
+        downsample=result.requested_seg_downsample,
+        sthresh=result.seg_sthresh,
+        sthresh_up=result.seg_sthresh_up,
+        mthresh=result.seg_mthresh,
+        close=result.seg_close,
+        sam2_checkpoint_path=str(checkpoint_path),
+        sam2_config_path=str(config_path),
+    )
+
+    validated = validate_tiling_artifacts(
+        whole_slide=SlideSpec(
+            sample_id="slide-sam2-identity",
+            image_path=Path("slide-sam2-identity.svs"),
+        ),
+        coordinates_npz_path=artifacts.coordinates_npz_path,
+        coordinates_meta_path=artifacts.coordinates_meta_path,
+        compatibility=_artifact_compatibility(
+            tiling_config=tiling_config,
+            segmentation_config=segmentation,
+            filter_config=filter_config,
+        ),
+    )
+
+    loaded = load_tiling_result(
+        artifacts.coordinates_npz_path,
+        artifacts.coordinates_meta_path,
+    )
+    assert loaded.sam2_checkpoint_path == checkpoint_path
+    assert loaded.sam2_config_path == config_path
+    assert validated.coordinates_meta_path == artifacts.coordinates_meta_path
+
+
+def test_validate_tiling_artifacts_rejects_changed_sam2_checkpoint_path(
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    filter_config: FilterConfig,
+):
+    result = _build_preprocessing_result(
+        sample_id="slide-sam2-checkpoint",
+        image_path="slide-sam2-checkpoint.svs",
+        sam2_checkpoint_path=Path("models/original-sam2.pt"),
+        sam2_config_path=Path("models/sam2.yaml"),
+    )
+    result.tissue_method = "SAM2"
+    artifacts = save_tiling_result(result, output_dir=tmp_path)
+    changed_segmentation = SegmentationConfig(
+        method=result.tissue_method,
+        downsample=result.requested_seg_downsample,
+        sthresh=result.seg_sthresh,
+        sthresh_up=result.seg_sthresh_up,
+        mthresh=result.seg_mthresh,
+        close=result.seg_close,
+        sam2_checkpoint_path=Path("models/changed-sam2.pt"),
+        sam2_config_path=result.sam2_config_path,
+    )
+
+    with pytest.raises(ValueError, match="sam2_checkpoint_path mismatch"):
+        validate_tiling_artifacts(
+            whole_slide=SlideSpec(
+                sample_id="slide-sam2-checkpoint",
+                image_path=Path("slide-sam2-checkpoint.svs"),
+            ),
+            coordinates_npz_path=artifacts.coordinates_npz_path,
+            coordinates_meta_path=artifacts.coordinates_meta_path,
+            compatibility=_artifact_compatibility(
+                tiling_config=tiling_config,
+                segmentation_config=changed_segmentation,
+                filter_config=filter_config,
+            ),
+        )
+
+
+def test_validate_tiling_artifacts_rejects_changed_sam2_config_path(
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    filter_config: FilterConfig,
+):
+    result = _build_preprocessing_result(
+        sample_id="slide-sam2-config",
+        image_path="slide-sam2-config.svs",
+        sam2_checkpoint_path=Path("models/sam2.pt"),
+        sam2_config_path=Path("models/original-sam2.yaml"),
+    )
+    result.tissue_method = "sam2"
+    artifacts = save_tiling_result(result, output_dir=tmp_path)
+    changed_segmentation = SegmentationConfig(
+        method="sam2",
+        downsample=result.requested_seg_downsample,
+        sthresh=result.seg_sthresh,
+        sthresh_up=result.seg_sthresh_up,
+        mthresh=result.seg_mthresh,
+        close=result.seg_close,
+        sam2_checkpoint_path=result.sam2_checkpoint_path,
+        sam2_config_path=Path("models/changed-sam2.yaml"),
+    )
+
+    with pytest.raises(ValueError, match="sam2_config_path mismatch"):
+        validate_tiling_artifacts(
+            whole_slide=SlideSpec(
+                sample_id="slide-sam2-config",
+                image_path=Path("slide-sam2-config.svs"),
+            ),
+            coordinates_npz_path=artifacts.coordinates_npz_path,
+            coordinates_meta_path=artifacts.coordinates_meta_path,
+            compatibility=_artifact_compatibility(
+                tiling_config=tiling_config,
+                segmentation_config=changed_segmentation,
+                filter_config=filter_config,
+            ),
+        )
 
 
 def test_validate_tiling_artifacts_rejects_mismatched_requested_seg_downsample(

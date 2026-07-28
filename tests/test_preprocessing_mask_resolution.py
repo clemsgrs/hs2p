@@ -226,6 +226,9 @@ def test_build_tiling_result_from_mask_preserves_resolved_mask_metadata():
         image_path=Path("slide.svs"),
         backend="asap",
         requested_backend="auto",
+        spacing_at_level_0=0.25,
+        sam2_checkpoint_path=Path("sam2.pt"),
+        sam2_config_path=Path("sam2.yaml"),
         sample_id="slide-1",
         requested_tile_size_px=224,
         requested_spacing_um=0.5,
@@ -263,4 +266,29 @@ def test_build_tiling_result_from_mask_preserves_resolved_mask_metadata():
     assert result.mask_spacing_um == 1.0
     assert result.image_path == Path("slide.svs")
     assert result.backend == "asap"
+    assert result.spacing_at_level_0 == 0.25
+    assert result.sam2_checkpoint_path == Path("sam2.pt")
+    assert result.sam2_config_path == Path("sam2.yaml")
     assert result.requested_backend == "auto"
+
+
+def test_build_tiling_result_from_mask_omits_sam2_identity_for_hsv():
+    result = preprocessing_mod.build_tiling_result_from_mask(
+        slide=_make_slide(),
+        resolved_mask=preprocessing_mod.ResolvedTissueMask(
+            tissue_mask=np.zeros((25, 25), dtype=np.uint8),
+            tissue_method="hsv",
+            requested_seg_downsample=64,
+            seg_downsample=64,
+            seg_level=1,
+            seg_spacing_um=1.0,
+        ),
+        image_path=Path("slide.svs"),
+        backend="asap",
+        requested_backend="auto",
+        sam2_checkpoint_path=Path("unused-sam2.pt"),
+        sam2_config_path=Path("unused-sam2.yaml"),
+    )
+
+    assert result.sam2_checkpoint_path is None
+    assert result.sam2_config_path is None

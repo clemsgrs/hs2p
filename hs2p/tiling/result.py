@@ -163,6 +163,9 @@ class TilingResult:
     blur_threshold: float = 50.0
     qc_spacing_um: float = 2.0
     # -- optional --
+    spacing_at_level_0: float | None = None
+    sam2_checkpoint_path: str | Path | None = None
+    sam2_config_path: str | Path | None = None
     mask_path: str | Path | None = None
     tissue_mask_tissue_value: int | None = None
     mask_level: int | None = None
@@ -179,6 +182,10 @@ class TilingResult:
 
     def __post_init__(self) -> None:
         self.image_path = Path(self.image_path)
+        if self.sam2_checkpoint_path is not None:
+            self.sam2_checkpoint_path = Path(self.sam2_checkpoint_path)
+        if self.sam2_config_path is not None:
+            self.sam2_config_path = Path(self.sam2_config_path)
         if self.mask_path is not None:
             self.mask_path = Path(self.mask_path)
 
