@@ -14,7 +14,11 @@ from PIL import Image
 
 from hs2p.tiling.result import TilingResult
 from hs2p.tile_qc import filter_coordinate_tiles, needs_pixel_qc
-from hs2p.fileops import is_flattened_annotation, promote_temp_file
+from hs2p.fileops import (
+    is_flattened_annotation,
+    promote_temp_file,
+    validate_annotation_name,
+)
 from hs2p.wsi import iter_tile_records_from_result, open_reader_for_result
 from hs2p.wsi.reader import BatchRegionReader
 
@@ -124,6 +128,10 @@ def extract_tiles_to_tar(
     gpu_decode: bool = False,
     phase_recorder: Any | None = None,
 ) -> tuple[Path, TilingResult]:
+    from hs2p.artifacts import _annotation_tiles_dir
+
+    validate_annotation_name(annotation)
+    validate_annotation_name(result.annotation)
     jpeg_backend = str(jpeg_backend)
     _jpeg_encoder = None
     if jpeg_backend == "turbojpeg":
@@ -131,7 +139,6 @@ def extract_tiles_to_tar(
 
         _jpeg_encoder = turbojpeg.TurboJPEG()
 
-    from hs2p.artifacts import _annotation_tiles_dir
     tiles_dir = Path(tiles_dir) if tiles_dir is not None else _annotation_tiles_dir(output_dir, annotation)
     tiles_dir.mkdir(parents=True, exist_ok=True)
     stem = _annotation_tar_stem(result.sample_id, annotation)

@@ -3,9 +3,8 @@ import pytest
 from hs2p.configs.resolvers import validate_color_mapping, validate_pixel_mapping
 
 
-def test_validate_pixel_mapping_accepts_uint16_labels_without_background():
-    # background is optional, and values up to the uint16 ceiling are allowed
-    validate_pixel_mapping({"grade_4": 300, "grade_5": 600})
+def test_validate_pixel_mapping_accepts_preview_safe_boundaries_without_background():
+    validate_pixel_mapping({"grade_4": 0, "grade_5": 255})
 
 
 def test_validate_pixel_mapping_rejects_duplicate_values():
@@ -13,11 +12,13 @@ def test_validate_pixel_mapping_rejects_duplicate_values():
         validate_pixel_mapping({"background": 0, "tumor": 1, "stroma": 1})
 
 
-def test_validate_pixel_mapping_rejects_out_of_range_values():
-    with pytest.raises(ValueError, match="range"):
-        validate_pixel_mapping({"background": 0, "tumor": 70000})
-    with pytest.raises(ValueError, match="range"):
-        validate_pixel_mapping({"background": 0, "tumor": -1})
+@pytest.mark.parametrize("invalid_value", [-1, 256])
+def test_validate_pixel_mapping_rejects_value_outside_preview_safe_range(invalid_value):
+    with pytest.raises(
+        ValueError,
+        match=rf"tumor.*{invalid_value}.*range \[0, 255\]",
+    ):
+        validate_pixel_mapping({"background": 0, "tumor": invalid_value})
 
 
 def test_validate_pixel_mapping_rejects_non_integer_values():

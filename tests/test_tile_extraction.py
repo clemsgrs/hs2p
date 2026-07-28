@@ -93,6 +93,33 @@ def _solid_patch(color: tuple[int, int, int], size: int = 256) -> np.ndarray:
     return arr
 
 
+def test_extract_tiles_to_tar_rejects_reserved_annotation_before_writing(tmp_path):
+    output_dir = tmp_path / "output"
+    tiles_dir = tmp_path / "explicit-tiles"
+
+    with pytest.raises(ValueError, match="'merged'.*reserved"):
+        extract_tiles_to_tar(
+            _make_tiling_result(num_tiles=0),
+            output_dir,
+            annotation="merged",
+            tiles_dir=tiles_dir,
+        )
+
+    assert not output_dir.exists()
+    assert not tiles_dir.exists()
+
+
+def test_extract_tiles_to_tar_rejects_reserved_result_annotation_before_writing(
+    tmp_path,
+):
+    result = replace(_make_tiling_result(num_tiles=0), annotation="merged")
+
+    with pytest.raises(ValueError, match="'merged'.*reserved"):
+        extract_tiles_to_tar(result, tmp_path)
+
+    assert not (tmp_path / "tiles").exists()
+
+
 def _make_grid_tiling_result(
     *,
     columns: int,

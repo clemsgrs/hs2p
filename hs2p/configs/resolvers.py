@@ -4,6 +4,7 @@ from typing import Any
 
 import numpy as np
 
+from hs2p.fileops import validate_annotation_name
 from hs2p.wsi.types import CoordinateOutputMode, CoordinateSelectionStrategy, SamplingSpec
 
 from .models import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig
@@ -107,7 +108,8 @@ def resolve_sampling_request(
     the binary tissue-tiling path. The signal is configuration, not label names: a spec equal
     to :func:`build_default_sampling_spec` (the untouched default ``{background, tissue}``
     setup) is binary tissue tiling; any change to the label vocabulary or the sampled set opts
-    into multi-label annotation sampling. No label name is reserved at this boundary.
+    into multi-label annotation sampling. The structural output identity ``"merged"`` is
+    reserved and rejected while resolving the sampling spec.
     """
     spec = resolve_sampling_spec(cfg, tiling=tiling)
     if not spec.active_annotations:
@@ -166,10 +168,9 @@ def _merge_sampling_mapping(
 def validate_pixel_mapping(pixel_mapping: dict[str, int]) -> None:
     """Validate the annotation ``pixel_mapping`` up front, before any slide is opened.
 
-    ``pixel_mapping`` is the user's own label vocabulary — no name is reserved. Each label
-    must map to a distinct, non-negative integer within the supported ``uint16`` range so the
-    read path can split classes by exact value without collisions or silent wrapping (see
-    :func:`hs2p.tiling.mask._as_discrete_label_array`).
+    ``pixel_mapping`` is the user's own label vocabulary except for ``"merged"``, which names
+    structural merged coordinate output. Each label must map to a distinct integer in the
+    preview-safe range ``[0, 255]`` so all consumers preserve it without silent wrapping.
 
     Label *names* become on-disk path components (``output_dir/tiles/<label>/...`` for
     per-annotation artifacts), so they must be safe single path components — no separators,
@@ -177,24 +178,16 @@ def validate_pixel_mapping(pixel_mapping: dict[str, int]) -> None:
     """
     seen: dict[int, str] = {}
     for annotation, value in pixel_mapping.items():
-        if (
-            not annotation
-            or annotation in {".", ".."}
-            or any(ch in annotation for ch in ("/", "\\", "\x00"))
-        ):
-            raise ValueError(
-                f"pixel_mapping label {annotation!r} must be a safe path component "
-                "(non-empty, no '/'\\ separators, not '.' or '..')"
-            )
+        validate_annotation_name(annotation)
         if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
             raise ValueError(
                 f"pixel_mapping['{annotation}'] must be an integer label value, got {value!r}"
             )
         ivalue = int(value)
-        if ivalue < 0 or ivalue > 65535:
+        if ivalue < 0 or ivalue > 255:
             raise ValueError(
                 f"pixel_mapping['{annotation}']={ivalue} is outside the supported "
-                "label range [0, 65535]"
+                "label range [0, 255]"
             )
         if ivalue in seen:
             raise ValueError(
@@ -202,6 +195,24 @@ def validate_pixel_mapping(pixel_mapping: dict[str, int]) -> None:
                 f"'{annotation}' and '{seen[ivalue]}' both map to {ivalue}"
             )
         seen[ivalue] = annotation
+
+
+def validate_sampling_spec(sampling: SamplingSpec) -> None:
+    """Validate every annotation declaration accepted by direct Python sampling APIs."""
+    validate_pixel_mapping(sampling.pixel_mapping)
+    _validate_annotation_names(
+        sampling.active_annotations,
+        sampling.tissue_percentage,
+        sampling.color_mapping,
+    )
+
+
+def _validate_annotation_names(*declarations: Any) -> None:
+    for declaration in declarations:
+        if declaration is None:
+            continue
+        for annotation in declaration:
+            validate_annotation_name(annotation)
 
 
 def validate_color_mapping(
@@ -297,6 +308,7 @@ def _resolve_sampling_spec_from_masks(masks_cfg: Any, *, tiling: TilingConfig) -
         getattr(masks_cfg, "colors", None),
         field_name="colors",
     )
+    _validate_annotation_names(pixel_mapping, min_coverage, colors)
     pixel_mapping, (min_coverage, colors) = _drop_null_labels(
         pixel_mapping, min_coverage, colors
     )
@@ -345,6 +357,7 @@ def _resolve_sampling_spec_from_sampling_params(
         getattr(sampling_config, "color_mapping", None),
         field_name="color_mapping",
     )
+    _validate_annotation_names(pixel_mapping, tissue_percentage, color_mapping)
     pixel_mapping, (tissue_percentage, color_mapping) = _drop_null_labels(
         pixel_mapping, tissue_percentage, color_mapping
     )

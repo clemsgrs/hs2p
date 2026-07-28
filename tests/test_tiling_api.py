@@ -789,6 +789,43 @@ def test_save_and_load_tiling_result_round_trip(tmp_path: Path):
     np.testing.assert_array_equal(loaded.tissue_fractions, result.tissue_fractions)
 
 
+def test_save_tiling_result_rejects_reserved_annotation_with_explicit_tiles_dir(
+    tmp_path: Path,
+):
+    result = _build_preprocessing_result(
+        sample_id="slide-reserved",
+        image_path="slide-reserved.svs",
+    )
+    output_dir = tmp_path / "output"
+    tiles_dir = tmp_path / "explicit-tiles"
+
+    with pytest.raises(ValueError, match="'merged'.*reserved"):
+        save_tiling_result(
+            result,
+            output_dir=output_dir,
+            annotation="merged",
+            tiles_dir=tiles_dir,
+        )
+
+    assert not output_dir.exists()
+    assert not tiles_dir.exists()
+
+
+def test_save_tiling_result_rejects_reserved_result_annotation_before_writing(
+    tmp_path: Path,
+):
+    result = _build_preprocessing_result(
+        sample_id="slide-reserved",
+        image_path="slide-reserved.svs",
+        annotation="merged",
+    )
+
+    with pytest.raises(ValueError, match="'merged'.*reserved"):
+        save_tiling_result(result, output_dir=tmp_path)
+
+    assert not (tmp_path / "tiles").exists()
+
+
 def test_preprocessing_result_builder_preserves_core_fields():
     result = _build_preprocessing_result(
         sample_id="slide-adapter",

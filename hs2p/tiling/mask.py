@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 
 from hs2p.configs import SegmentationConfig
+from hs2p.configs.resolvers import validate_pixel_mapping
 from hs2p.segmentation import segment_tissue_image
 from hs2p.tiling.contours import _normalize_level_downsamples
 from hs2p.tiling.result import ResolvedAnnotationMasks, ResolvedTissueMask, Sam2Thumbnail
@@ -481,9 +482,11 @@ def resolve_annotation_masks(
     was missing from the codebase — the annotation counterpart of
     :func:`resolve_tissue_mask`'s precomputed path. ``pixel_mapping`` maps class name to the
     integer pixel value in the mask; one binary mask (255 foreground / 0 background) is
-    produced for **every** entry — no label name is special. ``pixel_mapping`` is the user's
-    own vocabulary; *which* of these classes get sampled is decided downstream by the sampling
-    spec (``min_coverage`` thresholds), not here.
+    produced for every entry. Annotation names are user-defined except for ``"merged"``,
+    which is reserved for structural merged coordinate output, and label IDs must be distinct
+    integers in ``[0, 255]`` regardless of the raster's integer storage width. Which classes
+    get sampled is decided downstream by the sampling spec (``min_coverage`` thresholds), not
+    here.
 
     There is no reserved ``background`` label: every pixel value present in the raster must be
     declared (the read-time discreteness guard rejects undeclared values), so if the raster
@@ -492,6 +495,7 @@ def resolve_annotation_masks(
     """
     if mask_path is None:
         raise ValueError("resolve_annotation_masks requires a mask_path")
+    validate_pixel_mapping(pixel_mapping)
 
     resolved_mask_backend = _resolve_mask_backend(mask_path, mask_backend)
     requested_mask_backend = (

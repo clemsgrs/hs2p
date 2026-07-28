@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 
+from hs2p.configs.resolvers import validate_pixel_mapping, validate_sampling_spec
 from hs2p.tiling.contours import _normalize_level_downsamples, detect_contours
 from hs2p.tiling.coverage import compute_tile_coverage
 from hs2p.tiling.generate import generate_tiles
@@ -545,6 +546,8 @@ def build_per_annotation_tiling_results(
     INDEPENDENT_SAMPLING: one tiling pass per annotation using that annotation's binary mask.
     JOINT_SAMPLING: one pass on the union mask, then per-annotation post-filter by coverage.
     """
+    validate_sampling_spec(sampling_spec)
+    validate_pixel_mapping(resolved_masks.pixel_mapping)
     if output_mode is None:
         output_mode = CoordinateOutputMode.PER_ANNOTATION
     # Validate here (the shared chokepoint for both the CLI and the public tile_slide/
@@ -768,6 +771,8 @@ def preprocess_slide_per_annotation(
     When ``mask_preview`` is given, one filled multi-label overlay is rendered here — once per
     slide, from the just-resolved per-label binary masks — before any sampling.
     """
+    validate_pixel_mapping(pixel_mapping)
+    validate_sampling_spec(sampling_spec)
     slide = open_slide(image_path, backend=backend, spacing_override=spacing_override)
     try:
         resolved_masks = resolve_annotation_masks(
