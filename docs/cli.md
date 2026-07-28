@@ -192,6 +192,17 @@ When stdout is non-interactive, `hs2p` falls back to concise plain-text progress
 
 Detailed logs still go to `output_dir/logs/log.txt`.
 
+## Partial batch failures
+
+The CLI attempts every requested slide and persists every outcome to
+`process_list.csv`. If any slide failed, it reports a completed run with failed
+slides and exits non-zero only after the manifest and tracebacks have been
+written. It exits zero when every slide succeeded.
+
+This differs from the Python `tile_slides()` contract: Python callers receive
+the successful artifacts and one aggregate `BatchPartialFailureWarning` instead
+of a non-zero process exit.
+
 ## Resume and precomputed artifacts
 
 - `resume: true` expects the current process-list schema

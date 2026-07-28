@@ -135,6 +135,14 @@ artifacts = tile_slides(
 )
 ```
 
+`tile_slides()` attempts every requested slide independently. If one or more
+slides fail, it returns the `TilingArtifacts` for successful slides and emits
+one `BatchPartialFailureWarning` after the batch has finished. The warning names
+every failed slide and its reason. Full per-slide errors and tracebacks remain
+available in `output/process_list.csv`.
+
+An all-success batch returns every artifact without emitting this warning.
+
 When `save_mask_preview=True`, `tile_slides()` writes `preview/mask/{sample_id}.jpg`
 as a contour-only slide preview. The outer tissue boundary uses evergreen
 `#255E3B`, while hole contours use coral `#F26B3A`. `tissue_contour_color`

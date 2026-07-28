@@ -6,11 +6,17 @@ from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
+import pytest
 
 import hs2p.api as api_mod
 import hs2p.tiling.orchestration as orchestration_mod
 import hs2p.preprocessing as preprocessing_mod
-from hs2p.api import SlideSpec, TilingArtifacts, tile_slides
+from hs2p.api import (
+    BatchPartialFailureWarning,
+    SlideSpec,
+    TilingArtifacts,
+    tile_slides,
+)
 from hs2p.configs import FilterConfig, SegmentationConfig, TilingConfig
 import hs2p.__main__ as tiling_mod
 
@@ -491,14 +497,15 @@ def test_tile_slides_emits_progress_for_reused_success_and_failure(
     monkeypatch.setattr("hs2p.tiling.orchestration._resolve_mask_for_request", _fake_resolve_mask_for_request)
 
     with progress.activate_progress_reporter(reporter):
-        tile_slides(
-            [slide_a, slide_b, slide_c],
-            tiling=_tiling_config(),
-            segmentation=_segmentation_config(),
-            filtering=_filter_config(),
-            output_dir=run_dir,
-            resume=True,
-        )
+        with pytest.warns(BatchPartialFailureWarning, match="slide-c: boom"):
+            tile_slides(
+                [slide_a, slide_b, slide_c],
+                tiling=_tiling_config(),
+                segmentation=_segmentation_config(),
+                filtering=_filter_config(),
+                output_dir=run_dir,
+                resume=True,
+            )
 
     assert [event.kind for event in reporter.events] == [
         "tissue.started",

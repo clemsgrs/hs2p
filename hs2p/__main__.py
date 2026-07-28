@@ -1,8 +1,12 @@
 import argparse
+from dataclasses import dataclass
 from pathlib import Path
 
+import pandas as pd
+
 import hs2p.progress as progress
-from hs2p.api import tile_slides
+from hs2p.api import TilingArtifacts, tile_slides
+from hs2p.artifacts import summarize_failed_slides
 from hs2p.configs.loader import DEFAULT_JPEG_BACKEND
 from hs2p.configs.resolvers import (
     resolve_filter_config,
@@ -13,6 +17,12 @@ from hs2p.configs.resolvers import (
     resolve_tiling_config,
 )
 from hs2p.utils import load_csv, setup
+
+
+@dataclass(frozen=True)
+class _CliRunResult:
+    artifacts: list[TilingArtifacts]
+    failed_slide_count: int
 
 
 def get_args_parser(add_help: bool = True):
@@ -123,21 +133,38 @@ def main(args):
                     output_mode=output_mode,
                 )
             artifacts = tile_slides(whole_slides, **tile_kwargs)
+            process_list_path = output_dir / "process_list.csv"
+            try:
+                process_df = pd.read_csv(process_list_path)
+            except pd.errors.EmptyDataError:
+                failed_slide_count = 0
+            else:
+                failed_slide_count = len(
+                    summarize_failed_slides(
+                        process_df.to_dict(orient="records")
+                    )
+                )
             progress.emit_progress(
                 "run.finished",
                 command="tiling",
                 output_dir=str(output_dir),
-                process_list_path=str(output_dir / "process_list.csv"),
+                process_list_path=str(process_list_path),
                 logs_dir=str(output_dir / "logs"),
+                failed_slide_count=failed_slide_count,
             )
-            return artifacts
+            return _CliRunResult(
+                artifacts=artifacts,
+                failed_slide_count=failed_slide_count,
+            )
         except Exception as exc:
             progress.emit_progress("run.failed", stage="tiling", error=str(exc))
             raise
 
 
 def entrypoint(argv=None):
-    main(parse_args(argv))
+    result = main(parse_args(argv))
+    if isinstance(result, _CliRunResult):
+        return int(result.failed_slide_count > 0)
     return 0
 
 
