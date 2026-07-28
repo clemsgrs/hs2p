@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 
 from hs2p.configs import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig
-from hs2p.configs.resolvers import require_tissue_fraction
+from hs2p.configs.resolvers import require_tissue_fraction, validate_sampling_spec
 from hs2p.progress import emit_progress, emit_progress_log
 from hs2p.tiling.result import ResolvedTissueMask, TilingResult
 from hs2p.tiling.single import (
@@ -24,7 +24,7 @@ from hs2p.tiling.single import (
     preprocess_slide_per_annotation,
 )
 from hs2p.tiling.tar import _annotation_tar_stem, _needs_pixel_filtering, extract_tiles_to_tar
-from hs2p.fileops import is_flattened_annotation
+from hs2p.fileops import is_flattened_annotation, validate_annotation_name
 from hs2p.wsi import (
     CoordinateOutputMode,
     CoordinateSelectionStrategy,
@@ -369,6 +369,8 @@ def tile_slide(
     """Tile a single slide. With ``sampling`` provided, performs annotation-aware sampling
     and returns one :class:`TilingResult` per active annotation (``{annotation: result}``);
     otherwise tiles tissue and returns a single :class:`TilingResult`."""
+    if sampling is not None:
+        validate_sampling_spec(sampling)
     effective_tiling = _resolve_effective_backends(whole_slide, tiling)
     effective_segmentation = _resolve_effective_segmentation(
         whole_slide=whole_slide,
@@ -486,14 +488,16 @@ def write_annotation_tiling_preview(
     full color as backdrop, with the selected tile grid (fixed black line) drawn over it.
 
     The preview subdirectory mirrors the coordinate artifact path 1:1 via the shared
-    :func:`is_flattened_annotation` rule (per-annotation subdir, except None/"tissue"/merged →
-    flat root). Returns ``None`` for an empty tile set so zero-tile labels skip their preview.
+    :func:`is_flattened_annotation` rule (per-annotation subdir, except structural output
+    ``None`` and conventional ``"tissue"`` → flat root). Returns ``None`` for an empty tile
+    set so zero-tile labels skip their preview.
     """
+    annotation = result.annotation
+    validate_annotation_name(annotation)
     if len(result.x) == 0:
         return None
     save_dir = output_dir / "preview" / "tiling"
     save_dir.mkdir(parents=True, exist_ok=True)
-    annotation = result.annotation
     if is_flattened_annotation(annotation):
         preview_path = save_dir / f"{result.sample_id}.jpg"
         preview_annotation = None
@@ -1181,9 +1185,8 @@ def tile_slides(
     output_mode: str | None = None,
 ) -> list[TilingArtifacts]:
     output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    _validate_whole_slides(whole_slides)
     if sampling is not None:
+        validate_sampling_spec(sampling)
         if not sampling.active_annotations:
             raise ValueError("annotation sampling requires a non-empty sampling.active_annotations")
         unsupported = [
@@ -1200,6 +1203,8 @@ def tile_slides(
                 "tile_slides annotation sampling does not yet support: "
                 + ", ".join(unsupported)
             )
+    output_dir.mkdir(parents=True, exist_ok=True)
+    _validate_whole_slides(whole_slides)
     _validate_segmentation_requirement(
         whole_slides=whole_slides,
         segmentation=segmentation,

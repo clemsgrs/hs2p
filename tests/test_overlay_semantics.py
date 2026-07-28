@@ -399,6 +399,41 @@ def test_write_annotation_tiling_preview_draws_label_backdrop_under_black_grid(
     assert arr[0, 0].max() <= 20
 
 
+def test_write_annotation_tiling_preview_rejects_reserved_name_before_writing(
+    monkeypatch, tmp_path: Path
+):
+    orchestration_mod = pytest.importorskip("hs2p.tiling.orchestration")
+    monkeypatch.setattr(
+        orchestration_mod,
+        "write_coordinate_preview",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("preview writer must not run")
+        ),
+    )
+    result = SimpleNamespace(
+        x=np.array([0], dtype=np.int64),
+        y=np.array([0], dtype=np.int64),
+        tile_size_lv0=64,
+        image_path=Path("fake-wsi.tif"),
+        backend="openslide",
+        sample_id="slide0",
+        annotation="merged",
+        mask_backend=None,
+    )
+
+    with pytest.raises(ValueError, match="'merged'.*reserved"):
+        orchestration_mod.write_annotation_tiling_preview(
+            result=result,
+            output_dir=tmp_path,
+            downsample=1,
+            mask_path=None,
+            pixel_mapping=None,
+            color_mapping=None,
+        )
+
+    assert not (tmp_path / "preview").exists()
+
+
 def test_save_overlay_preview_writes_rgba_overlay_to_jpeg(monkeypatch, tmp_path: Path):
     overlay = Image.fromarray(
         np.array(

@@ -1,20 +1,21 @@
-"""The annotation→path flattening rule (None/tissue/merged → flat root, other labels → a
-per-annotation subdir) must live in a single shared helper that both the artifact code
-and the preview/visualization layer can import without a circular import."""
+"""Structural output (None) and conventional tissue annotations stay flat, while named
+annotations use per-annotation subdirectories."""
 
 import pytest
 
 from hs2p.fileops import is_flattened_annotation
 
 
-@pytest.mark.parametrize("annotation", [None, "tissue", "merged"])
-def test_flattened_for_none_tissue_and_merged(annotation):
-    # "merged" is the union-of-classes output mode: it carries no single class label, so
-    # its artifacts belong at the flat root alongside plain tissue (not a `merged/` subdir).
+@pytest.mark.parametrize("annotation", [None, "tissue"])
+def test_flattened_for_structural_output_and_tissue(annotation):
+    # Structural merged output carries annotation=None and output_mode="merged".
     assert is_flattened_annotation(annotation) is True
 
 
-@pytest.mark.parametrize("annotation", ["grade_4", "tumor", "Tissue", "tissue_x", "Merged", "merged_x"])
+@pytest.mark.parametrize(
+    "annotation",
+    ["grade_4", "tumor", "Tissue", "tissue_x", "merged", "Merged", "merged_x"],
+)
 def test_not_flattened_for_named_labels(annotation):
     assert is_flattened_annotation(annotation) is False
 

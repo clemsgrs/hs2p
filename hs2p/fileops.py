@@ -5,22 +5,37 @@ import shutil
 from pathlib import Path
 
 
+def validate_annotation_name(annotation: str | None) -> str | None:
+    """Validate an annotation name, accepting ``None`` for structural output."""
+    if annotation is None:
+        return None
+    if annotation == "merged":
+        raise ValueError(
+            "annotation name 'merged' is reserved for structural merged coordinate output"
+        )
+    if (
+        not annotation
+        or annotation in {".", ".."}
+        or any(ch in annotation for ch in ("/", "\\", "\x00"))
+    ):
+        raise ValueError(
+            f"annotation label {annotation!r} must be a safe path component "
+            "(non-empty, no '/'\\ separators, not '.' or '..')"
+        )
+    return annotation
+
+
 def is_flattened_annotation(annotation: str | None) -> bool:
     """Decide whether an annotation's artifacts land at the flat output root.
 
     This is the single source of truth for the annotation→path rule shared by the
     coordinate/tar artifact code and the preview/visualization layer: ``None`` and the
-    sentinel labels ``"tissue"`` and ``"merged"`` collapse to the flat layout (no
-    per-annotation subdir), while every other label gets its own ``.../{annotation}/...``
-    location. ``"merged"`` is the union-of-classes output mode: it carries no single class
-    and so belongs at the flat root alongside plain tissue. Flattening it here lets the
-    informative ``"merged"`` process-list label flow through to consumers without forcing
-    them to blank it to ``None`` to keep the artifact at the flat root (which would also
-    erase the tissue-vs-merged distinction). It lives in this leaf module (stdlib-only
-    deps) so both layers can import it without a circular import and a preview file can
-    never land in a different place than its coordinate set.
+    conventional ``"tissue"`` label collapse to the flat layout (no per-annotation subdir),
+    while every other label gets its own ``.../{annotation}/...`` location. Structural merged
+    output is represented by ``annotation=None`` with ``output_mode="merged"``; the literal
+    annotation name ``"merged"`` is reserved and must be rejected at caller boundaries.
     """
-    return annotation is None or annotation in ("tissue", "merged")
+    return annotation is None or annotation == "tissue"
 
 
 def promote_temp_file(temp_path: Path, target_path: Path) -> None:

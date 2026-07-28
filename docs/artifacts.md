@@ -5,7 +5,10 @@
 ## Artifact locations
 
 - Tiling writes one artifact pair per slide under `tiles/`
-- Sampling writes one artifact pair per annotation under `tiles/<annotation>/`
+- Per-annotation sampling writes one artifact pair under `tiles/<annotation>/`.
+  The conventional `tissue` annotation stays flat under `tiles/`.
+- Structural merged sampling writes one flat artifact pair under `tiles/`; `merged` is
+  reserved as an output identity and cannot be used as an annotation name.
 
 Each successful output produces:
 

@@ -123,6 +123,58 @@ def test_background_label_is_not_reserved_at_activation():
     assert set(sampling.active_annotations) == {"background"}
 
 
+def test_annotation_config_rejects_reserved_merged_name():
+    cfg = _cfg(
+        {
+            "tiling": {
+                "masks": {
+                    "pixel_mapping": {"merged": 2},
+                    "colors": {"merged": None},
+                    "min_coverage": {"merged": 0.5},
+                }
+            }
+        }
+    )
+
+    with pytest.raises(ValueError, match="'merged'.*reserved"):
+        resolve_sampling_request(cfg, tiling=resolve_tiling_config(cfg))
+
+
+def test_annotation_config_rejects_reserved_name_before_null_to_drop():
+    cfg = _cfg(
+        {
+            "tiling": {
+                "masks": {
+                    "pixel_mapping": {"merged": None},
+                    "colors": {"merged": None},
+                    "min_coverage": {"merged": 0.5},
+                }
+            }
+        }
+    )
+
+    with pytest.raises(ValueError, match="'merged'.*reserved"):
+        resolve_sampling_request(cfg, tiling=resolve_tiling_config(cfg))
+
+
+@pytest.mark.parametrize("invalid_value", [-1, 256])
+def test_annotation_config_rejects_label_id_outside_preview_safe_range(invalid_value):
+    cfg = _cfg(
+        {
+            "tiling": {
+                "masks": {
+                    "pixel_mapping": {"tumor": invalid_value},
+                    "colors": {"tumor": None},
+                    "min_coverage": {"tumor": 0.5},
+                }
+            }
+        }
+    )
+
+    with pytest.raises(ValueError, match=rf"tumor.*{invalid_value}"):
+        resolve_sampling_request(cfg, tiling=resolve_tiling_config(cfg))
+
+
 def test_build_default_sampling_spec_requires_tissue_coverage():
     """The binary-tissue default spec hard-errors on a missing tissue threshold (no silent
     0.0), honours an explicit 0.0 opt-out, and carries a specified value through."""
