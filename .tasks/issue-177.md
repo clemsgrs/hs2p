@@ -8,4 +8,4 @@
 - [x] Run the focused regression test and full test suite.
 - [x] Rebase onto `origin/main` and re-run tests.
 - [x] Run the two-axis `/code-review origin/main` against issue #177, fix findings, and re-green.
-- [ ] Commit, push, and open a draft PR containing `Closes #177`.
+- [x] Commit, push, and open a draft PR containing `Closes #177`.
