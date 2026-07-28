@@ -270,7 +270,7 @@ def test_cli_entrypoint_exits_nonzero_after_partial_failure_manifest_is_persiste
         exit_code = tiling_mod.entrypoint([str(tmp_path / "config.yaml")])
 
     assert attempted[0] == "slide-1"
-    assert pd.isna(attempted[1])
+    assert attempted[1] == "nan"
     assert attempted[2] == "slide-3"
     process_df = pd.read_csv(Path(cfg.output_dir) / "process_list.csv")
     assert process_df["tiling_status"].tolist() == ["success", "failed", "success"]

@@ -3309,6 +3309,20 @@ def test_load_csv_rejects_duplicate_sample_id(tmp_path: Path):
         load_csv(cfg)
 
 
+def test_load_csv_preserves_literal_na_like_sample_ids_as_strings(tmp_path: Path):
+    csv_path = tmp_path / "slides.csv"
+    csv_path.write_text(
+        "sample_id,image_path\n"
+        "nan,nan.svs\n"
+        "NA,na.svs\n"
+        "null,null.svs\n"
+    )
+
+    slides = load_csv(SimpleNamespace(csv=str(csv_path)))
+
+    assert [slide.sample_id for slide in slides] == ["nan", "NA", "null"]
+
+
 def test_load_csv_rejects_legacy_mask_columns(tmp_path: Path):
     csv_path = tmp_path / "slides.csv"
     csv_path.write_text(

@@ -84,7 +84,7 @@ def load_csv(
     require_mask_column: bool = False,
 ):
     csv_path = Path(cfg.csv).resolve()
-    df = pd.read_csv(csv_path)
+    df = pd.read_csv(csv_path, converters={"sample_id": str})
     required = {"sample_id", "image_path"}
     missing = sorted(required - set(df.columns))
     if missing:
