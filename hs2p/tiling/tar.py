@@ -219,16 +219,15 @@ def extract_tiles_to_tar(
                     )
                     tile_arr = np.asarray(img)
 
-                if jpeg_backend == "turbojpeg":
+                if turbojpeg is not None:
                     assert _jpeg_encoder is not None
-                    assert turbojpeg is not None
                     jpeg_bytes = _jpeg_encoder.encode(
                         tile_arr,
                         quality=jpeg_quality,
                         pixel_format=turbojpeg.TJPF_RGB,
                         jpeg_subsample=turbojpeg.TJSAMP_420,
                     )
-                elif jpeg_backend == "pil":
+                else:
                     img = Image.fromarray(tile_arr).convert("RGB")
                     buf = io.BytesIO()
                     img.save(buf, format="JPEG", quality=jpeg_quality)
