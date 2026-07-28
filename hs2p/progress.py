@@ -120,6 +120,13 @@ class TextReporter:
                 f"using {payload['backend']}"
             )
         if kind == "run.finished":
+            failed_slide_count = payload.get("failed_slide_count", 0)
+            if failed_slide_count:
+                noun = "slide" if failed_slide_count == 1 else "slides"
+                return (
+                    f"Run completed with {failed_slide_count} failed {noun}. "
+                    f"Output: {payload['output_dir']}"
+                )
             return f"Run finished successfully. Output: {payload['output_dir']}"
         if kind == "run.failed":
             return f"Run failed during {payload['stage']}: {payload['error']}"
@@ -315,13 +322,17 @@ class RichReporter:
                 )
             return
         if kind == "run.finished":
+            failed_slide_count = payload.get("failed_slide_count", 0)
+            rows = [
+                ("Output", payload["output_dir"]),
+                ("Process list", payload["process_list_path"]),
+                ("Logs", payload["logs_dir"]),
+            ]
+            if failed_slide_count:
+                rows.insert(0, ("Failed slides", str(failed_slide_count)))
             self._print_summary(
-                "Run Complete",
-                [
-                    ("Output", payload["output_dir"]),
-                    ("Process list", payload["process_list_path"]),
-                    ("Logs", payload["logs_dir"]),
-                ],
+                "Run Complete" if not failed_slide_count else "Run Complete with Failures",
+                rows,
             )
             return
         if kind == "run.failed":

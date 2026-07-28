@@ -1,6 +1,7 @@
 import json
 import errno
 import tempfile
+import warnings
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,6 +11,7 @@ import pandas as pd
 import pytest
 from omegaconf import OmegaConf
 
+import hs2p
 import hs2p.preprocessing as preprocessing_mod
 from hs2p.api import (
     CompatibilitySpec,
@@ -1451,7 +1453,7 @@ def test_tile_slides_resolves_all_masks_before_computing_any_slide(
     monkeypatch.setattr(
         orchestration_mod,
         "save_tiling_result",
-        lambda result, output_dir, tiles_dir=None: TilingArtifacts(
+        lambda result, output_dir, tiles_dir=None, annotation=None: TilingArtifacts(
             sample_id=result.sample_id,
             coordinates_npz_path=Path(output_dir) / "tiles" / f"{result.sample_id}.coordinates.npz",
             coordinates_meta_path=Path(output_dir) / "tiles" / f"{result.sample_id}.coordinates.meta.json",
@@ -1549,7 +1551,7 @@ def test_tile_slides_emits_tissue_progress_before_tiling_progress(
     monkeypatch.setattr(
         orchestration_mod,
         "save_tiling_result",
-        lambda result, output_dir, tiles_dir=None: TilingArtifacts(
+        lambda result, output_dir, tiles_dir=None, annotation=None: TilingArtifacts(
             sample_id=result.sample_id,
             coordinates_npz_path=Path(output_dir) / "tiles" / f"{result.sample_id}.coordinates.npz",
             coordinates_meta_path=Path(output_dir) / "tiles" / f"{result.sample_id}.coordinates.meta.json",
@@ -2972,14 +2974,15 @@ def test_tile_slides_resume_marks_stale_artifact_as_failed(
         ),
     )
 
-    reused = tile_slides(
-        [SlideSpec(sample_id="slide-6", image_path=Path("requested-slide.svs"))],
-        tiling=tiling_config,
-        segmentation=segmentation_config,
-        filtering=filter_config,
-        output_dir=tmp_path / "run",
-        resume=True,
-    )
+    with pytest.warns(hs2p.BatchPartialFailureWarning, match="slide-6"):
+        reused = tile_slides(
+            [SlideSpec(sample_id="slide-6", image_path=Path("requested-slide.svs"))],
+            tiling=tiling_config,
+            segmentation=segmentation_config,
+            filtering=filter_config,
+            output_dir=tmp_path / "run",
+            resume=True,
+        )
 
     assert reused == []
     process_df = pd.read_csv(tmp_path / "run" / "process_list.csv")
@@ -3075,17 +3078,142 @@ def test_tile_slides_logs_failures_in_real_time(
 ):
     _patch_preprocess_slide(monkeypatch, error=RuntimeError("boom"))
 
-    artifacts = tile_slides(
-        [SlideSpec(sample_id="slide-log", image_path=Path("slide-log.svs"))],
-        tiling=tiling_config,
-        segmentation=segmentation_config,
-        filtering=filter_config,
-        output_dir=tmp_path,
-    )
+    with pytest.warns(hs2p.BatchPartialFailureWarning, match="slide-log: boom"):
+        artifacts = tile_slides(
+            [SlideSpec(sample_id="slide-log", image_path=Path("slide-log.svs"))],
+            tiling=tiling_config,
+            segmentation=segmentation_config,
+            filtering=filter_config,
+            output_dir=tmp_path,
+        )
 
     assert artifacts == []
     captured = capsys.readouterr()
     assert "[tile_slides] FAILED slide-log: boom" in captured.out
+
+
+def test_tile_slides_returns_successes_and_warns_once_after_attempting_all_slides(
+    monkeypatch,
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    attempted = []
+
+    def _result_or_failure(**kwargs):
+        sample_id = kwargs["sample_id"]
+        attempted.append(sample_id)
+        failures = {
+            "slide-2": "damaged header",
+            "slide-3": "permission denied",
+        }
+        if sample_id in failures:
+            raise RuntimeError(failures[sample_id])
+        return _build_preprocessing_result(
+            sample_id=sample_id,
+            image_path=str(kwargs["image_path"]),
+        )
+
+    _patch_preprocess_slide(monkeypatch, result=_result_or_failure)
+
+    with pytest.warns(hs2p.BatchPartialFailureWarning) as caught:
+        artifacts = tile_slides(
+            [
+                SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs")),
+                SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
+                SlideSpec(sample_id="slide-3", image_path=Path("slide-3.svs")),
+                SlideSpec(sample_id="slide-4", image_path=Path("slide-4.svs")),
+            ],
+            tiling=tiling_config,
+            segmentation=segmentation_config,
+            filtering=filter_config,
+            output_dir=tmp_path,
+            num_workers=1,
+        )
+
+    assert attempted == ["slide-1", "slide-2", "slide-3", "slide-4"]
+    assert [artifact.sample_id for artifact in artifacts] == ["slide-1", "slide-4"]
+    assert len(caught) == 1
+    warning = str(caught[0].message)
+    assert "2 failed slides" in warning
+    assert "slide-2: damaged header" in warning
+    assert "slide-3: permission denied" in warning
+    assert "skipped" not in warning.lower()
+
+    process_df = pd.read_csv(tmp_path / "process_list.csv")
+    failures = process_df[process_df["tiling_status"] == "failed"].set_index("sample_id")
+    assert failures.loc["slide-2", "error"] == "damaged header"
+    assert "RuntimeError: damaged header" in failures.loc["slide-2", "traceback"]
+    assert failures.loc["slide-3", "error"] == "permission denied"
+    assert "RuntimeError: permission denied" in failures.loc["slide-3", "traceback"]
+
+
+def test_tile_slides_all_success_returns_every_artifact_without_partial_failure_warning(
+    monkeypatch,
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    def _successful_result(**kwargs):
+        return _build_preprocessing_result(
+            sample_id=kwargs["sample_id"],
+            image_path=str(kwargs["image_path"]),
+        )
+
+    _patch_preprocess_slide(monkeypatch, result=_successful_result)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        artifacts = tile_slides(
+            [
+                SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs")),
+                SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
+            ],
+            tiling=tiling_config,
+            segmentation=segmentation_config,
+            filtering=filter_config,
+            output_dir=tmp_path,
+            num_workers=1,
+        )
+
+    assert [artifact.sample_id for artifact in artifacts] == ["slide-1", "slide-2"]
+    assert not [
+        warning
+        for warning in caught
+        if issubclass(warning.category, hs2p.BatchPartialFailureWarning)
+    ]
+
+
+def test_tile_slides_partial_failure_warning_supplies_reason_for_blank_exception(
+    monkeypatch,
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    monkeypatch.setattr(
+        orchestration_mod,
+        "_resolve_effective_backends",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError()),
+    )
+
+    with pytest.warns(hs2p.BatchPartialFailureWarning) as caught:
+        artifacts = tile_slides(
+            [SlideSpec(sample_id="slide-blank", image_path=Path("slide-blank.svs"))],
+            tiling=tiling_config,
+            segmentation=segmentation_config,
+            filtering=filter_config,
+            output_dir=tmp_path,
+        )
+
+    assert artifacts == []
+    assert str(caught[0].message).endswith("slide-blank: RuntimeError")
+    process_df = pd.read_csv(tmp_path / "process_list.csv")
+    assert process_df.loc[0, "error"] == "RuntimeError"
+    assert "RuntimeError" in process_df.loc[0, "traceback"]
+
 
 def test_tile_slides_resume_rejects_unsupported_process_list_schema(
     tmp_path: Path,
@@ -3146,17 +3274,21 @@ def test_tile_slides_writes_process_list_incrementally(
 
     _patch_preprocess_slide(monkeypatch, result=_result_or_crash)
 
-    tile_slides(
-        [
-            SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs")),
-            SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
-        ],
-        tiling=tiling_config,
-        segmentation=segmentation_config,
-        filtering=filter_config,
-        output_dir=run_dir,
-        num_workers=1,
-    )
+    with pytest.warns(
+        hs2p.BatchPartialFailureWarning,
+        match="slide-2: simulated mid-run crash",
+    ):
+        tile_slides(
+            [
+                SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs")),
+                SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
+            ],
+            tiling=tiling_config,
+            segmentation=segmentation_config,
+            filtering=filter_config,
+            output_dir=run_dir,
+            num_workers=1,
+        )
 
     df = pd.read_csv(run_dir / "process_list.csv")
     assert set(df["sample_id"]) == {"slide-1", "slide-2"}
@@ -3175,6 +3307,20 @@ def test_load_csv_rejects_duplicate_sample_id(tmp_path: Path):
 
     with pytest.raises(ValueError, match="Duplicate sample_id"):
         load_csv(cfg)
+
+
+def test_load_csv_preserves_literal_na_like_sample_ids_as_strings(tmp_path: Path):
+    csv_path = tmp_path / "slides.csv"
+    csv_path.write_text(
+        "sample_id,image_path\n"
+        "nan,nan.svs\n"
+        "NA,na.svs\n"
+        "null,null.svs\n"
+    )
+
+    slides = load_csv(SimpleNamespace(csv=str(csv_path)))
+
+    assert [slide.sample_id for slide in slides] == ["nan", "NA", "null"]
 
 
 def test_load_csv_rejects_legacy_mask_columns(tmp_path: Path):
@@ -3759,14 +3905,18 @@ def test_tile_slides_deferred_preview_failure_records_base_artifact_backends(
     monkeypatch.setattr(orchestration_mod, "_write_tiling_preview_from_artifacts", _boom)
     monkeypatch.setattr(orchestration_mod, "write_tiling_preview", _boom)
 
-    artifacts = tile_slides(
-        [SlideSpec(sample_id="slide-preview", image_path=Path("slide-preview.svs"))],
-        tiling=tiling_config,
-        segmentation=segmentation_config,
-        filtering=filter_config,
-        preview=PreviewConfig(save_tiling_preview=True),
-        output_dir=tmp_path,
-    )
+    with pytest.warns(
+        hs2p.BatchPartialFailureWarning,
+        match="slide-preview: preview boom",
+    ):
+        artifacts = tile_slides(
+            [SlideSpec(sample_id="slide-preview", image_path=Path("slide-preview.svs"))],
+            tiling=tiling_config,
+            segmentation=segmentation_config,
+            filtering=filter_config,
+            preview=PreviewConfig(save_tiling_preview=True),
+            output_dir=tmp_path,
+        )
 
     assert artifacts == []
     df = pd.read_csv(tmp_path / "process_list.csv")
@@ -3820,20 +3970,24 @@ def test_tile_slides_resume_validation_failure_records_requested_and_resolved_ba
 
     monkeypatch.setattr(orchestration_mod, "validate_tiling_artifacts", _reject)
 
-    artifacts = tile_slides(
-        [
-            SlideSpec(
-                sample_id="slide-x",
-                image_path=Path("slide-x.svs"),
-                mask_path=Path("slide-x-mask.tif"),
-            )
-        ],
-        tiling=tiling_config,
-        segmentation=segmentation_config,
-        filtering=filter_config,
-        output_dir=run_dir,
-        resume=True,
-    )
+    with pytest.warns(
+        hs2p.BatchPartialFailureWarning,
+        match="slide-x: backend mismatch",
+    ):
+        artifacts = tile_slides(
+            [
+                SlideSpec(
+                    sample_id="slide-x",
+                    image_path=Path("slide-x.svs"),
+                    mask_path=Path("slide-x-mask.tif"),
+                )
+            ],
+            tiling=tiling_config,
+            segmentation=segmentation_config,
+            filtering=filter_config,
+            output_dir=run_dir,
+            resume=True,
+        )
 
     assert artifacts == []
     df = pd.read_csv(run_dir / "process_list.csv")
@@ -3860,19 +4014,23 @@ def test_tile_slides_backend_resolution_failure_records_requested_with_null_reso
 
     monkeypatch.setattr(orchestration_mod, "_resolve_effective_backends", _boom)
 
-    artifacts = tile_slides(
-        [
-            SlideSpec(
-                sample_id="slide-x",
-                image_path=Path("slide-x.svs"),
-                mask_path=Path("slide-x-mask.tif"),
-            )
-        ],
-        tiling=tiling_config,
-        segmentation=segmentation_config,
-        filtering=filter_config,
-        output_dir=tmp_path,
-    )
+    with pytest.warns(
+        hs2p.BatchPartialFailureWarning,
+        match="slide-x: backend probe failed",
+    ):
+        artifacts = tile_slides(
+            [
+                SlideSpec(
+                    sample_id="slide-x",
+                    image_path=Path("slide-x.svs"),
+                    mask_path=Path("slide-x-mask.tif"),
+                )
+            ],
+            tiling=tiling_config,
+            segmentation=segmentation_config,
+            filtering=filter_config,
+            output_dir=tmp_path,
+        )
 
     assert artifacts == []
     df = pd.read_csv(tmp_path / "process_list.csv")

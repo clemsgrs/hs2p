@@ -418,6 +418,29 @@ class ProcessListCheckpoint:
                     temp_path.unlink(missing_ok=True)
 
 
+def summarize_failed_slides(
+    process_rows: Sequence[dict[str, Any]],
+) -> tuple[tuple[str, str], ...]:
+    """Return one ordered ``(sample_id, reason)`` pair per failed slide."""
+    reasons_by_slide: dict[str, list[str]] = {}
+    for row in process_rows:
+        if row.get("tiling_status") != "failed":
+            continue
+        sample_id = str(row["sample_id"])
+        raw_reason = row.get("error")
+        if raw_reason is None or pd.isna(raw_reason):
+            reason = "unknown error"
+        else:
+            reason = str(raw_reason).strip() or "unknown error"
+        reasons = reasons_by_slide.setdefault(sample_id, [])
+        if reason not in reasons:
+            reasons.append(reason)
+    return tuple(
+        (sample_id, " | ".join(reasons))
+        for sample_id, reasons in reasons_by_slide.items()
+    )
+
+
 def load_whole_slides_from_rows(rows: Sequence[dict[str, Any]]) -> list[SlideSpec]:
     whole_slides: list[SlideSpec] = []
     for row in rows:
@@ -451,6 +474,7 @@ __all__ = [
     "load_tiling_result",
     "load_whole_slides_from_rows",
     "save_tiling_result",
+    "summarize_failed_slides",
     "maybe_load_existing_artifacts",
     "optional_path",
     "validate_required_columns",

@@ -144,6 +144,10 @@ When `is_within_tolerance` is true, `tile_size_lv0` and `step_px_lv0` reflect th
 - `error`
 - `traceback`
 
+Each attempted slide is recorded as `success` or `failed`. Failure rows retain
+the concise reason in `error` and the detailed diagnostic traceback in
+`traceback`; they are failed slides, not skipped slides.
+
 ### Sampling manifest
 
 - `sample_id`

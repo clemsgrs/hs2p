@@ -1,4 +1,5 @@
 from hs2p.api import (
+    BatchPartialFailureWarning,
     FilterConfig,
     PreviewConfig,
     SegmentationConfig,

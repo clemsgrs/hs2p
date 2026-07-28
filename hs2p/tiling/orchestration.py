@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import multiprocessing as mp
 import traceback
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -51,9 +52,29 @@ from hs2p.artifacts import (
     maybe_load_existing_artifacts,
     optional_path,
     save_tiling_result,
+    summarize_failed_slides,
     validate_required_columns,
     validate_tiling_artifacts,
 )
+
+
+class BatchPartialFailureWarning(UserWarning):
+    """A completed batch attempted every slide but one or more slides failed."""
+
+    def __init__(self, failures: Sequence[tuple[str, str]]):
+        self.failures = tuple(failures)
+        failed_slide_count = len(self.failures)
+        noun = "slide" if failed_slide_count == 1 else "slides"
+        details = "; ".join(
+            f"{sample_id}: {reason}" for sample_id, reason in self.failures
+        )
+        super().__init__(
+            f"Batch completed with {failed_slide_count} failed {noun}: {details}"
+        )
+
+
+def _exception_reason(exc: BaseException) -> str:
+    return str(exc).strip() or type(exc).__name__
 
 
 def _resolve_effective_backends(
@@ -779,7 +800,7 @@ def _build_failure_process_row(
         "tiles_tar_path": np.nan,
         "mask_preview_path": np.nan,
         "tiling_preview_path": np.nan,
-        "error": error,
+        "error": error.strip() or "unknown error",
         "traceback": traceback_text,
     }
 
@@ -986,7 +1007,7 @@ def _compute_and_save_tiling_artifacts_from_request(
                 request.tiling.requested_mask_backend if has_mask else None
             ),
             mask_backend=request.tiling.mask_backend if has_mask else None,
-            error=str(exc),
+            error=_exception_reason(exc),
             traceback_text=traceback.format_exc(),
         )
 
@@ -1051,7 +1072,7 @@ def _resolve_mask_for_request(
             backend=effective_tiling.backend,
             requested_mask_backend=requested_mask_backend,
             mask_backend=mask_backend,
-            error=str(exc),
+            error=_exception_reason(exc),
             traceback_text=traceback.format_exc(),
         )
 
@@ -1073,7 +1094,7 @@ def _resolve_mask_for_request_safe(
                 request.tiling.requested_mask_backend if has_mask else None
             ),
             mask_backend=request.tiling.mask_backend if has_mask else None,
-            error=str(exc),
+            error=_exception_reason(exc),
             traceback_text=traceback.format_exc(),
         )
 
@@ -1363,7 +1384,7 @@ def tile_slides(
             planned_work.append(
                 _SlideWork(
                     whole_slide=whole_slide,
-                    error=str(exc),
+                    error=_exception_reason(exc),
                     traceback_text=traceback.format_exc(),
                     requested_backend=tiling.requested_backend,
                     backend=(
@@ -1539,12 +1560,13 @@ def tile_slides(
                 )
             except Exception as exc:
                 emit_progress_log(
-                    f"[tile_slides] FAILED {previous_pending.whole_slide.sample_id}: {exc}",
+                    f"[tile_slides] FAILED {previous_pending.whole_slide.sample_id}: "
+                    f"{_exception_reason(exc)}",
                 )
                 _record_process_row(
                     _build_failure_process_row(
                         whole_slide=previous_pending.whole_slide,
-                        error=str(exc),
+                        error=_exception_reason(exc),
                         traceback_text=traceback.format_exc(),
                         requested_backend=previous_pending.base_artifact.requested_backend,
                         backend=previous_pending.base_artifact.backend,
@@ -1841,10 +1863,14 @@ def tile_slides(
         if preview_executor is not None:
             preview_executor.shutdown(wait=True)
     process_list_checkpoint.flush(process_rows)
+    failures = summarize_failed_slides(process_rows)
+    if failures:
+        warnings.warn(BatchPartialFailureWarning(failures), stacklevel=2)
     return artifacts
 
 
 __all__ = [
+    "BatchPartialFailureWarning",
     "extract_tiles_to_tar",
     "tile_slide",
     "tile_slides",
