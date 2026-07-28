@@ -6,6 +6,8 @@
   - Input CSV schemas, config areas, progress reporting, and resume/precomputed workflows
 - [Artifact reference](artifacts.md)
   - `process_list.csv` manifests
+- [Release notes](release-notes.md)
+  - User-visible behavior changes and artifact compatibility impact
 - [Benchmark notes](benchmark.md)
   - Throughput findings and the benchmark entrypoints in `scripts/`
 - [Tissue mask generation](tissue-mask-generation.md)

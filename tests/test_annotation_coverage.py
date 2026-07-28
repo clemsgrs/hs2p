@@ -34,8 +34,14 @@ TUMOR_PX, STROMA_PX, NECROSIS_PX = 40000, 40000, 1600
 
 
 def _fake_resolve_backends(
-    *, requested_slide_backend, requested_mask_backend, wsi_path, mask_path=None
+    *,
+    requested_slide_backend,
+    requested_mask_backend,
+    wsi_path,
+    mask_path=None,
+    slide_spacing_override=None,
 ):
+    del slide_spacing_override
     from hs2p.wsi.backend import BackendSelection, ResolvedBackends
 
     sel = BackendSelection(backend="asap", reason=None, tried=("asap",))

@@ -47,15 +47,17 @@ def _wsi(*, backend_name: str = "cucim"):
 def test_seam_resolves_slide_and_mask_from_own_paths(monkeypatch):
     seen: list[tuple[str, str]] = []
 
-    def _fake_can_open(*, wsi_path, mask_path, backend):
-        del mask_path
-        seen.append((str(wsi_path), backend))
+    def _fake_can_open(
+        *, source_path, companion_path, backend, spacing_override=None
+    ):
+        del companion_path, spacing_override
+        seen.append((str(source_path), backend))
         # slide.svs → cucim opens; mask.tif → only asap opens
-        if "mask" in str(wsi_path):
+        if "mask" in str(source_path):
             return backend == "asap"
         return backend == "cucim"
 
-    monkeypatch.setattr(reader_mod, "_backend_can_open_slide", _fake_can_open)
+    monkeypatch.setattr(reader_mod, "_backend_can_open_source", _fake_can_open)
 
     resolved = resolve_backends(
         requested_slide_backend="auto",
@@ -73,8 +75,10 @@ def test_seam_resolves_slide_and_mask_from_own_paths(monkeypatch):
 def test_seam_maskless_has_null_mask_provenance(monkeypatch):
     monkeypatch.setattr(
         reader_mod,
-        "_backend_can_open_slide",
-        lambda *, wsi_path, mask_path, backend: backend == "cucim",
+        "_backend_can_open_source",
+        lambda *, source_path, companion_path, backend, spacing_override=None: (
+            backend == "cucim"
+        ),
     )
     resolved = resolve_backends(
         requested_slide_backend="auto",
@@ -93,14 +97,17 @@ def test_seam_slide_resolution_ignores_mask_openability(monkeypatch):
     with the slide's chosen backend must not perturb slide selection."""
     probed_paths: list[str] = []
 
-    def _fake_can_open(*, wsi_path, mask_path, backend):
-        probed_paths.append(str(wsi_path))
+    def _fake_can_open(
+        *, source_path, companion_path, backend, spacing_override=None
+    ):
+        del companion_path, spacing_override
+        probed_paths.append(str(source_path))
         # cucim can open the slide; the mask is a different format only asap opens
-        if "mask" in str(wsi_path):
+        if "mask" in str(source_path):
             return backend == "asap"
         return backend == "cucim"
 
-    monkeypatch.setattr(reader_mod, "_backend_can_open_slide", _fake_can_open)
+    monkeypatch.setattr(reader_mod, "_backend_can_open_source", _fake_can_open)
     resolved = resolve_backends(
         requested_slide_backend="auto",
         requested_mask_backend="asap",
@@ -116,7 +123,7 @@ def test_seam_explicit_backends_are_authoritative_without_probe(monkeypatch):
     def _boom(*args, **kwargs):
         raise AssertionError("explicit backend must not trigger an openability probe")
 
-    monkeypatch.setattr(reader_mod, "_backend_can_open_slide", _boom)
+    monkeypatch.setattr(reader_mod, "_backend_can_open_source", _boom)
     resolved = resolve_backends(
         requested_slide_backend="openslide",
         requested_mask_backend="cucim",

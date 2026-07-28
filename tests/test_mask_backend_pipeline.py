@@ -270,7 +270,15 @@ def test_load_whole_slides_from_rows_preserves_mask_path():
 def test_auto_mask_selection_emits_distinct_progress_event(monkeypatch):
     reporter = RecordingReporter()
 
-    def _fake_resolve_backends(*, requested_slide_backend, requested_mask_backend, wsi_path, mask_path=None):
+    def _fake_resolve_backends(
+        *,
+        requested_slide_backend,
+        requested_mask_backend,
+        wsi_path,
+        mask_path=None,
+        slide_spacing_override=None,
+    ):
+        del slide_spacing_override
         slide = BackendSelection(backend="asap", reason=None, tried=("asap",))
         mask = BackendSelection(
             backend="cucim", reason="selected cuCIM for auto backend", tried=("cucim",)
@@ -309,7 +317,15 @@ def test_auto_mask_selection_emits_distinct_progress_event(monkeypatch):
 def test_maskless_slide_emits_no_mask_backend_event(monkeypatch):
     reporter = RecordingReporter()
 
-    def _fake_resolve_backends(*, requested_slide_backend, requested_mask_backend, wsi_path, mask_path=None):
+    def _fake_resolve_backends(
+        *,
+        requested_slide_backend,
+        requested_mask_backend,
+        wsi_path,
+        mask_path=None,
+        slide_spacing_override=None,
+    ):
+        del slide_spacing_override
         return ResolvedBackends(
             slide=BackendSelection(backend="cucim", reason="selected cuCIM for auto backend", tried=("cucim",)),
             mask=None, requested_slide_backend="auto", requested_mask_backend=None,
@@ -334,7 +350,10 @@ def test_maskless_slide_emits_no_mask_backend_event(monkeypatch):
 def test_wsi_resolves_mask_backend_independently(monkeypatch):
     opened: list[tuple[str, str]] = []
 
-    def _fake_resolve_backend(requested, *, wsi_path, mask_path=None):
+    def _fake_resolve_backend(
+        requested, *, wsi_path, mask_path=None, spacing_override=None
+    ):
+        del requested, mask_path, spacing_override
         # slide path -> asap; mask path -> openslide (independent)
         backend = "openslide" if "mask" in str(wsi_path) else "asap"
         return BackendSelection(backend=backend, reason=None, tried=(backend,))

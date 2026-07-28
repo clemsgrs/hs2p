@@ -95,6 +95,7 @@ def _resolve_effective_backends(
         requested_mask_backend=tiling.requested_mask_backend,
         wsi_path=whole_slide.image_path,
         mask_path=whole_slide.mask_path,
+        slide_spacing_override=whole_slide.spacing_at_level_0,
     )
     if emit and resolved.slide.reason is not None:
         emit_progress(
