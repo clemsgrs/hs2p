@@ -36,8 +36,15 @@ pip install "hs2p[openslide]"
 pip install "hs2p[asap]"
 pip install "hs2p[vips]"
 pip install "hs2p[cucim]"
+pip install "hs2p[turbojpeg]"
 pip install "hs2p[all]"
 ```
+
+Tile TAR export uses Pillow (`speed.jpeg_backend: pil`) by default, so it works
+with the base install. For higher JPEG encoding throughput, install the
+`turbojpeg` extra and explicitly set `speed.jpeg_backend: turbojpeg`. Explicit
+encoder choices are authoritative: hs2p reports a missing optional dependency
+instead of falling back to a different encoder.
 
 The supported backend set is:
 

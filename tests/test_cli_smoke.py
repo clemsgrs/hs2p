@@ -24,7 +24,7 @@ def _base_cfg(tmp_path: Path, csv_path: Path) -> SimpleNamespace:
         output_dir=str(tmp_path / "output"),
         resume=False,
         save_tiles=False,
-        speed=SimpleNamespace(num_workers=1, jpeg_backend="turbojpeg"),
+        speed=SimpleNamespace(num_workers=1),
         tiling=SimpleNamespace(
             read_coordinates_from=None,
             backend="asap",
@@ -143,7 +143,7 @@ def test_tiling_main_smoke_uses_current_schema_and_manifest(
         )
     ]
     assert captured["save_tiles"] is False
-    assert captured["jpeg_backend"] == "turbojpeg"
+    assert captured["jpeg_backend"] == "pil"
     process_df = pd.read_csv(Path(cfg.output_dir) / "process_list.csv")
     assert list(process_df.columns) == [
         "sample_id",

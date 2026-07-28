@@ -3,6 +3,7 @@ from pathlib import Path
 
 import hs2p.progress as progress
 from hs2p.api import tile_slides
+from hs2p.configs.loader import DEFAULT_JPEG_BACKEND
 from hs2p.configs.resolvers import (
     resolve_filter_config,
     resolve_preview_config,
@@ -59,7 +60,9 @@ def main(args):
             sampling, selection_strategy, output_mode = resolve_sampling_request(
                 cfg, tiling=tiling
             )
-            jpeg_backend = str(getattr(cfg.speed, "jpeg_backend", "turbojpeg"))
+            jpeg_backend = str(
+                getattr(cfg.speed, "jpeg_backend", DEFAULT_JPEG_BACKEND)
+            )
             progress.emit_progress(
                 "run.started",
                 command="tiling",

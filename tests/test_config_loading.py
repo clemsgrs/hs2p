@@ -1,7 +1,12 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+from hs2p.configs import default_config
 from hs2p.utils.setup import get_cfg_from_args
+
+
+def test_shipped_config_defaults_to_pillow_jpeg_encoding():
+    assert default_config.speed.jpeg_backend == "pil"
 
 
 def test_get_cfg_from_args_merges_mask_coverage_mapping(tmp_path: Path):

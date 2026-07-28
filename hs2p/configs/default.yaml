@@ -78,7 +78,7 @@ tiling:
 
 speed:
   num_workers: 8 # number of workers for tiling slides
-  jpeg_backend: "turbojpeg" # JPEG encoder used when saving tiles
+  jpeg_backend: "pil" # portable default; use turbojpeg with hs2p[turbojpeg] for faster tile encoding
 
 wandb:
   enable: false

@@ -57,6 +57,9 @@ cucim = [
 vips = [
     "pyvips",
 ]
+turbojpeg = [
+    "PyTurboJPEG",
+]
 all = [
     "openslide-python",
     "openslide-bin",
@@ -66,6 +69,7 @@ all = [
     "cupy-cuda12x",
     "nvidia-nvimgcodec-cu12>=0.7.0",
     "pyvips",
+    "PyTurboJPEG",
 ]
 testing = [
     "pytest>=6.0",

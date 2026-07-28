@@ -6,6 +6,31 @@ on:
   workflow_dispatch:
 
 jobs:
+  wheel-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build wheel
+        run: |
+          python -m pip install --upgrade build
+          python -m build --wheel
+
+      - name: Test base wheel tile saving
+        run: |
+          python -m venv /tmp/hs2p-wheel-smoke
+          /tmp/hs2p-wheel-smoke/bin/python -m pip install dist/*.whl
+          cd /tmp
+          /tmp/hs2p-wheel-smoke/bin/python "$GITHUB_WORKSPACE/scripts/smoke_tile_wheel.py"
+
   docker-test:
     runs-on: ubuntu-latest
     timeout-minutes: 60

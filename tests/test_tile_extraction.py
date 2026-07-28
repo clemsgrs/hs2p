@@ -14,18 +14,11 @@ import pytest
 from PIL import Image
 
 import hs2p.preprocessing as preprocessing_mod
+import hs2p.tiling.tar as tar_mod
 from hs2p.api import extract_tiles_to_tar
 from hs2p.configs.models import FilterConfig
 from hs2p.wsi import iter_tile_arrays_from_result
 from hs2p.wsi.streaming.plans import GroupedReadPlan, iter_grouped_read_plans
-
-
-_extract_tiles_to_tar = extract_tiles_to_tar
-
-
-def extract_tiles_to_tar(*args, **kwargs):
-    kwargs.setdefault("jpeg_backend", "pil")
-    return _extract_tiles_to_tar(*args, **kwargs)
 
 
 def _make_tiling_result(
@@ -443,7 +436,11 @@ class TestExtractTilesToTar:
         )
 
         with patch("hs2p.wsi.streaming.stream.open_slide", return_value=mock_reader):
-            tar_path, _ = _extract_tiles_to_tar(result, output_dir=tmp_path)
+            tar_path, _ = extract_tiles_to_tar(
+                result,
+                output_dir=tmp_path,
+                jpeg_backend="turbojpeg",
+            )
 
         assert tar_path.is_file()
         assert captured == {
@@ -451,6 +448,34 @@ class TestExtractTilesToTar:
             "pixel_format": 0,
             "jpeg_subsample": 2,
         }
+
+    def test_missing_turbojpeg_fails_actionably_before_tile_materialization(
+        self, tmp_path: Path, monkeypatch
+    ):
+        result = _make_tiling_result(num_tiles=1)
+        original_import_module = tar_mod.importlib.import_module
+
+        def _import_module(name):
+            if name == "turbojpeg":
+                raise ModuleNotFoundError(
+                    "No module named 'turbojpeg'",
+                    name="turbojpeg",
+                )
+            return original_import_module(name)
+
+        monkeypatch.setattr(tar_mod.importlib, "import_module", _import_module)
+
+        with pytest.raises(
+            ImportError,
+            match=r"pip install 'hs2p\[turbojpeg\]'",
+        ):
+            extract_tiles_to_tar(
+                result,
+                output_dir=tmp_path,
+                jpeg_backend="turbojpeg",
+            )
+
+        assert not (tmp_path / "tiles").exists()
 
     def test_uses_pil_encoding_when_requested(self, tmp_path: Path, monkeypatch):
         result = _make_tiling_result(num_tiles=1)

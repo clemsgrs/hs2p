@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from hs2p.configs import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig
+from hs2p.configs.loader import DEFAULT_JPEG_BACKEND
 from hs2p.configs.resolvers import require_tissue_fraction, validate_sampling_spec
 from hs2p.progress import emit_progress, emit_progress_log
 from hs2p.tiling.result import ResolvedTissueMask, TilingResult
@@ -23,7 +24,11 @@ from hs2p.tiling.single import (
     preprocess_slide,
     preprocess_slide_per_annotation,
 )
-from hs2p.tiling.tar import _annotation_tar_stem, _needs_pixel_filtering, extract_tiles_to_tar
+from hs2p.tiling.tar import (
+    _load_jpeg_backend,
+    _needs_pixel_filtering,
+    extract_tiles_to_tar,
+)
 from hs2p.fileops import is_flattened_annotation, validate_annotation_name
 from hs2p.wsi import (
     CoordinateOutputMode,
@@ -565,7 +570,7 @@ class _ComputeRequest:
     preview_downsample: int = 32
     mask_overlay_color: tuple[int, int, int] = (157, 219, 129)
     mask_overlay_alpha: float = 0.5
-    jpeg_backend: str = "turbojpeg"
+    jpeg_backend: str = DEFAULT_JPEG_BACKEND
     gpu_decode: bool = False
     include_result: bool = False
     save_tiles: bool = False
@@ -1178,7 +1183,7 @@ def tile_slides(
     resume: bool = False,
     read_coordinates_from: Path | None = None,
     save_tiles: bool = False,
-    jpeg_backend: str = "turbojpeg",
+    jpeg_backend: str = DEFAULT_JPEG_BACKEND,
     gpu_decode: bool = False,
     sampling: SamplingSpec | None = None,
     selection_strategy: str | None = None,
@@ -1209,6 +1214,8 @@ def tile_slides(
         whole_slides=whole_slides,
         segmentation=segmentation,
     )
+    if save_tiles:
+        _load_jpeg_backend(str(jpeg_backend))
     artifacts: list[TilingArtifacts] = []
     process_rows: list[dict[str, Any]] = []
     process_list_path = output_dir / "process_list.csv"

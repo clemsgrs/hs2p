@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import importlib
 import io
 import tarfile
 import tempfile
@@ -12,6 +13,7 @@ from typing import Any, Sequence
 import numpy as np
 from PIL import Image
 
+from hs2p.configs.loader import DEFAULT_JPEG_BACKEND
 from hs2p.tiling.result import TilingResult
 from hs2p.tile_qc import filter_coordinate_tiles, needs_pixel_qc
 from hs2p.fileops import (
@@ -21,6 +23,22 @@ from hs2p.fileops import (
 )
 from hs2p.wsi import iter_tile_records_from_result, open_reader_for_result
 from hs2p.wsi.reader import BatchRegionReader
+
+
+def _load_jpeg_backend(jpeg_backend: str) -> Any | None:
+    if jpeg_backend == "pil":
+        return None
+    if jpeg_backend != "turbojpeg":
+        raise ValueError(f"Unsupported jpeg_backend: {jpeg_backend}")
+    try:
+        return importlib.import_module("turbojpeg")
+    except ModuleNotFoundError as exc:
+        if exc.name != "turbojpeg":
+            raise
+        raise ImportError(
+            "JPEG backend 'turbojpeg' requires the optional PyTurboJPEG "
+            "dependency; install it with pip install 'hs2p[turbojpeg]'."
+        ) from exc
 
 
 def _annotation_tar_stem(sample_id: str, annotation: str | None) -> str:
@@ -120,7 +138,7 @@ def extract_tiles_to_tar(
     *,
     annotation: str | None = None,
     jpeg_quality: int = 90,
-    jpeg_backend: str = "turbojpeg",
+    jpeg_backend: str = DEFAULT_JPEG_BACKEND,
     supertile_sizes: Sequence[int] | None = None,
     tiles_dir: Path | None = None,
     filter_params: Any | None = None,
@@ -133,11 +151,8 @@ def extract_tiles_to_tar(
     validate_annotation_name(annotation)
     validate_annotation_name(result.annotation)
     jpeg_backend = str(jpeg_backend)
-    _jpeg_encoder = None
-    if jpeg_backend == "turbojpeg":
-        import turbojpeg
-
-        _jpeg_encoder = turbojpeg.TurboJPEG()
+    turbojpeg = _load_jpeg_backend(jpeg_backend)
+    _jpeg_encoder = turbojpeg.TurboJPEG() if turbojpeg is not None else None
 
     tiles_dir = Path(tiles_dir) if tiles_dir is not None else _annotation_tiles_dir(output_dir, annotation)
     tiles_dir.mkdir(parents=True, exist_ok=True)
@@ -204,7 +219,7 @@ def extract_tiles_to_tar(
                     )
                     tile_arr = np.asarray(img)
 
-                if jpeg_backend == "turbojpeg":
+                if turbojpeg is not None:
                     assert _jpeg_encoder is not None
                     jpeg_bytes = _jpeg_encoder.encode(
                         tile_arr,
@@ -212,13 +227,11 @@ def extract_tiles_to_tar(
                         pixel_format=turbojpeg.TJPF_RGB,
                         jpeg_subsample=turbojpeg.TJSAMP_420,
                     )
-                elif jpeg_backend == "pil":
+                else:
                     img = Image.fromarray(tile_arr).convert("RGB")
                     buf = io.BytesIO()
                     img.save(buf, format="JPEG", quality=jpeg_quality)
                     jpeg_bytes = buf.getvalue()
-                else:
-                    raise ValueError(f"Unsupported jpeg_backend: {jpeg_backend}")
                 buf = io.BytesIO(jpeg_bytes)
                 encode_duration = time.perf_counter() - encode_start
                 if phase_recorder is not None:

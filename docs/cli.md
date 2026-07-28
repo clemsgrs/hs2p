@@ -72,8 +72,13 @@ pip install "hs2p[openslide]"
 pip install "hs2p[asap]"
 pip install "hs2p[vips]"
 pip install "hs2p[cucim]"
+pip install "hs2p[turbojpeg]"
 pip install "hs2p[all]"
 ```
+
+The base install includes Pillow, the portable default JPEG encoder for tile TAR
+export. The `turbojpeg` extra installs PyTurboJPEG as an optional performance
+backend and is also included in `all`.
 
 `tiling.backend` (slide reader) and `tiling.mask_backend` (source-mask reader) both support:
 
@@ -161,6 +166,12 @@ backend fields/columns) are rejected clearly rather than loaded.
   - write `tiles/{sample_id}.tiles.tar`
 - `speed.num_workers`
   - slide-level batch parallelism
+- `speed.jpeg_backend`
+  - `pil` (default) uses the core Pillow dependency and works in a base install
+  - `turbojpeg` opts into the faster PyTurboJPEG encoder and requires
+    `pip install "hs2p[turbojpeg]"`
+  - explicit selections never fall back; an unavailable TurboJPEG dependency is
+    reported before slide tile extraction begins
 
 ## Progress reporting
 
