@@ -43,6 +43,7 @@ def main() -> None:
     tile[:] = (12, 34, 56)
     result = SimpleNamespace(
         sample_id="wheel-smoke",
+        annotation=None,
         read_tile_size_px=8,
         requested_tile_size_px=8,
         tile_index=np.array([0], dtype=np.int32),
