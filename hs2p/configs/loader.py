@@ -9,6 +9,7 @@ def load_config(config_name: str):
 
 
 default_config = load_config("default")
+DEFAULT_JPEG_BACKEND = str(default_config.speed.jpeg_backend)
 
 
 def load_and_merge_config(config_name: str):

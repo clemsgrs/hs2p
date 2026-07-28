@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from hs2p.configs import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig
+from hs2p.configs.loader import DEFAULT_JPEG_BACKEND
 from hs2p.configs.resolvers import require_tissue_fraction, validate_sampling_spec
 from hs2p.progress import emit_progress, emit_progress_log
 from hs2p.tiling.result import ResolvedTissueMask, TilingResult
@@ -569,7 +570,7 @@ class _ComputeRequest:
     preview_downsample: int = 32
     mask_overlay_color: tuple[int, int, int] = (157, 219, 129)
     mask_overlay_alpha: float = 0.5
-    jpeg_backend: str = "pil"
+    jpeg_backend: str = DEFAULT_JPEG_BACKEND
     gpu_decode: bool = False
     include_result: bool = False
     save_tiles: bool = False
@@ -1182,7 +1183,7 @@ def tile_slides(
     resume: bool = False,
     read_coordinates_from: Path | None = None,
     save_tiles: bool = False,
-    jpeg_backend: str = "pil",
+    jpeg_backend: str = DEFAULT_JPEG_BACKEND,
     gpu_decode: bool = False,
     sampling: SamplingSpec | None = None,
     selection_strategy: str | None = None,

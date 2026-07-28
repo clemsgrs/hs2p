@@ -1272,6 +1272,17 @@ def test_tile_slides_rejects_missing_turbojpeg_before_slide_compute(
     segmentation_config: SegmentationConfig,
     filter_config: FilterConfig,
 ):
+    def _missing_turbojpeg(_jpeg_backend):
+        raise ImportError(
+            "JPEG backend 'turbojpeg' requires the optional PyTurboJPEG "
+            "dependency; install it with pip install 'hs2p[turbojpeg]'."
+        )
+
+    monkeypatch.setattr(
+        orchestration_mod,
+        "_load_jpeg_backend",
+        _missing_turbojpeg,
+    )
     monkeypatch.setattr(
         orchestration_mod,
         "_compute_and_save_tiling_artifacts_from_request",

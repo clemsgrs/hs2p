@@ -13,6 +13,7 @@ from typing import Any, Sequence
 import numpy as np
 from PIL import Image
 
+from hs2p.configs.loader import DEFAULT_JPEG_BACKEND
 from hs2p.tiling.result import TilingResult
 from hs2p.tile_qc import filter_coordinate_tiles, needs_pixel_qc
 from hs2p.fileops import (
@@ -137,7 +138,7 @@ def extract_tiles_to_tar(
     *,
     annotation: str | None = None,
     jpeg_quality: int = 90,
-    jpeg_backend: str = "pil",
+    jpeg_backend: str = DEFAULT_JPEG_BACKEND,
     supertile_sizes: Sequence[int] | None = None,
     tiles_dir: Path | None = None,
     filter_params: Any | None = None,

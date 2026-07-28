@@ -14,6 +14,7 @@ import pytest
 from PIL import Image
 
 import hs2p.preprocessing as preprocessing_mod
+import hs2p.tiling.tar as tar_mod
 from hs2p.api import extract_tiles_to_tar
 from hs2p.configs.models import FilterConfig
 from hs2p.wsi import iter_tile_arrays_from_result
@@ -449,9 +450,20 @@ class TestExtractTilesToTar:
         }
 
     def test_missing_turbojpeg_fails_actionably_before_tile_materialization(
-        self, tmp_path: Path
+        self, tmp_path: Path, monkeypatch
     ):
         result = _make_tiling_result(num_tiles=1)
+        original_import_module = tar_mod.importlib.import_module
+
+        def _import_module(name):
+            if name == "turbojpeg":
+                raise ModuleNotFoundError(
+                    "No module named 'turbojpeg'",
+                    name="turbojpeg",
+                )
+            return original_import_module(name)
+
+        monkeypatch.setattr(tar_mod.importlib, "import_module", _import_module)
 
         with pytest.raises(
             ImportError,
