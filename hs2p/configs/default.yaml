@@ -9,7 +9,7 @@ save_tiles: false # save extracted tiles as {sample_id}.tiles.tar in addition to
 seed: 0 # seed for reproducibility
 
 tiling:
-  read_coordinates_from: # path to a directory containing {sample_id}.coordinates.npz and {sample_id}.coordinates.meta.json (leave empty to compute tiles)
+  read_coordinates_from: # path to reusable {sample_id}.coordinates.* artifacts; skips coordinate computation only, while requested TAR/preview outputs still run
   backend: "auto" # backend to use for slide reading; auto prefers CuCIM when supported and falls back to ASAP/openslide
   mask_backend: "auto" # backend to use for reading source masks; resolved independently from the mask path (auto uses the same openability-only probe as the slide backend)
   independent_sampling: false # whether to tile each annotation independently (true) or jointly over the union mask (false)

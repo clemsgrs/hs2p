@@ -126,7 +126,13 @@ backend fields/columns) are rejected clearly rather than loaded.
 ## Config areas
 
 - `tiling.read_coordinates_from`
-  - Reuse precomputed `{sample_id}.coordinates.*` artifacts
+  - Reuse precomputed `{sample_id}.coordinates.*` artifacts instead of recomputing tile
+    coordinates
+  - Coordinate reuse is not completed-slide processing: outputs requested by the current run
+    are still materialized. In particular, `save_tiles: true` writes the tile TAR and manifest,
+    and an enabled tiling preview is rendered when at least one coordinate is present.
+  - Disabled outputs are not created, and a reused zero-tile artifact does not create or report
+    a tiling preview.
 - `tiling.params`
   - spacing, tile size, overlap, tolerance, padding, and minimum tissue fraction
 - `tiling.seg_params`
@@ -205,9 +211,11 @@ of a non-zero process exit.
 
 ## Resume and precomputed artifacts
 
-- `resume: true` expects the current process-list schema
+- `resume: true` treats a compatible successful `process_list.csv` row as completed slide
+  processing and expects the current process-list schema
 - reused artifacts are validated against structured metadata, not `config_hash`
-- `tiling.read_coordinates_from` is the supported way to reuse precomputed coordinate artifacts
+- `tiling.read_coordinates_from` reuses only compatible tile coordinates; downstream outputs
+  enabled for the current run are still produced
 
 ## Performance notes
 

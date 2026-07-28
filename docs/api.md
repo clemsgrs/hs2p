@@ -143,6 +143,12 @@ available in `output/process_list.csv`.
 
 An all-success batch returns every artifact without emitting this warning.
 
+Pass `read_coordinates_from=Path("saved/tiles")` to reuse compatible
+`{sample_id}.coordinates.*` files without recomputing coordinates. This does not mark the
+slide as already processed: `save_tiles=True` still writes the TAR and its manifest sidecar,
+and `PreviewConfig(save_tiling_preview=True)` still renders a preview for non-empty
+coordinates. Outputs that are not enabled are not created.
+
 When `save_mask_preview=True`, `tile_slides()` writes `preview/mask/{sample_id}.jpg`
 as a contour-only slide preview. The outer tissue boundary uses evergreen
 `#255E3B`, while hole contours use coral `#F26B3A`. `tissue_contour_color`
