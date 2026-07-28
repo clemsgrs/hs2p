@@ -10,7 +10,13 @@ The Python API is the best entrypoint when you want to integrate `hs2p` into you
 - `SlideSpec`
   - Identifies one slide via `sample_id`, `image_path`, and optional `mask_path`
   - `SlideSpec` stays generic because it is shared across tiling and sampling internals
-  - `spacing_at_level_0` can override broken or missing slide metadata
+  - A finite positive `spacing_at_level_0` is the effective level-0 spacing for every
+    backend, including when native metadata is missing. Every effective pyramid spacing
+    is this value multiplied by the backend's level downsample.
+  - If valid native metadata disagrees with the override beyond tight floating-point
+    equivalence, the selected backend emits one warning with the slide path, native
+    value, supplied value, and backend. Missing metadata is rescued without a conflict
+    warning.
 - `TilingConfig`
   - Requested backend, spacing, tile size, overlap, padding, and minimum tissue fraction
 - `SegmentationConfig`

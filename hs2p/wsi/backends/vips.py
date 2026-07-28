@@ -4,7 +4,11 @@ from typing import Any
 
 import numpy as np
 
-from hs2p.wsi.backends.common import paste_region, resolve_padded_read_bounds
+from hs2p.wsi.backends.common import (
+    paste_region,
+    resolve_level0_spacing,
+    resolve_padded_read_bounds,
+)
 from hs2p.wsi.geometry import compute_level_spacings
 
 VIPS_SUPPORTED_SUFFIXES = {
@@ -36,6 +40,7 @@ def _vips_to_numpy(image) -> np.ndarray:
         arr = arr[..., :3]
     return arr
 
+
 class VIPSReader:
     def __init__(self, path: str | Path, *, spacing_override: float | None = None):
         try:
@@ -57,17 +62,18 @@ class VIPSReader:
         self._level_dimensions = self._resolve_level_dimensions()
         self._level_downsamples = self._resolve_level_downsamples()
         self.native_spacing = self._extract_spacing()
-        self._spacing = (
-            float(spacing_override)
-            if spacing_override is not None
-            else self.native_spacing
+        self._spacing = resolve_level0_spacing(
+            path=self._path,
+            backend=self.backend_name,
+            native_spacing=self.native_spacing,
+            spacing_override=spacing_override,
         )
         self._spacings = compute_level_spacings(
-            level0_spacing_um=self.native_spacing,
+            level0_spacing_um=self._spacing,
             level_downsamples=self._level_downsamples,
         )
 
-    def _extract_spacing(self) -> float:
+    def _extract_spacing(self) -> float | None:
         fields = set(self._root.get_fields())
         if "openslide.mpp-x" in fields:
             return float(self._root.get("openslide.mpp-x"))
@@ -77,10 +83,7 @@ class VIPSReader:
             xres = float(self._root.get("xres"))
             if xres > 0:
                 return 1000.0 / xres
-        raise ValueError(
-            "Unable to infer slide spacing from libvips metadata. "
-            "Provide spacing_at_level_0 or use a slide with valid spacing metadata."
-        )
+        return None
 
     def _resolve_level_dimensions(self) -> list[tuple[int, int]]:
         levels: list[tuple[int, int]] = []

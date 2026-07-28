@@ -40,6 +40,13 @@ slide-2,/data/slide-2.tif,/data/slide-2-tissue-mask.tif,
 ...
 ```
 
+The override must be finite and greater than zero. When supplied, it is authoritative:
+level 0 uses that spacing and every other level uses the override multiplied by the
+selected backend's downsample factor. It can therefore rescue missing spacing metadata.
+If existing native spacing genuinely differs, the selected backend warns once with the
+slide path, native value, supplied value, and backend; floating-point representation
+noise and missing native metadata do not produce a conflict warning.
+
 ## Quick start
 
 Start from [`hs2p/configs/default.yaml`](../hs2p/configs/default.yaml), then edit:
