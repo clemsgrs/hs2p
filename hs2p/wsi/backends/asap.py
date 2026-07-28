@@ -5,7 +5,12 @@ from typing import Any
 import cv2
 import numpy as np
 
-from hs2p.wsi.backends.common import paste_region, resolve_padded_read_bounds
+from hs2p.wsi.backends.common import (
+    paste_region,
+    resolve_level0_spacing,
+    resolve_padded_read_bounds,
+)
+from hs2p.wsi.geometry import compute_level_spacings
 
 
 class ASAPReader:
@@ -20,19 +25,29 @@ class ASAPReader:
 
         self._path = Path(path)
         self._wsi = wsd.WholeSlideImage(self._path, backend="asap")
-        self.native_spacing = float(self._wsi.spacings[0])
-        self._spacing = (
-            float(spacing_override)
-            if spacing_override is not None
-            else self.native_spacing
-        )
-        self._spacings = [float(value) for value in self._wsi.spacings]
         self._level_dimensions = [
             (int(width), int(height)) for width, height in self._wsi.shapes
         ]
         self._level_downsamples = [
             (float(value), float(value)) for value in self._wsi.downsamplings
         ]
+        backend_spacings = [float(value) for value in self._wsi.spacings]
+        self.native_spacing = backend_spacings[0] if backend_spacings else None
+        self._spacing = resolve_level0_spacing(
+            path=self._path,
+            backend=self.backend_name,
+            native_spacing=self.native_spacing,
+            spacing_override=spacing_override,
+        )
+        self._spacings = compute_level_spacings(
+            level0_spacing_um=self._spacing,
+            level_downsamples=self._level_downsamples,
+        )
+        self._backend_spacings = (
+            backend_spacings
+            if len(backend_spacings) == len(self._level_dimensions)
+            else self._spacings
+        )
 
     @property
     def backend_name(self) -> str:
@@ -63,7 +78,7 @@ class ASAPReader:
         return list(self._level_downsamples)
 
     def read_level(self, level: int) -> np.ndarray:
-        return np.asarray(self._wsi.get_slide(spacing=self._spacings[level]))
+        return np.asarray(self._wsi.get_slide(spacing=self._backend_spacings[level]))
 
     def read_region(
         self,
@@ -86,7 +101,7 @@ class ASAPReader:
                 int(bounds.read_location[1]),
                 int(read_width),
                 int(read_height),
-                spacing=float(self._spacings[level]),
+                spacing=float(self._backend_spacings[level]),
                 center=False,
             )
         )

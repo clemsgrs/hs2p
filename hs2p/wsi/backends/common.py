@@ -1,9 +1,55 @@
 
+import math
+import warnings
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
 WHITE_RGB = 255
+SPACING_EQUIVALENCE_REL_TOL = 1e-12
+
+
+def resolve_level0_spacing(
+    *,
+    path: str | Path,
+    backend: str,
+    native_spacing: float | None,
+    spacing_override: float | None,
+) -> float:
+    """Return the effective level-0 spacing for a concrete reader."""
+    if spacing_override is None:
+        if native_spacing is None:
+            raise ValueError(
+                f"Unable to infer slide spacing for path={path} with backend={backend}. "
+                "Provide spacing_at_level_0 or use a slide with valid spacing metadata."
+            )
+        return float(native_spacing)
+
+    invalid_override_message = (
+        "spacing override must be a finite positive value, "
+        f"got {spacing_override!r}"
+    )
+    try:
+        supplied_spacing = float(spacing_override)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(invalid_override_message) from exc
+    if not math.isfinite(supplied_spacing) or supplied_spacing <= 0:
+        raise ValueError(invalid_override_message)
+    if native_spacing is not None and not math.isclose(
+        float(native_spacing),
+        supplied_spacing,
+        rel_tol=SPACING_EQUIVALENCE_REL_TOL,
+        abs_tol=0.0,
+    ):
+        warnings.warn(
+            "Slide spacing override conflict: "
+            f"path={path}, native={native_spacing}, supplied={supplied_spacing}, "
+            f"backend={backend}; using the supplied level-0 spacing.",
+            UserWarning,
+            stacklevel=2,
+        )
+    return supplied_spacing
 
 
 def make_white_canvas(width: int, height: int) -> np.ndarray:

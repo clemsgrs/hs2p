@@ -6,7 +6,11 @@ from typing import Any, Iterable
 import cv2
 import numpy as np
 
-from hs2p.wsi.backends.common import paste_region, resolve_padded_read_bounds
+from hs2p.wsi.backends.common import (
+    paste_region,
+    resolve_level0_spacing,
+    resolve_padded_read_bounds,
+)
 from hs2p.wsi.geometry import compute_level_spacings
 
 
@@ -58,7 +62,7 @@ def _as_rgb_uint8(region: Any) -> np.ndarray:
     return arr
 
 
-def _extract_spacing_from_metadata(metadata: dict[str, Any]) -> float:
+def _extract_spacing_from_metadata(metadata: dict[str, Any]) -> float | None:
     for entry in metadata.values():
         if not isinstance(entry, dict):
             continue
@@ -92,10 +96,7 @@ def _extract_spacing_from_metadata(metadata: dict[str, Any]) -> float:
         }.get(str(units).lower() if units is not None else "")
         if factor is not None:
             return float(spacing) * factor
-    raise ValueError(
-        "Unable to infer slide spacing from cuCIM metadata. "
-        "Provide spacing_at_level_0 or use a slide with valid spacing metadata."
-    )
+    return None
 
 
 class CuCIMReader:
@@ -146,13 +147,14 @@ class CuCIMReader:
                 for width, height in self._level_dimensions
             ]
         self.native_spacing = _extract_spacing_from_metadata(self._metadata)
-        self._spacing = (
-            float(spacing_override)
-            if spacing_override is not None
-            else self.native_spacing
+        self._spacing = resolve_level0_spacing(
+            path=path,
+            backend=self.backend_name,
+            native_spacing=self.native_spacing,
+            spacing_override=spacing_override,
         )
         self._spacings = compute_level_spacings(
-            level0_spacing_um=self.native_spacing,
+            level0_spacing_um=self._spacing,
             level_downsamples=self._level_downsamples,
         )
 

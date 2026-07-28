@@ -4,7 +4,11 @@ from typing import Any
 
 import numpy as np
 
-from hs2p.wsi.backends.common import paste_region, resolve_padded_read_bounds
+from hs2p.wsi.backends.common import (
+    paste_region,
+    resolve_level0_spacing,
+    resolve_padded_read_bounds,
+)
 from hs2p.wsi.geometry import compute_level_spacings
 
 
@@ -20,10 +24,11 @@ class OpenSlideReader:
 
         self._slide = openslide.OpenSlide(str(path))
         self.native_spacing = self._extract_spacing()
-        self._spacing = (
-            float(spacing_override)
-            if spacing_override is not None
-            else self.native_spacing
+        self._spacing = resolve_level0_spacing(
+            path=path,
+            backend=self.backend_name,
+            native_spacing=self.native_spacing,
+            spacing_override=spacing_override,
         )
         self._level_dimensions = [
             (int(width), int(height)) for width, height in self._slide.level_dimensions
@@ -32,11 +37,11 @@ class OpenSlideReader:
             (float(value), float(value)) for value in self._slide.level_downsamples
         ]
         self._spacings = compute_level_spacings(
-            level0_spacing_um=self.native_spacing,
+            level0_spacing_um=self._spacing,
             level_downsamples=self._level_downsamples,
         )
 
-    def _extract_spacing(self) -> float:
+    def _extract_spacing(self) -> float | None:
         properties = self._slide.properties
         mpp_x = properties.get("openslide.mpp-x")
         if mpp_x is not None:
@@ -46,10 +51,7 @@ class OpenSlideReader:
             objective_value = float(objective)
             if objective_value > 0:
                 return 10.0 / objective_value
-        raise ValueError(
-            "Unable to infer slide spacing from OpenSlide metadata. "
-            "Provide spacing_at_level_0 or use a slide with valid spacing metadata."
-        )
+        return None
 
     @property
     def backend_name(self) -> str:
