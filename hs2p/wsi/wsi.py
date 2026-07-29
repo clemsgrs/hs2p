@@ -74,7 +74,11 @@ class WSI(object):
         # backend from ``path`` only, the mask backend from ``mask_path`` only. A slide with no
         # mask leaves both mask-provenance attributes ``None``.
         self.requested_backend = backend
-        selection = resolve_backend(backend, wsi_path=path)
+        selection = resolve_backend(
+            backend,
+            wsi_path=path,
+            spacing_override=spacing_at_level_0,
+        )
         self.backend = selection.backend
         self.reader = open_slide(
             path,

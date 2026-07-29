@@ -1,4 +1,5 @@
 
+import warnings
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -17,7 +18,7 @@ from hs2p.wsi.backends import (
 from hs2p.wsi.geometry import LevelSelection, select_level, select_level_for_downsample
 
 AUTO_BACKEND = "auto"
-AUTO_BACKEND_ORDER = ("cucim", "asap", "openslide")
+AUTO_BACKEND_ORDER = ("cucim", "vips", "openslide", "asap")
 
 
 @runtime_checkable
@@ -107,6 +108,7 @@ def resolve_backends(
     requested_mask_backend: str | None,
     wsi_path: str | Path,
     mask_path: str | Path | None = None,
+    slide_spacing_override: float | None = None,
 ) -> ResolvedBackends:
     """Resolve slide and mask backends independently from their own paths.
 
@@ -115,7 +117,11 @@ def resolve_backends(
     probe. A slide with no ``mask_path`` resolves only the slide role.
     """
     requested_slide = (requested_slide_backend or AUTO_BACKEND).strip().lower()
-    slide_selection = resolve_backend(requested_slide, wsi_path=Path(wsi_path))
+    slide_selection = resolve_backend(
+        requested_slide,
+        wsi_path=Path(wsi_path),
+        spacing_override=slide_spacing_override,
+    )
     if mask_path is None:
         return ResolvedBackends(
             slide=slide_selection,
@@ -198,7 +204,11 @@ def open_slide(
 ) -> SlideReader:
     backend = (backend or AUTO_BACKEND).strip().lower()
     if backend == AUTO_BACKEND:
-        selection = resolve_backend(backend, wsi_path=Path(path))
+        selection = resolve_backend(
+            backend,
+            wsi_path=Path(path),
+            spacing_override=spacing_override,
+        )
         backend = selection.backend
     spec = _BACKENDS.get(backend)
     if spec is None:
@@ -216,25 +226,32 @@ def _normalize_path(path: Path | None) -> str | None:
 
 
 @lru_cache(maxsize=256)
-def _backend_can_open_slide(
+def _backend_can_open_source(
     *,
-    wsi_path: str,
-    mask_path: str | None,
+    source_path: str,
+    companion_path: str | None,
     backend: str,
+    spacing_override: float | None = None,
 ) -> bool:
     spec = _BACKENDS.get(backend)
     if spec is None:
         return False
-    if not spec.supports_path(wsi_path):
+    if not spec.supports_path(source_path):
         return False
-    if mask_path is not None and not spec.supports_path(mask_path):
+    if companion_path is not None and not spec.supports_path(companion_path):
         return False
     try:
-        slide = spec.opener(wsi_path)
-        slide.close()
-        if mask_path is not None:
-            mask = spec.opener(mask_path)
-            mask.close()
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=r"^Slide spacing override conflict:",
+                category=UserWarning,
+            )
+            source = spec.opener(source_path, spacing_override=spacing_override)
+            source.close()
+            if companion_path is not None:
+                companion = spec.opener(companion_path)
+                companion.close()
         return True
     except Exception:
         return False
@@ -245,6 +262,7 @@ def resolve_backend(
     *,
     wsi_path: Path,
     mask_path: Path | None = None,
+    spacing_override: float | None = None,
 ) -> BackendSelection:
     requested_backend = (requested_backend or AUTO_BACKEND).strip().lower()
     if requested_backend != AUTO_BACKEND:
@@ -259,38 +277,40 @@ def resolve_backend(
     tried: list[str] = []
     reasons: list[str] = []
 
-    if supports_cucim_path(wsi_path):
-        tried.append("cucim")
-        if _backend_can_open_slide(
-            wsi_path=normalized_wsi_path,
-            mask_path=normalized_mask_path,
-            backend="cucim",
-        ):
-            return BackendSelection(
-                backend="cucim",
-                reason="selected cuCIM for auto backend",
-                tried=tuple(tried),
-            )
-        reasons.append("cuCIM could not open the slide or mask")
-    else:
-        reasons.append(
-            f"cuCIM skipped for unsupported slide suffix {wsi_path.suffix.lower() or '<none>'}"
+    display_names = {"cucim": "cuCIM", "vips": "VIPS"}
+    for backend in AUTO_BACKEND_ORDER:
+        spec = _BACKENDS[backend]
+        display_name = display_names.get(backend, backend)
+        unsupported_path = next(
+            (
+                path
+                for path in (normalized_wsi_path, normalized_mask_path)
+                if path is not None and not spec.supports_path(path)
+            ),
+            None,
         )
-
-    for backend in AUTO_BACKEND_ORDER[1:]:
+        if unsupported_path is not None:
+            suffix = Path(unsupported_path).suffix.lower() or "<none>"
+            reasons.append(
+                f"{display_name} skipped for unsupported path suffix {suffix}"
+            )
+            continue
         tried.append(backend)
-        if _backend_can_open_slide(
-            wsi_path=normalized_wsi_path,
-            mask_path=normalized_mask_path,
+        if _backend_can_open_source(
+            source_path=normalized_wsi_path,
+            companion_path=normalized_mask_path,
             backend=backend,
+            spacing_override=spacing_override,
         ):
-            reason = "; ".join(reasons + [f"selected {backend} for auto backend"])
+            reason = "; ".join(
+                reasons + [f"selected {display_name} for auto backend"]
+            )
             return BackendSelection(
                 backend=backend,
                 reason=reason,
                 tried=tuple(tried),
             )
-        reasons.append(f"{backend} could not open the slide or mask")
+        reasons.append(f"{display_name} could not open the source")
 
     raise RuntimeError(
         f"Unable to open {wsi_path} with any supported backend (tried: {', '.join(tried) or 'none'})"

@@ -55,6 +55,10 @@ The supported backend set is:
 - `asap`
 
 `auto` prefers `cucim -> vips -> openslide -> asap`.
+Slide and source-mask paths follow this order independently, using openability only.
+Because the priority changed, an existing `auto` configuration can resolve to a different
+backend; resumed runs may therefore reject and recompute backend-dependent artifacts. Pin an
+explicit backend when preserving the previous decoder is required.
 
 SAM2-based tissue segmentation requires a separate additional install:
 

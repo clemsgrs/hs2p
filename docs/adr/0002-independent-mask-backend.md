@@ -19,6 +19,10 @@ roles are independent, and neither role's openability probe influences the other
 one selection policy: `auto` checks openability only (open then close to pick the first backend
 that opens the file) and never inspects decoded label semantics or retries after selection. A
 selected decoder is authoritative for that read (ADR 0001 still holds).
+The shared automatic priority is cuCIM, VIPS, OpenSlide, then ASAP. A slide probe receives the
+user's level-0 spacing override so it can open a slide with missing native spacing metadata;
+probe-time spacing-conflict warnings are suppressed, and only the selected reader emits the
+contextual warning.
 
 Both fields accept only `auto`, `cucim`, `asap`, `openslide`, `vips`; null and unknown values
 fail configuration validation, including when a `TilingConfig` is constructed directly in
@@ -53,5 +57,7 @@ resolved backend, and reason.
 - A mask can use a different decoder than its slide without changing the slide backend.
 - Because `auto` is openability-only, a backend that opens but cannot decode a mask can be
   selected and then fail at read time; the fix is to set `mask_backend` explicitly.
+- Existing `auto` configurations can resolve to a different backend under the shared priority,
+  so backend-dependent artifacts may need to be recomputed.
 - Pre-#163 metadata and `process_list.csv` schemas (without the mask backend fields/columns)
   are rejected clearly rather than loaded.
