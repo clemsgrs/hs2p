@@ -189,3 +189,9 @@ reopen a slide, mask, SAM2 checkpoint, or SAM2 model config solely to detect an 
 replacement at the same path. Keeping the contents behind those paths stable is the user's
 responsibility. After replacing a source in place, remove the reusable coordinate artifact or
 write the replacement under a new path so incompatible coordinates are not reused.
+
+After a slide is recorded as successfully completed, resume also treats its downstream
+`tiles_tar_path`, `mask_preview_path`, and `tiling_preview_path` values as provenance. It does
+not check, reopen, regenerate, or repair those files, even when the resumed invocation requests
+the corresponding outputs. Deleting or replacing a recorded downstream file after successful
+completion is the user's responsibility.

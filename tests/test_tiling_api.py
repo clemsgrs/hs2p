@@ -3068,6 +3068,87 @@ def test_tile_slides_resume_preserves_extra_columns_and_existing_preview_paths(
     assert Path(row["tiling_preview_path"]) == tiling_preview_path
 
 
+@pytest.mark.parametrize("request_downstream_outputs", [False, True])
+def test_tile_slides_resume_trusts_recorded_downstream_output_provenance(
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+    request_downstream_outputs: bool,
+):
+    """A compatible recorded success remains authoritative after its downstream files are
+    deleted, regardless of whether the resumed invocation requests those outputs."""
+    run_dir = tmp_path / "run"
+    result = _build_preprocessing_result(
+        sample_id="slide-resume",
+        image_path="slide-resume.svs",
+    )
+    coordinate_artifacts = save_tiling_result(result, output_dir=run_dir)
+    recorded_paths = {
+        "tiles_tar_path": run_dir / "tiles" / "slide-resume.tar",
+        "mask_preview_path": run_dir / "preview" / "mask" / "slide-resume.jpg",
+        "tiling_preview_path": run_dir / "preview" / "tiling" / "slide-resume.jpg",
+    }
+    for path in recorded_paths.values():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"recorded output")
+        path.unlink()
+
+    pd.DataFrame(
+        [
+            {
+                "sample_id": "slide-resume",
+                "annotation": "tissue",
+                "image_path": "slide-resume.svs",
+                "mask_path": np.nan,
+                "requested_backend": "asap",
+                "backend": "asap",
+                "requested_mask_backend": np.nan,
+                "mask_backend": np.nan,
+                "tiling_status": "success",
+                "num_tiles": coordinate_artifacts.num_tiles,
+                "coordinates_npz_path": str(coordinate_artifacts.coordinates_npz_path),
+                "coordinates_meta_path": str(coordinate_artifacts.coordinates_meta_path),
+                **{key: str(path) for key, path in recorded_paths.items()},
+                "feature_status": "success",
+                "feature_path": "tile_embeddings/slide-resume.npz",
+                "error": np.nan,
+                "traceback": np.nan,
+            }
+        ]
+    ).to_csv(run_dir / "process_list.csv", index=False)
+
+    reused = tile_slides(
+        [SlideSpec(sample_id="slide-resume", image_path=Path("slide-resume.svs"))],
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        preview=(
+            PreviewConfig(save_mask_preview=True, save_tiling_preview=True)
+            if request_downstream_outputs
+            else None
+        ),
+        output_dir=run_dir,
+        resume=True,
+        save_tiles=request_downstream_outputs,
+    )
+
+    assert len(reused) == 1
+    artifact = reused[0]
+    assert artifact.tiles_tar_path == recorded_paths["tiles_tar_path"]
+    assert artifact.mask_preview_path == recorded_paths["mask_preview_path"]
+    assert artifact.tiling_preview_path == recorded_paths["tiling_preview_path"]
+    assert all(not path.exists() for path in recorded_paths.values())
+
+    row = pd.read_csv(run_dir / "process_list.csv").to_dict(orient="records")[0]
+    assert row["feature_status"] == "success"
+    assert row["feature_path"] == "tile_embeddings/slide-resume.npz"
+    assert {
+        key: Path(row[key])
+        for key in recorded_paths
+    } == recorded_paths
+
+
 def test_tile_slides_logs_failures_in_real_time(
     monkeypatch,
     capsys,
