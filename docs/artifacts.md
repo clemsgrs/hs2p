@@ -20,6 +20,9 @@ Optional tile tar export writes:
 - `{sample_id}.tiles.tar`
 - `{sample_id}.tiles.manifest.csv`
 
+The manifest is the TAR's deterministic sidecar. The returned artifact and process-list row
+record `tiles_tar_path`; the manifest uses the same stem with `.manifest.csv`.
+
 ## `.coordinates.npz`
 
 The NPZ contains the canonical geometry arrays:
@@ -164,6 +167,10 @@ the concise reason in `error` and the detailed diagnostic traceback in
 - `traceback`
 
 ## Resume and validation
+
+`resume` treats a compatible successful process-list row as completed processing. In contrast,
+`read_coordinates_from` reuses coordinate computation only, so downstream TAR and tiling
+preview outputs enabled for the current invocation are still materialized.
 
 Existing artifacts are validated against their structured metadata:
 

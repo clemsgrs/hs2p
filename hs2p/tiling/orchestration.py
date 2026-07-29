@@ -565,6 +565,7 @@ class _PendingPreview:
 class _SlideWork:
     whole_slide: SlideSpec
     artifact: TilingArtifacts | None = None
+    reused_coordinates: bool = False
     compute_request: Any | None = None
     error: str | None = None
     traceback_text: str | None = None
@@ -1012,6 +1013,56 @@ def _compute_and_save_tiling_artifacts_from_request(
         )
 
 
+def _materialize_outputs_from_reused_coordinates(
+    *,
+    input_index: int,
+    whole_slide: SlideSpec,
+    artifact: TilingArtifacts,
+    output_dir: Path,
+    save_tiles: bool,
+    jpeg_backend: str,
+    num_workers: int,
+    gpu_decode: bool,
+) -> _ComputeResponse:
+    try:
+        result = load_tiling_result(
+            artifact.coordinates_npz_path,
+            artifact.coordinates_meta_path,
+        )
+        tiles_tar_path = None
+        if save_tiles:
+            tiles_tar_path, result = extract_tiles_to_tar(
+                result,
+                output_dir=output_dir,
+                jpeg_backend=jpeg_backend,
+                num_workers=num_workers,
+                gpu_decode=gpu_decode,
+            )
+        return _ComputeResponse(
+            input_index=input_index,
+            whole_slide=whole_slide,
+            ok=True,
+            artifact=replace(artifact, tiles_tar_path=tiles_tar_path),
+            result=result,
+            requested_backend=artifact.requested_backend,
+            backend=artifact.backend,
+            requested_mask_backend=artifact.requested_mask_backend,
+            mask_backend=artifact.mask_backend,
+        )
+    except Exception as exc:
+        return _ComputeResponse(
+            input_index=input_index,
+            whole_slide=whole_slide,
+            ok=False,
+            requested_backend=artifact.requested_backend,
+            backend=artifact.backend,
+            requested_mask_backend=artifact.requested_mask_backend,
+            mask_backend=artifact.mask_backend,
+            error=_exception_reason(exc),
+            traceback_text=traceback.format_exc(),
+        )
+
+
 def _resolve_mask_for_request(
     request: _MaskResolutionRequest,
 ) -> _MaskResolutionResponse:
@@ -1308,6 +1359,7 @@ def tile_slides(
                 )
             compatibility = compatibility_specs[key]
             artifact: TilingArtifacts | None = None
+            reused_coordinates = False
             if whole_slide.sample_id in existing_successes:
                 row = existing_successes[whole_slide.sample_id]
                 npz_path = optional_path(row["coordinates_npz_path"])
@@ -1329,11 +1381,13 @@ def tile_slides(
                     read_coordinates_from=Path(read_coordinates_from),
                     compatibility=compatibility,
                 )
+                reused_coordinates = artifact is not None
             if artifact is not None:
                 planned_work.append(
                     _SlideWork(
                         whole_slide=whole_slide,
                         artifact=artifact,
+                        reused_coordinates=reused_coordinates,
                     )
                 )
                 continue
@@ -1725,8 +1779,29 @@ def tile_slides(
                 buffered_responses[response.input_index] = response
             return buffered_responses.pop(input_index)
 
-        for planned in planned_work:
+        for input_index, planned in enumerate(planned_work):
             if planned.artifact is not None:
+                if planned.reused_coordinates and (
+                    save_tiles
+                    or (
+                        preview is not None
+                        and preview.save_tiling_preview
+                        and planned.artifact.num_tiles > 0
+                    )
+                ):
+                    _process_compute_response(
+                        _materialize_outputs_from_reused_coordinates(
+                            input_index=input_index,
+                            whole_slide=planned.whole_slide,
+                            artifact=planned.artifact,
+                            output_dir=output_dir,
+                            save_tiles=save_tiles,
+                            jpeg_backend=str(jpeg_backend),
+                            num_workers=num_workers,
+                            gpu_decode=gpu_decode,
+                        )
+                    )
+                    continue
                 artifacts.append(planned.artifact)
                 _record_tiling_success(num_tiles=planned.artifact.num_tiles)
                 _record_process_row(
