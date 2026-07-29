@@ -32,6 +32,8 @@ and its mask provenance is null. An explicit mask backend applies to every sourc
 precomputed tissue masks, annotation masks, the public low-level readers, overlays, and
 deferred preview reads.
 
+The shared `auto` priority is `cucim`, `vips`, `openslide`, then `asap`.
+
 The public low-level mask readers are decoupled from the slide backend: called **without** a
 `mask_backend` (omitted or `None`) they resolve the mask backend independently from the mask
 path via `auto`, never inheriting the slide's backend, and record `requested_mask_backend ==
