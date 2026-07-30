@@ -104,6 +104,31 @@ def test_generate_tiles_uses_actual_read_geometry_when_spacing_is_within_toleran
     assert np.unique(result.y)[1] == 448
 
 
+def test_generate_tiles_rejects_finer_image_spacing_via_shared_policy():
+    contours = ContourResult(
+        contours=[],
+        holes=[],
+        mask=np.zeros((1, 1), dtype=np.uint8),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"requested spacing 0\.125.*finest available spacing 0\.25.*"
+            r"image upsampling is forbidden"
+        ),
+    ):
+        generate_tiles(
+            slide_dimensions=(100, 100),
+            contours=contours,
+            requested_tile_size_px=256,
+            requested_spacing_um=0.125,
+            base_spacing_um=0.25,
+            level_downsamples=[1.0],
+            tolerance=0.05,
+        )
+
+
 def _make_tiling_result(n_tiles: int = 4) -> TilingResult:
     rng = np.random.RandomState(42)
     coords = rng.randint(0, 1000, size=(n_tiles, 2)).astype(np.int64)

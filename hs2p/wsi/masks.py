@@ -11,12 +11,15 @@ def read_label_at_spacing(
 ) -> np.ndarray:
     """Read a multi-class label raster at ``requested_spacing_um``, preserving class ids.
 
-    Resamples with **nearest-neighbor** (any averaging interpolation would invent
-    class indices) via :meth:`hs2p.wsi.wsi.WSI.read_full_at_spacing`, then recovers a
-    single-channel integer raster. Slide backends return RGB (a single-channel label
-    is replicated across channels); this collapses it back to one channel, asserting
-    the channels agree so a genuine colour image fails loud rather than silently
-    keeping only its red channel.
+    Explicitly identifies the pixels as labels and resamples with
+    **nearest-neighbor** (any averaging interpolation would invent class indices) via
+    :meth:`hs2p.wsi.wsi.WSI.read_full_at_spacing`. Unlike the image-safe public
+    default, this permits finer requests because nearest-neighbour replication
+    preserves the label vocabulary. The result is recovered as a single-channel
+    integer raster. Slide backends return RGB (a single-channel label is replicated
+    across channels); this collapses it back to one channel, asserting the channels
+    agree so a genuine colour image fails loud rather than silently keeping only its
+    red channel.
 
     Args:
         wsi: An :class:`hs2p.wsi.wsi.WSI` (or any object exposing
@@ -28,7 +31,10 @@ def read_label_at_spacing(
         A 2-D integer ``np.ndarray`` of class indices at the requested spacing.
     """
     arr = wsi.read_full_at_spacing(
-        requested_spacing_um, tolerance=tolerance, interpolation="nearest"
+        requested_spacing_um,
+        tolerance=tolerance,
+        interpolation="nearest",
+        content_kind="label",
     )
     return _collapse_label_raster(arr)
 
@@ -43,9 +49,10 @@ def read_label_region_at_spacing(
 ) -> np.ndarray:
     """Read a multi-class label *region* at ``requested_spacing_um``, preserving class ids.
 
-    The region counterpart of :func:`read_label_at_spacing` (for annotation-sampled ROIs):
-    nearest-neighbor resample via :meth:`hs2p.wsi.wsi.WSI.read_region_at_spacing`, then
-    collapse the channel-replicated raster back to a single-channel integer mask.
+    The region counterpart of :func:`read_label_at_spacing` (for annotation-sampled
+    ROIs): explicitly opt into label upsampling, nearest-neighbor resample via
+    :meth:`hs2p.wsi.wsi.WSI.read_region_at_spacing`, then collapse the
+    channel-replicated raster back to a single-channel integer mask.
 
     Args:
         location: ``(x, y)`` top-left in level-0 pixel space.
@@ -57,6 +64,7 @@ def read_label_region_at_spacing(
         size,
         tolerance=tolerance,
         interpolation="nearest",
+        content_kind="label",
     )
     return _collapse_label_raster(arr)
 

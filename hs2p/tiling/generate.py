@@ -54,15 +54,6 @@ def generate_tiles(
     num_workers: int = 1,
 ) -> TileGeometry:
     normalized_downsamples = _normalize_level_downsamples(level_downsamples)
-    if requested_spacing_um < base_spacing_um:
-        relative_diff = abs(base_spacing_um - requested_spacing_um) / requested_spacing_um
-        if relative_diff > tolerance:
-            raise ValueError(
-                f"Desired spacing ({requested_spacing_um}) is smaller than the "
-                f"whole-slide image starting spacing ({base_spacing_um}) and does not "
-                f"fall within tolerance ({tolerance:.0%})"
-            )
-
     level_sel = plan_spacing_read(
         requested_spacing_um=requested_spacing_um,
         level0_spacing_um=base_spacing_um,
@@ -72,6 +63,7 @@ def generate_tiles(
         ],
         target_size_px=(requested_tile_size_px, requested_tile_size_px),
         tolerance=tolerance,
+        content_kind="image",
     )
     read_tile_size_px = level_sel.read_size_px[0]
     tile_size_lv0 = round(
