@@ -9,14 +9,14 @@ AUTO_BACKEND = "auto"
 # registry in ``hs2p.wsi.reader._BACKENDS`` (plus ``auto``); duplicated here so the config
 # layer validates without importing the (heavier) WSI reader package at model-definition time.
 VALID_BACKENDS: frozenset[str] = frozenset(
-    {AUTO_BACKEND, "cucim", "asap", "openslide", "vips"}
+    {AUTO_BACKEND, "cucim", "asap", "openslide", "pil", "vips"}
 )
 
 
 def _validate_backend_name(value: object, *, field: str) -> str:
     """Reject null and unknown backend names for a config field.
 
-    Both ``backend`` and ``mask_backend`` accept only ``auto`` plus the four concrete
+    Both ``backend`` and ``mask_backend`` accept only ``auto`` plus the concrete
     backends. ``None`` and unknown strings are configuration errors — including when a
     :class:`TilingConfig` is constructed directly in Python.
     """
@@ -29,6 +29,7 @@ def _validate_backend_name(value: object, *, field: str) -> str:
             f"tiling.{field} must be one of {sorted(VALID_BACKENDS)}, got {value!r}"
         )
     return value
+
 
 _DEFAULT_TILING = default_config.tiling
 _DEFAULT_TILING_PARAMS = _DEFAULT_TILING.params

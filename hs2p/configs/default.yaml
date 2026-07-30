@@ -10,8 +10,8 @@ seed: 0 # seed for reproducibility
 
 tiling:
   read_coordinates_from: # path to reusable {sample_id}.coordinates.* artifacts; skips coordinate computation only, while requested TAR/preview outputs still run
-  backend: "auto" # backend to use for slide reading; auto prefers CuCIM when supported and falls back to ASAP/openslide
-  mask_backend: "auto" # backend to use for reading source masks; resolved independently from the mask path (auto uses the same openability-only probe as the slide backend)
+  backend: "auto" # slide reader; auto uses PIL for PNG/JPEG, otherwise cuCIM -> VIPS -> OpenSlide -> ASAP
+  mask_backend: "auto" # source-mask reader; resolved independently with the same format-aware auto policy
   independent_sampling: false # whether to tile each annotation independently (true) or jointly over the union mask (false)
   params:
     requested_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel

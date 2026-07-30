@@ -46,16 +46,25 @@ with the base install. For higher JPEG encoding throughput, install the
 encoder choices are authoritative: hs2p reports a missing optional dependency
 instead of falling back to a different encoder.
 
-The supported backend set is:
+Pillow also provides the base-install flat-raster reader
+(`tiling.backend: pil`). These two settings have different jobs:
+`tiling.backend` chooses the input reader, while `speed.jpeg_backend` chooses
+the tile-output JPEG encoder.
+
+The supported input-reader backend set is:
 
 - `auto`
+- `pil`
 - `cucim`
 - `vips`
 - `openslide`
 - `asap`
 
-`auto` prefers `cucim -> vips -> openslide -> asap`.
-Slide and source-mask paths follow this order independently, using openability only.
+For `.png`, `.jpg`, and `.jpeg` inputs (case-insensitive), `auto` selects only
+PIL. Corrupt, unsupported, or oversized flat rasters fail through PIL without
+probing or recommending a native WSI backend. Other inputs retain the
+`cucim -> vips -> openslide -> asap` openability chain; PIL is never tried for
+them. Slide and source-mask paths apply this format policy independently.
 Because the priority changed, an existing `auto` configuration can resolve to a different
 backend; resumed runs may therefore reject and recompute backend-dependent artifacts. Pin an
 explicit backend when preserving the previous decoder is required.

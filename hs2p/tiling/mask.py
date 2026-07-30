@@ -12,6 +12,7 @@ from hs2p.configs.resolvers import validate_pixel_mapping
 from hs2p.segmentation import segment_tissue_image
 from hs2p.tiling.contours import _normalize_level_downsamples
 from hs2p.tiling.result import ResolvedAnnotationMasks, ResolvedTissueMask, Sam2Thumbnail
+from hs2p.wsi.backends.pil import PILImageTooLargeError
 from hs2p.wsi.reader import (
     AUTO_BACKEND,
     open_slide,
@@ -29,15 +30,18 @@ def _resolve_mask_backend(mask_path: str | Path, mask_backend: str | None) -> st
     """Resolve the concrete backend used to read a source mask, from the mask path alone.
 
     ``mask_backend`` is the *requested* mask backend: a concrete name is authoritative and
-    returned without a probe; ``"auto"`` triggers openability-only auto-selection over the mask
-    path; ``None`` means "not specified by the caller" and maps to ``AUTO_BACKEND`` — a direct
-    low-level caller who omits the backend resolves the mask independently from the mask path,
-    never inheriting the slide's backend. This is the mask-role half of the shared
-    backend-resolution seam (#163): the slide backend is resolved separately from the slide
-    path and never consulted here.
+    returned without a probe; ``"auto"`` applies format-aware selection over the
+    mask path (flat rasters select PIL directly, other inputs use the native
+    openability chain); ``None`` means "not specified by the caller" and maps to
+    ``AUTO_BACKEND`` — a direct low-level caller who omits the backend resolves
+    the mask independently from the mask path, never inheriting the slide's
+    backend. This is the mask-role half of the shared backend-resolution seam
+    (#163): the slide backend is resolved separately from the slide path and
+    never consulted here.
     """
     requested = mask_backend if mask_backend is not None else AUTO_BACKEND
     return resolve_backend(requested, wsi_path=Path(mask_path)).backend
+
 
 # Reading a mask level larger than this many pixels means the mask lacks a pyramid level
 # near the requested segmentation spacing (the read would be downsized to the seg grid
@@ -93,9 +97,14 @@ def _is_label_subset(mask: np.ndarray, *, valid_values: set[int]) -> bool:
 def _raise_mask_decode_error(
     *, label: str, mask_path: str | Path, backend: str, error: Exception
 ) -> NoReturn:
+    remedy = (
+        "Verify the flat raster file."
+        if isinstance(error, PILImageTooLargeError)
+        else "Select another backend or regenerate the mask."
+    )
     message = (
         f"{label} decode failed for path={Path(mask_path)} with backend={backend}: {error}. "
-        "Select another backend or regenerate the mask."
+        f"{remedy}"
     )
     if isinstance(error, ValueError):
         raise ValueError(message) from error

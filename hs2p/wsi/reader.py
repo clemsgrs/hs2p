@@ -11,8 +11,10 @@ from hs2p.wsi.backends import (
     ASAPReader,
     CuCIMReader,
     OpenSlideReader,
+    PILReader,
     VIPSReader,
     supports_cucim_path,
+    supports_pil_path,
     supports_vips_path,
 )
 from hs2p.wsi.geometry import LevelSelection, select_level, select_level_for_downsample
@@ -112,9 +114,11 @@ def resolve_backends(
 ) -> ResolvedBackends:
     """Resolve slide and mask backends independently from their own paths.
 
-    Slide ``auto`` and mask ``auto`` share the same openability-only selection policy
-    (:func:`resolve_backend`); an explicit backend is authoritative and returned without a
-    probe. A slide with no ``mask_path`` resolves only the slide role.
+    Slide ``auto`` and mask ``auto`` share the same format-aware selection policy
+    (:func:`resolve_backend`): flat raster suffixes select PIL directly, while other
+    suffixes use the native-backend openability chain. An explicit backend is
+    authoritative and returned without a probe. A slide with no ``mask_path``
+    resolves only the slide role.
     """
     requested_slide = (requested_slide_backend or AUTO_BACKEND).strip().lower()
     slide_selection = resolve_backend(
@@ -187,10 +191,19 @@ def _open_vips(
     return VIPSReader(path, spacing_override=spacing_override)
 
 
+def _open_pil(
+    path: str | Path,
+    *,
+    spacing_override: float | None = None,
+) -> SlideReader:
+    return PILReader(path, spacing_override=spacing_override)
+
+
 _BACKENDS: dict[str, _BackendSpec] = {
     "cucim": _BackendSpec("cucim", _open_cucim, supports_cucim_path),
     "asap": _BackendSpec("asap", _open_asap, _supports_all_paths),
     "openslide": _BackendSpec("openslide", _open_openslide, _supports_all_paths),
+    "pil": _BackendSpec("pil", _open_pil, supports_pil_path),
     "vips": _BackendSpec("vips", _open_vips, supports_vips_path),
 }
 
@@ -272,6 +285,13 @@ def resolve_backend(
             tried=(requested_backend,),
         )
 
+    if supports_pil_path(wsi_path):
+        return BackendSelection(
+            backend="pil",
+            reason="selected PIL for flat raster input",
+            tried=("pil",),
+        )
+
     normalized_wsi_path = _normalize_path(wsi_path)
     normalized_mask_path = _normalize_path(mask_path)
     tried: list[str] = []
@@ -322,13 +342,15 @@ def open_mask_reader(
 ) -> tuple[SlideReader, str]:
     """Open a source mask through its own resolved backend, with actionable failures.
 
-    Resolves the mask backend from the mask path alone (``auto`` probes openability; a concrete
-    name is authoritative) and opens the reader, both inside one ``try`` so any failure —
-    resolution *or* open — is reraised with context naming the mask path and the requested
-    backend (and the resolved backend when it got that far). This is the centralized mask-open
-    seam for the visualization/overlay and :class:`~hs2p.wsi.wsi.WSI` attached-mask paths (#163),
-    mirroring :func:`hs2p.tiling.mask._raise_mask_decode_error`: a ``ValueError`` cause reraises
-    as ``ValueError``, anything else as ``RuntimeError``.
+    Resolves the mask backend from the mask path alone (``auto`` applies the
+    format-aware policy; a concrete name is authoritative) and opens the reader,
+    both inside one ``try`` so any failure — resolution *or* open — is reraised
+    with context naming the mask path and the requested backend (and the resolved
+    backend when it got that far). This is the centralized mask-open seam for the
+    visualization/overlay and :class:`~hs2p.wsi.wsi.WSI` attached-mask paths
+    (#163), mirroring :func:`hs2p.tiling.mask._raise_mask_decode_error`: a
+    ``ValueError`` cause reraises as ``ValueError``, anything else as
+    ``RuntimeError``.
 
     Returns ``(reader, resolved_backend)``.
     """
@@ -337,10 +359,16 @@ def open_mask_reader(
         resolved = resolve_backend(mask_backend, wsi_path=Path(mask_path)).backend
         reader = open_slide(mask_path, backend=resolved)
     except Exception as error:
+        requested = (mask_backend or AUTO_BACKEND).strip().lower()
+        remedy = (
+            "Verify the flat raster file."
+            if requested == AUTO_BACKEND and resolved == "pil"
+            else "Select another mask backend or verify the mask file."
+        )
         message = (
             f"Mask open failed for path={Path(mask_path)} with backend={resolved} "
             f"(requested={mask_backend}): {error}. "
-            "Select another mask backend or verify the mask file."
+            f"{remedy}"
         )
         if isinstance(error, ValueError):
             raise ValueError(message) from error

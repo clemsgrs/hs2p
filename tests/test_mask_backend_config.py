@@ -27,7 +27,7 @@ def test_omitting_mask_backend_defaults_to_auto():
     assert tiling.requested_mask_backend == "auto"
 
 
-@pytest.mark.parametrize("name", ["auto", "cucim", "asap", "openslide", "vips"])
+@pytest.mark.parametrize("name", ["auto", "cucim", "asap", "openslide", "pil", "vips"])
 def test_supported_backend_names_are_accepted(name):
     tiling = _tiling(backend=name, mask_backend=name)
     assert tiling.backend == name
