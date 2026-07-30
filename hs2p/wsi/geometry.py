@@ -1,7 +1,11 @@
 
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
+
+# Pixel semantics controlling whether finer-than-source reads may upsample.
+ContentKind = Literal["image", "label"]
 
 
 @dataclass(frozen=True)
@@ -107,6 +111,42 @@ def select_level(
     )
 
 
+def select_level_for_spacing_read(
+    *,
+    requested_spacing_um: float,
+    level0_spacing_um: float,
+    level_downsamples: list[tuple[float, float]],
+    tolerance: float,
+    content_kind: ContentKind,
+) -> LevelSelection:
+    """Select a level and enforce the content-aware upsampling policy.
+
+    Image pixels may only be read at native or coarser spacing; label pixels may
+    be replicated because nearest-neighbour interpolation preserves their vocabulary.
+    """
+    if content_kind not in ("image", "label"):
+        raise ValueError(
+            f"unknown content_kind {content_kind!r}; expected 'image' or 'label'"
+        )
+    selection = select_level(
+        requested_spacing_um=requested_spacing_um,
+        level0_spacing_um=level0_spacing_um,
+        level_downsamples=level_downsamples,
+        tolerance=tolerance,
+    )
+    if (
+        content_kind == "image"
+        and requested_spacing_um < level0_spacing_um
+        and not selection.is_within_tolerance
+    ):
+        raise ValueError(
+            f"requested spacing {requested_spacing_um} µm/px is finer than finest "
+            f"available spacing {level0_spacing_um} µm/px; "
+            "image upsampling is forbidden"
+        )
+    return selection
+
+
 @dataclass(frozen=True)
 class SpacingReadPlan:
     """How to read a region of ``target_size_px`` (at ``requested_spacing_um``).
@@ -130,6 +170,7 @@ def plan_spacing_read(
     level_downsamples: list[tuple[float, float]],
     target_size_px: tuple[int, int],
     tolerance: float,
+    content_kind: ContentKind,
 ) -> SpacingReadPlan:
     """Resolve (level, read_size) for reading ``target_size_px`` at a spacing.
 
@@ -138,13 +179,16 @@ def plan_spacing_read(
     requested spacing (via :func:`select_level`), then size the read at that level to
     cover ``target_size_px`` after downscaling. Within tolerance ⇒ read the target
     size directly (treated as exact); otherwise scale up by
-    ``requested_spacing_um / read_spacing_um``.
+    ``requested_spacing_um / read_spacing_um``. ``content_kind`` is explicit:
+    ``"image"`` forbids finer-than-source requests outside tolerance, while
+    ``"label"`` allows nearest-neighbour replication by the caller.
     """
-    sel = select_level(
+    sel = select_level_for_spacing_read(
         requested_spacing_um=requested_spacing_um,
         level0_spacing_um=level0_spacing_um,
         level_downsamples=level_downsamples,
         tolerance=tolerance,
+        content_kind=content_kind,
     )
     target_w, target_h = int(target_size_px[0]), int(target_size_px[1])
     if sel.is_within_tolerance:

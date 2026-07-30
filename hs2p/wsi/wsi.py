@@ -5,7 +5,11 @@ import numpy as np
 from PIL import Image
 
 from hs2p.wsi.backend import open_mask_reader, open_slide, resolve_backend
-from hs2p.wsi.geometry import plan_spacing_read, select_level
+from hs2p.wsi.geometry import (
+    ContentKind,
+    plan_spacing_read,
+    select_level_for_spacing_read,
+)
 
 Image.MAX_IMAGE_PIXELS = 933120000
 
@@ -19,6 +23,18 @@ INTERPOLATION_FLAGS = {
     "cubic": cv2.INTER_CUBIC,
     "lanczos": cv2.INTER_LANCZOS4,
 }
+
+
+def _validate_label_resize_interpolation(
+    *,
+    content_kind: ContentKind,
+    interpolation: str,
+    needs_resize: bool,
+) -> None:
+    if content_kind == "label" and needs_resize and interpolation != "nearest":
+        raise ValueError(
+            "label content requires nearest-neighbour interpolation when resizing"
+        )
 
 
 def resize_array(
@@ -227,14 +243,16 @@ class WSI(object):
         *,
         tolerance: float,
         interpolation: str,
+        content_kind: ContentKind = "image",
     ) -> np.ndarray:
         """Read a region at an arbitrary spacing (level-select + downscale).
 
         Picks the finest pyramid level whose spacing is ``<= requested_spacing_um``
-        (within ``tolerance``) — never upsampling — reads it natively, then downscales
-        to ``size`` (width, height in px at ``requested_spacing_um``) with the named
-        ``interpolation``. When a level matches the requested spacing exactly there is
-        no resize (lossless).
+        (within ``tolerance``), reads it natively, then resizes to ``size`` (width,
+        height in px at ``requested_spacing_um``). The safe default treats pixels as
+        image content and never upsamples them. Label helpers explicitly opt into
+        nearest-neighbour replication. A level within tolerance is accepted without
+        resizing.
 
         Args:
             location: ``(x, y)`` top-left in level-0 pixel space.
@@ -244,7 +262,11 @@ class WSI(object):
                 the caller must state it).
             interpolation: One of :data:`INTERPOLATION_FLAGS`, required so the caller
                 consciously picks it (``"nearest"`` for label masks, ``"area"`` for
-                image downscaling).
+                image downscaling). Resizing declared label content with any other
+                interpolation raises rather than inventing label values.
+            content_kind: Pixel semantics. The safe default, ``"image"``, forbids
+                requests finer than the finest available spacing outside tolerance.
+                ``"label"`` allows nearest-neighbour replication for label helpers.
         """
         plan = plan_spacing_read(
             requested_spacing_um=float(requested_spacing_um),
@@ -252,9 +274,16 @@ class WSI(object):
             level_downsamples=self.level_downsamples,
             target_size_px=(int(size[0]), int(size[1])),
             tolerance=float(tolerance),
+            content_kind=content_kind,
+        )
+        target_size = (int(size[0]), int(size[1]))
+        _validate_label_resize_interpolation(
+            content_kind=content_kind,
+            interpolation=interpolation,
+            needs_resize=not plan.is_within_tolerance,
         )
         region = self.read_region(location, plan.level, plan.read_size_px)
-        return resize_array(region, (int(size[0]), int(size[1])), interpolation=interpolation)
+        return resize_array(region, target_size, interpolation=interpolation)
 
     def read_full_at_spacing(
         self,
@@ -262,19 +291,28 @@ class WSI(object):
         *,
         tolerance: float,
         interpolation: str,
+        content_kind: ContentKind = "image",
     ) -> np.ndarray:
         """Read the entire image resampled to ``requested_spacing_um``.
 
-        Convenience over :meth:`read_region_at_spacing` for the "read this whole
-        (small) image at a target spacing" case (e.g. a pre-cropped ROI tile): full
-        native read of the finest level ``<=`` the request, then downscale by
-        ``level_spacing / requested_spacing_um``. Exact-level match ⇒ no resize.
+        Full native read of the finest level ``<=`` the request, then downscale by
+        ``level_spacing / requested_spacing_um``. The safe ``content_kind="image"``
+        default rejects requests finer than the finest available spacing outside
+        tolerance. ``content_kind="label"`` permits nearest-neighbour replication
+        for label helpers and rejects other interpolation when resampling. A level
+        within tolerance is returned without resizing.
         """
-        sel = select_level(
+        sel = select_level_for_spacing_read(
             requested_spacing_um=float(requested_spacing_um),
             level0_spacing_um=float(self.get_level_spacing(0)),
             level_downsamples=self.level_downsamples,
             tolerance=float(tolerance),
+            content_kind=content_kind,
+        )
+        _validate_label_resize_interpolation(
+            content_kind=content_kind,
+            interpolation=interpolation,
+            needs_resize=not sel.is_within_tolerance,
         )
         arr = self.get_slide(sel.level)
         if sel.is_within_tolerance:
