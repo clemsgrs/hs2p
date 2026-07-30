@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-07-21
+- Amended: 2026-07-31 by the flat-raster format policy (#198)
 
 ## Context
 
@@ -15,24 +16,24 @@ cannot), and there was no way to express that without changing the slide backend
 
 `TilingConfig` gains a second field, `mask_backend`, alongside `backend`. The slide backend is
 resolved only from the slide path and the mask backend only from the source-mask path — the two
-roles are independent, and neither role's openability probe influences the other. Both share
-one selection policy: `auto` checks openability only (open then close to pick the first backend
-that opens the file) and never inspects decoded label semantics or retries after selection. A
-selected decoder is authoritative for that read (ADR 0001 still holds).
-The shared automatic priority is cuCIM, VIPS, OpenSlide, then ASAP. A slide probe receives the
-user's level-0 spacing override so it can open a slide with missing native spacing metadata;
-probe-time spacing-conflict warnings are suppressed, and only the selected reader emits the
-contextual warning.
+roles are independent, and neither role's backend resolution influences the
+other. Both share one format-aware selection policy: `auto` selects only PIL for
+`.png`, `.jpg`, and `.jpeg` suffixes, and uses the cuCIM, VIPS, OpenSlide, then
+ASAP openability chain for other inputs. PIL is never included in that chain.
+Selection never inspects decoded label semantics or retries after selection. A
+selected decoder is authoritative for that read (ADR 0001 still holds). A
+native-backend slide probe receives the user's level-0 spacing override so it
+can open a slide with missing native spacing metadata; probe-time
+spacing-conflict warnings are suppressed, and only the selected reader emits
+the contextual warning.
 
-Both fields accept only `auto`, `cucim`, `asap`, `openslide`, `vips`; null and unknown values
+Both fields accept only `auto`, `cucim`, `asap`, `openslide`, `pil`, `vips`; null and unknown values
 fail configuration validation, including when a `TilingConfig` is constructed directly in
 Python (which is keyword-only, and validates the `requested_*` provenance fields on the same
 allowlist). A slide with no source mask never resolves or validates mask-backend availability,
 and its mask provenance is null. An explicit mask backend applies to every source-mask read —
 precomputed tissue masks, annotation masks, the public low-level readers, overlays, and
 deferred preview reads.
-
-The shared `auto` priority is `cucim`, `vips`, `openslide`, then `asap`.
 
 The public low-level mask readers are decoupled from the slide backend: called **without** a
 `mask_backend` (omitted or `None`) they resolve the mask backend independently from the mask
@@ -43,8 +44,10 @@ path via `auto`, never inheriting the slide's backend, and record `requested_mas
 Opening a source mask is centralized through one helper (`open_mask_reader`) so an open failure
 — from backend resolution or the open itself — is reraised with actionable context naming the
 mask path and the requested backend (and the resolved backend when known), rather than a raw
-codec error; the remedy is to set `mask_backend` explicitly. Overlays and the `WSI` attached-mask
-path route through this helper.
+codec error. Native-backend failures recommend setting `mask_backend`
+explicitly; an auto-selected flat PIL failure recommends only verifying the
+file, because the format policy has no fallback. Overlays and the `WSI`
+attached-mask path route through this helper.
 
 Requested and resolved values are kept separate for both roles (`requested_backend` /
 `backend`, `requested_mask_backend` / `mask_backend`) and persisted in the tiling metadata,
@@ -57,8 +60,10 @@ resolved backend, and reason.
 ## Consequences
 
 - A mask can use a different decoder than its slide without changing the slide backend.
-- Because `auto` is openability-only, a backend that opens but cannot decode a mask can be
-  selected and then fail at read time; the fix is to set `mask_backend` explicitly.
+- For non-flat inputs, a native backend that opens but cannot decode a mask can
+  be selected and then fail at read time; the fix is to set `mask_backend`
+  explicitly.
+- Flat raster suffixes fail through PIL without a native-backend fallback.
 - Existing `auto` configurations can resolve to a different backend under the shared priority,
   so backend-dependent artifacts may need to be recomputed.
 - Pre-#163 metadata and `process_list.csv` schemas (without the mask backend fields/columns)

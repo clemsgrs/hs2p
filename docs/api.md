@@ -188,17 +188,22 @@ Internally, the shared coordinate engine still uses a generic `mask_path`.
 each support:
 
 - `auto`
+- `pil`
 - `cucim`
 - `vips`
 - `openslide`
 - `asap`
 
-`auto` prefers `cucim -> vips -> openslide -> asap`. Both fields reject null and unknown
-values when the `TilingConfig` is constructed.
+`auto` classifies each input by suffix. `.png`, `.jpg`, and `.jpeg`
+(case-insensitive) select only PIL; a flat-raster open or size failure is final.
+Other inputs use the unchanged `cucim -> vips -> openslide -> asap`
+openability chain, which never considers PIL. Both fields reject null and unknown
+values when the `TilingConfig` is constructed. An explicit backend remains
+authoritative.
 
 The slide backend is resolved from the slide path and the mask backend from the source-mask
-path — independently, with the same openability-only `auto` policy (no label-semantics
-inspection, no retry after selection). An explicit mask backend applies to every source-mask
+path — independently, with the same format-aware `auto` policy (no label-semantics
+inspection and no retry after selection). An explicit mask backend applies to every source-mask
 read: precomputed tissue masks, annotation masks, the low-level readers
 (`resolve_tissue_mask`, `resolve_annotation_masks`, `load_precomputed_tissue_mask`,
 `load_annotation_label_mask`, all of which accept a `mask_backend`), `overlay_mask_on_slide`,
@@ -211,11 +216,17 @@ backend — and records `requested_mask_backend == "auto"`. The high-level pipel
 because it always passes an explicit resolved `mask_backend`. `TilingConfig` is keyword-only, so
 every field (including `mask_backend`) must be passed by name.
 
+`tiling.backend="pil"` is the input reader for flat rasters. It is distinct from
+`speed.jpeg_backend="pil"`, which selects Pillow only as the JPEG encoder for
+saved tile TARs.
+
 Opening a source mask that the selected backend cannot decode fails with actionable context
 naming the mask path and the requested backend (and the resolved backend when known) rather than
 surfacing a raw codec error — for example
 `Mask open failed for path=... with backend=<resolved> (requested=<requested>): <error>. Select
 another mask backend or verify the mask file.` The remedy is to set `mask_backend` explicitly.
+For a flat raster that `auto` assigns to PIL, the error instead asks the caller
+only to verify the file; it does not recommend another backend.
 
 `TilingResult`, `TilingArtifacts`, the tiling metadata, and `process_list.csv` record both the
 requested and resolved slide and mask backends separately (`requested_backend` / `backend` and
