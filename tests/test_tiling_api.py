@@ -1058,28 +1058,9 @@ def test_tile_slides_defers_preview_writes_until_after_next_slide_compute(
         path.write_bytes(b"preview")
         return path
 
-    class _FakeFuture:
-        def __init__(self, fn, kwargs):
-            self._fn = fn
-            self._kwargs = kwargs
-
-        def result(self):
-            return self._fn(**self._kwargs)
-
-    class _FakeThreadPoolExecutor:
-        def __init__(self, max_workers):
-            assert max_workers == 1
-
-        def submit(self, fn, **kwargs):
-            return _FakeFuture(fn, kwargs)
-
-        def shutdown(self, wait=True):
-            return None
-
     monkeypatch.setattr("hs2p.tiling.orchestration._compute_tiling_result", _fake_compute_tiling_result)
     monkeypatch.setattr("hs2p.tiling.orchestration.save_tiling_result", _fake_save_tiling_result)
     monkeypatch.setattr("hs2p.tiling.orchestration.write_tiling_preview", _fake_write_tiling_preview)
-    monkeypatch.setattr("hs2p.tiling.orchestration.ThreadPoolExecutor", _FakeThreadPoolExecutor)
 
     artifacts = tile_slides(
         [

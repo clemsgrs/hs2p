@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Faster tiling previews
+
+Tiling previews (`preview.save_tiling_preview`) are now rendered by drawing the
+grid directly on the loaded slide canvas when no annotation overlay is requested,
+instead of cropping and re-pasting every tile. The overlay path is unchanged. The
+preview stage also runs in up to `speed.num_workers` spawned processes rather
+than threads, including when previews are materialized from reusable coordinate
+artifacts. A single worker renders inline to avoid process startup and backend
+re-import overhead. On dense prostatectomy slides (60k-190k tiles) this cuts the
+preview stage from ~19 s to ~2 s per slide with 16 workers. Grid lines are now
+complete: the previous per-tile paste erased the shared edge of already-drawn
+neighbours when tiles did not fall on whole preview pixels.
+
 ### Format-aware automatic slide and mask backends
 
 Flat `.png`, `.jpg`, and `.jpeg` slide or source-mask inputs now select the new

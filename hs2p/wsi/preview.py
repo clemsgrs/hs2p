@@ -88,7 +88,6 @@ def draw_grid_from_coordinates(
     color_mapping: dict[str, list[int] | None] | None = None,
 ):
     downsamples = wsi.level_downsamples[vis_level]
-    source_canvas = canvas[:, :, :3].copy()
     if indices is None:
         indices = np.arange(len(coords))
     total = len(indices)
@@ -109,6 +108,18 @@ def draw_grid_from_coordinates(
         if aligned_mask.ndim == 3 and aligned_mask.shape[-1] == 1:
             aligned_mask = np.squeeze(aligned_mask, axis=-1)
 
+    if aligned_mask is None:
+        # No overlay: the canvas already holds the slide pixels, so only the grid
+        # lines need drawing. Skips the per-tile crop/convert/write-back below,
+        # which is an identity op here and dominates preview time on dense slides.
+        for idx in range(total):
+            coord = np.ceil(
+                np.asarray(coords[indices[idx]], dtype=np.float64) / np.asarray(downsamples)
+            ).astype(np.int32)
+            draw_grid(canvas, coord, tile_size, thickness=thickness)
+        return Image.fromarray(canvas)
+
+    source_canvas = canvas[:, :, :3].copy()
     for idx in range(total):
         tile_id = indices[idx]
         coord = coords[tile_id]
