@@ -28,8 +28,9 @@ def _saved_coordinates(
     tmp_path: Path,
     *,
     coords: list[tuple[int, int]],
+    sample_id: str = "reuse-slide",
 ) -> tuple[SlideSpec, Path]:
-    slide = SlideSpec(sample_id="reuse-slide", image_path=Path("reuse-slide.svs"))
+    slide = SlideSpec(sample_id=sample_id, image_path=Path(f"{sample_id}.svs"))
     coordinates = np.asarray(coords, dtype=np.int64).reshape((-1, 2))
     result = preprocessing.TilingResult(
         tiles=preprocessing.TileGeometry(
@@ -175,6 +176,87 @@ def test_reused_coordinates_materialize_requested_tar_manifest_and_preview(
     assert Path(row["coordinates_meta_path"]) == artifact.coordinates_meta_path
     assert Path(row["tiles_tar_path"]) == expected_tar
     assert Path(row["tiling_preview_path"]) == expected_preview
+
+
+def test_reused_coordinate_previews_use_configured_process_capacity(
+    monkeypatch,
+    tmp_path: Path,
+):
+    first_slide, coordinates_dir = _saved_coordinates(
+        tmp_path,
+        coords=[(0, 0)],
+        sample_id="reuse-1",
+    )
+    second_slide, second_coordinates_dir = _saved_coordinates(
+        tmp_path,
+        coords=[(16, 0)],
+        sample_id="reuse-2",
+    )
+    assert second_coordinates_dir == coordinates_dir
+    _install_fake_slide_reader(monkeypatch)
+
+    seen: dict[str, object] = {}
+    submitted: list[str] = []
+
+    class _DeferredFuture:
+        def __init__(self, fn, kwargs):
+            self._fn = fn
+            self._kwargs = kwargs
+
+        def result(self):
+            return self._fn(**self._kwargs)
+
+    class _RecordingProcessPoolExecutor:
+        def __init__(
+            self,
+            max_workers,
+            *,
+            mp_context,
+            initializer,
+            initargs,
+        ):
+            seen["max_workers"] = max_workers
+            seen["mp_context"] = mp_context
+            seen["initializer"] = initializer
+            seen["initargs"] = initargs
+
+        def submit(self, fn, **kwargs):
+            submitted.append(kwargs["result"].sample_id)
+            return _DeferredFuture(fn, kwargs)
+
+        def shutdown(self, wait=True):
+            seen["shutdown_wait"] = wait
+
+    monkeypatch.setattr(
+        orchestration,
+        "ProcessPoolExecutor",
+        _RecordingProcessPoolExecutor,
+    )
+
+    output_dir = tmp_path / "run"
+    artifacts = tile_slides(
+        [first_slide, second_slide],
+        tiling=_tiling_config(),
+        segmentation=_segmentation_config(),
+        filtering=_filter_config(),
+        preview=PreviewConfig(save_tiling_preview=True, downsample=2),
+        output_dir=output_dir,
+        num_workers=4,
+        read_coordinates_from=coordinates_dir,
+    )
+
+    assert submitted == ["reuse-1", "reuse-2"]
+    assert seen == {
+        "max_workers": 4,
+        "mp_context": orchestration._process_pool_context(),
+        "initializer": orchestration._configure_worker_logging,
+        "initargs": (str(output_dir),),
+        "shutdown_wait": True,
+    }
+    assert [artifact.tiling_preview_path for artifact in artifacts] == [
+        output_dir / "preview" / "tiling" / "reuse-1.jpg",
+        output_dir / "preview" / "tiling" / "reuse-2.jpg",
+    ]
 
 
 def test_reused_zero_tile_coordinates_do_not_fabricate_a_preview(

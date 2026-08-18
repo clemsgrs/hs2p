@@ -502,3 +502,43 @@ def test_draw_grid_from_coordinates_crops_loaded_canvas_instead_of_fetching_tile
 
     rendered = np.array(image)
     assert rendered.shape == canvas.shape
+
+
+def test_draw_grid_from_coordinates_no_mask_preserves_fractional_projected_edges():
+    class FakeWSI:
+        level_downsamples = [(1.0, 1.0), (1.3, 1.3)]
+        level_dimensions = [(8, 7), (8, 7)]
+        spacings = [0.25, 0.325]
+
+        def get_level_spacing(self, level):
+            return self.spacings[level]
+
+    canvas = np.full((7, 8, 3), 255, dtype=np.uint8)
+    rendered = np.array(
+        wsi_mod.draw_grid_from_coordinates(
+            canvas.copy(),
+            FakeWSI(),
+            coords=[(0, 0), (2, 0)],
+            tile_size_at_0=(3, 3),
+            vis_level=1,
+            thickness=1,
+            mask=None,
+        )
+    )
+
+    expected_black = np.array(
+        [
+            [True, True, True, True, True, True, False, False],
+            [True, False, True, True, False, True, False, False],
+            [True, False, True, True, False, True, False, False],
+            [True, True, True, True, True, True, False, False],
+            [False, False, False, False, False, False, False, False],
+            [False, False, False, False, False, False, False, False],
+            [False, False, False, False, False, False, False, False],
+        ],
+        dtype=bool,
+    )
+    expected = np.full_like(canvas, 255)
+    expected[expected_black] = 0
+
+    np.testing.assert_array_equal(rendered, expected)

@@ -4,7 +4,7 @@ import logging
 import multiprocessing as mp
 import traceback
 import warnings
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -1197,6 +1197,34 @@ def _process_pool_context():
     return mp.get_context("spawn")
 
 
+class _InlineExecutor:
+    """Executor that runs each submission synchronously in the calling process.
+
+    Used for tiling previews when there is a single worker: no spawn cost and no
+    slide-backend re-import in a child process.
+    """
+
+    class _DeferredFuture:
+        # Runs on first ``result()`` so errors surface there, like a real future.
+        def __init__(self, fn, kwargs):
+            self._fn = fn
+            self._kwargs = kwargs
+            self._done = False
+            self._value = None
+
+        def result(self):
+            if not self._done:
+                self._value = self._fn(**self._kwargs)
+                self._done = True
+            return self._value
+
+    def submit(self, fn, **kwargs):
+        return self._DeferredFuture(fn, kwargs)
+
+    def shutdown(self, wait=True):
+        return None
+
+
 def _write_tiling_preview_from_artifacts(
     *,
     artifact: TilingArtifacts,
@@ -1532,16 +1560,28 @@ def tile_slides(
         for request in compute_requests
         if request.input_index not in mask_failures
     ]
-    use_slide_pool, pool_processes, worker_inner_workers = _resolve_tiling_worker_allocation(
-        num_workers=num_workers,
-        compute_count=len(compute_requests),
+    use_slide_pool, compute_pool_processes, worker_inner_workers = (
+        _resolve_tiling_worker_allocation(
+            num_workers=num_workers,
+            compute_count=len(compute_requests),
+        )
     )
     compute_pool_module = _process_pool_context()
-    preview_executor = (
-        ThreadPoolExecutor(max_workers=max(1, pool_processes))
-        if preview is not None and preview.save_tiling_preview
-        else None
-    )
+    # Tiling previews are CPU-bound Python (per-tile grid drawing + JPEG encode), so a
+    # thread pool serialises on the GIL and ends up slower than a single thread. Use
+    # spawned processes, like the tiling pools (see ``_process_pool_context``).
+    preview_executor = None
+    if preview is not None and preview.save_tiling_preview:
+        preview_worker_count = max(1, int(num_workers))
+        if preview_worker_count > 1:
+            preview_executor = ProcessPoolExecutor(
+                max_workers=preview_worker_count,
+                mp_context=compute_pool_module,
+                initializer=_configure_worker_logging,
+                initargs=(str(output_dir),),
+            )
+        else:
+            preview_executor = _InlineExecutor()
     pending_previews: list[_PendingPreview] = []
     total_slides = len(planned_work)
 
@@ -1877,7 +1917,7 @@ def tile_slides(
                 for request in compute_requests
             ]
             with compute_pool_module.Pool(
-                processes=pool_processes,
+                processes=compute_pool_processes,
                 initializer=_configure_worker_logging,
                 initargs=(str(output_dir),),
             ) as pool:
