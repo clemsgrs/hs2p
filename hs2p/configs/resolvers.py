@@ -257,16 +257,15 @@ def resolve_sampling_spec(
     *,
     tiling: TilingConfig,
 ) -> SamplingSpec:
-    # Try new masks config first
     masks_cfg = getattr(cfg.tiling, "masks", None)
     if masks_cfg is not None:
-        return _resolve_sampling_spec_from_masks(masks_cfg, tiling=tiling)
+        return _resolve_sampling_spec_from_masks(masks_cfg)
 
     # Fall back to legacy sampling_params key
     sampling_config = getattr(cfg.tiling, "sampling_params", None)
     if sampling_config is None:
         return build_default_sampling_spec(tiling)
-    return _resolve_sampling_spec_from_sampling_params(sampling_config, tiling=tiling)
+    return _resolve_sampling_spec_from_sampling_params(sampling_config)
 
 
 def _drop_null_labels(
@@ -291,7 +290,7 @@ def _drop_null_labels(
     return kept, filtered
 
 
-def _resolve_sampling_spec_from_masks(masks_cfg: Any, *, tiling: TilingConfig) -> SamplingSpec:
+def _resolve_sampling_spec_from_masks(masks_cfg: Any) -> SamplingSpec:
     pixel_mapping = _merge_sampling_mapping(
         getattr(masks_cfg, "pixel_mapping", None),
         field_name="pixel_mapping",
@@ -336,8 +335,6 @@ def _resolve_sampling_spec_from_masks(masks_cfg: Any, *, tiling: TilingConfig) -
 
 def _resolve_sampling_spec_from_sampling_params(
     sampling_config: Any,
-    *,
-    tiling: TilingConfig,
 ) -> SamplingSpec:
     pixel_mapping = _merge_sampling_mapping(
         getattr(sampling_config, "pixel_mapping", None),

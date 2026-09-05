@@ -5,7 +5,6 @@ import numpy as np
 
 from hs2p.wsi.streaming.batched import BatchedReadRequest, iter_cucim_batched_read_regions
 from hs2p.wsi.streaming.plans import (
-    GroupedReadPlan,
     iter_grouped_read_plans,
     resolve_read_step_px,
     resolve_step_px_lv0,
@@ -89,22 +88,6 @@ def iter_tile_arrays_from_result(
         yield record.tile_arr
 
 
-def _iter_tile_records_from_region(
-    region: np.ndarray,
-    *,
-    read_plan: GroupedReadPlan,
-    tile_size_px: int,
-    read_step_px: int,
-) -> Iterator[PlannedTileView]:
-    for tile_view in iter_plan_region_tile_views(
-        np.asarray(region),
-        read_plan=read_plan,
-        tile_size_px=int(tile_size_px),
-        read_step_px=int(read_step_px),
-    ):
-        yield tile_view
-
-
 def _iter_tile_records_from_reader_plans(
     reader: SlideReader,
     *,
@@ -119,7 +102,7 @@ def _iter_tile_records_from_reader_plans(
             int(read_level),
             (int(read_plan.read_size_px), int(read_plan.read_size_px)),
         )
-        yield from _iter_tile_records_from_region(
+        yield from iter_plan_region_tile_views(
             np.asarray(region),
             read_plan=read_plan,
             tile_size_px=int(tile_size_px),
@@ -162,7 +145,7 @@ def _iter_cucim_tile_records_from_result(
     )
 
     for request, region in batched_regions:
-        yield from _iter_tile_records_from_region(
+        yield from iter_plan_region_tile_views(
             np.asarray(region),
             read_plan=request.payload,
             tile_size_px=int(result.read_tile_size_px),

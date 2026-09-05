@@ -23,7 +23,7 @@ def project_discrete_grid_origins(
 ) -> np.ndarray:
     """Project level-0 origin coordinates into a discrete target grid.
 
-    Origin coordinates are truncated toward zero so a top-left anchor stays
+    Origin coordinates are rounded down so a top-left anchor stays
     within the same source pixel footprint after projection.
     """
     coordinates = np.asarray(coordinates)

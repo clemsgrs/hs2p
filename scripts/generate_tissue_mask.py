@@ -221,51 +221,6 @@ def get_best_level_for_downsample_custom(
     return level
 
 
-def get_best_level_for_spacing(
-    wsi: wsd.WholeSlideImage, requested_spacing_um: float, tolerance: float
-):
-    """
-    Determines the best level in a multi-resolution image pyramid for a given target spacing.
-
-    Ensures that the spacing of the returned level is either within the specified tolerance of the requested
-    spacing or smaller than the requested spacing to avoid upsampling.
-
-    Args:
-        requested_spacing_um (float): Desired spacing.
-        tolerance (float, optional): Tolerance for matching the spacing, deciding how much
-            spacing can deviate from those specified in the slide metadata.
-
-    Returns:
-        level (int): Index of the best matching level in the image pyramid.
-    """
-    spacing_at_0 = wsi.spacings[0]
-    requested_downsample = requested_spacing_um / spacing_at_0
-    level_downsamples = get_downsamples(wsi)
-    level = get_best_level_for_downsample_custom(level_downsamples, requested_downsample)
-    level_spacing = wsi.spacings[level]
-
-    # check if the level_spacing is within the tolerance of the requested_spacing
-    is_within_tolerance = False
-    if abs(level_spacing - requested_spacing_um) / requested_spacing_um <= tolerance:
-        is_within_tolerance = True
-        return level, is_within_tolerance
-
-    # otherwise, look for a spacing smaller than or equal to the requested_spacing
-    else:
-        while level > 0 and level_spacing > requested_spacing_um:
-            level -= 1
-            level_spacing = wsi.spacings[level]
-            if abs(level_spacing - requested_spacing_um) / requested_spacing_um <= tolerance:
-                is_within_tolerance = True
-                break
-
-    assert (
-        level_spacing <= requested_spacing_um
-        or abs(level_spacing - requested_spacing_um) / requested_spacing_um <= tolerance
-    ), f"Unable to find a spacing less than or equal to the requested spacing ({requested_spacing_um}) or within {int(tolerance * 100)}% of the requested spacing."
-    return level, is_within_tolerance
-
-
 def load_wsi_at_spacing(
     *,
     wsi_path: Path,

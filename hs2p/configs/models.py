@@ -32,11 +32,9 @@ def _validate_backend_name(value: object, *, field: str) -> str:
 
 
 _DEFAULT_TILING = default_config.tiling
-_DEFAULT_TILING_PARAMS = _DEFAULT_TILING.params
 _DEFAULT_SEGMENTATION = _DEFAULT_TILING.seg_params
 _DEFAULT_FILTERING = _DEFAULT_TILING.filter_params
 _DEFAULT_PREVIEW = _DEFAULT_TILING.preview
-_DEFAULT_MASKS = _DEFAULT_TILING.masks
 
 
 @dataclass(frozen=True, kw_only=True)

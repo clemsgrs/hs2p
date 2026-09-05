@@ -154,33 +154,27 @@ def draw_grid_from_coordinates(
             )
             valid_tile = Image.fromarray(valid_tile).convert("RGB")
 
-            if aligned_mask is not None:
-                if palette is None or pixel_mapping is None or color_mapping is None:
-                    raise ValueError(
-                        "palette, pixel_mapping, and color_mapping are required when mask overlay is enabled"
-                    )
-                masked_tile = extract_padded_crop(
-                    aligned_mask,
-                    x=int(coord[0]),
-                    y=int(coord[1]),
-                    width=valid_width,
-                    height=valid_height,
+            if palette is None or pixel_mapping is None or color_mapping is None:
+                raise ValueError(
+                    "palette, pixel_mapping, and color_mapping are required when mask overlay is enabled"
                 )
-                if masked_tile.ndim == 3 and masked_tile.shape[-1] == 1:
-                    masked_tile = np.squeeze(masked_tile, axis=-1)
-                masked_tile = Image.fromarray(masked_tile)
-                masked_tile = masked_tile.split()[0]
-                masked_tile = masked_tile.resize((valid_width, valid_height), Image.NEAREST)
-                overlayed_tile = overlay_mask_on_tile(
-                    valid_tile,
-                    masked_tile,
-                    palette,
-                    pixel_mapping,
-                    color_mapping,
-                )
-                tile[:valid_height, :valid_width, :] = overlayed_tile
-            else:
-                tile[:valid_height, :valid_width, :] = np.array(valid_tile)
+            masked_tile = extract_padded_crop(
+                aligned_mask,
+                x=int(coord[0]),
+                y=int(coord[1]),
+                width=valid_width,
+                height=valid_height,
+            )
+            masked_tile = Image.fromarray(masked_tile)
+            masked_tile = masked_tile.split()[0]
+            overlayed_tile = overlay_mask_on_tile(
+                valid_tile,
+                masked_tile,
+                palette,
+                pixel_mapping,
+                color_mapping,
+            )
+            tile[:valid_height, :valid_width, :] = overlayed_tile
 
         canvas_crop_shape = canvas[
             coord[1] : coord[1] + tile_size[1],

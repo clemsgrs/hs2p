@@ -70,7 +70,7 @@ class WSI(object):
         spacings (list[float]): List of spacings for each level.
         level_dimensions (list[tuple[int, int]]): Dimensions at each level.
         level_downsamples (list[tuple[float, float]]): Downsample factors for each level.
-        backend (str): Backend used for opening the wsi (default: "asap").
+        backend (str): Backend used for opening the wsi.
         mask_path (Path, optional): Path to the segmentation mask.
         mask_reader: Segmentation mask reader object.
     """
@@ -316,9 +316,8 @@ class WSI(object):
         )
         arr = self.get_slide(sel.level)
         if sel.is_within_tolerance:
-            # Level matches the request (within tolerance) — read native, no resize.
             return arr
         level_height, level_width = arr.shape[0], arr.shape[1]
-        scale = float(sel.read_spacing_um) / float(requested_spacing_um)  # < 1 (downscale)
+        scale = float(sel.read_spacing_um) / float(requested_spacing_um)
         target_size = (int(round(level_width * scale)), int(round(level_height * scale)))
         return resize_array(arr, target_size, interpolation=interpolation)

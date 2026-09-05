@@ -75,10 +75,10 @@ def summarize_annotation_coverage(
       ``min_coverage`` is the only signal for "which classes matter", so a declared-but-
       unthresholded label (e.g. the value reserved for unannotated pixels) is excluded from
       both the numerator set and the denominator.
-    - ``est_tiles`` — number of non-overlapping tile footprints whose class coverage is at
+    - ``est_tiles`` — number of tile footprints whose class coverage is at
       least ``min_coverage[class]`` (``None`` when no threshold is given). This is an
       *estimate*: it reuses :func:`compute_tile_coverage` over a regular level-0 grid and
-      deliberately ignores tissue filtering and tile overlap.
+      uses the requested overlap but deliberately ignores tissue filtering.
 
     ``area_mm2`` is reported for every declared class; ``frac``/``est_tiles`` only for the
     thresholded classes. Reuses hs2p's existing coverage primitive (the controllable

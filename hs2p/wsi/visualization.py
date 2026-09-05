@@ -63,7 +63,7 @@ def _find_contour_groups_from_mask(mask_arr: np.ndarray) -> list[tuple[np.ndarra
 
 
 def _scale_contour(contour: np.ndarray, scale_x: float, scale_y: float) -> np.ndarray:
-    contour_lv = contour.copy().astype(np.float64)
+    contour_lv = contour.astype(np.float64)
     contour_lv[:, 0, 0] *= scale_x
     contour_lv[:, 0, 1] *= scale_y
     return np.rint(contour_lv).astype(np.int32)
@@ -277,9 +277,7 @@ def overlay_mask_on_slide(
         )
         width, height = wsi.size
     if annotation_mask_path is not None:
-        # The mask is decoded with its own resolved backend, independent of the slide's (#163),
-        # through the centralized helper so an open failure names the mask path and requested
-        # backend rather than surfacing a raw codec error.
+        # Resolve mask decoding independently of the slide backend.
         mask_reader, _ = open_mask_reader(
             annotation_mask_path, mask_backend=mask_backend
         )
@@ -378,13 +376,7 @@ def write_coordinate_preview(
     wsi = WSI(wsi_path, backend=backend)
     vis_level = wsi.get_best_level_for_downsample_custom(downsample)
     if mask_path is not None:
-        # Pass the backend *reader*, not the WSI, into the grid renderer's mask-overlay
-        # path: ``read_aligned_mask`` calls ``read_level``/``spacings`` (reader/backend
-        # methods). A WSI exposes ``spacings`` but not ``read_level``, so handing it the
-        # WSI raised ``'WSI' object has no attribute 'read_level'``. This mirrors the
-        # mask-preview path (``overlay_mask_on_slide`` uses the reader from ``open_mask_reader``).
-        # The mask uses its own resolved backend, independent of the slide's (#163), via the
-        # centralized helper so an open failure names the mask path and requested backend.
+        # The grid renderer needs the mask reader's read_level/spacings interface.
         mask, _ = open_mask_reader(mask_path, mask_backend=mask_backend)
     else:
         mask = None

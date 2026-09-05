@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Benchmark tile-store creation with read/encode/write time breakdown.
 
-Replicates the ``extract_tiles_to_tar`` pipeline from ``hs2p.api`` with
+Runs the ``extract_tiles_to_tar`` pipeline from ``hs2p.api`` with
 per-phase timing instrumentation so that read, JPEG-encode, and tar-write
 costs can be measured independently.
 """

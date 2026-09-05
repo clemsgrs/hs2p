@@ -166,3 +166,4 @@ output/
 data/
 *.csv
 *.yaml
+.tasks/

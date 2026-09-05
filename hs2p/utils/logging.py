@@ -38,7 +38,7 @@ def _configure_logger(
         level: The logging level to use.
         output: A file name or a directory to save log. If None, will not save log file.
             If ends with ".txt" or ".log", assumed to be a file name.
-            Otherwise, logs will be saved to `output/log.txt`.
+            Otherwise, logs will be saved to `output/logs/log.txt`.
 
     Returns:
         The configured logger.
@@ -60,13 +60,11 @@ def _configure_logger(
     datefmt = "%Y%m%d %H:%M:%S"
     formatter = logging.Formatter(fmt=fmt, datefmt=datefmt)
 
-    # stdout logging for main worker only
     handler = _ProgressAwareStreamHandler(stream=sys.stdout)
     handler.setLevel(logging.DEBUG)
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
-    # file logging for all workers
     if output:
         if os.path.splitext(output)[-1] in (".txt", ".log"):
             filename = output
@@ -97,7 +95,7 @@ def setup_logging(
         output: A file name or a directory to save log files. If None, log
             files will not be saved. If output ends with ".txt" or ".log", it
             is assumed to be a file name.
-            Otherwise, logs will be saved to `output/log.txt`.
+            Otherwise, logs will be saved to `output/logs/log.txt`.
         name: The name of the logger to configure, by default the root logger.
         level: The logging level to use.
         capture_warnings: Whether warnings should be captured as logs.
