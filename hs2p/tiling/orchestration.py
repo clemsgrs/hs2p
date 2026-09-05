@@ -650,11 +650,8 @@ def _build_success_artifact(
     mask_preview_path: Path | None,
     tiling_preview_path: Path | None,
 ) -> TilingArtifacts:
-    return TilingArtifacts(
-        sample_id=base_artifact.sample_id,
-        coordinates_npz_path=base_artifact.coordinates_npz_path,
-        coordinates_meta_path=base_artifact.coordinates_meta_path,
-        num_tiles=base_artifact.num_tiles,
+    return replace(
+        base_artifact,
         tiles_tar_path=(
             tiles_tar_path
             if tiles_tar_path is not None
@@ -662,12 +659,6 @@ def _build_success_artifact(
         ),
         mask_preview_path=mask_preview_path,
         tiling_preview_path=tiling_preview_path,
-        backend=base_artifact.backend,
-        requested_backend=base_artifact.requested_backend,
-        mask_backend=base_artifact.mask_backend,
-        requested_mask_backend=base_artifact.requested_mask_backend,
-        annotation=base_artifact.annotation,
-        output_mode=base_artifact.output_mode,
     )
 
 
@@ -835,21 +826,12 @@ def _save_per_annotation_artifact(
     mask_preview_path: Path | None = None,
 ) -> TilingArtifacts:
     artifact = save_tiling_result(result, output_dir=output_dir, annotation=annotation)
-    return TilingArtifacts(
-        sample_id=artifact.sample_id,
-        coordinates_npz_path=artifact.coordinates_npz_path,
-        coordinates_meta_path=artifact.coordinates_meta_path,
-        num_tiles=artifact.num_tiles,
+    return replace(
+        artifact,
         tiles_tar_path=None,
         # One slide-level preview, repeated on every label row so each row is self-describing.
         mask_preview_path=mask_preview_path,
-        tiling_preview_path=artifact.tiling_preview_path,
-        backend=artifact.backend,
-        requested_backend=artifact.requested_backend,
-        mask_backend=artifact.mask_backend,
-        requested_mask_backend=artifact.requested_mask_backend,
         annotation=annotation,
-        output_mode=artifact.output_mode,
     )
 
 
@@ -1893,26 +1875,10 @@ def tile_slides(
     try:
         if use_slide_pool:
             pool_requests = [
-                _ComputeRequest(
-                    input_index=request.input_index,
-                    whole_slide=request.whole_slide,
-                    tiling=request.tiling,
-                    segmentation=request.segmentation,
-                    resolved_mask=request.resolved_mask,
-                    filtering=request.filtering,
-                    mask_preview_path=request.mask_preview_path,
-                    preview_downsample=request.preview_downsample,
-                    mask_overlay_color=request.mask_overlay_color,
-                    mask_overlay_alpha=request.mask_overlay_alpha,
-                    output_dir=request.output_dir,
+                replace(
+                    request,
                     num_workers=worker_inner_workers,
-                    jpeg_backend=request.jpeg_backend,
-                    gpu_decode=request.gpu_decode,
                     include_result=False,
-                    save_tiles=request.save_tiles,
-                    sampling=request.sampling,
-                    sampling_selection_strategy=request.sampling_selection_strategy,
-                    sampling_output_mode=request.sampling_output_mode,
                 )
                 for request in compute_requests
             ]
@@ -1931,26 +1897,10 @@ def tile_slides(
                 )
         else:
             serial_requests = [
-                _ComputeRequest(
-                    input_index=request.input_index,
-                    whole_slide=request.whole_slide,
-                    tiling=request.tiling,
-                    segmentation=request.segmentation,
-                    resolved_mask=request.resolved_mask,
-                    filtering=request.filtering,
-                    mask_preview_path=request.mask_preview_path,
-                    preview_downsample=request.preview_downsample,
-                    mask_overlay_color=request.mask_overlay_color,
-                    mask_overlay_alpha=request.mask_overlay_alpha,
-                    output_dir=request.output_dir,
+                replace(
+                    request,
                     num_workers=worker_inner_workers,
-                    jpeg_backend=request.jpeg_backend,
-                    gpu_decode=request.gpu_decode,
                     include_result=True,
-                    save_tiles=request.save_tiles,
-                    sampling=request.sampling,
-                    sampling_selection_strategy=request.sampling_selection_strategy,
-                    sampling_output_mode=request.sampling_output_mode,
                 )
                 for request in compute_requests
             ]

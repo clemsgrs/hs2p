@@ -93,31 +93,19 @@ def _apply_qc_filtering_to_result(
             source_label=str(result.image_path),
         )
     keep = np.asarray(keep_flags, dtype=bool)
-    if int(keep.sum()) == len(result.x):
-        return replace(
-            result,
-            filter_white=filter_params.filter_white,
-            filter_black=filter_params.filter_black,
-            white_threshold=filter_params.white_threshold,
-            black_threshold=filter_params.black_threshold,
-            fraction_threshold=filter_params.fraction_threshold,
-            filter_grayspace=filter_params.filter_grayspace,
-            grayspace_saturation_threshold=filter_params.grayspace_saturation_threshold,
-            grayspace_fraction_threshold=filter_params.grayspace_fraction_threshold,
-            filter_blur=filter_params.filter_blur,
-            blur_threshold=filter_params.blur_threshold,
-            qc_spacing_um=filter_params.qc_spacing_um,
-        )
-
-    return replace(
-        result,
-        tiles=replace(
+    tiles = result.tiles
+    if int(keep.sum()) != len(result.x):
+        tiles = replace(
             result.tiles,
             x=result.x[keep],
             y=result.y[keep],
             tissue_fractions=result.tissue_fractions[keep],
             tile_index=np.arange(int(keep.sum()), dtype=np.int32),
-        ),
+        )
+
+    return replace(
+        result,
+        tiles=tiles,
         filter_white=filter_params.filter_white,
         filter_black=filter_params.filter_black,
         white_threshold=filter_params.white_threshold,

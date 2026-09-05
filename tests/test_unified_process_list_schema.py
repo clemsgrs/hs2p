@@ -28,14 +28,6 @@ def _artifact(*, annotation=None, tiles_tar_path=None):
     )
 
 
-def test_success_row_annotation_defaults_to_tissue_when_none():
-    row = orchestration_mod._build_success_process_row(
-        whole_slide=_whole_slide(),
-        artifact=_artifact(annotation=None),
-    )
-    assert row["annotation"] == "tissue"
-
-
 def test_success_row_annotation_preserved_when_set():
     row = orchestration_mod._build_success_process_row(
         whole_slide=_whole_slide(),

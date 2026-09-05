@@ -86,14 +86,14 @@ def detect_contours(
         if area == 0 or area <= min_fg_area:
             continue
 
-        contour_lv0 = raw_contours[fg_idx].copy().astype(np.float64)
+        contour_lv0 = raw_contours[fg_idx].astype(np.float64)
         contour_lv0[:, 0, 0] *= scale_x
         contour_lv0[:, 0, 1] *= scale_y
         filtered_contours.append(contour_lv0.astype(np.int32))
 
         hole_contours_lv0 = []
         for hole_idx in child_hole_indices.tolist():
-            hole_lv0 = raw_contours[hole_idx].copy().astype(np.float64)
+            hole_lv0 = raw_contours[hole_idx].astype(np.float64)
             hole_lv0[:, 0, 0] *= scale_x
             hole_lv0[:, 0, 1] *= scale_y
             hole_contours_lv0.append(hole_lv0.astype(np.int32))

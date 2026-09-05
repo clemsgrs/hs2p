@@ -200,7 +200,7 @@ def _build_contour_tissue_mask(
     scale_y = mask_h / slide_h
 
     contour_mask = np.zeros((mask_h, mask_w), dtype=np.uint8)
-    contour_mask_scaled = contour.copy().astype(np.float64)
+    contour_mask_scaled = contour.astype(np.float64)
     contour_mask_scaled[:, 0, 0] *= scale_x
     contour_mask_scaled[:, 0, 1] *= scale_y
     contour_mask_scaled = np.round(contour_mask_scaled).astype(np.int32)
@@ -209,7 +209,7 @@ def _build_contour_tissue_mask(
     if contour_holes:
         holes_scaled = []
         for hole in contour_holes:
-            hole_scaled = hole.copy().astype(np.float64)
+            hole_scaled = hole.astype(np.float64)
             hole_scaled[:, 0, 0] *= scale_x
             hole_scaled[:, 0, 1] *= scale_y
             holes_scaled.append(np.round(hole_scaled).astype(np.int32))

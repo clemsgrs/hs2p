@@ -487,9 +487,8 @@ def resolve_annotation_masks(
 ) -> ResolvedAnnotationMasks:
     """Read an annotation mask into one binary mask per declared label at ``seg_downsample``.
 
-    The multi-label producer that ``build_per_annotation_tiling_results`` consumes but that
-    was missing from the codebase — the annotation counterpart of
-    :func:`resolve_tissue_mask`'s precomputed path. ``pixel_mapping`` maps class name to the
+    The annotation counterpart of :func:`resolve_tissue_mask`'s precomputed path.
+    ``pixel_mapping`` maps class name to the
     integer pixel value in the mask; one binary mask (255 foreground / 0 background) is
     produced for every entry. Annotation names are user-defined except for ``"merged"``,
     which is reserved for structural merged coordinate output, and label IDs must be distinct

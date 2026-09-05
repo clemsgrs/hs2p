@@ -52,29 +52,19 @@ def initialize_wandb(
     else:
         tags = [str(t) for t in cfg.wandb.tags]
     config = OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)
+    resume_kwargs = {}
     if cfg.wandb.resume_id:
-        run = wandb.init(
-            project=cfg.wandb.project,
-            entity=cfg.wandb.username,
-            name=cfg.wandb.exp_name,
-            group=cfg.wandb.group,
-            dir=cfg.wandb.dir,
-            config=config,
-            tags=tags,
-            id=cfg.wandb.resume_id,
-            resume="must",
-        )
-    else:
-        run = wandb.init(
-            project=cfg.wandb.project,
-            entity=cfg.wandb.username,
-            name=cfg.wandb.exp_name,
-            group=cfg.wandb.group,
-            dir=cfg.wandb.dir,
-            config=config,
-            tags=tags,
-        )
-    return run
+        resume_kwargs = {"id": cfg.wandb.resume_id, "resume": "must"}
+    return wandb.init(
+        project=cfg.wandb.project,
+        entity=cfg.wandb.username,
+        name=cfg.wandb.exp_name,
+        group=cfg.wandb.group,
+        dir=cfg.wandb.dir,
+        config=config,
+        tags=tags,
+        **resume_kwargs,
+    )
 
 
 def load_csv(

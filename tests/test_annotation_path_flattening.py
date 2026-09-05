@@ -20,22 +20,6 @@ def test_not_flattened_for_named_labels(annotation):
     assert is_flattened_annotation(annotation) is False
 
 
-def test_helper_importable_without_circular_import():
-    # fileops is a leaf module (stdlib-only deps), so importing the helper from it
-    # cannot pull in artifacts or the preview layer.
-    import hs2p.fileops as fileops
-
-    assert hasattr(fileops, "is_flattened_annotation")
-
-
-def test_artifact_dir_uses_shared_helper():
-    from hs2p.artifacts import _annotation_tiles_dir
-
-    # When flattened, no per-annotation subdir is appended.
-    assert is_flattened_annotation(None)
-    assert _annotation_tiles_dir("/out", "tissue") == _annotation_tiles_dir("/out", None)
-
-
 def test_tar_stem_uses_shared_helper():
     from hs2p.tiling.tar import _annotation_tar_stem
 

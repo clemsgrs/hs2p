@@ -50,12 +50,12 @@ def resolve_step_px_lv0(result: Any) -> int:
     x = np.asarray(result.x, dtype=np.int64)
     y = np.asarray(result.y, dtype=np.int64)
     if x.shape[0] > 1:
-        unique_x = np.unique(np.sort(x))
+        unique_x = np.unique(x)
         diffs = np.diff(unique_x)
         diffs = diffs[diffs > 0]
         if diffs.size > 0:
             return int(diffs.min())
-        unique_y = np.unique(np.sort(y))
+        unique_y = np.unique(y)
         diffs = np.diff(unique_y)
         diffs = diffs[diffs > 0]
         if diffs.size > 0:
@@ -108,8 +108,6 @@ def iter_grouped_read_plans(
                 if match_idx is None or consumed[match_idx]:
                     return None
                 indices.append(match_idx)
-            if len(indices) < (x_idx + 1) * block_size:
-                return None
         return GroupedReadPlan(
             x=x0,
             y=y0,

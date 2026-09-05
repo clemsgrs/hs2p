@@ -41,27 +41,6 @@ def push_branch_and_tag(branch: str, version: str) -> None:
     run(f"git push origin {tag}")
 
 
-def push_tag_and_branch(version: str) -> str:
-    branch = f"release-{version}"
-    tag = f"{version}"
-
-    print(f"🌿 Creating branch {branch}...")
-    run(f"git checkout -b {branch}")
-    run(f"git push origin {branch}")
-
-    print(f"🏷️ Creating tag {tag}...")
-    # Check if tag already exists
-    existing_tags = run("git tag")
-    if tag not in existing_tags.split():
-        run(f"git tag {tag}")
-    else:
-        print(f"✅ Tag {tag} already exists.")
-
-    run(f"git push origin {tag}")
-
-    return branch
-
-
 def create_pull_request(branch: str, version: str) -> None:
     print(f"🔁 Creating pull request for {branch} → main...")
     run(

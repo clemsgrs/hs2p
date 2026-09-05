@@ -764,8 +764,7 @@ def preprocess_slide_per_annotation(
 
     The annotation counterpart of :func:`preprocess_slide` — it returns one
     :class:`TilingResult` per active annotation (keyed by name) instead of a single tissue
-    result, wiring the previously-orphaned :func:`build_per_annotation_tiling_results` to a
-    real mask. ``selection_strategy`` selects INDEPENDENT vs JOINT sampling; ``output_mode``
+    result. ``selection_strategy`` selects INDEPENDENT vs JOINT sampling; ``output_mode``
     selects single vs per-annotation coordinate output.
 
     When ``mask_preview`` is given, one filled multi-label overlay is rendered here — once per
