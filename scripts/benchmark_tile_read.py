@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import csv
 import importlib
 import sys
 import time
@@ -12,8 +13,9 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 import numpy as np
+from rich.console import Console
 
-from hs2p.api import coerce_wsd_path
+from hs2p.wsi.backend import coerce_wsd_path
 from scripts.benchmark_tile_read_support import (
     BenchmarkProgressReporter,
     MODE_CONFIG,

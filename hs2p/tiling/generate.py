@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 
 from hs2p.tiling.contours import _normalize_level_downsamples
-from hs2p.tiling.coverage import compute_tile_coverage
+from hs2p.tiling.coverage import _compute_tile_coverage
 from hs2p.tiling.result import ContourResult, TileGeometry, TilingResult
 from hs2p.wsi.geometry import plan_spacing_read
 
@@ -172,17 +172,28 @@ def _tiles_for_contour(
 
     grid_x, grid_y = np.meshgrid(xs, ys, indexing="ij")
     candidates = np.stack([grid_x.ravel(), grid_y.ravel()], axis=1)
+    mask_h, mask_w = tissue_mask.shape[:2]
+    scale_x, scale_y = mask_w / slide_w, mask_h / slide_h
+    # Round on the full mask grid before cropping. The inclusive contour extrema
+    # bound every filled pixel, so other canvas pixels never need an integral.
+    mask_x0 = min(mask_w, max(0, round(x_cont * scale_x)))
+    mask_y0 = min(mask_h, max(0, round(y_cont * scale_y)))
+    mask_x1 = min(mask_w, max(0, round((x_cont + w_cont - 1) * scale_x) + 1))
+    mask_y1 = min(mask_h, max(0, round((y_cont + h_cont - 1) * scale_y) + 1))
     contour_mask = _build_contour_tissue_mask(
         contour=contour,
         contour_holes=contour_holes,
         tissue_mask=tissue_mask,
         slide_dimensions=slide_dimensions,
+        mask_bounds=(mask_x0, mask_y0, mask_x1, mask_y1),
     )
-    fractions = compute_tile_coverage(
+    fractions = _compute_tile_coverage(
         candidates,
         contour_mask,
         tile_size_lv0,
         slide_dimensions,
+        mask_dimensions=(mask_w, mask_h),
+        mask_origin=(mask_x0, mask_y0),
     )
     keep = fractions >= min_tissue_fraction
     return candidates[keep], fractions[keep]
@@ -193,18 +204,25 @@ def _build_contour_tissue_mask(
     contour_holes: list[np.ndarray],
     tissue_mask: np.ndarray,
     slide_dimensions: tuple[int, int],
+    *,
+    mask_bounds: tuple[int, int, int, int] | None = None,
 ) -> np.ndarray:
     mask_h, mask_w = tissue_mask.shape[:2]
     slide_w, slide_h = slide_dimensions
     scale_x = mask_w / slide_w
     scale_y = mask_h / slide_h
 
-    contour_mask = np.zeros((mask_h, mask_w), dtype=np.uint8)
+    x0, y0, x1, y1 = mask_bounds if mask_bounds is not None else (0, 0, mask_w, mask_h)
+    contour_mask = np.zeros((y1 - y0, x1 - x0), dtype=np.uint8)
+    if contour_mask.size == 0:
+        return contour_mask
     contour_mask_scaled = contour.astype(np.float64)
     contour_mask_scaled[:, 0, 0] *= scale_x
     contour_mask_scaled[:, 0, 1] *= scale_y
     contour_mask_scaled = np.round(contour_mask_scaled).astype(np.int32)
-    cv2.drawContours(contour_mask, [contour_mask_scaled], -1, 1, thickness=-1)
+    cv2.drawContours(
+        contour_mask, [contour_mask_scaled], -1, 1, thickness=-1, offset=(-x0, -y0)
+    )
 
     if contour_holes:
         holes_scaled = []
@@ -213,9 +231,11 @@ def _build_contour_tissue_mask(
             hole_scaled[:, 0, 0] *= scale_x
             hole_scaled[:, 0, 1] *= scale_y
             holes_scaled.append(np.round(hole_scaled).astype(np.int32))
-        cv2.drawContours(contour_mask, holes_scaled, -1, 0, thickness=-1)
+        cv2.drawContours(
+            contour_mask, holes_scaled, -1, 0, thickness=-1, offset=(-x0, -y0)
+        )
 
-    return contour_mask * (tissue_mask > 0).astype(np.uint8)
+    return contour_mask * (tissue_mask[y0:y1, x0:x1] > 0).astype(np.uint8)
 
 
 __all__ = [

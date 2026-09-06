@@ -1,0 +1,2 @@
+sample_id,image_path,mask_path
+test-wsi,tests/fixtures/input/test-wsi.tif,tests/fixtures/input/test-mask.tif

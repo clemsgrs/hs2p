@@ -165,5 +165,6 @@ cython_debug/
 output/
 data/
 *.csv
+!benchmarks/fixture.csv
 *.yaml
 .tasks/

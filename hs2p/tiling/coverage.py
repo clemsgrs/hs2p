@@ -26,7 +26,34 @@ def compute_tile_coverage(
     Returns:
         (N,) float32 array with values in [0, 1].
     """
-    mask_h, mask_w = binary_mask.shape[:2]
+    return _compute_tile_coverage(
+        candidates,
+        binary_mask,
+        tile_size_lv0,
+        slide_dimensions,
+        mask_dimensions=(binary_mask.shape[1], binary_mask.shape[0]),
+        mask_origin=(0, 0),
+    )
+
+
+def _compute_tile_coverage(
+    candidates: np.ndarray,
+    binary_mask: np.ndarray,
+    tile_size_lv0: int,
+    slide_dimensions: tuple[int, int],
+    *,
+    mask_dimensions: tuple[int, int],
+    mask_origin: tuple[int, int],
+) -> np.ndarray:
+    """Measure a mask crop while keeping projection on the original mask grid.
+
+    Pixels outside the crop are zero. Projecting before subtracting its integer
+    origin preserves the full mask's rounding, including noninteger downsampling.
+    """
+    if binary_mask.size == 0:
+        return np.zeros(len(candidates), dtype=np.float32)
+    crop_h, crop_w = binary_mask.shape[:2]
+    mask_w, mask_h = mask_dimensions
     slide_w, slide_h = slide_dimensions
     scale_x = mask_w / slide_w
     scale_y = mask_h / slide_h
@@ -43,10 +70,11 @@ def compute_tile_coverage(
         scale_x=scale_x,
         scale_y=scale_y,
     )
-    x1 = np.clip(mask_origins[:, 0], 0, mask_w)
-    y1 = np.clip(mask_origins[:, 1], 0, mask_h)
-    x2 = np.clip(mask_origins[:, 0] + tile_w_mask, 0, mask_w)
-    y2 = np.clip(mask_origins[:, 1] + tile_h_mask, 0, mask_h)
+    mask_origins -= mask_origin
+    x1 = np.clip(mask_origins[:, 0], 0, crop_w)
+    y1 = np.clip(mask_origins[:, 1], 0, crop_h)
+    x2 = np.clip(mask_origins[:, 0] + tile_w_mask, 0, crop_w)
+    y2 = np.clip(mask_origins[:, 1] + tile_h_mask, 0, crop_h)
 
     tissue_sum = (
         integral[y2, x2] - integral[y1, x2] - integral[y2, x1] + integral[y1, x1]

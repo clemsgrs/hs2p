@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pytest
 
@@ -21,6 +22,76 @@ from hs2p.wsi.streaming.plans import resolve_read_step_px
 
 BASE_SPACING = 0.25
 DOWNSAMPLES = [1.0, 2.0, 4.0, 16.0]
+
+
+@pytest.mark.parametrize("num_workers", [1, 2])
+def test_generate_tiles_bounds_coverage_work_to_selected_content(monkeypatch, num_workers):
+    mask = np.zeros((64, 64), dtype=np.uint8)
+    mask[4:6, 4:6] = 255
+    mask[48:50, 48:50] = 255
+    contours = detect_contours(mask, slide_dimensions=(64, 64), a_t=0)
+    integral_sizes = []
+    original_integral = cv2.integral
+
+    def track_integral(image, *args, **kwargs):
+        integral_sizes.append(image.size)
+        return original_integral(image, *args, **kwargs)
+
+    monkeypatch.setattr(cv2, "integral", track_integral)
+    result = generate_tiles(
+        (64, 64), contours, requested_tile_size_px=2,
+        requested_spacing_um=1.0, base_spacing_um=1.0,
+        level_downsamples=[1.0], min_tissue_fraction=0.5,
+        num_workers=num_workers,
+    )
+
+    np.testing.assert_array_equal(result.x, [4, 48])
+    np.testing.assert_array_equal(result.y, [4, 48])
+    np.testing.assert_array_equal(result.tissue_fractions, [1.0, 1.0])
+    assert sum(integral_sizes) <= 8
+
+
+@pytest.mark.parametrize(
+    "contour,holes,tile_size,expected_coords,expected_fractions",
+    [
+        (
+            [[5, 3], [15, 3], [15, 15], [5, 15]],
+            [[[8, 6], [10, 6], [10, 9], [8, 9]]],
+            6,
+            [[5, 3], [5, 9], [5, 15], [11, 3], [11, 9], [11, 15]],
+            [0.75, 0.75, 0.5, 0.75, 0.75, 0.5],
+        ),
+        (
+            [[15, 12], [24, 12], [24, 21], [15, 21]],
+            [],
+            4,
+            [[15, 12], [15, 16], [19, 12], [19, 16]],
+            [1.0, 1.0, 0.5, 0.5],
+        ),
+        (
+            [[19, 3], [19, 8]],
+            [],
+            4,
+            [[19, 3], [19, 7]],
+            [0.0, 0.0],
+        ),
+    ],
+)
+def test_generate_tiles_preserves_fractional_mask_projection_and_padding(
+    contour, holes, tile_size, expected_coords, expected_fractions,
+):
+    contours = ContourResult(
+        contours=[np.array(contour, dtype=np.int32).reshape(-1, 1, 2)],
+        holes=[[np.array(hole, dtype=np.int32).reshape(-1, 1, 2) for hole in holes]],
+        mask=np.full((6, 8), 255, dtype=np.uint8),
+    )
+    result = generate_tiles(
+        (20, 18), contours, requested_tile_size_px=tile_size,
+        requested_spacing_um=1.0, base_spacing_um=1.0,
+        level_downsamples=[1.0], min_tissue_fraction=0.0,
+    )
+    np.testing.assert_array_equal(np.column_stack((result.x, result.y)), expected_coords)
+    np.testing.assert_array_equal(result.tissue_fractions, expected_fractions)
 
 
 def test_detect_contours_keeps_all_child_holes():
