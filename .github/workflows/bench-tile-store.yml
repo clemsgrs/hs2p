@@ -1,138 +1,36 @@
-name: Bench – tile read throughput
+name: Bench – fixture read and store
 
 on:
-  push:
-    branches: [master]
   pull_request:
-    branches: [master]
   workflow_dispatch:
 
 permissions:
-  contents: write  # allows committing the chart back to the repo on master
-  actions: read    # needed to download artifacts from other runs
+  contents: read
 
 jobs:
   bench:
-    name: WSD read-strategy comparison
     runs-on: ubuntu-latest
-
+    timeout-minutes: 15
     steps:
-      # ------------------------------------------------------------------ #
-      # 1. Source                                                            #
-      # ------------------------------------------------------------------ #
       - uses: actions/checkout@v4
-
-      # ------------------------------------------------------------------ #
-      # 2. Build Docker image (layer cache keyed to Dockerfile + deps)      #
-      # ------------------------------------------------------------------ #
-      - uses: docker/setup-buildx-action@v3
-
-      - name: Build hs2p image
-        uses: docker/build-push-action@v6
+      - uses: actions/setup-python@v5
         with:
-          context: .
-          load: true
-          tags: hs2p-bench:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # ------------------------------------------------------------------ #
-      # 3. Run benchmark inside the image                                   #
-      #    Mount repo at /opt/app so the current code is tested, not the   #
-      #    snapshot that was baked into the image.                          #
-      # ------------------------------------------------------------------ #
-      - name: Run tile-read benchmark (regular_wsd / supertiles_wsd)
+          python-version: '3.11'
+      - name: Install CPU benchmark dependencies
+        run: python -m pip install '.[openslide,testing]' 'wholeslidedata==0.0.15' 'numpy<2'
+      - name: Test benchmark support
+        run: python -m pytest -q --no-cov -m script tests/test_benchmarking.py tests/test_benchmark_tile_store.py
+      - name: Measure preprocessing CPU and allocations
+        run: python scripts/benchmark_preprocessing.py --cases contours_sparse contours_dense mask_decode fixture --repeat 3 --output bench-out/preprocessing.json
+      - name: Measure fixture read and store
         run: |
-          docker run --rm \
-            --user "$(id -u):$(id -g)" \
-            -v "$PWD:/opt/app" \
-            -w /opt/app \
-            hs2p-bench \
-            bash -c "
-              pip install -e . -q &&
-              python scripts/benchmark_tile_read.py \
-                --config-file benchmarks/bench-fixture.yaml \
-                --output-dir  bench-out \
-                --modes regular_wsd supertiles_wsd \
-                --repeat  1 \
-                --warmup  0
-            "
-
-      # ------------------------------------------------------------------ #
-      # 4. Download baseline from the latest successful master run          #
-      # ------------------------------------------------------------------ #
-      - name: Download baseline artifact from master
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # Look for the most recent successful run of this workflow on the
-        # default branch.  Skip gracefully if none exists yet.
-        run: |
-          DEFAULT_BRANCH="${{ github.event.repository.default_branch }}"
-          RUN_ID=$(gh run list \
-            --repo "$GITHUB_REPOSITORY" \
-            --branch "$DEFAULT_BRANCH" \
-            --workflow "bench-tile-store.yml" \
-            --status success \
-            --limit 1 \
-            --json databaseId \
-            --jq '.[0].databaseId // empty')
-
-          if [ -z "$RUN_ID" ]; then
-            echo "No previous successful run found on ${DEFAULT_BRANCH} – skipping baseline download."
-          else
-            echo "Downloading baseline from run ${RUN_ID}"
-            gh run download "$RUN_ID" \
-              --repo "$GITHUB_REPOSITORY" \
-              --name bench-tile-read-results \
-              --dir bench-baseline \
-            || echo "Artifact download failed – skipping baseline comparison."
-          fi
-
-      # ------------------------------------------------------------------ #
-      # 5. Plot comparison (also inside Docker so matplotlib is available)  #
-      # ------------------------------------------------------------------ #
-      - name: Build comparison chart
-        run: |
-          NEW_LABEL="${{ github.head_ref || github.ref_name }}"
-          BASELINE_FLAG=""
-          [ -f bench-baseline/benchmark_summary.csv ] && \
-            BASELINE_FLAG="--baseline bench-baseline/benchmark_summary.csv"
-
-          docker run --rm \
-            --user "$(id -u):$(id -g)" \
-            -v "$PWD:/opt/app" \
-            -w /opt/app \
-            hs2p-bench \
-            python scripts/plot_bench_comparison.py \
-              --new   bench-out/benchmark_summary.csv \
-              ${BASELINE_FLAG} \
-              --new-label      "$NEW_LABEL" \
-              --baseline-label "main" \
-              --output         bench-out/throughput_comparison.png
-
-      # ------------------------------------------------------------------ #
-      # 6. Commit chart to assets/ (master pushes only)                     #
-      # ------------------------------------------------------------------ #
-      - name: Commit benchmark chart to assets/
-        if: github.event_name == 'push'
-        run: |
-          cp bench-out/throughput_comparison.png assets/bench-throughput.png
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add assets/bench-throughput.png
-          git diff --cached --quiet && echo "Chart unchanged – nothing to commit." || \
-            git commit -m "chore: update bench-throughput chart [skip ci]" && \
-            git push
-
-      # ------------------------------------------------------------------ #
-      # 7. Upload results as a workflow artifact                            #
-      # ------------------------------------------------------------------ #
-      - name: Upload benchmark results
+          python scripts/benchmark_tile_read.py --config-file benchmarks/fixture.json --output-dir bench-out/read --modes regular_wsd supertiles_wsd --repeat 3 --warmup 1 --num-workers 1
+          python scripts/benchmark_tile_store.py --config-file benchmarks/fixture.json --output-dir bench-out/store --workers 1 --repeat 3 --warmup 1 --jpeg-backend pil
+      - name: Upload measurements
         uses: actions/upload-artifact@v4
         with:
-          name: bench-tile-read-results
+          name: bench-fixture-results
           path: |
-            bench-out/benchmark_runs.csv
-            bench-out/benchmark_summary.csv
-            bench-out/throughput_comparison.png
-          retention-days: 90
+            bench-out/**/*.csv
+            bench-out/*.json
+          retention-days: 30

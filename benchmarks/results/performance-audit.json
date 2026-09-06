@@ -1,0 +1,296 @@
+{
+  "baseline_revision": "d4ea0c3ae1e2b9c8d106cf9c31324ec2f1828ae5",
+  "notes": "Original source exported with git archive; working-tree filenames omitted. First pair: 5 samples; confirm pair: 11 samples for noisy smaller cases and real fixture. Timings exclude tracing/profiling. All paired output hashes match.",
+  "runs": {
+    "before": {
+      "environment": {
+        "python": "3.10.12 (main, Jun 22 2026, 18:55:27) [GCC 11.4.0]",
+        "platform": "Linux-5.15.0-124-generic-x86_64-with-glibc2.35",
+        "numpy": "2.2.6",
+        "opencv": "4.13.0",
+        "opencv_threads": 1,
+        "revision": null
+      },
+      "repeat": 5,
+      "warmup": 1,
+      "results": [
+        {
+          "case": "contours_sparse",
+          "seconds": [
+            39.54397333692759,
+            39.41306124813855,
+            21.26220207917504,
+            37.15201248298399,
+            287.9064210278448
+          ],
+          "median_seconds": 39.41306124813855,
+          "peak_traced_bytes": 71557393,
+          "output": {
+            "sha256": "b1537311c213501969337416ff1a24d34b85a0e88805fc75ccf1aea7fc509a68",
+            "elements": 9216
+          }
+        },
+        {
+          "case": "contours_dense",
+          "seconds": [
+            0.07915634312666953,
+            0.0883660928811878,
+            0.08737372211180627,
+            0.08331680204719305,
+            0.09279221715405583
+          ],
+          "median_seconds": 0.08737372211180627,
+          "peak_traced_bytes": 77103386,
+          "output": {
+            "sha256": "f6b7b8974fa2453b0ab41014439ed185e7f85a802c2106a96c98e2581bfef8e1",
+            "elements": 57600
+          }
+        },
+        {
+          "case": "mask_decode",
+          "seconds": [
+            0.1237678739707917,
+            0.12561165099032223,
+            0.12666867091320455,
+            0.11663788207806647,
+            0.13844245509244502
+          ],
+          "median_seconds": 0.12561165099032223,
+          "peak_traced_bytes": 75518642,
+          "output": {
+            "sha256": "74c9db0ef1c893c635e411c827c22b878586b9132f7315bc75f73bcdaf835163",
+            "elements": 4194304
+          }
+        }
+      ]
+    },
+    "after": {
+      "environment": {
+        "python": "3.10.12 (main, Jun 22 2026, 18:55:27) [GCC 11.4.0]",
+        "platform": "Linux-5.15.0-124-generic-x86_64-with-glibc2.35",
+        "numpy": "2.2.6",
+        "opencv": "4.13.0",
+        "opencv_threads": 1,
+        "source_sha256": "a94fb2016ea0ec697e2b08de1c4acf39cee4a5edbb2bae536728602db10b0d32",
+        "benchmark_sha256": "7f02f960717f9621fd8498215b911cb9016525222b6bb2672f3d6459ae70e041",
+        "revision": "d4ea0c3ae1e2b9c8d106cf9c31324ec2f1828ae5"
+      },
+      "repeat": 5,
+      "warmup": 1,
+      "results": [
+        {
+          "case": "contours_sparse",
+          "seconds": [
+            0.027945714071393013,
+            0.018895624903962016,
+            0.015874884091317654,
+            0.01386392512358725,
+            0.012973431963473558
+          ],
+          "median_seconds": 0.015874884091317654,
+          "peak_traced_bytes": 1179316,
+          "output": {
+            "sha256": "b1537311c213501969337416ff1a24d34b85a0e88805fc75ccf1aea7fc509a68",
+            "elements": 9216
+          }
+        },
+        {
+          "case": "contours_dense",
+          "seconds": [
+            0.16964651411399245,
+            0.12053385004401207,
+            0.31072508404031396,
+            0.23664930905215442,
+            0.22845285618677735
+          ],
+          "median_seconds": 0.22845285618677735,
+          "peak_traced_bytes": 68467138,
+          "output": {
+            "sha256": "f6b7b8974fa2453b0ab41014439ed185e7f85a802c2106a96c98e2581bfef8e1",
+            "elements": 57600
+          }
+        },
+        {
+          "case": "mask_decode",
+          "seconds": [
+            0.12552440003491938,
+            0.10333653585985303,
+            0.13660942087881267,
+            0.12679872289299965,
+            0.11777747608721256
+          ],
+          "median_seconds": 0.12552440003491938,
+          "peak_traced_bytes": 37901667,
+          "output": {
+            "sha256": "74c9db0ef1c893c635e411c827c22b878586b9132f7315bc75f73bcdaf835163",
+            "elements": 4194304
+          }
+        }
+      ]
+    },
+    "before-confirm": {
+      "environment": {
+        "python": "3.10.12 (main, Jun 22 2026, 18:55:27) [GCC 11.4.0]",
+        "platform": "Linux-5.15.0-124-generic-x86_64-with-glibc2.35",
+        "numpy": "2.2.6",
+        "opencv": "4.13.0",
+        "opencv_threads": 1,
+        "source_sha256": "6f8a8832fb3a98db437b135daf13266fea20c49a0d83966b12a1450ae299f384",
+        "benchmark_sha256": "7f02f960717f9621fd8498215b911cb9016525222b6bb2672f3d6459ae70e041",
+        "revision": null
+      },
+      "repeat": 11,
+      "warmup": 1,
+      "results": [
+        {
+          "case": "contours_dense",
+          "seconds": [
+            0.1483443658798933,
+            0.23787036701105535,
+            0.08555850712582469,
+            0.07868436397984624,
+            0.18789773504249752,
+            0.1189098060131073,
+            0.13833045307546854,
+            0.10968806105665863,
+            0.13621387700550258,
+            0.1616814809385687,
+            0.21081279893405735
+          ],
+          "median_seconds": 0.13833045307546854,
+          "peak_traced_bytes": 77103410,
+          "output": {
+            "sha256": "f6b7b8974fa2453b0ab41014439ed185e7f85a802c2106a96c98e2581bfef8e1",
+            "elements": 57600
+          }
+        },
+        {
+          "case": "mask_decode",
+          "seconds": [
+            0.24896094808354974,
+            0.18367275688797235,
+            0.1259632259607315,
+            0.13522876403294504,
+            0.12945592892356217,
+            0.15343502420000732,
+            0.13265454513020813,
+            0.11590019008144736,
+            0.13050933205522597,
+            0.11793020297773182,
+            3.7515907830093056
+          ],
+          "median_seconds": 0.13265454513020813,
+          "peak_traced_bytes": 75518666,
+          "output": {
+            "sha256": "74c9db0ef1c893c635e411c827c22b878586b9132f7315bc75f73bcdaf835163",
+            "elements": 4194304
+          }
+        },
+        {
+          "case": "fixture",
+          "seconds": [
+            0.01351371593773365,
+            0.01413401891477406,
+            0.012991315918043256,
+            0.011782727902755141,
+            0.010198405012488365,
+            0.00921800616197288,
+            0.00891019101254642,
+            0.00865408987738192,
+            0.008714720839634538,
+            0.008894279133528471,
+            0.00853112107142806
+          ],
+          "median_seconds": 0.00921800616197288,
+          "peak_traced_bytes": 3635686,
+          "output": {
+            "sha256": "d7d1cbd04c3ab968255073d773b2710c25fcf2b5c690aa903f333dbad790b6d3",
+            "elements": 459
+          }
+        }
+      ]
+    },
+    "after-confirm": {
+      "environment": {
+        "python": "3.10.12 (main, Jun 22 2026, 18:55:27) [GCC 11.4.0]",
+        "platform": "Linux-5.15.0-124-generic-x86_64-with-glibc2.35",
+        "numpy": "2.2.6",
+        "opencv": "4.13.0",
+        "opencv_threads": 1,
+        "source_sha256": "a94fb2016ea0ec697e2b08de1c4acf39cee4a5edbb2bae536728602db10b0d32",
+        "benchmark_sha256": "7f02f960717f9621fd8498215b911cb9016525222b6bb2672f3d6459ae70e041",
+        "revision": "d4ea0c3ae1e2b9c8d106cf9c31324ec2f1828ae5"
+      },
+      "repeat": 11,
+      "warmup": 1,
+      "results": [
+        {
+          "case": "contours_dense",
+          "seconds": [
+            0.19882250484079123,
+            0.10860366700217128,
+            0.14196723187342286,
+            0.08570409193634987,
+            0.09152158908545971,
+            0.1156506109982729,
+            0.10937231709249318,
+            0.10477381688542664,
+            0.15879476792179048,
+            0.19588519097305834,
+            0.11800947599112988
+          ],
+          "median_seconds": 0.1156506109982729,
+          "peak_traced_bytes": 68467105,
+          "output": {
+            "sha256": "f6b7b8974fa2453b0ab41014439ed185e7f85a802c2106a96c98e2581bfef8e1",
+            "elements": 57600
+          }
+        },
+        {
+          "case": "mask_decode",
+          "seconds": [
+            0.05845782603137195,
+            0.057363471016287804,
+            0.06597398710437119,
+            0.06362449401058257,
+            0.07050250517204404,
+            0.07087262184359133,
+            0.07790851104073226,
+            0.052274283953011036,
+            0.07164167799055576,
+            0.07381233503110707,
+            0.08612665208056569
+          ],
+          "median_seconds": 0.07050250517204404,
+          "peak_traced_bytes": 37901587,
+          "output": {
+            "sha256": "74c9db0ef1c893c635e411c827c22b878586b9132f7315bc75f73bcdaf835163",
+            "elements": 4194304
+          }
+        },
+        {
+          "case": "fixture",
+          "seconds": [
+            0.012881356058642268,
+            0.012702412903308868,
+            0.012151236878708005,
+            0.01160437404178083,
+            0.011232170974835753,
+            0.010083833010867238,
+            0.009944992139935493,
+            0.010476294904947281,
+            0.010296524036675692,
+            0.010203856974840164,
+            0.01004413003101945
+          ],
+          "median_seconds": 0.010476294904947281,
+          "peak_traced_bytes": 2253725,
+          "output": {
+            "sha256": "d7d1cbd04c3ab968255073d773b2710c25fcf2b5c690aa903f333dbad790b6d3",
+            "elements": 459
+          }
+        }
+      ]
+    }
+  }
+}

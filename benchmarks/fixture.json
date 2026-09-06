@@ -1,0 +1,18 @@
+{
+  "csv": "benchmarks/fixture.csv",
+  "output_dir": "output/benchmark-fixture",
+  "save_tiles": false,
+  "tiling": {
+    "backend": "openslide",
+    "mask_backend": "openslide",
+    "params": {
+      "requested_spacing_um": 0.5,
+      "requested_tile_size_px": 224,
+      "tolerance": 0.05,
+      "overlap": 0.0
+    },
+    "masks": {"min_coverage": {"tissue": 0.1}},
+    "preview": {"save_mask_preview": false, "save_tiling_preview": false}
+  },
+  "speed": {"num_workers": 1, "jpeg_backend": "pil"}
+}

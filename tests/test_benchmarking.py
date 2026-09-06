@@ -12,6 +12,24 @@ from hs2p.wsi.streaming.plans import resolve_read_step_px
 pytestmark = pytest.mark.script
 
 
+def test_read_benchmark_resume_preserves_completed_csv_results(monkeypatch, tmp_path):
+    module = _load_benchmark_script_module()
+    summary = tmp_path / "benchmark_summary.csv"
+    runs = tmp_path / "benchmark_runs.csv"
+    summary.write_text("mode,tiles\nregular_wsd,2\n")
+    runs.write_text("mode,repeat_index,tiles\nregular_wsd,0,2\n")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["benchmark_tile_read.py", "--config-file", "unused.json",
+         "--output-dir", str(tmp_path), "--modes", "regular_wsd"],
+    )
+
+    assert module.main() == 0
+    assert summary.read_text() == "mode,tiles\nregular_wsd,2\n"
+    assert runs.read_text() == "mode,repeat_index,tiles\nregular_wsd,0,2\n"
+
+
 def _make_grid_result(
     *,
     columns: int,
@@ -296,7 +314,8 @@ def test_load_single_slide_result_from_config_builds_fresh_tiling_result(tmp_pat
         "save_tiles: false\n"
         "resume: false\n"
         "tiling:\n"
-        "  backend: asap\n"
+        "  backend: openslide\n"
+        "  mask_backend: openslide\n"
         "  params:\n"
         "    requested_spacing_um: 0.5\n"
         "    requested_tile_size_px: 224\n"
@@ -306,7 +325,8 @@ def test_load_single_slide_result_from_config_builds_fresh_tiling_result(tmp_pat
         "    min_coverage:\n"
         "      tissue: 0.1\n"
         "  preview:\n"
-        "    save: false\n"
+        "    save_mask_preview: false\n"
+        "    save_tiling_preview: false\n"
     )
 
     result = module.load_single_slide_result_from_config(
@@ -350,7 +370,7 @@ def test_benchmark_wsd_mode_reports_region_and_tile_progress(monkeypatch):
         mp.setitem(
             sys.modules,
             "wholeslidedata",
-            SimpleNamespace(WSI=_FakeWSI),
+            SimpleNamespace(WholeSlideImage=_FakeWSI),
         )
         elapsed, tile_count, checksum = module.benchmark_wsd_mode(
             result=result,
@@ -377,15 +397,19 @@ def test_benchmark_cucim_batch_mode_reports_region_and_tile_progress(monkeypatch
     ]
 
     class _FakeCuImage:
+        metadata = {"cucim": {"resolutions": {
+            "level_dimensions": [(32, 32)], "level_downsamples": [1.0],
+        }}}
+
         def __init__(self, *_args, **_kwargs):
             pass
 
-        def read_region(self, locations, size, level, num_workers):
+        def read_region(self, location, size, level, num_workers):
             assert level == 0
             assert num_workers == 2
             return [
                 np.zeros((int(size[0]), int(size[1]), 3), dtype=np.uint8)
-                for _ in locations
+                for _ in location
             ]
 
     updates: list[tuple[int, int]] = []

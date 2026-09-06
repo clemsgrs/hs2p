@@ -1,68 +1,116 @@
-# Benchmark Notes
+# Performance verification
 
-The benchmark entrypoints now live in:
+Run commands from the repository root. Use the same Python environment, machine,
+slide, backend, configuration, tile limit, and worker count for both revisions.
+Install the portable CPU dependencies in a virtual environment:
 
-- `scripts/benchmark_tile_read.py`
-- `scripts/benchmark_tile_store.py`
+```bash
+python -m pip install -e '.[openslide,testing]' 'wholeslidedata==0.0.15' 'numpy<2'
+```
 
-with shared helper logic in:
+The checked-in `benchmarks/fixture.json` and `benchmarks/fixture.csv` use the real
+TIFF fixtures with OpenSlide and PIL JPEG encoding. They need no GPU or ASAP.
+The CSV paths are relative to the repository root. JSON is accepted by the normal
+OmegaConf configuration loader. Coordinate selection is computed before timing;
+the benchmark loader does not reuse coordinate artifacts.
 
-- `scripts/benchmark_tile_read_support.py`
-- `scripts/benchmark_tile_store_support.py`
-- `scripts/benchmark_tile_utils.py`
+## Preprocessing CPU and memory
 
-This note tells the story behind the tile-store throughput improvements that motivated the current benchmark setup.
+The deterministic preprocessing runner covers sparse/dense contour selection,
+mask decoding, and the real fixture. It complements the existing read/store
+benchmarks, which exclude coordinate preparation:
 
-<img src="../output/tile-store-benchmark-path-breakdown/throughput.png" alt="Tile-store benchmark progression" width="900">
+```bash
+python scripts/benchmark_preprocessing.py \
+  --cases contours_sparse contours_dense mask_decode fixture --repeat 5 \
+  --output output/perf-before/preprocessing.json
+```
 
-## Baseline
+Repeat with a fresh `perf-after` output. Keep case inputs identical; inspect the
+recorded output fingerprints as well as timing and memory measurements. The runner
+refuses to overwrite an existing report and saves each completed case. Add
+`--profile-dir output/perf-profile` to collect profiles for investigation; compare
+unprofiled runs for headline timings.
 
-The starting point was the simplest possible path:
+The synthetic cases use a 2048×2048 mask on a 32768×32768 slide grid:
+`contours_sparse` has 64 separated 96×96 tissue islands (9,216 output tiles),
+while `contours_dense` has one 1920×1920 region (57,600 tiles). They exercise
+production `generate_tiles` with one worker. `mask_decode` loads a 4-million-pixel
+byte mask through an in-memory reader: it measures validation and binarization,
+**not codec or disk I/O**. `fixture` calls `tile_slide` with explicit OpenSlide slide
+and mask backends, including opening and decoding the real TIFFs, contour
+selection, and coordinate generation; it excludes artifact writing.
 
-- `wholeslidedata` reads
-- one read per tile
-- PIL JPEG encoding
+Each case performs one warmup by default, records all uninstrumented wall-clock
+samples and their median, then makes a separate allocation-traced call. The
+`peak_traced_bytes` measurement includes NumPy allocations visible to tracemalloc;
+it excludes prebuilt inputs and native decoder/OpenCV allocations that Python
+cannot trace. It is not process RSS. Profiles also come from a separate call.
+JSON reports include package/runtime details, source and runner hashes, and output
+hashes. Compare output hashes exactly across revisions. Use a quiet machine and
+inspect the sample spread; shared-host scheduling and warm caches affect timings.
+The CPU runner requires no additional benchmark package.
 
-On the benchmark slide, that baseline reached `62.64 tiles/s` at `4` workers.
-The plot makes the main problem obvious: throughput rises a little with worker
-count, but the curve flattens quickly because the pipeline is still doing one
-decode per tile.
+See [the audit results](performance-audit.md) for measured changes and limitations.
 
-## WSD + Supertiles
+## Read and extraction throughput
 
-The first read-path change was to stop thinking about the slide as a sequence
-of isolated tiles and instead read larger regions that cover multiple output
-tiles.
+Use a **new output directory for each revision**. The read runner resumes existing
+modes and will skip them; reusing a directory does not produce new measurements.
 
-By “supertiles” I mean a larger read window, such as an `8x8` or `4x4` block of
-output tiles, that is read once and then sliced back into the individual tiles.
-That reduces repeated decode work because neighboring tiles often overlap the
-same underlying image data.
+```bash
+python scripts/benchmark_tile_read.py \
+  --config-file benchmarks/fixture.json --output-dir output/perf-before/read \
+  --modes regular_wsd supertiles_wsd --num-workers 1 --warmup 1 --repeat 5
+python scripts/benchmark_tile_store.py \
+  --config-file benchmarks/fixture.json --output-dir output/perf-before/store \
+  --workers 1 --jpeg-backend pil --warmup 1 --repeat 5
+```
 
-Using WSD with supertiles raised throughput to `82.23 tiles/s` at `4` workers.
-That is a real gain, but it is still a modest one. The important part is that
-the curve improved even before we changed readers, which confirmed that the
-larger-region idea itself was sound.
+Repeat with `perf-after` after changing revisions. Both scripts write
+`benchmark_runs.csv` (individual samples) and `benchmark_summary.csv` (mean and
+standard deviation). Compare the same mode and worker count, including tile
+counts and read checksums before interpreting throughput. Checksums are a coarse
+sanity check; correctness tests remain necessary. `--max-tiles 64` gives a quick
+smoke run; use all fixture tiles or a representative external slide for claims.
 
-## CuCIM Batch Reads
+The read runner times region reads and tile consumption, excluding slide opening,
+coordinate selection, and read planning. Its WSD modes use wholeslidedata, so they
+compare read strategies rather than measuring every production reader path.
+The store runner times the production `extract_tiles_to_tar` call, including
+planning, reading, JPEG encoding and TAR writing, and reports read/encode/write
+phase timings. It writes a temporary TAR per repetition and removes it afterward;
+its output directory therefore determines the measured filesystem. Progress and
+phase instrumentation are included. Warmups exercise filesystem/decoder caches;
+these commands do not measure cold-cache storage performance.
 
-In parallel, we tried a different path: keep the tile structure, but let CuCIM
-batch multiple reads more efficiently.
+For backend or concurrency studies, copy the fixture JSON, change the slide CSV
+and explicit backend, and sweep `--workers 1 2 4`. CuCIM GPU modes require CUDA
+hardware and the corresponding extra; TurboJPEG requires its Python and native
+libraries. Do not compare measurements from different machines as a speedup.
 
-Using CuCIM batch reads raised throughput to `85.60 tiles/s` at `4` workers.
-That is close to the WSD supertile result, which is useful evidence: the win is
-not tied to one particular reader. The common factor is that both approaches
-reduce how often the pipeline has to decode a tiny tile-sized region from
-scratch.
+## Correctness and CI
 
-## Combining the Read Improvements
+```bash
+python -m pytest -q --no-cov -m script tests/test_benchmarking.py tests/test_benchmark_tile_store.py
+python -m pytest -q --no-cov tests
+python -m pytest -q --no-cov -m integration tests/test_fixture_artifacts_regression.py tests/test_tile_count_heuristic_regression.py tests/test_tiling_preview_mask_overlay.py
+```
 
-Both directions improved the baseline, so the next obvious step was to combine
-them.
+The last command contains ASAP-dependent golden-coordinate checks; inspect skips
+and use the existing project Docker image when ASAP is needed. The fixture benchmark
+workflow runs the preprocessing and portable CPU read/store commands and uploads raw JSON/CSVs. It is a
+smoke/performance artifact workflow, without a noisy cross-run speed threshold.
 
-With `cucim + supertiles + PIL`, throughput rises to `193.23 tiles/s` at
-`4` workers. That is more than 3x the original baseline.
+Shared helpers remain in `benchmark_tile_read_support.py`,
+`benchmark_tile_store_support.py`, and `benchmark_tile_utils.py`. The obsolete test
+for the removed `benchmark_throughput.py` runner has been removed. Local untracked
+experiment and plotting scripts are not dependencies of the repeatable workflow.
 
-At that point, the encoder finally matters again. Switching from PIL to
-TurboJPEG on the same combined path lifts throughput further to
-`217.56 tiles/s` at `4` workers.
+## Earlier throughput experiments
+
+Previous single-slide experiments reported 62.64 tiles/s for regular WSD/PIL,
+82.23 for WSD supertiles, 85.60 for CuCIM batch reads, 193.23 for CuCIM supertiles
+with PIL, and 217.56 with TurboJPEG, all at four workers. These are historical
+observations, not portable baselines: their original environment and raw results
+are not checked in. Use the commands above for a current comparison.

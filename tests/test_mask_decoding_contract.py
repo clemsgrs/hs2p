@@ -217,3 +217,24 @@ def test_single_value_annotation_mask_succeeds_without_empty_mask_warning(
     assert np.all(resolved.masks["background"] == 255)
     assert not np.any(resolved.masks["tumor"])
     assert [record for record in caplog.records if record.levelname == "WARNING"] == []
+
+
+def test_uint8_mask_loading_does_not_widen_raster_for_label_validation(monkeypatch):
+    # Backend channel reduction can return a non-contiguous view.
+    source = np.array([[[0, 99], [7, 99]], [[7, 99], [0, 99]]], dtype=np.uint8)
+    monkeypatch.setattr(mask_mod, "open_slide", lambda *args, **kwargs: _ArrayMaskSlide(source))
+    scanned_item_sizes = []
+    original_unique = np.unique
+
+    def record_unique(values, *args, **kwargs):
+        scanned_item_sizes.append(values.dtype.itemsize)
+        return original_unique(values, *args, **kwargs)
+
+    monkeypatch.setattr(mask_mod.np, "unique", record_unique)
+    result, level, spacing = load_precomputed_tissue_mask(
+        mask_path="labels.tif", slide=_wsi(), seg_level=0, tissue_value=7, mask_backend="cucim",
+    )
+
+    np.testing.assert_array_equal(result, np.array([[0, 255], [255, 0]], dtype=np.uint8))
+    assert (level, spacing) == (0, 0.25)
+    assert all(size == 1 for size in scanned_item_sizes)

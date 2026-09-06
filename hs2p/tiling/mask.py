@@ -45,9 +45,9 @@ def _resolve_mask_backend(mask_path: str | Path, mask_backend: str | None) -> st
 
 # Reading a mask level larger than this many pixels means the mask lacks a pyramid level
 # near the requested segmentation spacing (the read would be downsized to the seg grid
-# immediately afterward). Reading + np.unique(int64) on such a raster OOMs the process, so
-# fail fast with an actionable message instead. 256 Mpx ≈ 256 MB uint8 (+ ~2 GB transient
-# int64 unique) — safe, and ~52x above the largest healthy BEETLE mask read (4.9 Mpx).
+# immediately afterward). Decoding and validating such a raster can exhaust memory, so
+# fail fast with an actionable message instead. 256 Mpx is already 256 MB for uint8;
+# wider source dtypes and backend decode buffers can require considerably more.
 MAX_MASK_READ_PX = 256_000_000
 
 
@@ -83,14 +83,23 @@ def _as_discrete_label_array(mask: np.ndarray) -> np.ndarray:
     )
 
 
+def _mask_label_values(mask: np.ndarray) -> np.ndarray:
+    # Byte masks have only 256 possible labels. A histogram avoids widening and
+    # sorting the entire raster, including non-contiguous channel views.
+    if mask.dtype == np.uint8 and mask.ndim == 2 and mask.size:
+        histogram = cv2.calcHist([mask], [0], None, [256], [0, 256])
+        return np.flatnonzero(histogram)
+    return np.unique(mask.astype(np.int64, copy=False))
+
+
 def _is_discrete_binary_mask(mask: np.ndarray, *, tissue_value: int) -> bool:
-    values = np.unique(mask.astype(np.int64, copy=False))
+    values = _mask_label_values(mask)
     non_tissue = [int(value) for value in values.tolist() if int(value) != tissue_value]
     return len(values) <= 2 and len(non_tissue) <= 1
 
 
 def _is_label_subset(mask: np.ndarray, *, valid_values: set[int]) -> bool:
-    values = {int(value) for value in np.unique(mask.astype(np.int64, copy=False)).tolist()}
+    values = {int(value) for value in _mask_label_values(mask).tolist()}
     return values <= valid_values
 
 
@@ -138,7 +147,7 @@ def _read_discrete_mask_level(
     if is_discrete(backend_mask):
         return _as_discrete_label_array(backend_mask)
 
-    values = np.unique(backend_mask.astype(np.int64, copy=False))
+    values = _mask_label_values(backend_mask)
     raise ValueError(
         f"{label} read produced non-discrete labels "
         f"at level {mask_level}: {values.tolist()[:16]}"

@@ -248,7 +248,7 @@ def test_resolve_jpeg_backend_prefers_config(tmp_path):
     assert mod.resolve_jpeg_backend(config_file=config_path) == "pil"
 
 
-def test_resolve_jpeg_backend_defaults_to_turbojpeg_when_unspecified(tmp_path):
+def test_resolve_jpeg_backend_defaults_to_pil_when_unspecified(tmp_path):
     mod = _load_benchmark_module()
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
@@ -258,7 +258,7 @@ def test_resolve_jpeg_backend_defaults_to_turbojpeg_when_unspecified(tmp_path):
         "  num_workers: 4\n"
     )
 
-    assert mod.resolve_jpeg_backend(config_file=config_path) == "turbojpeg"
+    assert mod.resolve_jpeg_backend(config_file=config_path) == "pil"
 
 
 def test_resolve_jpeg_backend_prefers_cli_override(tmp_path):
