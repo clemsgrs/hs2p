@@ -2,7 +2,16 @@
 
 Run commands from the repository root. Use the same Python environment, machine,
 slide, backend, configuration, tile limit, and worker count for both revisions.
-Install the portable CPU dependencies in a virtual environment:
+On Ubuntu/Debian, install the native dependency before the Python packages.
+The WSD read modes use `wholeslidedata==0.0.15`, which pins `rtree==1.0.0`
+and requires `libspatialindex_c` even for image-only reads:
+
+```bash
+sudo apt-get update
+sudo apt-get install --no-install-recommends -y libspatialindex-dev
+```
+
+Then install the CPU dependencies in a virtual environment:
 
 ```bash
 python -m pip install -e '.[openslide,testing]' 'wholeslidedata==0.0.15' 'numpy<2'

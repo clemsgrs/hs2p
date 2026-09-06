@@ -16,6 +16,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Install native WSD dependency
+        # wholeslidedata pins Rtree 1.0.0, which needs the system spatial-index library.
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libspatialindex-dev
       - name: Install CPU benchmark dependencies
         run: python -m pip install '.[openslide,testing]' 'wholeslidedata==0.0.15' 'numpy<2'
       - name: Test benchmark support
