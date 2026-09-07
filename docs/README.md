@@ -1,17 +1,17 @@
 # Documentation
 
-- [API guide](api.md)
-  - Python entrypoints, public dataclasses, and when to use `tile_slide()` vs `tile_slides()`
-- [CLI guide](cli.md)
-  - Input CSV schemas, config areas, progress reporting, and resume/precomputed workflows
-- [Artifact reference](artifacts.md)
-  - `process_list.csv` manifests
-- [Release notes](release-notes.md)
-  - User-visible behavior changes and artifact compatibility impact
-- [Benchmark notes](benchmark.md)
-  - Throughput findings and the benchmark entrypoints in `scripts/`
-- [Tissue mask generation](tissue-mask-generation.md)
-  - Standalone pyramidal tissue-mask generation outside the main tiling pipeline
-- Architecture decisions
-  - [ADR 0001: Use one authoritative backend for mask decoding](adr/0001-authoritative-mask-decoding.md)
-  - [ADR 0002: Resolve the mask backend independently from the slide backend](adr/0002-independent-mask-backend.md)
+Start with the [installation and quick starts](../README.md) to tile your first slide, then choose the guide for your workflow.
+
+| Guide | Use it to |
+| --- | --- |
+| [Python API](api.md) | Tile one slide or a batch, inspect results, and save or load artifacts. |
+| [CLI](cli.md) | Configure batch tiling or annotation sampling, choose backends, and resume runs. |
+| [Artifacts](artifacts.md) | Read coordinates, metadata, tile exports, and `process_list.csv`. |
+| [Tissue-mask generation](tissue-mask-generation.md) | Create reusable pyramidal tissue masks with the standalone script. |
+| [Benchmarks](benchmark.md) | Run throughput benchmarks and interpret the recorded results. |
+| [Release notes](release-notes.md) | Check behavior changes and artifact compatibility before upgrading. |
+
+Architecture decisions explain the mask-reading contracts:
+
+- [One authoritative backend for mask decoding](adr/0001-authoritative-mask-decoding.md)
+- [Independent slide and mask backends](adr/0002-independent-mask-backend.md)

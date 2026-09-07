@@ -1,55 +1,51 @@
 # Artifact Reference
 
-`hs2p` writes explicit named coordinate artifacts for both tiling and sampling.
+Tiling and annotation sampling share the same coordinate format and process list.
 
 ## Artifact locations
 
-- Tiling writes one artifact pair per slide under `tiles/`
-- Per-annotation sampling writes one artifact pair under `tiles/<annotation>/`.
+- Tiling writes one coordinate output per slide under `tiles/`.
+- Per-annotation sampling writes one output under `tiles/<annotation>/`.
   The conventional `tissue` annotation stays flat under `tiles/`.
-- Structural merged sampling writes one flat artifact pair under `tiles/`; `merged` is
+- Merged sampling writes one flat output under `tiles/`; `merged` is
   reserved as an output identity and cannot be used as an annotation name.
 
-Each successful output produces:
+Each successful non-empty output produces:
 
 - `{sample_id}.coordinates.npz`
 - `{sample_id}.coordinates.meta.json`
 
-Optional tile tar export writes:
+An output with zero tiles is still successful. It writes only the metadata JSON,
+with `n_tiles: 0`; `coordinates_npz_path` is `None` in the API and blank in the
+process list. `load_tiling_result(None, metadata_path)` restores its empty arrays.
+
+Optional tile TAR export writes:
 
 - `{sample_id}.tiles.tar`
 - `{sample_id}.tiles.manifest.csv`
 
-The manifest is the TAR's deterministic sidecar. The returned artifact and process-list row
-record `tiles_tar_path`; the manifest uses the same stem with `.manifest.csv`.
+The manifest contains `tile_index`, `x`, and `y`, mapping level-0 tile origins to
+JPEG members named `000000.jpg`, `000001.jpg`, and so on. The returned artifact and
+process-list row record `tiles_tar_path`; the manifest uses the same stem with
+`.manifest.csv`. Batch annotation sampling does not currently support TAR export.
 
 ## `.coordinates.npz`
 
-The NPZ contains the canonical geometry arrays:
+All NPZ arrays have shape `(N,)`, where `N` is the tile count.
 
-- `tile_index`
-  - contiguous tile ids from `0` to `n_tiles - 1`
-- `x`
-  - shape `(N,)`
-  - level-0 tile origin x-coordinates
-- `y`
-  - shape `(N,)`
-  - level-0 tile origin y-coordinates
-- `tissue_fractions`
-  - per-tile tissue or annotation coverage values aligned with `x` and `y`
+| Array | Stored dtype | Meaning |
+| --- | --- | --- |
+| `tile_index` | `int32` | Contiguous tile IDs from `0` to `N - 1`. |
+| `x` | `int64` | Level-0 tile-origin x-coordinates in pixels. |
+| `y` | `int64` | Level-0 tile-origin y-coordinates in pixels. |
+| `tissue_fractions` | `float32` | Tissue or annotation coverage aligned with `x` and `y`. |
 
 Tile order is deterministic: numeric `x` first, then numeric `y` within each shared `x`.
 
 ## `.coordinates.meta.json`
 
-The metadata file is structured into:
-
-- `provenance`
-- `slide`
-- `tiling`
-- `segmentation`
-- `filtering`
-- `artifact`
+The JSON has six sections. The fields below describe the current schema; loading
+rejects missing or unexpected keys.
 
 ### `provenance`
 
@@ -58,8 +54,13 @@ The metadata file is structured into:
 - `mask_path`
 - `backend`
 - `requested_backend`
+- `mask_backend`
+- `requested_mask_backend`
 - `spacing_at_level_0`
   - the explicit level-0 spacing override, or `null` when no override was used
+
+Backend fields distinguish requested readers from resolved readers. Both mask
+backend values are `null` when no source mask was used.
 
 ### `slide`
 
@@ -87,6 +88,7 @@ When `is_within_tolerance` is true, `tile_size_lv0` and `step_px_lv0` reflect th
 ### `segmentation`
 
 - `tissue_method`
+- `requested_seg_downsample`
 - `seg_downsample`
 - `seg_level`
 - `seg_spacing_um`
@@ -102,6 +104,9 @@ When `is_within_tolerance` is true, `tile_size_lv0` and `step_px_lv0` reflect th
 - `tissue_mask_tissue_value`
 - `mask_level`
 - `mask_spacing_um`
+
+`requested_seg_downsample` records the configuration value; `seg_downsample` records
+the actual pyramid or SAM2-thumbnail downsample used.
 
 ### `filtering`
 
@@ -122,21 +127,26 @@ When `is_within_tolerance` is true, `tile_size_lv0` and `step_px_lv0` reflect th
 ### `artifact`
 
 - `coordinate_space`
+  - `"level0_px"`
 - `tile_order`
+  - `"x_then_y"`
 - `annotation`
 - `selection_strategy`
 - `output_mode`
 
 ## `process_list.csv`
 
-### Tiling manifest
+Both tissue tiling and annotation sampling use these columns:
 
 - `sample_id`
 - `annotation`
+- `output_mode`
 - `image_path`
 - `mask_path`
 - `requested_backend`
 - `backend`
+- `requested_mask_backend`
+- `mask_backend`
 - `tiling_status`
 - `num_tiles`
 - `coordinates_npz_path`
@@ -147,28 +157,15 @@ When `is_within_tolerance` is true, `tile_size_lv0` and `step_px_lv0` reflect th
 - `error`
 - `traceback`
 
-Each attempted slide is recorded as `success` or `failed`. Failure rows retain
-the concise reason in `error` and the detailed diagnostic traceback in
-`traceback`; they are failed slides, not skipped slides.
-
-### Sampling manifest
-
-- `sample_id`
-- `annotation`
-- `image_path`
-- `mask_path`
-- `requested_backend`
-- `backend`
-- `sampling_status`
-- `num_tiles`
-- `coordinates_npz_path`
-- `coordinates_meta_path`
-- `error`
-- `traceback`
+`tiling_status` is `success` or `failed`, including for annotation sampling.
+Successful per-annotation outputs have separate rows. `annotation` is `tissue`
+for ordinary tiling, the class name for per-annotation sampling, or `merged` for
+merged output. Failure rows retain the reason in `error` and the diagnostic
+traceback in `traceback`.
 
 ## Resume and validation
 
-`resume` treats a compatible successful process-list row as completed processing. In contrast,
+For tissue tiling, `resume` treats a compatible successful process-list row as completed processing.
 `read_coordinates_from` reuses coordinate computation only, so downstream TAR and tiling
 preview outputs enabled for the current invocation are still materialized.
 
@@ -177,12 +174,19 @@ Existing artifacts are validated against their structured metadata:
 - slide identity
 - mask path
 - explicit level-0 spacing override presence and value
-- backend
+- resolved slide backend and, when a source mask exists, resolved mask backend
 - requested spacing and tile size
 - overlap and minimum tissue fraction
 - segmentation and filtering settings
 - SAM2 checkpoint and model-config paths for SAM2 segmentation
 - sampling selection/output metadata when relevant
+
+Requested backend names are provenance only: changing `auto` to the same resolved
+reader does not invalidate the artifacts. Batch annotation sampling currently
+rejects both `resume` and `read_coordinates_from`.
+
+Older metadata or process lists missing the mask-backend fields are rejected.
+Recompute those artifacts with the current schema before reusing them.
 
 Source identities are intentionally path-only. Artifact validation does not hash, stat, or
 reopen a slide, mask, SAM2 checkpoint, or SAM2 model config solely to detect an in-place

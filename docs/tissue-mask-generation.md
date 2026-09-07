@@ -1,29 +1,32 @@
 # Tissue Mask Generation
 
-For standalone binary tissue-mask generation outside the main tiling pipeline, use:
-
-```bash
-python scripts/generate_tissue_mask.py --help
-```
-
-This script produces pyramidal tissue masks that can later be consumed by:
-
-- CLI tiling through the `mask_path` CSV column
-- Python workflows through `SlideSpec(mask_path=...)`
+Use `scripts/generate_tissue_mask.py` to generate binary pyramidal TIFF masks
+before tiling. Pass each output to the [CLI](cli.md) through the `mask_path` CSV
+column or to the [Python API](api.md) through `SlideSpec(mask_path=...)`.
 
 ## Installation
 
-At minimum you need a whole-slide backend plus `tifffile`:
+The script lives in the repository and is not included in the pip package. Clone
+the repository and run the commands below from its root:
 
 ```bash
-pip install "hs2p[asap]" tifffile
+git clone https://github.com/clemsgrs/hs2p.git
+cd hs2p
 ```
 
-or install the full backend set:
+The script uses WholeSlideData for every backend. On Ubuntu/Debian, install its
+native spatial-index dependency, then install the Python dependencies in a virtual
+environment. This example uses OpenSlide:
 
 ```bash
-pip install "hs2p[all]" tifffile
+sudo apt-get update
+sudo apt-get install --no-install-recommends -y libspatialindex-dev
+python -m pip install -e '.[openslide,asap]' tifffile
+python scripts/generate_tissue_mask.py --help
 ```
+
+The `asap` extra supplies WholeSlideData; using the script's default `asap`
+backend also requires the native ASAP library and its Python bindings.
 
 ## Single-slide example
 
@@ -31,6 +34,7 @@ pip install "hs2p[all]" tifffile
 python scripts/generate_tissue_mask.py \
   --wsi /path/to/slide.tif \
   --output /path/to/tissue-mask-pyramid.tif \
+  --backend openslide \
   --spacing 4.0 \
   --tolerance 0.1
 ```
@@ -39,46 +43,40 @@ python scripts/generate_tissue_mask.py \
 
 ```bash
 python scripts/generate_tissue_mask.py \
-  --wsi /path/to/slide_dir/*.tif \
+  --wsi '/path/to/slide_dir/*.tif' \
   --output-dir /path/to/output_dir \
+  --backend openslide \
   --spacing 4.0 \
   --tolerance 0.1
 ```
 
-## What it does
+Multi-slide outputs are named `<slide_stem>.tif`; input slides must have unique
+stems within a run.
 
-- reads the slide through the selected whole-slide backend
-- computes a binary mask with `0 = background`, `1 = tissue`
-- can use a coarse-to-fine ROI shortcut to reduce memory and compute
-- writes a pyramidal TIFF mask at the requested spacing
-- writes a summary CSV for the run
+The script applies HSV thresholding and morphology to produce `0 = background`
+and `1 = tissue`. A coarse-to-fine ROI shortcut is enabled by default to reduce
+memory and compute. `--spacing` sets the target mask resolution in µm/px; a native
+spacing within `--tolerance` is reused, otherwise the image is downsampled to the
+target. The TIFF records the resulting spacing. Use `--verbose` to inspect it.
 
 ## Common options
 
-- `--backend`
-  - whole-slide backend, default `asap`
-- `--output` / `--output-dir`
-  - output path for single-slide or multi-slide mode
-- `--num-workers`
-  - parallelism for multi-slide processing
-- `--spacing-at-level-0`
-  - override when slide metadata is missing or wrong
-- `--no-cache`
-  - disable cache-based skipping
-- `--disable-coarse-roi-shortcut`
-  - force full-frame processing at the requested spacing
-- `--coarse-spacing`, `--coarse-roi-margin-um`, `--processing-tile-size`
-  - coarse-to-fine ROI tuning
-- `--min-component-area-um2`, `--min-hole-area-um2`
-  - morphology cleanup thresholds
-- `--gaussian-sigma-um`, `--open-radius-um`, `--close-radius-um`
-  - smoothing and morphology controls
-- `--compression`, `--tile-size`
-  - TIFF output controls
+| Options | Purpose |
+| --- | --- |
+| `--backend` | WholeSlideData reader; default `asap`. |
+| `--output` / `--output-dir` | Single output path or directory of outputs. |
+| `--num-workers` | Parallel slide processing. |
+| `--spacing-at-level-0` | Override missing or incorrect slide spacing metadata. |
+| `--no-cache` | Force recomputation. |
+| `--disable-coarse-roi-shortcut` | Process the full frame instead of coarse tissue ROIs. |
+| `--coarse-spacing`, `--coarse-roi-margin-um`, `--processing-tile-size` | Tune coarse-to-fine ROI processing. |
+| `--min-component-area-um2`, `--min-hole-area-um2` | Remove small tissue components and fill small holes. |
+| `--gaussian-sigma-um`, `--open-radius-um`, `--close-radius-um` | Control smoothing and morphology. |
+| `--compression`, `--tile-size` | Control TIFF encoding. |
 
 ## Outputs
 
-- `summary.csv`
-  - written next to `--output` or inside `--output-dir`
-- `cache_manifest.json`
-  - cache manifest used for skip detection
+Alongside the masks, the script writes `summary.csv` and `cache_manifest.json`
+next to `--output` or inside `--output-dir`. The summary records each slide's
+input path, output path, status, and failure traceback. The manifest lets repeated
+runs skip unchanged inputs and outputs when the processing options match.

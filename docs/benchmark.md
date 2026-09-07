@@ -60,7 +60,8 @@ hashes. Compare output hashes exactly across revisions. Use a quiet machine and
 inspect the sample spread; shared-host scheduling and warm caches affect timings.
 The CPU runner requires no additional benchmark package.
 
-See [the audit results](performance-audit.md) for measured changes and limitations.
+See the [2026-09-06 audit](performance-audit.md) for historical measurements and
+their limitations.
 
 ## Read and extraction throughput
 
@@ -93,8 +94,10 @@ its output directory therefore determines the measured filesystem. Progress and
 phase instrumentation are included. Warmups exercise filesystem/decoder caches;
 these commands do not measure cold-cache storage performance.
 
-For backend or concurrency studies, copy the fixture JSON, change the slide CSV
-and explicit backend, and sweep `--workers 1 2 4`. CuCIM GPU modes require CUDA
+For backend or concurrency studies, copy the fixture JSON and change the slide
+CSV and explicit backend. The CSV must contain exactly one slide. Sweep store
+workers with `--workers 1 2 4`; read runs take one `--num-workers` value at a time.
+Store sweeps also write `throughput.png`. CuCIM GPU modes require CUDA
 hardware and the corresponding extra; TurboJPEG requires its Python and native
 libraries. Do not compare measurements from different machines as a speedup.
 
@@ -110,11 +113,6 @@ The last command contains ASAP-dependent golden-coordinate checks; inspect skips
 and use the existing project Docker image when ASAP is needed. The fixture benchmark
 workflow runs the preprocessing and portable CPU read/store commands and uploads raw JSON/CSVs. It is a
 smoke/performance artifact workflow, without a noisy cross-run speed threshold.
-
-Shared helpers remain in `benchmark_tile_read_support.py`,
-`benchmark_tile_store_support.py`, and `benchmark_tile_utils.py`. The obsolete test
-for the removed `benchmark_throughput.py` runner has been removed. Local untracked
-experiment and plotting scripts are not dependencies of the repeatable workflow.
 
 ## Earlier throughput experiments
 

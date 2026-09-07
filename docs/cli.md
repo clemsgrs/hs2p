@@ -1,265 +1,192 @@
-# CLI Guide
+# CLI guide
 
-hs2p provides a single batch entrypoint:
+Run batch tissue tiling or annotation sampling with one command:
 
+```bash
+hs2p config.yaml [key=value ...]
 ```
-hs2p /path/to/config.yaml [opts...]
-```
 
-The `mask_path` column in the input CSV is interpreted as a tissue mask.
-Multi-label annotation sampling is driven by the same entrypoint via `tiling.masks` config.
+The configuration selects the workflow. Tissue tiling uses an optional tissue `mask_path`; annotation sampling requires an annotation `mask_path` for every slide.
 
-## Input CSV schemas
+## First run
 
-### Tiling
+Install a reader using the [installation quick start](../README.md#installation) or the [backend options](#backends) below. Create `slides.csv`:
 
 ```csv
 sample_id,image_path,mask_path
 slide-1,/data/slide-1.tif,/data/slide-1-tissue-mask.tif
 slide-2,/data/slide-2.tif,
-...
 ```
 
-### Sampling
+Save `config.yaml`:
+
+```yaml
+csv: slides.csv
+output_dir: output
+tiling:
+  backend: openslide
+  params:
+    requested_spacing_um: 0.5
+    requested_tile_size_px: 224
+```
+
+Omitted settings inherit the [default config](../hs2p/configs/default.yaml). Override individual values on the command line:
+
+```bash
+hs2p config.yaml speed.num_workers=4
+```
+
+The CLI creates `output/<YYYY-MM-DD_HH_MM>/` with the effective `config.yaml`, artifacts, `process_list.csv`, and `logs/log.txt`. Use `--skip-datetime` to write directly into `output_dir`, or `--output-dir /path/to/output` to override the output root. Relative CSV and image paths are resolved from the working directory, so absolute paths are useful for shared configs.
+
+## Input CSV
+
+`sample_id` and `image_path` are required, and sample IDs must be unique. Omit `mask_path` or leave it blank to segment tissue on the fly. For annotation sampling, fill it with the label-raster path:
 
 ```csv
 sample_id,image_path,mask_path
 slide-1,/data/slide-1.tif,/data/slide-1-annotations.tif
 slide-2,/data/slide-2.tif,/data/slide-2-annotations.tif
-...
 ```
 
-### Optional spacing override
+The old `tissue_mask_path` and `annotation_mask_path` columns are rejected; use `mask_path` for either workflow.
 
-Works in either mode:
+An optional `spacing_at_level_0` column overrides the slide's native spacing in microns per pixel:
 
 ```csv
 sample_id,image_path,mask_path,spacing_at_level_0
 slide-1,/data/slide-1.tif,,0.25
 slide-2,/data/slide-2.tif,/data/slide-2-tissue-mask.tif,
-...
 ```
 
-The override must be finite and greater than zero. When supplied, it is authoritative:
-level 0 uses that spacing and every other level uses the override multiplied by the
-selected backend's downsample factor. It can therefore rescue missing spacing metadata.
-If existing native spacing genuinely differs, the selected backend warns once with the
-slide path, native value, supplied value, and backend; floating-point representation
-noise and missing native metadata do not produce a conflict warning.
+The override must be finite and positive. It supplies missing metadata or replaces existing spacing; other pyramid spacings follow the backend's downsample factors. A disagreement with valid native metadata produces one warning identifying the slide, backend, and both values. Missing metadata and floating-point representation noise do not trigger that warning. Flat PNG/JPEG slides require this override because their density metadata is not interpreted as pathology spacing.
 
-## Quick start
+## Annotation sampling
 
-Start from [`hs2p/configs/default.yaml`](../hs2p/configs/default.yaml), then edit:
+The default label vocabulary is `{background: 0, tissue: 1}`, with only `tissue` selected. Changing the label vocabulary or sampled set activates annotation sampling when at least one class has a non-null coverage threshold. Changing only the tissue threshold keeps binary tissue tiling.
 
-- `csv`
-- `output_dir`
-- `tiling.backend`
-- `tiling.mask_backend`
-- `tiling.params.requested_spacing_um`
-- `tiling.params.requested_tile_size_px`
+For a mask containing background `0`, tumor `1`, and stroma `2`, add this to the first-run config:
 
-Run:
-
-```bash
-hs2p /path/to/config.yaml
+```yaml
+tiling:
+  masks:
+    pixel_mapping:
+      background: 0
+      tissue: null
+      tumor: 1
+      stroma: 2
+    colors:
+      background: null
+      tumor: [220, 60, 60]
+      stroma: [60, 160, 220]
+    min_coverage:
+      tissue: null
+      tumor: 0.5
+      stroma: null
+    output_mode: per_annotation
 ```
 
-## Installation and backends
+This selects tumor tiles with at least 50% coverage. Stroma is declared so the raster validates, but it is not sampled.
 
-Base install:
+- `pixel_mapping` must declare every raster label, with distinct integer values in `[0, 255]`, even if the raster uses a wider integer type. Undeclared pixel values fail validation. Names become directory components: do not use path separators, `.` or `..`; `merged` is reserved for merged output.
+- `min_coverage` selects classes through non-null thresholds. Coverage reports (`frac` and `est_tiles`) are relative to the selected classes. Declare unannotated pixels in `pixel_mapping` and leave their threshold null to exclude them.
+- Configs are deep-merged with the defaults. `min_coverage.tissue: null` stops sampling tissue; `pixel_mapping.tissue: null` removes that label and its companion settings, allowing another class to use value `1`.
+- `colors` must cover the remaining labels when supplied. Use RGB triplets or null to omit an overlay for a class; set `colors: null` to omit the mapping.
+
+`output_mode: per_annotation` writes separate coordinate artifacts for selected classes. `output_mode: merged` writes their union as one per-slide artifact. By default, joint sampling builds candidates over the union mask and filters them by class coverage. Set `tiling.independent_sampling: true` to generate candidates separately for each class.
+
+Annotation sampling supports filled mask previews and a tiling-grid preview for each non-empty coordinate output. `resume`, `tiling.read_coordinates_from`, and `save_tiles` are not supported for this workflow; enabling them raises an error. See the [artifact reference](artifacts.md) for output paths and the common batch manifest.
+
+## Backends
+
+`tiling.backend` selects the slide reader; `tiling.mask_backend` selects the source-mask reader. Both accept `auto`, `pil`, `cucim`, `vips`, `openslide`, or `asap`. Null and unknown values fail configuration validation.
+
+| Reader | Install | Prerequisite |
+| --- | --- | --- |
+| `pil` | `pip install hs2p` | Supply `spacing_at_level_0` for flat slides. |
+| `openslide` | `pip install "hs2p[openslide]"` | The extra includes OpenSlide's Python binding and binary package. |
+| `vips` | `pip install "hs2p[vips]"` | libvips must also be available. |
+| `asap` | `pip install "hs2p[asap]"` | Native ASAP with its Python bindings must also be installed. |
+| `cucim` | `pip install "hs2p[cucim]"` | The extra supplies the CUDA 12 cuCIM stack. |
+
+`pip install "hs2p[all]"` installs all reader extras and the optional TurboJPEG encoder; it does not install SAM2 or replace native system prerequisites.
+
+With `auto`, each path is resolved independently:
+
+- `.png`, `.jpg`, and `.jpeg` suffixes (case-insensitive) select PIL only. Corrupt, unsupported, or oversized flat rasters fail without trying another reader.
+- Other inputs probe `cucim → vips → openslide → asap` and stop at the first reader that opens the file. PIL is not part of this chain.
+
+Selection does not inspect mask labels or retry after a later decode failure. If a native reader opens a mask but cannot decode its pixels, explicitly set `tiling.mask_backend` to a reader that can decode it. Explicit reader choices are authoritative. Missing or incompatible mask backends fail with the mask path and backend in the error; a slide without a source mask does not check mask-reader availability.
+
+Requested and resolved readers are saved separately as provenance. Resume compares resolved readers, including the mask reader when a source mask exists. Pin explicit readers to keep decoder choice stable across environments or backend-priority changes. See [artifact validation](artifacts.md#resume-and-validation) for compatibility rules, including older metadata without mask-backend fields.
+
+### JPEG encoder
+
+`speed.jpeg_backend` controls saved-tile encoding independently of the input readers. `pil` is the default and works with the base install. For TurboJPEG:
 
 ```bash
-pip install hs2p
-```
-
-Optional extras:
-
-```bash
-pip install "hs2p[openslide]"
-pip install "hs2p[asap]"
-pip install "hs2p[vips]"
-pip install "hs2p[cucim]"
 pip install "hs2p[turbojpeg]"
-pip install "hs2p[all]"
+hs2p config.yaml save_tiles=true speed.jpeg_backend=turbojpeg
 ```
 
-The base install includes Pillow both as the flat-raster input reader
-(`tiling.backend: pil`) and as the portable default JPEG encoder for tile TAR
-export (`speed.jpeg_backend: pil`). These settings are independent: the first
-chooses how hs2p reads an input, while the second chooses how it encodes saved
-tiles. The `turbojpeg` extra installs PyTurboJPEG as an optional performance
-encoder and is also included in `all`.
+PyTurboJPEG also needs its native libjpeg-turbo library. An unavailable encoder is reported before tile extraction; explicit encoder selections do not fall back.
 
-`tiling.backend` (slide reader) and `tiling.mask_backend` (source-mask reader) both support:
+### SAM2 segmentation
 
-- `auto`
-- `pil`
-- `cucim`
-- `vips`
-- `openslide`
-- `asap`
+SAM2 requires both the optional dependencies and the model package:
 
-For `.png`, `.jpg`, and `.jpeg` inputs (case-insensitive), `auto` selects only
-PIL. A corrupt, unsupported, or oversized flat raster fails through PIL without
-another backend probe or recommendation. Other inputs use the unchanged
-`cucim -> vips -> openslide -> asap` openability chain, which never considers
-PIL. Null and any other value are rejected up front by configuration validation
-(including when constructing `TilingConfig` directly in Python).
+```bash
+pip install "hs2p[sam2]"
+pip install "git+https://github.com/facebookresearch/sam2.git"
+```
 
-### Independent slide and mask backends
+Set `tiling.seg_params.method: sam2`. SAM2 uses an internal `8.0 µm/px` thumbnail and ignores `seg_params.downsample`. It selects a pyramid level by physical spacing and resizes only when that level falls outside tolerance.
 
-The slide backend and the mask backend are resolved **independently, each from its own path**:
-`tiling.backend` from the slide path, `tiling.mask_backend` from the source-mask path. They
-share the same format-aware selection policy. Flat-raster suffixes route directly
-to PIL; other suffixes use the native-backend openability chain. Neither path
-inspects decoded label semantics or retries after selection. A slide with no
-source mask never resolves or validates mask-backend availability, and its mask
-provenance is recorded as null.
+If `sam2_checkpoint_path` or `sam2_config_path` is empty, hs2p downloads the corresponding default AtlasPatch asset from Hugging Face. Set those paths to use local files. `sam2_device` selects the inference device; `sam2_num_workers` caps concurrent mask-resolution workers. Use one worker to serialize GPU inference when memory is limited.
 
-Because `auto` is openability-only, a backend that can *open* but not *decode* a mask (e.g.
-cuCIM opening a deflate-compressed label TIFF whose pixels it cannot decode) can be selected
-and then fail at read time. When that happens, set `tiling.mask_backend` explicitly to a
-backend that decodes the mask (e.g. `openslide`). An unknown mask backend fails at
-configuration time; an unavailable or incompatible one fails only when the mask is read, with
-the mask path and requested backend named in the error.
+## Tiling settings and previews
 
-Both the requested and resolved slide and mask backends are recorded as provenance in the
-tiling metadata, `TilingArtifacts`, and `process_list.csv` (`requested_backend` / `backend`
-and `requested_mask_backend` / `mask_backend`). Requested values are provenance only. On
-`resume`, compatibility compares the **resolved** slide backend and — when the slide has a
-source mask — the **resolved** mask backend; artifacts are not rejected merely because a
-requested value differs. Pre-#163 metadata and `process_list.csv` files (without the mask
-backend fields/columns) are rejected clearly rather than loaded.
+The [default config](../hs2p/configs/default.yaml) lists all settings and defaults. The main controls are:
 
-## Config areas
+| Config area | Controls |
+| --- | --- |
+| `tiling.params` | Requested spacing, tile size, spacing tolerance, and overlap as a fraction. |
+| `tiling.masks.min_coverage.tissue` | Minimum tissue fraction for binary tissue tiling. |
+| `tiling.seg_params` | Tissue segmentation method and thumbnail resolution. |
+| `tiling.filter_params` | Contour area filtering and optional tile-pixel QC. |
+| `tiling.preview` | Separate `save_mask_preview` and `save_tiling_preview` toggles, plus styling. |
+| `speed.num_workers` | Slide-level batch parallelism. |
+| `save_tiles` | Export JPEG tiles to TAR with a CSV sidecar. |
 
-- `tiling.read_coordinates_from`
-  - Reuse precomputed `{sample_id}.coordinates.*` artifacts instead of recomputing tile
-    coordinates
-  - Coordinate reuse is not completed-slide processing: outputs requested by the current run
-    are still materialized. In particular, `save_tiles: true` writes the tile TAR and manifest,
-    and an enabled tiling preview is rendered when at least one coordinate is present.
-  - Disabled outputs are not created, and a reused zero-tile artifact does not create or report
-    a tiling preview.
-- `tiling.params`
-  - spacing, tile size, overlap, tolerance, padding, and minimum tissue fraction
-- `tiling.seg_params`
-  - tissue segmentation settings
-  - `method` selects `hsv`, `otsu`, `threshold`, or `sam2`
-- `tiling.filter_params`
-  - contour and optional white/black filtering settings
-- `tiling.preview`
-  - preview rendering settings
-  - `save` enables both batch mask previews and tiling previews
-  - `downsample` controls preview resolution
-  - `tissue_contour_color` controls the RGB border color used for `preview/mask/*.jpg`
-  - `mask_overlay_alpha` controls opacity for the filled annotation-mask overlay path; contour-only previews ignore it
-- `tiling.masks`
-  - multi-label annotation sampling (pixel_mapping, color_mapping, min_coverage, output_mode)
-  - annotation sampling activates when `pixel_mapping` declares a foreground class other than
-    the default `tissue`; otherwise the CLI runs binary tissue tiling. Each slide's annotation
-    mask is taken from the `mask_path` column of the input CSV.
-  - `pixel_mapping` is your own label vocabulary: it must enumerate **every** label value
-    present in the raster (each value distinct, in `[0, 255]`, regardless of the raster's
-    integer storage width). The annotation name `merged` is reserved for structural merged
-    coordinate output; `tissue` remains a valid conventional annotation. Any pixel value not
-    declared here makes the mask read fail (the discreteness guard). If the raster reserves a
-    value for unannotated pixels, declare it like any other class and simply give it no
-    `min_coverage` threshold.
-  - `min_coverage` selects **which** classes are actually sampled: only classes given a
-    (non-null) coverage threshold get tiled, and the coverage report's `frac`/`est_tiles`
-    are computed relative to those classes. To sample a subset (e.g. only Gleason grades 4
-    and 5 from a 6-grade mask), list all grades in `pixel_mapping` so the raster validates,
-    but give thresholds only to grades 4 and 5. Because configs are deep-merged over the
-    default `{background: 0, tissue: 1}`, set `min_coverage.tissue: null` to drop the default
-    tissue class from sampling, and set `pixel_mapping.tissue: null` to remove the default
-    label entirely (required to reuse its value, e.g. a `tumor: 1` mask).
-  - `output_mode` (annotation sampling only): `per_annotation` (default) writes one coordinate
-    artifact per sampled class; `merged` writes one flat merged per-slide artifact (the
-    union of tiles passing any class threshold), identified structurally rather than as an
-    annotation named `merged`.
-  - `tiling.independent_sampling` chooses `independent_sampling` (tile each class separately)
-    vs the default joint sampling (one pass over the union mask, then per-class coverage
-    filtering).
-  - Not yet supported with annotation sampling: `resume`, `read_coordinates_from`, and
-    `save_tiles` raise a clear error if enabled; previews are skipped.
-- `save_tiles`
-  - write `tiles/{sample_id}.tiles.tar`
-- `speed.num_workers`
-  - slide-level batch parallelism
-- `speed.jpeg_backend`
-  - `pil` (default) uses the core Pillow dependency and works in a base install
-  - `turbojpeg` opts into the faster PyTurboJPEG encoder and requires
-    `pip install "hs2p[turbojpeg]"`
-  - explicit selections never fall back; an unavailable TurboJPEG dependency is
-    reported before slide tile extraction begins
+For `hsv`, `otsu` (Otsu on saturation), and `threshold` (fixed saturation threshold), a larger `seg_params.downsample` selects a coarser segmentation thumbnail and reduces work. Smaller values give finer tissue boundaries at a higher time and memory cost.
 
-## Progress reporting
+Pixel QC is disabled by default. Enable `filter_white`, `filter_black`, `filter_grayspace`, or `filter_blur` under `tiling.filter_params` when needed. QC reads candidate tiles at `qc_spacing_um`, typically coarser than final extraction, and adds work beyond mask-only tiling.
 
-When stdout is interactive, the entrypoint uses `rich` live progress:
+`tiling.preview.downsample` controls preview resolution. Tissue-mask previews draw contours: `tissue_contour_color` sets the outer RGB border (default `#255E3B`), and holes use `#F26B3A`. `mask_overlay_alpha` affects filled annotation overlays only. Non-empty tissue results can also produce a tiling-grid preview.
 
-- shows discovered tile totals during the run
-- reports `empty_masks` while resolving precomputed tissue masks and in final summaries
-- finishes with a summary panel including output locations and `process_list.csv`
+Tile TAR export uses batched reads for cuCIM and coalesces dense regions on other readers. GPU decoding is opt-in through `gpu_decode=True` in the Python API. See [benchmarks](benchmark.md) for measured throughput and [artifacts](artifacts.md) for TAR paths and fields.
 
-When stdout is non-interactive, `hs2p` falls back to concise plain-text progress and summary logs.
+## Progress and failures
 
-Detailed logs still go to `output_dir/logs/log.txt`.
+Interactive terminals show live tile totals, empty-mask counts, and a final summary with output locations. Redirected output uses plain-text progress and summaries. Detailed logs are written to the run directory's `logs/log.txt`.
 
-## Partial batch failures
+The CLI attempts each slide and records its outcome in `process_list.csv`. Slide failures produce a nonzero exit status after the manifest and tracebacks are written; all-success runs exit zero. Python `tile_slides()` instead returns successful artifacts and emits one aggregate `BatchPartialFailureWarning`.
 
-The CLI attempts every requested slide and persists every outcome to
-`process_list.csv`. If any slide failed, it reports a completed run with failed
-slides and exits non-zero only after the manifest and tracebacks have been
-written. It exits zero when every slide succeeded.
+## Resume and coordinate reuse
 
-This differs from the Python `tile_slides()` contract: Python callers receive
-the successful artifacts and one aggregate `BatchPartialFailureWarning` instead
-of a non-zero process exit.
+To continue a dated run, keep `output_dir` as the parent directory and select its existing run name:
 
-## Resume and precomputed artifacts
+```bash
+hs2p config.yaml resume=true resume_dirname=2026-09-08_10_30
+```
 
-- `resume: true` treats a compatible successful `process_list.csv` row as completed slide
-  processing and expects the current process-list schema
-- reused artifacts are validated against structured metadata, not `config_hash`
-- `tiling.read_coordinates_from` reuses only compatible tile coordinates; downstream outputs
-  enabled for the current run are still produced
+For a run created with `--skip-datetime`, use `resume=true resume_dirname=.` to target `output_dir` itself.
 
-## Performance notes
+`resume: true` treats compatible successful manifest rows as completed processing. It does not recreate a recorded TAR or preview if that file has since been deleted.
 
-### Segmentation downsample
+To reuse coordinates while producing outputs for the current run:
 
-`tiling.seg_params.downsample` controls the resolution used for tissue segmentation:
+```bash
+hs2p config.yaml tiling.read_coordinates_from=/data/previous-run/tiles save_tiles=true
+```
 
-- larger values are faster and coarser
-- smaller values improve edge precision but cost more time and memory
-
-`tiling.seg_params.method` controls how the segmentation mask is generated at that level:
-
-- `hsv` uses the existing HSV heuristic
-- `otsu` thresholds the saturation channel with Otsu
-- `threshold` applies a fixed saturation threshold
-- `sam2` runs SAM2 inference on an internal fixed `8.0 um/px` thumbnail
-  - hs2p chooses the thumbnail level in physical units first, then resizes to the requested spacing only if the nearest pyramid level is outside tolerance
-  - if `sam2_checkpoint_path` is empty, hs2p downloads the default AtlasPatch checkpoint from Hugging Face
-  - if `sam2_config_path` is empty, hs2p downloads the default AtlasPatch SAM2 config from Hugging Face
-  - `tiling.seg_params.downsample` is ignored by SAM2
-  - `sam2_num_workers` caps concurrent SAM2 mask-resolution workers; set it to `1` to serialize GPU inference and avoid CUDA OOMs
-
-### Tile pixel QC
-
-`tiling.filter_params.filter_white`, `filter_black`, `filter_grayspace`, and `filter_blur` are disabled by default.
-
-When enabled, hs2p evaluates candidate tiles at `tiling.filter_params.qc_spacing_um`, which is typically coarser than the final extraction spacing. This is still slower than mask-only tiling, but cheaper than running pixel QC at the requested tile spacing.
-
-### Tile tar export
-
-When `save_tiles: true`, hs2p also writes `tiles/{sample_id}.tiles.tar`.
-
-- non-CuCIM paths coalesce dense tile regions before slicing them back into tiles
-- CuCIM paths use batched reads
-- `gpu_decode=True` is opt-in in the Python API for CuCIM tar export
-
-## Outputs
-
-See [artifacts.md](artifacts.md) for the exact coordinate artifact schema and process-list columns.
+Coordinate reuse skips coordinate computation and still writes requested TARs and tiling-grid previews; it does not regenerate mask previews. Disabled outputs are not created, and zero-tile artifacts do not produce tiling previews. Compatibility uses structured metadata, not `config_hash`; consult the [artifact reference](artifacts.md#resume-and-validation) before reusing results after changing inputs or settings.
