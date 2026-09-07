@@ -54,9 +54,10 @@ and **no end-to-end speed improvement is claimed**. The 1.3 ms median increase
 is retained in the table rather than hidden. Larger, fragmented real slides are
 needed to quantify dataset-level throughput.
 
-Reproduce the five-sample synthetic pair with the commands in `benchmark.md`;
+Reproduce the five-sample synthetic pair with the [benchmark commands](benchmark.md);
 use `--cases contours_dense mask_decode fixture --repeat 11` for the confirmation
-pair. For this audit the baseline was exported with `git archive HEAD`, and the
+pair. Export the recorded baseline with
+`git archive d4ea0c3ae1e2b9c8d106cf9c31324ec2f1828ae5`; for this audit, the
 same benchmark script was copied into its `scripts/` directory. Run that copy with
 the same interpreter to import the baseline package without modifying your
 working checkout. Archive exports have no `.git`, so their revision field is null;

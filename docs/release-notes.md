@@ -4,7 +4,7 @@
 
 ### Faster tiling previews
 
-Tiling previews (`preview.save_tiling_preview`) are now rendered by drawing the
+Tiling previews (`tiling.preview.save_tiling_preview`) are now rendered by drawing the
 grid directly on the loaded slide canvas when no annotation overlay is requested,
 instead of cropping and re-pasting every tile. The overlay path is unchanged. The
 preview stage also runs in up to `speed.num_workers` spawned processes rather

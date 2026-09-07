@@ -17,14 +17,11 @@ tiling:
     requested_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel
     tolerance: 0.05 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)
     requested_tile_size_px: 256 # size of the tiles to extract, in pixels
-    overlap: 0.0 # percentage of overlap between two consecutive tiles (float between 0 and 1)
+    overlap: 0.0 # fraction of overlap between consecutive tiles
   seg_params:
     method: "hsv" # tissue segmentation method: hsv, otsu, threshold, or sam2
-    # downsample: controls which pyramid level is read for tissue segmentation.
-    # A larger value reads a smaller thumbnail → faster segmentation and a smaller in-memory mask.
-    # A smaller value reads a higher-resolution thumbnail → slower but more precise tissue boundaries.
-    # Practically, values below 16 rarely improve tile selection meaningfully while being significantly slower.
-    # Speed impact: thumbnail read time and cv2.integral() cost both scale with the mask area (∝ 1/downsample²).
+    # Larger downsamples select coarser thumbnails and reduce segmentation work;
+    # smaller values give finer tissue boundaries at a higher memory and time cost.
     downsample: 64 # find the closest downsample in the slide for tissue segmentation
     sthresh: 8 # threshold used by method=threshold
     sthresh_up: 255 # upper threshold value for scaling the binary mask
@@ -39,11 +36,8 @@ tiling:
     ref_tile_size: 16 # reference tile size at the target spacing
     a_t: 4 # area filter threshold for tissue (positive integer, the minimum size of detected foreground contours to consider, relative to the reference tile size ref_tile_size, e.g. a value 10 means only detected foreground contours of size greater than 10 [ref_tile_size, ref_tile_size] tiles at the target spacing will be kept)
     a_h: 2 # area filter threshold for holes (positive integer, the minimum size of detected holes/cavities in foreground contours to avoid, once again relative to the reference tile size ref_tile_size)
-# filter_white / filter_black: when enabled, each candidate tile is read from the slide at full
-    # resolution and its pixel values are inspected. This is the only step in the tiling pipeline
-    # that reads actual tile pixel data, and it can be significantly slower than the rest of the
-    # pipeline — especially for slides with large internal JPEG tiles (e.g. 4096×4096 blocks),
-    # where each tile read triggers a full JPEG decode. Keep these disabled unless necessary.
+    # Pixel QC reads candidate tiles at qc_spacing_um and inspects their pixels.
+    # It adds slide reads beyond mask-only tiling; enable it only when needed.
     filter_white: false # whether to filter out mostly white tiles
     filter_black: false # whether to filter out mostly black tiles
     white_threshold: 220 # threshold for white pixels (0-255)
@@ -62,9 +56,8 @@ tiling:
     tissue_contour_color: [37, 94, 59] # RGB color used for outer tissue contours in batch mask previews
     mask_overlay_alpha: 0.5 # opacity used by the filled annotation-mask overlay path; contour previews ignore this
   masks:
-    # output_mode applies only when annotation sampling is active (pixel_mapping declares
-    # classes beyond the default tissue): per_annotation writes one coordinate artifact per
-    # sampled class; single_output writes one merged per-slide artifact.
+    # output_mode applies only to annotation sampling (a changed label vocabulary or
+    # sampled set): per_annotation writes coordinates per class; merged writes their union.
     output_mode: per_annotation
     pixel_mapping: # map annotated categories to their corresponding pixel values
       background: 0
