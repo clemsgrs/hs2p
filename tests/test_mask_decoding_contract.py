@@ -4,7 +4,9 @@ import numpy as np
 import pytest
 from PIL import Image
 
+import hs2p.mask as source_mask_mod
 import hs2p.tiling.mask as mask_mod
+from hs2p.mask import Mask, TissueLabels
 from hs2p.tiling.mask import (
     load_precomputed_tissue_mask,
     resolve_annotation_masks,
@@ -14,7 +16,8 @@ from hs2p.tiling.mask import (
 
 class _ArrayMaskSlide:
     spacing = 0.25
-    level_downsamples = [1.0]
+    native_spacing = 0.25
+    level_downsamples = [(1.0, 1.0)]
 
     def __init__(self, mask: np.ndarray):
         self._mask = mask
@@ -36,13 +39,25 @@ def _wsi(*, backend_name: str = "cucim"):
     )
 
 
+def _open_tissue_mask(monkeypatch, native: np.ndarray, *, path: str, tissue: int) -> Mask:
+    """Open a tissue ``Mask`` whose ``cucim`` backend decodes to ``native``."""
+    monkeypatch.setattr(
+        source_mask_mod,
+        "open_slide",
+        lambda path, backend=None, **kwargs: _ArrayMaskSlide(native),
+    )
+    return Mask(
+        path=path, labels=TissueLabels(background=0, tissue=tissue), backend="cucim"
+    )
+
+
 def test_invalid_tissue_labels_fail_without_a_direct_tiff_read(monkeypatch):
     backend_mask = np.array([[0, 1], [2, 0]], dtype=np.uint8)
     direct_reads = []
     monkeypatch.setattr(
-        mask_mod,
+        source_mask_mod,
         "open_slide",
-        lambda path, backend=None: _ArrayMaskSlide(backend_mask),
+        lambda path, backend=None, **kwargs: _ArrayMaskSlide(backend_mask),
     )
     monkeypatch.setattr(
         Image,
@@ -62,21 +77,19 @@ def test_invalid_tissue_labels_fail_without_a_direct_tiff_read(monkeypatch):
 
     assert direct_reads == []
     message = str(excinfo.value)
-    assert "Precomputed tissue mask" in message
     assert "/masks/sparse.tif" in message
     assert "backend=cucim" in message
-    assert "select another backend" in message.lower()
-    assert "regenerate" in message.lower()
+    assert "undeclared label IDs [2]" in message
 
 
 def test_tissue_backend_exception_fails_without_an_alternate_read(monkeypatch):
     opened_backends = []
 
-    def fail_open(path, backend=None):
+    def fail_open(path, backend=None, **kwargs):
         opened_backends.append(backend)
         raise RuntimeError("codec unavailable")
 
-    monkeypatch.setattr(mask_mod, "open_slide", fail_open)
+    monkeypatch.setattr(source_mask_mod, "open_slide", fail_open)
 
     with pytest.raises(RuntimeError) as excinfo:
         load_precomputed_tissue_mask(
@@ -89,34 +102,25 @@ def test_tissue_backend_exception_fails_without_an_alternate_read(monkeypatch):
 
     assert opened_backends == ["cucim"]
     message = str(excinfo.value)
-    assert "Precomputed tissue mask" in message
     assert "/masks/decode-error.tif" in message
     assert "backend=cucim" in message
     assert "codec unavailable" in message
-    assert "select another backend" in message.lower()
-    assert "regenerate" in message.lower()
 
 
 def test_empty_precomputed_tissue_mask_succeeds_with_one_contextual_warning(
     monkeypatch, caplog
 ):
     mask_path = "/masks/empty.tif"
-    monkeypatch.setattr(
-        mask_mod,
-        "open_slide",
-        lambda path, backend=None: _ArrayMaskSlide(
-            np.zeros((2, 2), dtype=np.uint8)
-        ),
+    mask = _open_tissue_mask(
+        monkeypatch, np.zeros((2, 2), dtype=np.uint8), path=mask_path, tissue=7
     )
     caplog.set_level("WARNING", logger="hs2p.tiling.mask")
 
     resolved = resolve_tissue_mask(
         slide=_wsi(),
         sample_id="case-017",
-        tissue_mask_path=mask_path,
-        tissue_mask_tissue_value=7,
+        mask=mask,
         seg_downsample=1,
-        mask_backend="cucim",
     )
 
     assert np.array_equal(resolved.tissue_mask, np.zeros((2, 2), dtype=np.uint8))
@@ -139,21 +143,24 @@ def test_nonempty_precomputed_tissue_mask_uses_one_backend_without_warning(
 ):
     opened_backends = []
 
-    def open_mask(path, backend=None):
+    def open_mask(path, backend=None, **kwargs):
         opened_backends.append(backend)
         return _ArrayMaskSlide(np.array([[0, 7], [0, 0]], dtype=np.uint8))
 
-    monkeypatch.setattr(mask_mod, "open_slide", open_mask)
+    monkeypatch.setattr(source_mask_mod, "open_slide", open_mask)
     caplog.set_level("WARNING", logger="hs2p.tiling.mask")
 
-    resolved = resolve_tissue_mask(
-        slide=_wsi(),
-        sample_id="case-018",
-        tissue_mask_path="/masks/nonempty.tif",
-        tissue_mask_tissue_value=7,
-        seg_downsample=1,
-        mask_backend="cucim",
-    )
+    with Mask(
+        path="/masks/nonempty.tif",
+        labels=TissueLabels(background=0, tissue=7),
+        backend="cucim",
+    ) as mask:
+        resolved = resolve_tissue_mask(
+            slide=_wsi(),
+            sample_id="case-018",
+            mask=mask,
+            seg_downsample=1,
+        )
 
     assert opened_backends == ["cucim"]
     assert np.array_equal(
@@ -186,7 +193,6 @@ def test_empty_generated_tissue_masks_do_not_warn(monkeypatch, caplog, method):
         slide=slide,
         sample_id=f"generated-{method}",
         tissue_method=method,
-        tissue_mask_path=None,
         seg_downsample=1,
     )
 
@@ -220,9 +226,11 @@ def test_single_value_annotation_mask_succeeds_without_empty_mask_warning(
 
 
 def test_uint8_mask_loading_does_not_widen_raster_for_label_validation(monkeypatch):
-    # Backend channel reduction can return a non-contiguous view.
-    source = np.array([[[0, 99], [7, 99]], [[7, 99], [0, 99]]], dtype=np.uint8)
-    monkeypatch.setattr(mask_mod, "open_slide", lambda *args, **kwargs: _ArrayMaskSlide(source))
+    # Collapsing replicated backend channels returns a non-contiguous view.
+    source = np.array([[[0, 0], [7, 7]], [[7, 7], [0, 0]]], dtype=np.uint8)
+    monkeypatch.setattr(
+        source_mask_mod, "open_slide", lambda *args, **kwargs: _ArrayMaskSlide(source)
+    )
     scanned_item_sizes = []
     original_unique = np.unique
 

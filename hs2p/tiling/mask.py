@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 from typing import NoReturn
 
@@ -9,6 +10,7 @@ import numpy as np
 
 from hs2p.configs import SegmentationConfig
 from hs2p.configs.resolvers import validate_pixel_mapping
+from hs2p.mask import Mask, TissueLabels
 from hs2p.segmentation import segment_tissue_image
 from hs2p.tiling.contours import _normalize_level_downsamples
 from hs2p.tiling.result import ResolvedAnnotationMasks, ResolvedTissueMask, Sam2Thumbnail
@@ -93,12 +95,6 @@ def _mask_label_values(mask: np.ndarray) -> np.ndarray:
     return np.unique(mask.astype(np.int64, copy=False))
 
 
-def _is_discrete_binary_mask(mask: np.ndarray, *, tissue_value: int) -> bool:
-    values = _mask_label_values(mask)
-    non_tissue = [int(value) for value in values.tolist() if int(value) != tissue_value]
-    return len(values) <= 2 and len(non_tissue) <= 1
-
-
 def _is_label_subset(mask: np.ndarray, *, valid_values: set[int]) -> bool:
     values = {int(value) for value in _mask_label_values(mask).tolist()}
     return values <= valid_values
@@ -155,22 +151,6 @@ def _read_discrete_mask_level(
     )
 
 
-def _read_mask_level(
-    *,
-    mask_path: str | Path,
-    mask_slide,
-    mask_level: int,
-    tissue_value: int,
-) -> np.ndarray:
-    return _read_discrete_mask_level(
-        mask_path=mask_path,
-        mask_slide=mask_slide,
-        mask_level=mask_level,
-        is_discrete=lambda mask: _is_discrete_binary_mask(mask, tissue_value=tissue_value),
-        label="Precomputed tissue mask",
-    )
-
-
 def _select_mask_level(
     *,
     mask_slide,
@@ -188,51 +168,75 @@ def _select_mask_level(
     return level, spacing_um
 
 
+def tissue_labels_from_pixel_mapping(
+    pixel_mapping: PixelMapping | None = None,
+) -> TissueLabels:
+    """Tissue semantics declared by a configuration ``pixel_mapping``: its ``background``
+    and ``tissue`` IDs, defaulting to 0 and 1."""
+    pixel_mapping = pixel_mapping or {}
+    return TissueLabels(
+        background=pixel_mapping.get("background", 0),
+        tissue=pixel_mapping.get("tissue", 1),
+    )
+
+
+def open_tissue_mask(
+    mask_path: str | Path | None,
+    *,
+    pixel_mapping: PixelMapping | None = None,
+    backend: str = AUTO_BACKEND,
+) -> AbstractContextManager[Mask | None]:
+    """Context manager over the tissue :class:`~hs2p.mask.Mask` a configuration-driven
+    caller opens for ``mask_path``; yields ``None`` when there is no source mask."""
+    if mask_path is None:
+        return nullcontext()
+    return Mask(
+        path=mask_path,
+        labels=tissue_labels_from_pixel_mapping(pixel_mapping),
+        backend=backend,
+    )
+
+
+def _read_binary_tissue_mask(
+    *, mask: Mask, slide, seg_level: int
+) -> tuple[np.ndarray, int, float]:
+    """Read ``mask`` on the slide's ``seg_level`` grid as a 255 (tissue) / 0 raster, with
+    the mask level and effective spacing that were read."""
+    if not isinstance(mask.labels, TissueLabels):
+        raise ValueError(
+            f"A tissue mask must declare TissueLabels, got {type(mask.labels).__name__}"
+        )
+    seg_spacing_um = float(slide.spacing) * float(
+        _normalize_level_downsamples(slide.level_downsamples)[seg_level]
+    )
+    read = mask.align_to(
+        reference_spacing_um=float(slide.spacing),
+        reference_dimensions=slide.level_dimensions[0],
+    ).read_full(
+        target_spacing_um=seg_spacing_um,
+        target_dimensions=slide.level_dimensions[seg_level],
+    )
+    tissue_mask = np.where(read.labels == mask.labels.tissue, 255, 0).astype(np.uint8)
+    return tissue_mask, read.read_level, read.read_spacing_um
+
+
 def load_precomputed_tissue_mask(
     *,
     mask_path: str | Path,
     slide,
     seg_level: int,
     tissue_value: int,
+    background_value: int = 0,
     mask_backend: str | None = None,
 ) -> tuple[np.ndarray, int, float]:
-    resolved_mask_backend = _resolve_mask_backend(mask_path, mask_backend)
-    try:
-        mask_slide = open_slide(mask_path, backend=resolved_mask_backend)
-        try:
-            seg_size = slide.level_dimensions[seg_level]
-            seg_spacing_um = float(slide.spacing) * float(
-                _normalize_level_downsamples(slide.level_downsamples)[seg_level]
-            )
-            mask_level, mask_spacing_um = _select_mask_level(
-                mask_slide=mask_slide,
-                requested_spacing_um=seg_spacing_um,
-            )
-            raw_mask = _read_mask_level(
-                mask_path=mask_path,
-                mask_slide=mask_slide,
-                mask_level=mask_level,
-                tissue_value=tissue_value,
-            )
-        finally:
-            mask_slide.close()
-    except Exception as exc:
-        _raise_mask_decode_error(
-            label="Precomputed tissue mask",
-            mask_path=mask_path,
-            backend=resolved_mask_backend,
-            error=exc,
-        )
-
-    if raw_mask.shape[:2] != (int(seg_size[1]), int(seg_size[0])):
-        raw_mask = cv2.resize(
-            _as_discrete_label_array(raw_mask),
-            (int(seg_size[0]), int(seg_size[1])),
-            interpolation=cv2.INTER_NEAREST,
-        )
-
-    mask = np.where(raw_mask == tissue_value, 255, 0).astype(np.uint8)
-    return mask, mask_level, mask_spacing_um
+    """Path-based tissue loader kept until the legacy mask interfaces are removed; opens a
+    :class:`~hs2p.mask.Mask` and delegates to the same read as :func:`resolve_tissue_mask`."""
+    with Mask(
+        path=mask_path,
+        labels=TissueLabels(background=background_value, tissue=tissue_value),
+        backend=mask_backend if mask_backend is not None else AUTO_BACKEND,
+    ) as mask:
+        return _read_binary_tissue_mask(mask=mask, slide=slide, seg_level=seg_level)
 
 
 def prepare_sam2_thumbnail(
@@ -299,8 +303,7 @@ def resolve_tissue_mask(
     slide,
     sample_id: str | None = None,
     tissue_method: str | None = None,
-    tissue_mask_path: str | Path | None,
-    tissue_mask_tissue_value: int = 1,
+    mask: Mask | None = None,
     sthresh: int = 8,
     sthresh_up: int = 255,
     mthresh: int = 7,
@@ -309,30 +312,28 @@ def resolve_tissue_mask(
     sam2_checkpoint_path: str | Path | None = None,
     sam2_config_path: str | Path | None = None,
     sam2_device: str = "cpu",
-    mask_backend: str | None = None,
     requested_mask_backend: str | None = None,
 ) -> ResolvedTissueMask:
-    if tissue_mask_path is not None:
-        resolved_mask_backend = _resolve_mask_backend(tissue_mask_path, mask_backend)
-        requested_mask_backend = (
-            requested_mask_backend
-            if requested_mask_backend is not None
-            else (mask_backend if mask_backend is not None else AUTO_BACKEND)
-        )
+    """Resolve the slide's tissue mask: from ``mask`` (an open tissue
+    :class:`~hs2p.mask.Mask`, whose lifetime the caller owns) when given, otherwise by
+    segmenting with ``tissue_method``.
+
+    ``requested_mask_backend`` is caller-owned provenance; the mask only knows the concrete
+    backend it opened, which is recorded as the request when none is supplied.
+    """
+    if mask is not None:
         normalized_downsamples = _normalize_level_downsamples(slide.level_downsamples)
         seg_level = select_level_for_downsample(
             float(seg_downsample),
             [(float(ds), float(ds)) for ds in normalized_downsamples],
         )
         seg_spacing_um = float(slide.spacing) * float(normalized_downsamples[seg_level])
-        mask, mask_level, mask_spacing_um = load_precomputed_tissue_mask(
-            mask_path=tissue_mask_path,
+        tissue_mask, mask_level, mask_spacing_um = _read_binary_tissue_mask(
+            mask=mask,
             slide=slide,
             seg_level=seg_level,
-            tissue_value=int(tissue_mask_tissue_value),
-            mask_backend=resolved_mask_backend,
         )
-        if not np.any(mask):
+        if not np.any(tissue_mask):
             logger.warning(
                 "Empty precomputed tissue mask: sample_id=%s mask_path=%s backend=%s "
                 "mask_level=%s tissue_value=%s. The mask backend returned a valid mask "
@@ -340,24 +341,28 @@ def resolve_tissue_mask(
                 "incorrectly decoded — verify it is intentionally empty, select another mask "
                 "backend, or regenerate the mask.",
                 sample_id if sample_id is not None else "<unknown>",
-                Path(tissue_mask_path),
-                resolved_mask_backend,
+                mask.path,
+                mask.backend,
                 mask_level,
-                int(tissue_mask_tissue_value),
+                mask.labels.tissue,
             )
         return ResolvedTissueMask(
-            tissue_mask=mask,
+            tissue_mask=tissue_mask,
             tissue_method="precomputed_mask",
             requested_seg_downsample=int(seg_downsample),
             seg_downsample=max(1, int(round(seg_spacing_um / float(slide.spacing)))),
             seg_level=seg_level,
             seg_spacing_um=seg_spacing_um,
-            mask_path=tissue_mask_path,
-            tissue_mask_tissue_value=int(tissue_mask_tissue_value),
+            mask_path=mask.path,
+            tissue_mask_tissue_value=mask.labels.tissue,
             mask_level=mask_level,
             mask_spacing_um=mask_spacing_um,
-            mask_backend=resolved_mask_backend,
-            requested_mask_backend=requested_mask_backend,
+            mask_backend=mask.backend,
+            requested_mask_backend=(
+                requested_mask_backend
+                if requested_mask_backend is not None
+                else mask.backend
+            ),
         )
 
     if not tissue_method:

@@ -59,10 +59,13 @@ def build_case(name: str):
         mask = np.zeros((2048, 2048), dtype=np.uint8)
         mask[::2, :] = 7
         slide = SimpleNamespace(spacing=0.5, level_downsamples=[1.0], level_dimensions=[(2048, 2048)])
-        reader = SimpleNamespace(**vars(slide), read_region=lambda *_: mask, close=lambda: None)
+        reader = SimpleNamespace(
+            native_spacing=0.5, level_downsamples=[(1.0, 1.0)], level_dimensions=[(2048, 2048)],
+            read_region=lambda *_: mask, close=lambda: None,
+        )
 
         def run():
-            with patch("hs2p.tiling.mask.open_slide", return_value=reader):
+            with patch("hs2p.mask.open_slide", return_value=reader):
                 result, _, _ = load_precomputed_tissue_mask(
                     mask_path="benchmark-mask.tif", slide=slide, seg_level=0,
                     tissue_value=7, mask_backend="openslide",

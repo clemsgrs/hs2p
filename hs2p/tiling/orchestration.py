@@ -44,6 +44,7 @@ from hs2p.wsi.backend import resolve_backends
 from hs2p.wsi.types import PixelMapping
 from hs2p.wsi.reader import open_slide as open_preprocessing_slide
 from hs2p.preprocessing import resolve_tissue_mask
+from hs2p.tiling.mask import open_tissue_mask
 from hs2p.artifacts import (
     CompatibilitySpec,
     ProcessListCheckpoint,
@@ -1067,23 +1068,29 @@ def _resolve_mask_for_request(
                 whole_slide=request.whole_slide,
                 segmentation=request.segmentation,
             )
-            resolved_mask = resolve_tissue_mask(
-                slide=slide,
-                sample_id=request.whole_slide.sample_id,
-                tissue_method=effective_segmentation.method,
-                tissue_mask_path=request.whole_slide.mask_path,
-                tissue_mask_tissue_value=1,
-                sthresh=effective_segmentation.sthresh,
-                sthresh_up=effective_segmentation.sthresh_up,
-                mthresh=effective_segmentation.mthresh,
-                close=effective_segmentation.close,
-                seg_downsample=effective_segmentation.downsample,
-                sam2_checkpoint_path=effective_segmentation.sam2_checkpoint_path,
-                sam2_config_path=effective_segmentation.sam2_config_path,
-                sam2_device=effective_segmentation.sam2_device,
-                mask_backend=effective_tiling.mask_backend,
-                requested_mask_backend=effective_tiling.requested_mask_backend,
-            )
+            # The mask opens the backend already resolved for it and lives only for its one
+            # full read. Binary tissue tiling runs on the default ``pixel_mapping`` (any
+            # other vocabulary is annotation sampling), so its defaults declare the labels.
+            with open_tissue_mask(
+                request.whole_slide.mask_path,
+                pixel_mapping=None,
+                backend=effective_tiling.mask_backend,
+            ) as mask:
+                resolved_mask = resolve_tissue_mask(
+                    slide=slide,
+                    sample_id=request.whole_slide.sample_id,
+                    tissue_method=effective_segmentation.method,
+                    mask=mask,
+                    sthresh=effective_segmentation.sthresh,
+                    sthresh_up=effective_segmentation.sthresh_up,
+                    mthresh=effective_segmentation.mthresh,
+                    close=effective_segmentation.close,
+                    seg_downsample=effective_segmentation.downsample,
+                    sam2_checkpoint_path=effective_segmentation.sam2_checkpoint_path,
+                    sam2_config_path=effective_segmentation.sam2_config_path,
+                    sam2_device=effective_segmentation.sam2_device,
+                    requested_mask_backend=requested_mask_backend,
+                )
         finally:
             slide.close()
         return _MaskResolutionResponse(

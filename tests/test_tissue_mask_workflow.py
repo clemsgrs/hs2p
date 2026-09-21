@@ -14,6 +14,7 @@ from PIL import Image
 import hs2p.progress as progress
 import hs2p.wsi.reader as reader_mod
 from hs2p.api import SlideSpec, TilingConfig, tile_slide, tile_slides
+from hs2p.preprocessing import preprocess_slide
 from tests.test_progress import RecordingReporter
 
 
@@ -123,6 +124,20 @@ def test_tile_slide_tiles_the_tissue_of_a_precomputed_mask(monkeypatch, tmp_path
     assert reader.close_count == 1
 
 
+def test_tile_slide_rejects_a_mask_value_outside_the_declared_tissue_labels(
+    monkeypatch, tmp_path
+):
+    # 255 is neither the background (0) nor the tissue (1) ID.
+    reader = _pyramid(_top_left_quadrant(background=255, tissue=1))
+    whole_slide = _slide_spec(tmp_path)
+    _serve_mask(monkeypatch, reader)
+
+    with pytest.raises(ValueError, match=r"undeclared label IDs \[255\]"):
+        tile_slide(whole_slide, tiling=_tiling())
+
+    assert reader.close_count == 1
+
+
 def test_tile_slide_closes_the_mask_when_its_decode_fails(monkeypatch, tmp_path):
     reader = _pyramid(
         _top_left_quadrant(background=0, tissue=1),
@@ -155,6 +170,55 @@ def test_tile_slide_opens_the_mask_with_the_preflight_backend(monkeypatch, tmp_p
 
     # One preflight probe sequence; opening the mask does not resolve ``auto`` again.
     assert probed == ["cucim", "vips", "openslide"]
+    assert result.requested_mask_backend == "auto"
+    assert result.mask_backend == "openslide"
+
+
+def test_preprocess_slide_reads_tissue_ids_from_the_pixel_mapping(monkeypatch, tmp_path):
+    reader = _pyramid(_top_left_quadrant(background=0, tissue=255))
+    whole_slide = _slide_spec(tmp_path)
+    _serve_mask(monkeypatch, reader)
+
+    result = preprocess_slide(
+        image_path=whole_slide.image_path,
+        tissue_mask_path=whole_slide.mask_path,
+        pixel_mapping={"background": 0, "tissue": 255},
+        backend="pil",
+        mask_backend="openslide",
+        spacing_override=0.5,
+        requested_tile_size_px=64,
+        min_tissue_fraction=0.5,
+    )
+
+    assert sorted(zip(result.x.tolist(), result.y.tolist())) == [
+        (0, 0),
+        (0, 64),
+        (64, 0),
+        (64, 64),
+    ]
+    assert result.tissue_mask_tissue_value == 255
+
+
+def test_preprocess_slide_omitting_the_mask_backend_requests_auto(monkeypatch, tmp_path):
+    """A direct caller who omits ``mask_backend`` resolves the mask from its own path via
+    ``auto`` — never the slide's backend — and records the request as ``"auto"``."""
+    reader = _pyramid(_top_left_quadrant(background=0, tissue=1))
+    whole_slide = _slide_spec(tmp_path)
+    _serve_mask(monkeypatch, reader)
+    monkeypatch.setattr(
+        reader_mod,
+        "_backend_can_open_source",
+        lambda *, backend, **kwargs: backend == "openslide",
+    )
+
+    result = preprocess_slide(
+        image_path=whole_slide.image_path,
+        tissue_mask_path=whole_slide.mask_path,
+        backend="pil",
+        spacing_override=0.5,
+    )
+
+    assert result.backend == "pil"
     assert result.requested_mask_backend == "auto"
     assert result.mask_backend == "openslide"
 

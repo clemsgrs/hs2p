@@ -12,9 +12,13 @@ from hs2p.tiling.contours import _normalize_level_downsamples, detect_contours
 from hs2p.tiling.coverage import compute_tile_coverage
 from hs2p.tiling.generate import generate_tiles
 from hs2p.tiling.result import ResolvedAnnotationMasks, ResolvedTissueMask, TilingResult
-from hs2p.tiling.mask import resolve_annotation_masks, resolve_tissue_mask
+from hs2p.tiling.mask import (
+    open_tissue_mask,
+    resolve_annotation_masks,
+    resolve_tissue_mask,
+)
 from hs2p.tile_qc import filter_coordinate_tiles, needs_pixel_qc
-from hs2p.wsi.reader import open_slide
+from hs2p.wsi.reader import AUTO_BACKEND, open_slide
 from hs2p.wsi.types import CoordinateOutputMode, CoordinateSelectionStrategy, PixelMapping
 from hs2p.wsi.visualization import _combine_label_masks, save_overlay_preview
 
@@ -619,7 +623,7 @@ def preprocess_slide(
     image_path: str | Path,
     sample_id: str | None = None,
     tissue_mask_path: str | Path | None = None,
-    tissue_mask_tissue_value: int = 1,
+    pixel_mapping: PixelMapping | None = None,
     backend: str = "auto",
     requested_backend: str | None = None,
     mask_backend: str | None = None,
@@ -664,23 +668,31 @@ def preprocess_slide(
         spacing_override=spacing_override,
     )
     try:
-        resolved_mask = resolve_tissue_mask(
-            slide=slide,
-            sample_id=sample_id,
-            tissue_mask_path=tissue_mask_path,
-            tissue_mask_tissue_value=tissue_mask_tissue_value,
-            tissue_method=tissue_method,
-            sthresh=sthresh,
-            sthresh_up=sthresh_up,
-            mthresh=mthresh,
-            close=close,
-            seg_downsample=seg_downsample,
-            sam2_checkpoint_path=sam2_checkpoint_path,
-            sam2_config_path=sam2_config_path,
-            sam2_device=sam2_device,
-            mask_backend=mask_backend,
-            requested_mask_backend=requested_mask_backend,
-        )
+        if mask_backend is None:
+            mask_backend = AUTO_BACKEND
+        # The tissue mask lives only for its one full read.
+        with open_tissue_mask(
+            tissue_mask_path, pixel_mapping=pixel_mapping, backend=mask_backend
+        ) as mask:
+            resolved_mask = resolve_tissue_mask(
+                slide=slide,
+                sample_id=sample_id,
+                mask=mask,
+                tissue_method=tissue_method,
+                sthresh=sthresh,
+                sthresh_up=sthresh_up,
+                mthresh=mthresh,
+                close=close,
+                seg_downsample=seg_downsample,
+                sam2_checkpoint_path=sam2_checkpoint_path,
+                sam2_config_path=sam2_config_path,
+                sam2_device=sam2_device,
+                requested_mask_backend=(
+                    requested_mask_backend
+                    if requested_mask_backend is not None
+                    else mask_backend
+                ),
+            )
         return build_tiling_result_from_mask(
             slide=slide,
             resolved_mask=resolved_mask,
