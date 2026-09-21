@@ -80,24 +80,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: TEMPORARY (#210) regenerate golden in container
-        run: |
-          set -euo pipefail
-          mkdir -p "$GITHUB_WORKSPACE/regen-golden"
-          chmod 777 "$GITHUB_WORKSPACE/regen-golden"
-          docker run --rm \
-            -v "$GITHUB_WORKSPACE:/workspace" \
-            -w /workspace \
-            hs2p:${{ github.sha }} \
-            bash -lc "python -m pip install --no-cache-dir pytest && MPLCONFIGDIR=/tmp/mpl PYTHONPATH=/workspace python scripts/_tmp_regen_golden.py /workspace/regen-golden"
-
-      - name: TEMPORARY (#210) upload regenerated golden
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: regen-golden
-          path: regen-golden/
-
       - name: Run default fast tests in container
         run: |
           set -euo pipefail
