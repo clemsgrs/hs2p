@@ -2,9 +2,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
+import hs2p.mask as source_mask_mod
 import hs2p.preprocessing as preprocessing_mod
 import hs2p.tiling.mask as tiling_mask_mod
+from hs2p.mask import AnnotationLabels, Mask, TissueLabels
 
 
 def _make_slide():
@@ -39,40 +42,40 @@ def _make_sam2_slide(level_downsamples, level_dimensions, spacing=0.25):
     )
 
 
-def test_resolve_tissue_mask_uses_precomputed_mask_without_segmentation(
-    monkeypatch,
-):
-    slide = _make_slide()
-    called = {"segment": False}
-
-    def _fake_load_precomputed_tissue_mask(**kwargs):
-        assert kwargs["mask_path"] == Path("mask.png")
-        assert kwargs["seg_level"] == 1
-        return np.full((25, 25), 255, dtype=np.uint8), 0, 1.0
-
-    def _fake_segment_tissue_image(*args, **kwargs):
-        called["segment"] = True
-        raise AssertionError("segment_tissue_image should not be called")
-
-    monkeypatch.setattr(
-        tiling_mask_mod,
-        "load_precomputed_tissue_mask",
-        _fake_load_precomputed_tissue_mask,
+def _open_mask(monkeypatch, labels) -> Mask:
+    """Open an all-tissue 25 px ``Mask`` at 1.0 um/px: the slide's level-1 grid."""
+    reader = SimpleNamespace(
+        native_spacing=1.0,
+        level_dimensions=[(25, 25)],
+        level_downsamples=[(1.0, 1.0)],
+        read_region=lambda location, level, size: np.ones((25, 25), dtype=np.uint8),
+        close=lambda: None,
     )
+    monkeypatch.setattr(source_mask_mod, "open_slide", lambda *args, **kwargs: reader)
+    return Mask(path=Path("mask.png"), labels=labels, backend="asap")
+
+
+def _forbid_segmentation(monkeypatch) -> None:
     monkeypatch.setattr(
         tiling_mask_mod,
         "segment_tissue_image",
-        _fake_segment_tissue_image,
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("segment_tissue_image should not be called")
+        ),
     )
 
+
+def test_resolve_tissue_mask_uses_precomputed_mask_without_segmentation(
+    monkeypatch,
+):
+    mask = _open_mask(monkeypatch, TissueLabels(background=0, tissue=1))
+    _forbid_segmentation(monkeypatch)
+
     resolved = preprocessing_mod.resolve_tissue_mask(
-        slide=slide,
-        tissue_mask_path=Path("mask.png"),
+        slide=_make_slide(),
+        mask=mask,
         tissue_method="sam2",
         seg_downsample=64,
-        # A direct caller resolves the mask backend from the mask path (#163); pass it
-        # explicitly here since the fake mask path cannot be probed.
-        mask_backend="asap",
     )
 
     assert resolved.tissue_method == "precomputed_mask"
@@ -83,7 +86,40 @@ def test_resolve_tissue_mask_uses_precomputed_mask_without_segmentation(
     assert resolved.seg_downsample == 4
     assert resolved.mask_path == Path("mask.png")
     assert resolved.tissue_mask_tissue_value == 1
-    assert not called["segment"]
+    assert (resolved.mask_level, resolved.mask_spacing_um) == (0, 1.0)
+    np.testing.assert_array_equal(
+        resolved.tissue_mask, np.full((25, 25), 255, dtype=np.uint8)
+    )
+
+
+def test_resolve_tissue_mask_rejects_a_mask_without_tissue_labels(monkeypatch):
+    mask = _open_mask(
+        monkeypatch, AnnotationLabels(pixel_mapping={"background": 0, "tumor": 1})
+    )
+
+    with pytest.raises(ValueError, match="must declare TissueLabels"):
+        preprocessing_mod.resolve_tissue_mask(slide=_make_slide(), mask=mask)
+
+
+@pytest.mark.parametrize(
+    ("pixel_mapping", "background", "tissue"),
+    [
+        (None, 0, 1),
+        ({"tumor": 3}, 0, 1),
+        ({"background": 2, "tissue": 255, "tumor": 3}, 2, 255),
+    ],
+)
+def test_tissue_labels_come_from_the_pixel_mapping_with_defaults(
+    pixel_mapping, background, tissue
+):
+    labels = tiling_mask_mod.tissue_labels_from_pixel_mapping(pixel_mapping)
+
+    assert labels == TissueLabels(background=background, tissue=tissue)
+
+
+def test_tissue_labels_reject_a_tissue_entry_merging_several_ids():
+    with pytest.raises(ValueError, match="TissueLabels tissue"):
+        tiling_mask_mod.tissue_labels_from_pixel_mapping({"tissue": [1, 2]})
 
 
 def test_prepare_sam2_thumbnail_uses_existing_level_when_within_tolerance():
@@ -128,10 +164,7 @@ def test_resolve_tissue_mask_requires_an_explicit_method():
     slide = _make_slide()
 
     try:
-        preprocessing_mod.resolve_tissue_mask(
-            slide=slide,
-            tissue_mask_path=None,
-        )
+        preprocessing_mod.resolve_tissue_mask(slide=slide)
     except ValueError as exc:
         assert "tissue_method is required" in str(exc)
     else:
@@ -141,26 +174,10 @@ def test_resolve_tissue_mask_requires_an_explicit_method():
 def test_resolve_tissue_mask_allows_precomputed_masks_without_a_method(
     monkeypatch,
 ):
-    slide = _make_slide()
+    mask = _open_mask(monkeypatch, TissueLabels(background=0, tissue=1))
+    _forbid_segmentation(monkeypatch)
 
-    monkeypatch.setattr(
-        tiling_mask_mod,
-        "load_precomputed_tissue_mask",
-        lambda **kwargs: (np.full((25, 25), 255, dtype=np.uint8), 0, 1.0),
-    )
-    monkeypatch.setattr(
-        tiling_mask_mod,
-        "segment_tissue_image",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("segment_tissue_image should not be called")
-        ),
-    )
-
-    resolved = preprocessing_mod.resolve_tissue_mask(
-        slide=slide,
-        tissue_mask_path=Path("mask.png"),
-        mask_backend="asap",
-    )
+    resolved = preprocessing_mod.resolve_tissue_mask(slide=_make_slide(), mask=mask)
 
     assert resolved.tissue_method == "precomputed_mask"
     assert resolved.mask_path == Path("mask.png")
@@ -189,7 +206,6 @@ def test_resolve_tissue_mask_uses_sam2_thumbnail_spacing(monkeypatch):
     resolved = preprocessing_mod.resolve_tissue_mask(
         slide=slide,
         tissue_method="sam2",
-        tissue_mask_path=None,
         seg_downsample=64,
     )
 
