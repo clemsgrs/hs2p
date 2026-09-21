@@ -12,7 +12,11 @@ import cv2
 import numpy as np
 
 from hs2p.configs.resolvers import validate_pixel_mapping
-from hs2p.wsi.geometry import compute_level_spacings, select_level_for_spacing_read
+from hs2p.wsi.geometry import (
+    LevelSelection,
+    compute_level_spacings,
+    select_level_for_spacing_read,
+)
 from hs2p.wsi.reader import AUTO_BACKEND, SlideReader, open_slide, resolve_backend
 from hs2p.wsi.types import pixel_values
 
@@ -28,6 +32,9 @@ LEVEL_SPACING_TOLERANCE = 0.01
 # File spacing is only cross-checked against the dimension-ratio spacing.
 SPACING_WARN_THRESHOLD = 0.01
 SPACING_FAIL_THRESHOLD = 0.05
+# Float noise allowed past the reference canvas edge, in reference level-0 pixels: a
+# spacing ratio such as 2.007 / 0.2007 evaluates to 10.000000000000002.
+CANVAS_EDGE_EPSILON_PX = 1e-6
 
 logger = logging.getLogger(__name__)
 
@@ -280,59 +287,185 @@ class AlignedMask:
         when none is fine enough), validates the native decode, then nearest-neighbor
         resizes it to the exact requested dimensions.
         """
-        mask = self.mask
-        reader = mask._require_reader()
-        target_width, target_height = (int(v) for v in target_dimensions)
-        if target_width <= 0 or target_height <= 0:
-            raise ValueError(
-                f"target_dimensions must be positive, got {target_width}x{target_height}"
+        reader = self.mask._require_reader()
+        target_width, target_height = _target_dimensions(target_dimensions)
+        selection = self._select_level(reader, target_spacing_um)
+        labels = self._read_native(
+            reader, level=selection.level, target_spacing_um=target_spacing_um
+        )
+        if labels.shape != (target_height, target_width):
+            labels = cv2.resize(
+                labels, (target_width, target_height), interpolation=cv2.INTER_NEAREST
             )
-        selection = select_level_for_spacing_read(
-            requested_spacing_um=float(target_spacing_um),
+        return _mask_read(labels, selection)
+
+    def read_region(
+        self,
+        *,
+        location: tuple[int, int],
+        target_spacing_um: float,
+        target_dimensions: tuple[int, int],
+    ) -> MaskRead:
+        """Read ``target_dimensions`` labels at ``target_spacing_um`` from ``location``.
+
+        ``location`` is the top-left ``(x, y)`` in the reference grid's level-0 pixels,
+        never in the mask file's own; the request spans
+        ``target_dimensions * target_spacing_um / reference_spacing_um`` reference
+        pixels from there. Reference coordinates map onto the selected mask level (the
+        same selection as :meth:`read_full`) through the per-axis dimension ratios
+        ``reference_size / level_size``.
+
+        The native window is the requested extent rounded outward to whole level
+        pixels: ``floor`` of its start, ``ceil`` of its end, capped at the level size.
+        Only that window is decoded and validated. Output pixel ``i`` then takes the
+        label of the level pixel holding its top-left corner, ``location + i *
+        target_spacing_um / reference_spacing_um`` -- the nearest-neighbor rule of
+        :meth:`read_full`, so a region equals the matching crop of a full read.
+        """
+        reader = self.mask._require_reader()
+        target_width, target_height = _target_dimensions(target_dimensions)
+        x, y = (int(v) for v in location)
+        selection = self._select_level(reader, target_spacing_um)
+        level = selection.level
+        step = float(target_spacing_um) / self.reference_spacing_um
+        extent_width, extent_height = target_width * step, target_height * step
+        reference_width, reference_height = self.reference_dimensions
+        if (
+            x < 0
+            or y < 0
+            or x + extent_width > reference_width + CANVAS_EDGE_EPSILON_PX
+            or y + extent_height > reference_height + CANVAS_EDGE_EPSILON_PX
+        ):
+            raise ValueError(
+                f"Mask region read refused for path={self.mask.path} with "
+                f"backend={self.mask.backend}: location ({x}, {y}) with extent "
+                f"{extent_width:g}x{extent_height:g} reference px "
+                f"({target_width}x{target_height} px at "
+                f"{float(target_spacing_um):.4f} um/px) extends beyond reference "
+                f"dimensions {reference_width}x{reference_height}. Mask regions are "
+                "never padded."
+            )
+        level_width, level_height = (int(v) for v in reader.level_dimensions[level])
+        x0, width, columns = _level_span(
+            start=x,
+            count=target_width,
+            step=step,
+            ratio=reference_width / level_width,
+            level_size=level_width,
+        )
+        y0, height, rows = _level_span(
+            start=y,
+            count=target_height,
+            step=step,
+            ratio=reference_height / level_height,
+            level_size=level_height,
+        )
+        labels = self._read_native(
+            reader,
+            level=level,
+            target_spacing_um=target_spacing_um,
+            window=(x0, y0, width, height),
+        )
+        return _mask_read(labels[np.ix_(rows, columns)], selection)
+
+    def _select_level(
+        self, reader: SlideReader, target_spacing_um: float
+    ) -> LevelSelection:
+        target_spacing_um = float(target_spacing_um)
+        if not math.isfinite(target_spacing_um) or target_spacing_um <= 0:
+            raise ValueError(
+                "target_spacing_um must be a finite positive value, "
+                f"got {target_spacing_um!r}"
+            )
+        return select_level_for_spacing_read(
+            requested_spacing_um=target_spacing_um,
             level0_spacing_um=self.level_spacings_um[0],
             level_downsamples=reader.level_downsamples,
             tolerance=LEVEL_SPACING_TOLERANCE,
             content_kind="label",
         )
-        level = selection.level
-        width, height = (int(v) for v in reader.level_dimensions[level])
+
+    def _read_native(
+        self,
+        reader: SlideReader,
+        *,
+        level: int,
+        target_spacing_um: float,
+        window: tuple[int, int, int, int] | None = None,
+    ) -> np.ndarray:
+        """Decode and validate ``level``, or only its ``(x, y, width, height)`` window."""
+        mask = self.mask
         context = f"path={mask.path} with backend={mask.backend}"
+        level_width, level_height = (int(v) for v in reader.level_dimensions[level])
+        x, y, width, height = window or (0, 0, level_width, level_height)
+        where = f"level {level}"
+        extent = f" at {width}x{height}"
+        if window is not None:
+            where += f", window {width}x{height} at ({x}, {y})"
+            extent = f", where the requested window is {width}x{height}"
         if width * height > MAX_MASK_READ_PX:
             raise ValueError(
                 f"Mask read refused for {context}: the level selected for "
-                f"{float(target_spacing_um):.4f} um/px is level {level} at "
-                f"{width}x{height} ({width * height / 1e6:.0f} Mpx), exceeding the "
+                f"{float(target_spacing_um):.4f} um/px is level {level}{extent} "
+                f"({width * height / 1e6:.0f} Mpx), exceeding the "
                 f"{MAX_MASK_READ_PX / 1e6:.0f} Mpx read cap. The mask likely lacks a "
                 "pyramid level near that spacing; regenerate it as a multi-resolution "
                 "pyramidal TIFF."
             )
+        # Readers take locations in the file's own level-0 pixels and floor them onto
+        # the level through the x downsample; ``ceil`` survives that floor when the
+        # downsample is not an integer.
+        downsample = float(reader.level_downsamples[level][0])
+        location = (math.ceil(x * downsample), math.ceil(y * downsample))
         try:
-            native = np.asarray(reader.read_region((0, 0), level, (width, height)))
+            native = np.asarray(reader.read_region(location, level, (width, height)))
         except Exception as error:
-            message = f"Mask decode failed for {context} at level {level}: {error}"
+            message = f"Mask decode failed for {context} at {where}: {error}"
             if isinstance(error, ValueError):
                 raise ValueError(message) from error
             raise RuntimeError(message) from error
 
         try:
-            labels = _validated_labels(native, declared_ids=mask.labels.ids)
+            return _validated_labels(native, declared_ids=mask.labels.ids)
         except ValueError as error:
             raise ValueError(
-                f"Mask read produced invalid labels for {context} at level {level}: "
-                f"{error}"
+                f"Mask read produced invalid labels for {context} at {where}: {error}"
             ) from error
-        if labels.shape != (target_height, target_width):
-            labels = cv2.resize(
-                labels, (target_width, target_height), interpolation=cv2.INTER_NEAREST
-            )
-        # A read-only view: the decode may share memory with a backend-owned buffer.
-        labels = labels.view()
-        labels.flags.writeable = False
-        return MaskRead(
-            labels=labels,
-            read_level=level,
-            read_spacing_um=selection.read_spacing_um,
+
+
+def _target_dimensions(target_dimensions: tuple[int, int]) -> tuple[int, int]:
+    target_width, target_height = (int(v) for v in target_dimensions)
+    if target_width <= 0 or target_height <= 0:
+        raise ValueError(
+            f"target_dimensions must be positive, got {target_width}x{target_height}"
         )
+    return target_width, target_height
+
+
+def _level_span(
+    *, start: int, count: int, step: float, ratio: float, level_size: int
+) -> tuple[int, int, np.ndarray]:
+    """One axis of a regional read, as ``(window start, window size, sampled pixels)``.
+
+    ``count`` output pixels, ``step`` reference pixels apart from ``start``, land on a
+    level whose pixels each span ``ratio`` reference pixels. The window rounds that
+    extent outward, capped at the level; ``sampled`` indexes it once per output pixel.
+    """
+    first = math.floor(start / ratio)
+    stop = min(math.ceil((start + count * step) / ratio), level_size)
+    sampled = np.floor((start + np.arange(count) * step) / ratio).astype(np.intp)
+    return first, stop - first, np.minimum(sampled, stop - 1) - first
+
+
+def _mask_read(labels: np.ndarray, selection: LevelSelection) -> MaskRead:
+    # A read-only view: the decode may share memory with a backend-owned buffer.
+    labels = labels.view()
+    labels.flags.writeable = False
+    return MaskRead(
+        labels=labels,
+        read_level=selection.level,
+        read_spacing_um=selection.read_spacing_um,
+    )
 
 
 def _validated_labels(native: np.ndarray, *, declared_ids: frozenset[int]) -> np.ndarray:
