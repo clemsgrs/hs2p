@@ -20,6 +20,7 @@ from hs2p.wsi.reader import (
     select_level,
     select_level_for_downsample,
 )
+from hs2p.wsi.types import PixelMapping, pixel_values
 
 DEFAULT_SAM2_THUMBNAIL_SPACING_UM = 8.0
 DEFAULT_SAM2_THUMBNAIL_TOLERANCE = 0.05
@@ -488,7 +489,7 @@ def resolve_annotation_masks(
     *,
     slide,
     mask_path: str | Path,
-    pixel_mapping: dict[str, int],
+    pixel_mapping: PixelMapping,
     seg_downsample: int = 64,
     tissue_method: str = "precomputed_mask",
     mask_backend: str | None = None,
@@ -498,8 +499,9 @@ def resolve_annotation_masks(
 
     The annotation counterpart of :func:`resolve_tissue_mask`'s precomputed path.
     ``pixel_mapping`` maps class name to the
-    integer pixel value in the mask; one binary mask (255 foreground / 0 background) is
-    produced for every entry. Annotation names are user-defined except for ``"merged"``,
+    integer pixel value in the mask, or to a list of values merged into that one class; one
+    binary mask (255 foreground / 0 background) is produced for every entry. Annotation names
+    are user-defined except for ``"merged"``,
     which is reserved for structural merged coordinate output, and label IDs must be distinct
     integers in ``[0, 255]`` regardless of the raster's integer storage width. Which classes
     get sampled is decided downstream by the sampling spec (``min_coverage`` thresholds), not
@@ -526,7 +528,9 @@ def resolve_annotation_masks(
         [(float(ds), float(ds)) for ds in normalized_downsamples],
     )
     seg_spacing_um = float(slide.spacing) * float(normalized_downsamples[seg_level])
-    valid_values = {int(value) for value in pixel_mapping.values()}
+    valid_values = {
+        int(value) for entry in pixel_mapping.values() for value in pixel_values(entry)
+    }
     raw_mask, mask_level, mask_spacing_um = load_annotation_label_mask(
         mask_path=mask_path,
         slide=slide,
@@ -535,8 +539,10 @@ def resolve_annotation_masks(
         mask_backend=resolved_mask_backend,
     )
     masks = {
-        name: np.where(raw_mask == int(value), np.uint8(255), np.uint8(0)).astype(np.uint8)
-        for name, value in pixel_mapping.items()
+        name: np.where(
+            np.isin(raw_mask, pixel_values(entry)), np.uint8(255), np.uint8(0)
+        ).astype(np.uint8)
+        for name, entry in pixel_mapping.items()
     }
     return ResolvedAnnotationMasks(
         masks=masks,

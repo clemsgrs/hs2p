@@ -88,6 +88,7 @@ tiling:
 This selects tumor tiles with at least 50% coverage. Stroma is declared so the raster validates, but it is not sampled.
 
 - `pixel_mapping` must declare every raster label, with distinct integer values in `[0, 255]`, even if the raster uses a wider integer type. Undeclared pixel values fail validation. Names become directory components: do not use path separators, `.` or `..`; `merged` is reserved for merged output.
+- A label may list several raster values, e.g. `tumor: [1, 2]`. They are sampled as one class whose coverage is their sum, so `min_coverage.tumor: 0.5` keeps a tile that is 30% value `1` and 30% value `2`; separate labels under `output_mode: merged` would drop it, since each threshold is tested alone. A value may appear under one label only. Previews draw the whole class in the label's color.
 - `min_coverage` selects classes through non-null thresholds. Coverage reports (`frac` and `est_tiles`) are relative to the selected classes. Declare unannotated pixels in `pixel_mapping` and leave their threshold null to exclude them.
 - Configs are deep-merged with the defaults. `min_coverage.tissue: null` stops sampling tissue; `pixel_mapping.tissue: null` removes that label and its companion settings, allowing another class to use value `1`.
 - `colors` must cover the remaining labels when supplied. Use RGB triplets or null to omit an overlay for a class; set `colors: null` to omit the mapping.

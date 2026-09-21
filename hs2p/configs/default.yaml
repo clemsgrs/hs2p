@@ -59,7 +59,7 @@ tiling:
     # output_mode applies only to annotation sampling (a changed label vocabulary or
     # sampled set): per_annotation writes coordinates per class; merged writes their union.
     output_mode: per_annotation
-    pixel_mapping: # map annotated categories to their corresponding pixel values
+    pixel_mapping: # map annotated categories to their corresponding pixel values; a list (e.g. tumor: [1, 2]) merges several values into one category
       background: 0
       tissue: 1
     colors: # [r,g,b] color code of overlayed annotation mask, leave blank if you don't want to overlay anything for a given category

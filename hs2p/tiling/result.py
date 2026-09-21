@@ -6,6 +6,8 @@ from typing import Any
 
 import numpy as np
 
+from hs2p.wsi.types import PixelMapping
+
 
 def _validate_geometry_arrays(
     x: np.ndarray,
@@ -72,7 +74,7 @@ class ResolvedAnnotationMasks:
     seg_downsample: int
     seg_level: int
     seg_spacing_um: float
-    pixel_mapping: dict[str, int]
+    pixel_mapping: PixelMapping
     mask_path: str | Path | None = None
     mask_level: int | None = None
     mask_spacing_um: float | None = None
