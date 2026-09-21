@@ -17,6 +17,10 @@ from hs2p.wsi.streaming.plans import resolve_read_step_px
 
 pytestmark = pytest.mark.integration
 
+# The golden was produced with cuCIM reading the mask. Pinning it keeps the fixture
+# independent of what ``mask_backend="auto"`` resolves to in a given environment.
+GOLDEN_MASK_BACKEND = "cucim"
+
 
 def _require_asap_backend(wsi_path: Path) -> str:
     wsd = pytest.importorskip("wholeslidedata")
@@ -39,6 +43,7 @@ def _build_tiling_configs(
         overlap=0.0,
         min_coverage={"tissue": tissue_pct},
         backend=backend,
+        mask_backend=GOLDEN_MASK_BACKEND,
     )
     segmentation = SegmentationConfig(
         method="hsv",
@@ -126,6 +131,22 @@ def test_generated_tiles_match_checked_in_ground_truth_outputs(
         == mask_path.name
     )
     assert generated_loaded.backend == golden.backend == backend
+    assert (
+        generated_loaded.requested_mask_backend
+        == golden.requested_mask_backend
+        == "cucim"
+    )
+    assert generated_loaded.mask_backend == golden.mask_backend == "cucim"
+    assert generated_loaded.seg_level == golden.seg_level == 3
+    assert golden.seg_spacing_um == pytest.approx(16.128, rel=1e-4)
+    assert generated_loaded.seg_spacing_um == pytest.approx(golden.seg_spacing_um)
+    assert generated_loaded.mask_level == golden.mask_level == 1
+    # rel=1e-4 is deliberate: #167 will persist the effective (dimension-ratio-derived)
+    # mask spacing, a ~4e-6 relative shift that approx's default rel=1e-6 would reject.
+    assert golden.mask_spacing_um == pytest.approx(8.063968, rel=1e-4)
+    assert generated_loaded.mask_spacing_um == pytest.approx(
+        golden.mask_spacing_um, rel=1e-4
+    )
     assert generated_loaded.requested_spacing_um == pytest.approx(golden.requested_spacing_um)
     assert generated_loaded.requested_tile_size_px == golden.requested_tile_size_px
     assert generated_loaded.read_level == golden.read_level
