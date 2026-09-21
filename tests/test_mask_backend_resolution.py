@@ -6,9 +6,8 @@ import numpy as np
 import pytest
 
 import hs2p.mask as source_mask_mod
-import hs2p.tiling.mask as mask_mod
 import hs2p.wsi.reader as reader_mod
-from hs2p.mask import Mask, TissueLabels
+from hs2p.mask import AnnotationLabels, Mask, TissueLabels
 from hs2p.wsi.backend import resolve_backends
 from hs2p.tiling.mask import (
     load_annotation_label_mask,
@@ -169,11 +168,11 @@ def test_precomputed_tissue_mask_opens_with_explicit_mask_backend(monkeypatch):
 def test_annotation_mask_opens_with_explicit_mask_backend(monkeypatch):
     opened: list[str] = []
 
-    def _open(path, backend=None):
+    def _open(path, backend=None, **kwargs):
         opened.append(backend)
         return _ArrayMaskSlide(np.array([[0, 1], [0, 0]], dtype=np.uint8))
 
-    monkeypatch.setattr(mask_mod, "open_slide", _open)
+    monkeypatch.setattr(source_mask_mod, "open_slide", _open)
     load_annotation_label_mask(
         mask_path="/masks/a.tif",
         slide=_wsi(backend_name="cucim"),
@@ -208,22 +207,32 @@ def test_resolve_tissue_mask_records_the_mask_backend_not_the_slide_backend(monk
     assert result.requested_mask_backend == "vips"
 
 
-def test_resolve_annotation_masks_uses_mask_backend(monkeypatch):
-    opened: list[str] = []
-
-    def _open(path, backend=None):
-        opened.append(backend)
-        return _ArrayMaskSlide(np.array([[0, 1], [0, 0]], dtype=np.uint8))
-
-    monkeypatch.setattr(mask_mod, "open_slide", _open)
-    resolve_annotation_masks(
-        slide=_wsi(backend_name="cucim"),
-        mask_path="/masks/a.tif",
-        pixel_mapping={"background": 0, "tumor": 1},
-        seg_downsample=1,
-        mask_backend="openslide",
+def _open_annotation_mask(monkeypatch, native: np.ndarray, *, path: str, backend: str) -> Mask:
+    monkeypatch.setattr(
+        source_mask_mod,
+        "open_slide",
+        lambda path, backend=None, **kwargs: _ArrayMaskSlide(native),
     )
-    assert opened == ["openslide"]
+    return Mask(
+        path=path,
+        labels=AnnotationLabels(pixel_mapping={"background": 0, "tumor": 1}),
+        backend=backend,
+    )
+
+
+def test_resolve_annotation_masks_records_the_mask_backend_not_the_slide_backend(monkeypatch):
+    mask = _open_annotation_mask(
+        monkeypatch,
+        np.array([[0, 1], [0, 0]], dtype=np.uint8),
+        path="/masks/a.tif",
+        backend="openslide",
+    )
+    result = resolve_annotation_masks(
+        slide=_wsi(backend_name="cucim"), mask=mask, seg_downsample=1
+    )
+    assert result.mask_backend == "openslide"
+    # The mask only knows the backend it opened; no request was supplied.
+    assert result.requested_mask_backend == "openslide"
 
 
 def test_resolve_tissue_mask_records_the_callers_requested_mask_backend(monkeypatch):
@@ -244,29 +253,20 @@ def test_resolve_tissue_mask_records_the_callers_requested_mask_backend(monkeypa
     assert result.mask_backend == "openslide"
 
 
-def test_resolve_annotation_masks_direct_call_omitting_backend_resolves_from_mask_path(monkeypatch):
-    """The annotation counterpart: omitting ``mask_backend`` resolves the mask from its own
-    path via ``auto`` (not the slide backend) and records requested provenance ``"auto"``."""
-    opened: list[str] = []
-
-    def _open(path, backend=None):
-        opened.append(backend)
-        return _ArrayMaskSlide(np.array([[0, 1], [0, 0]], dtype=np.uint8))
-
-    def _fake_resolve(requested, *, wsi_path, mask_path=None):
-        if requested == "auto":
-            return reader_mod.BackendSelection(backend="openslide")
-        return reader_mod.BackendSelection(backend=requested)
-
-    monkeypatch.setattr(mask_mod, "open_slide", _open)
-    monkeypatch.setattr(mask_mod, "resolve_backend", _fake_resolve)
+def test_resolve_annotation_masks_records_the_callers_requested_mask_backend(monkeypatch):
+    """The annotation counterpart: requested provenance is the caller's."""
+    mask = _open_annotation_mask(
+        monkeypatch,
+        np.array([[0, 1], [0, 0]], dtype=np.uint8),
+        path="/masks/a.tif",
+        backend="openslide",
+    )
     result = resolve_annotation_masks(
         slide=_wsi(backend_name="asap"),
-        mask_path="/masks/a.tif",
-        pixel_mapping={"background": 0, "tumor": 1},
+        mask=mask,
         seg_downsample=1,
+        requested_mask_backend="auto",
     )
-    assert opened == ["openslide"]
     assert result.requested_mask_backend == "auto"
     assert result.mask_backend == "openslide"
 

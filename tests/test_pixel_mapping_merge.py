@@ -7,9 +7,10 @@ import numpy as np
 import pytest
 from omegaconf import OmegaConf
 
-import hs2p.tiling.mask as maskmod
+import hs2p.mask as maskmod
 import hs2p.tiling.single as singlemod
 from hs2p.configs.resolvers import resolve_sampling_spec, validate_pixel_mapping
+from hs2p.mask import AnnotationLabels, Mask
 from hs2p.tiling.mask import resolve_annotation_masks
 from hs2p.tiling.single import preprocess_slide_per_annotation
 from hs2p.wsi.masks import compose_overlay_mask_from_annotations
@@ -37,7 +38,8 @@ class _FakeSlide:
         self._pixels = pixels
         self.dimensions = (SLIDE_SIZE, SLIDE_SIZE)
         self.spacing = SPACING
-        self.level_downsamples = [1.0]
+        self.native_spacing = SPACING
+        self.level_downsamples = [(1.0, 1.0)]
         self.level_dimensions = [(SLIDE_SIZE, SLIDE_SIZE)]
         self.backend_name = "mock"
 
@@ -53,7 +55,7 @@ class _FakeSlide:
 def patched_open(monkeypatch):
     from hs2p.wsi.backend import BackendSelection
 
-    def fake_open(path, backend="auto", spacing_override=None):
+    def fake_open(path, backend="auto", spacing_override=None, **kwargs):
         del backend, spacing_override
         if "mask" in str(path):
             return _FakeSlide(_split_tumor_mask())
@@ -64,7 +66,7 @@ def patched_open(monkeypatch):
     monkeypatch.setattr(
         maskmod,
         "resolve_backend",
-        lambda requested, *, wsi_path, mask_path=None: BackendSelection(
+        lambda requested, *, wsi_path, **kwargs: BackendSelection(
             backend="mock", tried=("mock",)
         ),
     )
@@ -126,12 +128,11 @@ def test_resolve_annotation_masks_unions_listed_values(patched_open):
         level_downsamples=[1.0],
         level_dimensions=[(SLIDE_SIZE, SLIDE_SIZE)],
     )
-    resolved = resolve_annotation_masks(
-        slide=slide,
-        mask_path="/fake/slide_mask.tif",
-        pixel_mapping={"background": 0, "tumor": [1, 2]},
-        seg_downsample=1,
-    )
+    with Mask(
+        path="/fake/slide_mask.tif",
+        labels=AnnotationLabels(pixel_mapping={"background": 0, "tumor": [1, 2]}),
+    ) as mask:
+        resolved = resolve_annotation_masks(slide=slide, mask=mask, seg_downsample=1)
     expected = np.zeros((SLIDE_SIZE, SLIDE_SIZE), dtype=np.uint8)
     expected[0:100, 0:60] = 255
     np.testing.assert_array_equal(resolved.masks["tumor"], expected)

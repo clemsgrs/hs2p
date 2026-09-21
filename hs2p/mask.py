@@ -23,8 +23,7 @@ from hs2p.wsi.types import pixel_values
 MAX_LABEL_ID = 255
 # Decoding a native mask level larger than this can exhaust memory (256 Mpx is already
 # 256 MB for uint8, more for wider dtypes and backend buffers), so reads fail fast
-# instead. A fixed safety invariant, not configuration; the same cap as the legacy
-# ``hs2p.tiling.mask.MAX_MASK_READ_PX``.
+# instead. A fixed safety invariant, not configuration.
 MAX_MASK_READ_PX = 256_000_000
 # Level selection treats a level within 1% of the requested spacing as exact,
 # independently of ``tiling.params.tolerance``.

@@ -282,3 +282,47 @@ def test_tile_slides_records_a_failed_annotation_mask_read(monkeypatch, tmp_path
     assert rows["requested_mask_backend"].tolist() == ["openslide"]
     assert rows["mask_backend"].tolist() == ["openslide"]
     assert reader.close_count == 1
+
+
+def test_tile_slide_rejects_an_annotation_id_outside_the_declared_mapping(
+    monkeypatch, tmp_path
+):
+    # 4 is owned by no label of the pixel mapping.
+    reader = _pyramid(_annotations(bottom_right=4))
+    whole_slide = _slide_spec(tmp_path)
+    _serve_mask(monkeypatch, reader)
+
+    with pytest.raises(ValueError, match=r"undeclared label IDs \[4\]"):
+        tile_slide(whole_slide, tiling=_tiling(), sampling=_sampling())
+
+    assert reader.close_count == 1
+
+
+def test_tile_slide_rejects_an_annotation_mask_that_does_not_cover_the_slide(
+    monkeypatch, tmp_path
+):
+    # A 256x128 mask cannot span the 256x256 slide at one scale.
+    reader = _MaskPyramid([_annotations()[:128]], spacing=0.5)
+    whole_slide = _slide_spec(tmp_path)
+    _serve_mask(monkeypatch, reader)
+
+    with pytest.raises(ValueError, match="Mask alignment failed"):
+        tile_slide(whole_slide, tiling=_tiling(), sampling=_sampling())
+
+    assert reader.read_levels == []
+    assert reader.close_count == 1
+
+
+def test_tile_slide_samples_a_flat_png_annotation_mask_without_spacing(tmp_path):
+    whole_slide = _slide_spec(tmp_path, mask_name="mask.png")
+    Image.fromarray(_annotations()).save(whole_slide.mask_path)
+
+    results = tile_slide(
+        whole_slide, tiling=_tiling(mask_backend="auto"), sampling=_sampling()
+    )
+
+    assert _tiles(results["tumor"]) == sorted(TUMOR_TILES)
+    assert _tiles(results["stroma"]) == sorted(STROMA_TILES)
+    # The spacing is the slide's 0.5 um/px scaled by the 256 px / 256 px dimension ratio.
+    assert (results["tumor"].mask_level, results["tumor"].mask_spacing_um) == (0, 0.5)
+    assert results["tumor"].mask_backend == "pil"

@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 
 from hs2p.configs.resolvers import validate_pixel_mapping, validate_sampling_spec
+from hs2p.mask import AnnotationLabels, Mask
 from hs2p.tiling.contours import _normalize_level_downsamples, detect_contours
 from hs2p.tiling.coverage import compute_tile_coverage
 from hs2p.tiling.generate import generate_tiles
@@ -786,14 +787,25 @@ def preprocess_slide_per_annotation(
     validate_sampling_spec(sampling_spec)
     slide = open_slide(image_path, backend=backend, spacing_override=spacing_override)
     try:
-        resolved_masks = resolve_annotation_masks(
-            slide=slide,
-            mask_path=mask_path,
-            pixel_mapping=pixel_mapping,
-            seg_downsample=seg_downsample,
-            mask_backend=mask_backend,
-            requested_mask_backend=requested_mask_backend,
-        )
+        if mask_backend is None:
+            mask_backend = AUTO_BACKEND
+        # The annotation mask declares the full configured vocabulary and lives only for
+        # its one full read.
+        with Mask(
+            path=mask_path,
+            labels=AnnotationLabels(pixel_mapping=pixel_mapping),
+            backend=mask_backend,
+        ) as mask:
+            resolved_masks = resolve_annotation_masks(
+                slide=slide,
+                mask=mask,
+                seg_downsample=seg_downsample,
+                requested_mask_backend=(
+                    requested_mask_backend
+                    if requested_mask_backend is not None
+                    else mask_backend
+                ),
+            )
         if mask_preview is not None:
             _render_annotation_mask_preview(
                 request=mask_preview,
