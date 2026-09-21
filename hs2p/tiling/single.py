@@ -15,7 +15,7 @@ from hs2p.tiling.result import ResolvedAnnotationMasks, ResolvedTissueMask, Tili
 from hs2p.tiling.mask import resolve_annotation_masks, resolve_tissue_mask
 from hs2p.tile_qc import filter_coordinate_tiles, needs_pixel_qc
 from hs2p.wsi.reader import open_slide
-from hs2p.wsi.types import CoordinateOutputMode, CoordinateSelectionStrategy
+from hs2p.wsi.types import CoordinateOutputMode, CoordinateSelectionStrategy, PixelMapping
 from hs2p.wsi.visualization import _combine_label_masks, save_overlay_preview
 
 
@@ -727,7 +727,7 @@ def preprocess_slide_per_annotation(
     *,
     image_path: str | Path,
     mask_path: str | Path,
-    pixel_mapping: dict[str, int],
+    pixel_mapping: PixelMapping,
     sampling_spec: Any,
     selection_strategy: str,
     sample_id: str | None = None,

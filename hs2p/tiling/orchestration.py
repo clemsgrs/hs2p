@@ -41,6 +41,7 @@ from hs2p.wsi import (
     write_coordinate_preview,
 )
 from hs2p.wsi.backend import resolve_backends
+from hs2p.wsi.types import PixelMapping
 from hs2p.wsi.reader import open_slide as open_preprocessing_slide
 from hs2p.preprocessing import resolve_tissue_mask
 from hs2p.artifacts import (
@@ -508,7 +509,7 @@ def write_annotation_tiling_preview(
     output_dir: Path,
     downsample: int,
     mask_path: Path | str | None,
-    pixel_mapping: dict[str, int] | None,
+    pixel_mapping: PixelMapping | None,
     color_mapping: dict[str, list[int] | None] | None,
 ) -> Path | None:
     """Render the tiling preview for one annotation artifact: the label's (or merged) mask in
@@ -1237,7 +1238,7 @@ def _write_annotation_tiling_preview_from_artifacts(
     output_dir: Path,
     downsample: int,
     mask_path: Path | str | None,
-    pixel_mapping: dict[str, int] | None,
+    pixel_mapping: PixelMapping | None,
     color_mapping: dict[str, list[int] | None] | None,
 ) -> Path | None:
     result = load_tiling_result(artifact.coordinates_npz_path, artifact.coordinates_meta_path)

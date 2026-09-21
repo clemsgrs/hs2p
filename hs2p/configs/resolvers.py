@@ -5,7 +5,13 @@ from typing import Any
 import numpy as np
 
 from hs2p.fileops import validate_annotation_name
-from hs2p.wsi.types import CoordinateOutputMode, CoordinateSelectionStrategy, SamplingSpec
+from hs2p.wsi.types import (
+    CoordinateOutputMode,
+    CoordinateSelectionStrategy,
+    PixelMapping,
+    SamplingSpec,
+    pixel_values,
+)
 
 from .models import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig
 
@@ -165,36 +171,49 @@ def _merge_sampling_mapping(
     return merged
 
 
-def validate_pixel_mapping(pixel_mapping: dict[str, int]) -> None:
+def validate_pixel_mapping(pixel_mapping: PixelMapping) -> None:
     """Validate the annotation ``pixel_mapping`` up front, before any slide is opened.
 
     ``pixel_mapping`` is the user's own label vocabulary except for ``"merged"``, which names
     structural merged coordinate output. Each label must map to a distinct integer in the
-    preview-safe range ``[0, 255]`` so all consumers preserve it without silent wrapping.
+    preview-safe range ``[0, 255]`` so all consumers preserve it without silent wrapping, or
+    to a non-empty list of such integers merged into one class. No raw value may be claimed
+    twice, within a label or across labels.
 
     Label *names* become on-disk path components (``output_dir/tiles/<label>/...`` for
     per-annotation artifacts), so they must be safe single path components — no separators,
     no ``.``/``..`` — to keep artifacts inside the run's output directory.
     """
     seen: dict[int, str] = {}
-    for annotation, value in pixel_mapping.items():
+    for annotation, entry in pixel_mapping.items():
         validate_annotation_name(annotation)
-        if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
+        values = pixel_values(entry)
+        if not values:
             raise ValueError(
-                f"pixel_mapping['{annotation}'] must be an integer label value, got {value!r}"
+                f"pixel_mapping['{annotation}'] must list at least one integer label value"
             )
-        ivalue = int(value)
-        if ivalue < 0 or ivalue > 255:
-            raise ValueError(
-                f"pixel_mapping['{annotation}']={ivalue} is outside the supported "
-                "label range [0, 255]"
-            )
-        if ivalue in seen:
-            raise ValueError(
-                "pixel_mapping values must be unique: "
-                f"'{annotation}' and '{seen[ivalue]}' both map to {ivalue}"
-            )
-        seen[ivalue] = annotation
+        for value in values:
+            if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
+                raise ValueError(
+                    f"pixel_mapping['{annotation}'] must be an integer label value, "
+                    f"got {value!r}"
+                )
+            ivalue = int(value)
+            if ivalue < 0 or ivalue > 255:
+                raise ValueError(
+                    f"pixel_mapping['{annotation}']={ivalue} is outside the supported "
+                    "label range [0, 255]"
+                )
+            if seen.get(ivalue) == annotation:
+                raise ValueError(
+                    f"pixel_mapping['{annotation}'] lists {ivalue} more than once"
+                )
+            if ivalue in seen:
+                raise ValueError(
+                    "pixel_mapping values must be unique: "
+                    f"'{annotation}' and '{seen[ivalue]}' both map to {ivalue}"
+                )
+            seen[ivalue] = annotation
 
 
 def validate_sampling_spec(sampling: SamplingSpec) -> None:
@@ -217,7 +236,7 @@ def _validate_annotation_names(*declarations: Any) -> None:
 
 def validate_color_mapping(
     *,
-    pixel_mapping: dict[str, int],
+    pixel_mapping: PixelMapping,
     color_mapping: dict[str, Sequence[int] | None],
 ) -> None:
     missing_annotations = sorted(set(pixel_mapping.keys()) - set(color_mapping.keys()))
@@ -290,6 +309,17 @@ def _drop_null_labels(
     return kept, filtered
 
 
+def _plain_pixel_lists(pixel_mapping: dict[str, Any]) -> dict[str, Any]:
+    """Turn list-valued entries (an OmegaConf ``ListConfig`` when read from YAML) into plain
+    lists. Scalar entries pass through untouched, so scalar-only mappings resolve as before."""
+    return {
+        name: list(value)
+        if isinstance(value, Sequence) and not isinstance(value, (str, bytes))
+        else value
+        for name, value in pixel_mapping.items()
+    }
+
+
 def _resolve_sampling_spec_from_masks(masks_cfg: Any) -> SamplingSpec:
     pixel_mapping = _merge_sampling_mapping(
         getattr(masks_cfg, "pixel_mapping", None),
@@ -311,6 +341,7 @@ def _resolve_sampling_spec_from_masks(masks_cfg: Any) -> SamplingSpec:
     pixel_mapping, (min_coverage, colors) = _drop_null_labels(
         pixel_mapping, min_coverage, colors
     )
+    pixel_mapping = _plain_pixel_lists(pixel_mapping)
     validate_pixel_mapping(pixel_mapping)
     missing_coverage_labels = sorted(set(min_coverage.keys()) - set(pixel_mapping.keys()))
     if missing_coverage_labels:
@@ -358,6 +389,7 @@ def _resolve_sampling_spec_from_sampling_params(
     pixel_mapping, (tissue_percentage, color_mapping) = _drop_null_labels(
         pixel_mapping, tissue_percentage, color_mapping
     )
+    pixel_mapping = _plain_pixel_lists(pixel_mapping)
     validate_pixel_mapping(pixel_mapping)
     missing_threshold_labels = sorted(
         set(tissue_percentage.keys()) - set(pixel_mapping.keys())

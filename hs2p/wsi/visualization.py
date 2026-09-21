@@ -6,6 +6,7 @@ from PIL import Image
 
 from .backend import open_mask_reader
 from .masks import read_aligned_mask
+from .types import PixelMapping, pixel_values
 from .preview import (
     build_overlay_alpha,
     build_palette,
@@ -127,9 +128,9 @@ def _resolve_stroke_thickness(
 def _resolve_fill_overlay_style(
     *,
     palette: np.ndarray | None,
-    pixel_mapping: dict[str, int] | None,
+    pixel_mapping: PixelMapping | None,
     color_mapping: dict[str, list[int] | None] | None,
-) -> tuple[np.ndarray, dict[str, int], dict[str, list[int] | None]] | None:
+) -> tuple[np.ndarray, PixelMapping, dict[str, list[int] | None]] | None:
     if palette is None and pixel_mapping is None and color_mapping is None:
         return None
     if pixel_mapping is None or color_mapping is None:
@@ -147,21 +148,23 @@ def _resolve_fill_overlay_style(
 def _combine_label_masks(
     *,
     masks: dict[str, np.ndarray],
-    pixel_mapping: dict[str, int],
+    pixel_mapping: PixelMapping,
 ) -> np.ndarray:
     """Recompose a single discrete label raster from per-label binary masks.
 
     The annotation sampler consumes one binary (255 fg / 0 bg) mask per label; the filled
     multi-label overlay needs them back as one raster carrying each label's declared pixel
-    value. Labels are painted in ``pixel_mapping`` order; later labels win on overlap, matching
-    how a single declared raster would have stored them.
+    value (the first one for a label merging several raw values). Labels are painted in
+    ``pixel_mapping`` order; later labels win on overlap, matching how a single declared raster
+    would have stored them.
     """
     reference = next(iter(masks.values()))
     combined = np.zeros(reference.shape[:2], dtype=np.uint8)
-    for name, value in pixel_mapping.items():
+    for name, entry in pixel_mapping.items():
         binary = masks.get(name)
         if binary is None:
             continue
+        value = pixel_values(entry)[0]
         combined = np.where(np.asarray(binary) > 0, np.uint8(int(value)), combined).astype(
             np.uint8
         )
@@ -173,7 +176,7 @@ def render_annotation_mask_preview(
     wsi_path: Path,
     backend: str,
     masks: dict[str, np.ndarray],
-    pixel_mapping: dict[str, int],
+    pixel_mapping: PixelMapping,
     color_mapping: dict[str, list[int] | None] | None,
     mask_preview_path: Path,
     downsample: int = 32,
@@ -209,7 +212,7 @@ def save_overlay_preview(
     mask_preview_path: Path,
     downsample: int = 32,
     palette: np.ndarray | None = None,
-    pixel_mapping: dict[str, int] | None = None,
+    pixel_mapping: PixelMapping | None = None,
     color_mapping: dict[str, list[int] | None] | None = None,
     alpha: float = 0.5,
     tile_size_lv0: int | None = None,
@@ -246,7 +249,7 @@ def overlay_mask_on_slide(
     downsample: int,
     backend: str,
     palette: np.ndarray | None = None,
-    pixel_mapping: dict[str, int] | None = None,
+    pixel_mapping: PixelMapping | None = None,
     color_mapping: dict[str, list[int] | None] | None = None,
     alpha: float = 0.5,
     mask_arr: np.ndarray | None = None,
@@ -369,7 +372,7 @@ def write_coordinate_preview(
     mask_path: Path | None = None,
     annotation: str | None = None,
     palette: np.ndarray | None = None,
-    pixel_mapping: dict[str, int] | None = None,
+    pixel_mapping: PixelMapping | None = None,
     color_mapping: dict[str, list[int] | None] | None = None,
     mask_backend: str = "auto",
 ):

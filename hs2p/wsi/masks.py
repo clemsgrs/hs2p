@@ -2,6 +2,8 @@
 import cv2
 import numpy as np
 
+from hs2p.wsi.types import PixelMapping, pixel_values
+
 
 def read_label_at_spacing(
     wsi,
@@ -169,17 +171,18 @@ def extract_padded_crop(
 def compose_overlay_mask_from_annotations(
     *,
     annotation_mask: dict[str, np.ndarray],
-    pixel_mapping: dict[str, int],
+    pixel_mapping: PixelMapping,
 ) -> np.ndarray:
+    # A label merging several raw values is painted with its first (representative) value.
     mask = np.full_like(
         normalize_tissue_mask(annotation_mask["tissue"]),
-        fill_value=pixel_mapping.get("background", 0),
+        fill_value=pixel_values(pixel_mapping.get("background", 0))[0],
         dtype=np.uint8,
     )
-    for annotation, label_value in pixel_mapping.items():
+    for annotation, entry in pixel_mapping.items():
         if annotation == "background":
             continue
         if annotation not in annotation_mask:
             continue
-        mask[normalize_tissue_mask(annotation_mask[annotation]) > 0] = label_value
+        mask[normalize_tissue_mask(annotation_mask[annotation]) > 0] = pixel_values(entry)[0]
     return mask

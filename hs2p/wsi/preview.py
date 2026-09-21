@@ -4,22 +4,26 @@ import numpy as np
 from PIL import Image, ImageOps
 
 from hs2p.wsi.masks import extract_padded_crop, read_aligned_mask
+from hs2p.wsi.types import PixelMapping, pixel_values
 
 
 def build_palette(
     *,
-    pixel_mapping: dict[str, int],
+    pixel_mapping: PixelMapping,
     color_mapping: dict[str, list[int] | None],
 ) -> np.ndarray:
     palette = np.zeros(shape=768, dtype=np.uint8)
-    for annotation, label_value in pixel_mapping.items():
+    for annotation, entry in pixel_mapping.items():
         color = color_mapping.get(annotation)
         if color is None:
             continue
-        palette[label_value * 3 : label_value * 3 + 3] = np.asarray(
-            color,
-            dtype=np.uint8,
-        )
+        # Every raw value of a merged label gets the label's color: the tiling preview
+        # overlays the raw mask file, where the values are still distinct.
+        for label_value in pixel_values(entry):
+            palette[label_value * 3 : label_value * 3 + 3] = np.asarray(
+                color,
+                dtype=np.uint8,
+            )
     return palette
 
 
@@ -27,14 +31,14 @@ def build_overlay_alpha(
     *,
     mask_arr: np.ndarray,
     alpha: float,
-    pixel_mapping: dict[str, int],
+    pixel_mapping: PixelMapping,
     color_mapping: dict[str, list[int] | None],
 ) -> Image.Image:
     alpha_int = int(round(255 * alpha))
     active_labels = set()
-    for annotation, label_value in pixel_mapping.items():
+    for annotation, entry in pixel_mapping.items():
         if color_mapping.get(annotation) is not None:
-            active_labels.add(label_value)
+            active_labels.update(pixel_values(entry))
 
     overlay_mask = np.isin(mask_arr, list(active_labels)).astype("uint8")
     alpha_content = np.less(overlay_mask, 1).astype("uint8") * alpha_int + (
@@ -47,7 +51,7 @@ def overlay_mask_on_tile(
     tile: Image.Image,
     mask: Image.Image,
     palette: np.ndarray,
-    pixel_mapping: dict[str, int],
+    pixel_mapping: PixelMapping,
     color_mapping: dict[str, list[int] | None],
     alpha: float = 0.5,
 ):
@@ -84,7 +88,7 @@ def draw_grid_from_coordinates(
     indices: list[int] | None = None,
     mask=None,
     palette: np.ndarray | None = None,
-    pixel_mapping: dict[str, int] | None = None,
+    pixel_mapping: PixelMapping | None = None,
     color_mapping: dict[str, list[int] | None] | None = None,
 ):
     downsamples = wsi.level_downsamples[vis_level]

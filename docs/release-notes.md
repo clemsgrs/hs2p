@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Several mask values under one label
+
+A `tiling.masks.pixel_mapping` entry may now be a list of raster values, e.g.
+`tumor: [1, 2]`. The values are sampled as one class: its binary mask is their union, so
+`min_coverage` applies to their summed coverage. `output_mode: merged` cannot express
+this, because it is the union of tiles passing each label's own threshold. Lists must be
+non-empty and no value may appear twice, within or across labels. Scalar entries are
+unchanged and are not rewritten as lists.
+
 ### Faster tiling previews
 
 Tiling previews (`tiling.preview.save_tiling_preview`) are now rendered by drawing the
