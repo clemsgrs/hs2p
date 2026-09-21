@@ -2,12 +2,12 @@
   "artifact": {
     "annotation": null,
     "coordinate_space": "level0_px",
-    "output_mode": "single_output",
+    "output_mode": "merged",
     "selection_strategy": "merged_default_tiling",
     "tile_order": "x_then_y"
   },
   "filtering": {
-    "a_h": 0,
+    "a_h": 2,
     "a_t": 4,
     "black_threshold": 25,
     "blur_threshold": 50.0,
@@ -27,40 +27,43 @@
     "mask_backend": "cucim",
     "mask_path": "/workspace/tests/fixtures/input/test-mask.tif",
     "requested_backend": "asap",
-    "requested_mask_backend": "auto",
+    "requested_mask_backend": "cucim",
     "sample_id": "test-wsi",
     "spacing_at_level_0": null
   },
   "segmentation": {
     "close": 4,
-    "mask_level": null,
+    "mask_level": 1,
     "mask_path": "/workspace/tests/fixtures/input/test-mask.tif",
-    "mask_spacing_um": null,
+    "mask_spacing_um": 8.063968658447266,
     "mthresh": 7,
-    "ref_tile_size_px": 16,
+    "ref_tile_size_px": 224,
     "requested_seg_downsample": 64,
     "sam2_checkpoint_path": null,
     "sam2_config_path": null,
     "seg_downsample": 64,
-    "seg_level": 0,
-    "seg_spacing_um": 0.0,
+    "seg_level": 3,
+    "seg_spacing_um": 16.128000252000003,
     "sthresh": 8,
     "sthresh_up": 255,
-    "tissue_mask_tissue_value": null,
+    "tissue_mask_tissue_value": 1,
     "tissue_method": "precomputed_mask"
   },
   "slide": {
     "base_spacing_um": 0.25200000393750005,
     "dimensions": [
-      0,
-      0
+      13824,
+      12800
     ],
     "level_downsamples": [
-      1.0
+      1.0,
+      4.0,
+      16.0,
+      64.0
     ]
   },
   "tiling": {
-    "is_within_tolerance": true,
+    "is_within_tolerance": false,
     "min_tissue_fraction": 0.1,
     "n_tiles": 459,
     "overlap": 0.0,
@@ -71,6 +74,6 @@
     "requested_tile_size_px": 224,
     "step_px_lv0": 444,
     "tile_size_lv0": 444,
-    "tolerance": 0.05
+    "tolerance": 0.07
   }
 }
