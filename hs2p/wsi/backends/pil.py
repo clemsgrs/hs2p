@@ -27,7 +27,13 @@ def supports_pil_path(path: str | Path) -> bool:
 
 
 class PILReader:
-    def __init__(self, path: str | Path, *, spacing_override: float | None = None):
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        spacing_override: float | None = None,
+        require_spacing: bool = True,
+    ):
         self._path = str(path)
         try:
             with _PIL_HEADER_LOCK:
@@ -57,6 +63,7 @@ class PILReader:
                 backend=self.backend_name,
                 native_spacing=self.native_spacing,
                 spacing_override=spacing_override,
+                require_spacing=require_spacing,
             )
         except Exception:
             self._image.close()
@@ -76,7 +83,7 @@ class PILReader:
 
     @property
     def spacings(self) -> list[float]:
-        return [self._spacing]
+        return [] if self._spacing is None else [self._spacing]
 
     @property
     def level_count(self) -> int:

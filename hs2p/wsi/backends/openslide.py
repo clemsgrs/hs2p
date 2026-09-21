@@ -13,7 +13,13 @@ from hs2p.wsi.geometry import compute_level_spacings
 
 
 class OpenSlideReader:
-    def __init__(self, path: str | Path, *, spacing_override: float | None = None):
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        spacing_override: float | None = None,
+        require_spacing: bool = True,
+    ):
         try:
             import openslide
         except ImportError as exc:
@@ -29,6 +35,7 @@ class OpenSlideReader:
             backend=self.backend_name,
             native_spacing=self.native_spacing,
             spacing_override=spacing_override,
+            require_spacing=require_spacing,
         )
         self._level_dimensions = [
             (int(width), int(height)) for width, height in self._slide.level_dimensions
@@ -36,9 +43,14 @@ class OpenSlideReader:
         self._level_downsamples = [
             (float(value), float(value)) for value in self._slide.level_downsamples
         ]
-        self._spacings = compute_level_spacings(
-            level0_spacing_um=self._spacing,
-            level_downsamples=self._level_downsamples,
+        # A source opened without spacing (``require_spacing=False``) has no level spacings.
+        self._spacings = (
+            []
+            if self._spacing is None
+            else compute_level_spacings(
+                level0_spacing_um=self._spacing,
+                level_downsamples=self._level_downsamples,
+            )
         )
 
     def _extract_spacing(self) -> float | None:

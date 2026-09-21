@@ -18,6 +18,7 @@ def _make_concrete_reader(
     backend: str,
     native_spacing: float | None,
     spacing_override: float | None,
+    require_spacing: bool = True,
 ):
     level_dimensions = [(400, 200), (160, 80), (100, 50)]
     level_downsamples = [1.0, 2.5, 4.0]
@@ -36,7 +37,11 @@ def _make_concrete_reader(
         )
         fake_module = SimpleNamespace(WholeSlideImage=MagicMock(return_value=slide))
         monkeypatch.setitem(sys.modules, "wholeslidedata", fake_module)
-        return ASAPReader("fake.svs", spacing_override=spacing_override)
+        return ASAPReader(
+            "fake.svs",
+            spacing_override=spacing_override,
+            require_spacing=require_spacing,
+        )
 
     if backend == "cucim":
         from hs2p.wsi.backends.cucim import CuCIMReader
@@ -62,7 +67,11 @@ def _make_concrete_reader(
                 fake_module if name == "cucim" else original_import_module(name)
             ),
         )
-        return CuCIMReader("fake.svs", spacing_override=spacing_override)
+        return CuCIMReader(
+            "fake.svs",
+            spacing_override=spacing_override,
+            require_spacing=require_spacing,
+        )
 
     if backend == "openslide":
         from hs2p.wsi.backends.openslide import OpenSlideReader
@@ -80,7 +89,11 @@ def _make_concrete_reader(
         )
         fake_module = SimpleNamespace(OpenSlide=MagicMock(return_value=slide))
         monkeypatch.setitem(sys.modules, "openslide", fake_module)
-        return OpenSlideReader("fake.svs", spacing_override=spacing_override)
+        return OpenSlideReader(
+            "fake.svs",
+            spacing_override=spacing_override,
+            require_spacing=require_spacing,
+        )
 
     if backend == "vips":
         from hs2p.wsi.backends.vips import VIPSReader
@@ -116,7 +129,11 @@ def _make_concrete_reader(
             Image=SimpleNamespace(new_from_file=new_from_file)
         )
         monkeypatch.setitem(sys.modules, "pyvips", fake_module)
-        return VIPSReader("fake.svs", spacing_override=spacing_override)
+        return VIPSReader(
+            "fake.svs",
+            spacing_override=spacing_override,
+            require_spacing=require_spacing,
+        )
 
     raise AssertionError(f"unsupported test backend: {backend}")
 
@@ -151,6 +168,38 @@ def test_spacing_override_rescues_missing_metadata_for_every_reader(
     assert reader.native_spacing is None
     assert reader.spacing == 0.25
     assert reader.spacings == [0.25, 0.625, 1.0]
+    assert len(recwarn) == 0
+
+
+@pytest.mark.parametrize("backend", ["asap", "cucim", "openslide", "vips"])
+def test_every_reader_requires_spacing_by_default(monkeypatch, backend):
+    with pytest.raises(
+        ValueError, match=rf"Unable to infer slide spacing.*backend={backend}"
+    ):
+        _make_concrete_reader(
+            monkeypatch,
+            backend=backend,
+            native_spacing=None,
+            spacing_override=None,
+        )
+
+
+@pytest.mark.parametrize("backend", ["asap", "cucim", "openslide", "vips"])
+def test_every_reader_opens_a_spacing_less_source_when_spacing_is_not_required(
+    monkeypatch, recwarn, backend
+):
+    reader = _make_concrete_reader(
+        monkeypatch,
+        backend=backend,
+        native_spacing=None,
+        spacing_override=None,
+        require_spacing=False,
+    )
+
+    assert reader.native_spacing is None
+    assert reader.spacing is None
+    assert reader.spacings == []
+    assert reader.level_dimensions == [(400, 200), (160, 80), (100, 50)]
     assert len(recwarn) == 0
 
 
