@@ -16,10 +16,17 @@ def resolve_level0_spacing(
     backend: str,
     native_spacing: float | None,
     spacing_override: float | None,
-) -> float:
-    """Return the effective level-0 spacing for a concrete reader."""
+    require_spacing: bool = True,
+) -> float | None:
+    """Return the effective level-0 spacing for a concrete reader.
+
+    ``require_spacing=False`` lets a source with neither native spacing nor an override
+    open with no spacing (``None``) instead of raising.
+    """
     if spacing_override is None:
         if native_spacing is None:
+            if not require_spacing:
+                return None
             raise ValueError(
                 f"Unable to infer slide spacing for path={path} with backend={backend}. "
                 "Provide spacing_at_level_0 or use a slide with valid spacing metadata."

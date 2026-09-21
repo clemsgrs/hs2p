@@ -13,6 +13,7 @@ from hs2p.api import (
     tile_slides,
     write_tiling_preview,
 )
+from hs2p.mask import AlignedMask, AnnotationLabels, Mask, MaskRead, TissueLabels
 from hs2p.preprocessing import (
     ContourResult,
     TileGeometry,

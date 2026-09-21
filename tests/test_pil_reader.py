@@ -82,6 +82,21 @@ def test_pil_reader_requires_explicit_level_zero_spacing(tmp_path):
         reader_mod.open_slide(path, backend="pil")
 
 
+@pytest.mark.parametrize("backend", ["pil", "auto"])
+def test_flat_raster_opens_without_spacing_when_spacing_is_not_required(
+    tmp_path, backend
+):
+    path = tmp_path / "labels.png"
+    Image.fromarray(np.zeros((4, 6), dtype=np.uint8), mode="L").save(path)
+
+    with reader_mod.open_slide(path, backend=backend, require_spacing=False) as slide:
+        assert slide.backend_name == "pil"
+        assert slide.native_spacing is None
+        assert slide.spacing is None
+        assert slide.spacings == []
+        assert slide.dimensions == (6, 4)
+
+
 def test_pil_reader_uses_the_project_owned_pixel_ceiling():
     assert pil_mod.PIL_MAX_IMAGE_PIXELS == 89_478_485
 

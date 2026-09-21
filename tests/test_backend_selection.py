@@ -3,6 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 import hs2p.api as api_mod
 import hs2p.preprocessing as preprocessing_mod
@@ -102,6 +103,7 @@ def test_resolve_backend_prefers_cucim_when_supported(monkeypatch):
         companion_path: str | None,
         backend: str,
         spacing_override=None,
+        require_spacing=True,
     ):
         del source_path, companion_path, spacing_override
         calls.append(backend)
@@ -126,6 +128,7 @@ def test_auto_slide_fallback_uses_shared_priority_without_native_backends(monkey
         companion_path: str | None,
         backend: str,
         spacing_override: float | None = None,
+        require_spacing: bool = True,
     ):
         del source_path, companion_path
         calls.append(backend)
@@ -154,6 +157,7 @@ def test_auto_selection_skips_backends_that_do_not_support_the_path(monkeypatch)
         companion_path: str | None,
         backend: str,
         spacing_override: float | None = None,
+        require_spacing: bool = True,
     ):
         del source_path, companion_path, spacing_override
         calls.append(backend)
@@ -177,6 +181,7 @@ def test_auto_mask_fallback_uses_shared_priority_independently(monkeypatch):
         companion_path: str | None,
         backend: str,
         spacing_override: float | None = None,
+        require_spacing: bool = True,
     ):
         del companion_path
         calls.append((source_path, backend, spacing_override))
@@ -216,7 +221,9 @@ def test_auto_open_uses_spacing_override_for_probe_and_warns_only_on_selected_op
         def close(self):
             return None
 
-    def _fake_opener(path, *, spacing_override=None, gpu_decode=False):
+    def _fake_opener(
+        path, *, spacing_override=None, gpu_decode=False, require_spacing=True
+    ):
         assert gpu_decode is False
         opened_with.append(spacing_override)
         if spacing_override is None:
@@ -257,6 +264,43 @@ def test_auto_open_uses_spacing_override_for_probe_and_warns_only_on_selected_op
     assert "backend=cucim" in str(caught[0].message)
 
 
+def test_auto_openability_probe_honors_require_spacing(monkeypatch):
+    class _Reader:
+        def close(self):
+            return None
+
+    def _fake_opener(path, *, spacing_override=None, require_spacing=True):
+        del path, spacing_override
+        if require_spacing:
+            raise ValueError("missing native spacing")
+        return _Reader()
+
+    monkeypatch.setattr(
+        reader_mod,
+        "_BACKENDS",
+        {
+            "openslide": reader_mod._BackendSpec(
+                name="openslide",
+                opener=_fake_opener,
+                supports_path=lambda path: True,
+            ),
+        },
+    )
+    monkeypatch.setattr(reader_mod, "AUTO_BACKEND_ORDER", ("openslide",))
+    reader_mod._backend_can_open_source.cache_clear()
+
+    with pytest.raises(RuntimeError, match="Unable to open untagged-mask.tif"):
+        reader_mod.resolve_backend("auto", wsi_path=Path("untagged-mask.tif"))
+
+    selection = reader_mod.resolve_backend(
+        "auto",
+        wsi_path=Path("untagged-mask.tif"),
+        require_spacing=False,
+    )
+
+    assert selection.backend == "openslide"
+
+
 def test_resolve_backend_respects_explicit_override(monkeypatch):
     calls: list[str] = []
 
@@ -266,6 +310,7 @@ def test_resolve_backend_respects_explicit_override(monkeypatch):
         companion_path: str | None,
         backend: str,
         spacing_override=None,
+        require_spacing=True,
     ):
         del source_path, companion_path, backend, spacing_override
         calls.append("called")
@@ -290,6 +335,7 @@ def test_reader_resolve_backend_prefers_cucim_when_supported(monkeypatch):
         companion_path: str | None,
         backend: str,
         spacing_override=None,
+        require_spacing=True,
     ):
         del source_path, companion_path, spacing_override
         calls.append(backend)
@@ -308,7 +354,7 @@ def test_reader_resolve_backend_prefers_cucim_when_supported(monkeypatch):
 def test_reader_backend_probe_uses_backend_openers(monkeypatch):
     seen_paths: list[str] = []
 
-    def _fake_opener(path, *, spacing_override=None):
+    def _fake_opener(path, *, spacing_override=None, require_spacing=True):
         del spacing_override
         seen_paths.append(str(path))
         return SimpleNamespace(close=lambda: None)

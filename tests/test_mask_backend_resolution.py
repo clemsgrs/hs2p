@@ -48,7 +48,12 @@ def test_seam_resolves_slide_and_mask_from_own_paths(monkeypatch):
     seen: list[tuple[str, str]] = []
 
     def _fake_can_open(
-        *, source_path, companion_path, backend, spacing_override=None
+        *,
+        source_path,
+        companion_path,
+        backend,
+        spacing_override=None,
+        require_spacing=True,
     ):
         del companion_path, spacing_override
         seen.append((str(source_path), backend))
@@ -76,9 +81,7 @@ def test_seam_maskless_has_null_mask_provenance(monkeypatch):
     monkeypatch.setattr(
         reader_mod,
         "_backend_can_open_source",
-        lambda *, source_path, companion_path, backend, spacing_override=None: (
-            backend == "cucim"
-        ),
+        lambda *, backend, **kwargs: backend == "cucim",
     )
     resolved = resolve_backends(
         requested_slide_backend="auto",
@@ -98,7 +101,12 @@ def test_seam_slide_resolution_ignores_mask_openability(monkeypatch):
     probed_paths: list[str] = []
 
     def _fake_can_open(
-        *, source_path, companion_path, backend, spacing_override=None
+        *,
+        source_path,
+        companion_path,
+        backend,
+        spacing_override=None,
+        require_spacing=True,
     ):
         del companion_path, spacing_override
         probed_paths.append(str(source_path))

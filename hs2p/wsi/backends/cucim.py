@@ -106,6 +106,7 @@ class CuCIMReader:
         *,
         spacing_override: float | None = None,
         gpu_decode: bool = False,
+        require_spacing: bool = True,
     ):
         if gpu_decode:
             os.environ["ENABLE_CUSLIDE2"] = "1"
@@ -152,10 +153,16 @@ class CuCIMReader:
             backend=self.backend_name,
             native_spacing=self.native_spacing,
             spacing_override=spacing_override,
+            require_spacing=require_spacing,
         )
-        self._spacings = compute_level_spacings(
-            level0_spacing_um=self._spacing,
-            level_downsamples=self._level_downsamples,
+        # A source opened without spacing (``require_spacing=False``) has no level spacings.
+        self._spacings = (
+            []
+            if self._spacing is None
+            else compute_level_spacings(
+                level0_spacing_um=self._spacing,
+                level_downsamples=self._level_downsamples,
+            )
         )
 
     @property

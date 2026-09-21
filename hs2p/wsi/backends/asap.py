@@ -14,7 +14,13 @@ from hs2p.wsi.geometry import compute_level_spacings
 
 
 class ASAPReader:
-    def __init__(self, path: str | Path, *, spacing_override: float | None = None):
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        spacing_override: float | None = None,
+        require_spacing: bool = True,
+    ):
         try:
             import wholeslidedata as wsd
         except ImportError as exc:
@@ -38,10 +44,16 @@ class ASAPReader:
             backend=self.backend_name,
             native_spacing=self.native_spacing,
             spacing_override=spacing_override,
+            require_spacing=require_spacing,
         )
-        self._spacings = compute_level_spacings(
-            level0_spacing_um=self._spacing,
-            level_downsamples=self._level_downsamples,
+        # A source opened without spacing (``require_spacing=False``) has no level spacings.
+        self._spacings = (
+            []
+            if self._spacing is None
+            else compute_level_spacings(
+                level0_spacing_um=self._spacing,
+                level_downsamples=self._level_downsamples,
+            )
         )
         self._backend_spacings = (
             backend_spacings

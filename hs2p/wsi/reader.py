@@ -162,16 +162,26 @@ def _open_asap(
     path: str | Path,
     *,
     spacing_override: float | None = None,
+    require_spacing: bool = True,
 ) -> SlideReader:
-    return ASAPReader(path, spacing_override=spacing_override)
+    return ASAPReader(
+        path,
+        spacing_override=spacing_override,
+        require_spacing=require_spacing,
+    )
 
 
 def _open_openslide(
     path: str | Path,
     *,
     spacing_override: float | None = None,
+    require_spacing: bool = True,
 ) -> SlideReader:
-    return OpenSlideReader(path, spacing_override=spacing_override)
+    return OpenSlideReader(
+        path,
+        spacing_override=spacing_override,
+        require_spacing=require_spacing,
+    )
 
 
 def _open_cucim(
@@ -179,24 +189,40 @@ def _open_cucim(
     *,
     spacing_override: float | None = None,
     gpu_decode: bool = False,
+    require_spacing: bool = True,
 ) -> SlideReader:
-    return CuCIMReader(path, spacing_override=spacing_override, gpu_decode=gpu_decode)
+    return CuCIMReader(
+        path,
+        spacing_override=spacing_override,
+        gpu_decode=gpu_decode,
+        require_spacing=require_spacing,
+    )
 
 
 def _open_vips(
     path: str | Path,
     *,
     spacing_override: float | None = None,
+    require_spacing: bool = True,
 ) -> SlideReader:
-    return VIPSReader(path, spacing_override=spacing_override)
+    return VIPSReader(
+        path,
+        spacing_override=spacing_override,
+        require_spacing=require_spacing,
+    )
 
 
 def _open_pil(
     path: str | Path,
     *,
     spacing_override: float | None = None,
+    require_spacing: bool = True,
 ) -> SlideReader:
-    return PILReader(path, spacing_override=spacing_override)
+    return PILReader(
+        path,
+        spacing_override=spacing_override,
+        require_spacing=require_spacing,
+    )
 
 
 _BACKENDS: dict[str, _BackendSpec] = {
@@ -214,13 +240,21 @@ def open_slide(
     *,
     spacing_override: float | None = None,
     gpu_decode: bool = False,
+    require_spacing: bool = True,
 ) -> SlideReader:
+    """Open ``path`` with ``backend``.
+
+    ``require_spacing=False`` lets a source without native spacing (and without an
+    override) open with ``native_spacing = None`` instead of raising; ``auto`` applies
+    the same flag to its openability probe.
+    """
     backend = (backend or AUTO_BACKEND).strip().lower()
     if backend == AUTO_BACKEND:
         selection = resolve_backend(
             backend,
             wsi_path=Path(path),
             spacing_override=spacing_override,
+            require_spacing=require_spacing,
         )
         backend = selection.backend
     spec = _BACKENDS.get(backend)
@@ -228,8 +262,17 @@ def open_slide(
         available = ", ".join(["auto", *_BACKENDS.keys()])
         raise ValueError(f"Unknown backend: '{backend}'. Available: {available}")
     if backend == "cucim":
-        return spec.opener(path, spacing_override=spacing_override, gpu_decode=gpu_decode)
-    return spec.opener(path, spacing_override=spacing_override)
+        return spec.opener(
+            path,
+            spacing_override=spacing_override,
+            gpu_decode=gpu_decode,
+            require_spacing=require_spacing,
+        )
+    return spec.opener(
+        path,
+        spacing_override=spacing_override,
+        require_spacing=require_spacing,
+    )
 
 
 def _normalize_path(path: Path | None) -> str | None:
@@ -245,6 +288,7 @@ def _backend_can_open_source(
     companion_path: str | None,
     backend: str,
     spacing_override: float | None = None,
+    require_spacing: bool = True,
 ) -> bool:
     spec = _BACKENDS.get(backend)
     if spec is None:
@@ -260,7 +304,11 @@ def _backend_can_open_source(
                 message=r"^Slide spacing override conflict:",
                 category=UserWarning,
             )
-            source = spec.opener(source_path, spacing_override=spacing_override)
+            source = spec.opener(
+                source_path,
+                spacing_override=spacing_override,
+                require_spacing=require_spacing,
+            )
             source.close()
             if companion_path is not None:
                 companion = spec.opener(companion_path)
@@ -276,6 +324,7 @@ def resolve_backend(
     wsi_path: Path,
     mask_path: Path | None = None,
     spacing_override: float | None = None,
+    require_spacing: bool = True,
 ) -> BackendSelection:
     requested_backend = (requested_backend or AUTO_BACKEND).strip().lower()
     if requested_backend != AUTO_BACKEND:
@@ -321,6 +370,7 @@ def resolve_backend(
             companion_path=normalized_mask_path,
             backend=backend,
             spacing_override=spacing_override,
+            require_spacing=require_spacing,
         ):
             reason = "; ".join(
                 reasons + [f"selected {display_name} for auto backend"]
