@@ -3,7 +3,8 @@ import cv2
 import numpy as np
 from PIL import Image, ImageOps
 
-from hs2p.wsi.masks import extract_padded_crop, read_aligned_mask
+from hs2p.mask import AlignedMask
+from hs2p.wsi.masks import extract_padded_crop
 from hs2p.wsi.types import PixelMapping, pixel_values
 
 
@@ -86,11 +87,13 @@ def draw_grid_from_coordinates(
     vis_level: int,
     thickness: int = 2,
     indices: list[int] | None = None,
-    mask=None,
+    mask: AlignedMask | None = None,
     palette: np.ndarray | None = None,
     pixel_mapping: PixelMapping | None = None,
     color_mapping: dict[str, list[int] | None] | None = None,
 ):
+    """Draw the tile grid on ``canvas`` (the slide at ``vis_level``), each tile over its
+    labels from ``mask``, a view aligned to ``wsi``'s level-0 grid, when one is given."""
     downsamples = wsi.level_downsamples[vis_level]
     if indices is None:
         indices = np.arange(len(coords))
@@ -101,16 +104,12 @@ def draw_grid_from_coordinates(
     )
     wsi_width_at_0, wsi_height_at_0 = wsi.level_dimensions[0]
 
-    vis_spacing = wsi.get_level_spacing(vis_level)
     aligned_mask = None
     if mask is not None:
-        aligned_mask = read_aligned_mask(
-            mask_obj=mask,
-            slide_spacing=vis_spacing,
-            slide_dimensions=wsi.level_dimensions[vis_level],
-        )
-        if aligned_mask.ndim == 3 and aligned_mask.shape[-1] == 1:
-            aligned_mask = np.squeeze(aligned_mask, axis=-1)
+        aligned_mask = mask.read_full(
+            target_spacing_um=wsi.get_level_spacing(vis_level),
+            target_dimensions=wsi.level_dimensions[vis_level],
+        ).labels
 
     if aligned_mask is None:
         # No overlay: the canvas already holds the slide pixels, so only the grid

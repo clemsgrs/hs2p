@@ -17,6 +17,7 @@ import pandas as pd
 from hs2p.configs import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig
 from hs2p.configs.loader import DEFAULT_JPEG_BACKEND
 from hs2p.configs.resolvers import require_tissue_fraction, validate_sampling_spec
+from hs2p.mask import Mask
 from hs2p.progress import emit_progress, emit_progress_log
 from hs2p.tiling.result import ResolvedTissueMask, TilingResult
 from hs2p.tiling.single import (
@@ -42,9 +43,9 @@ from hs2p.wsi import (
 )
 from hs2p.wsi.backend import resolve_backends
 from hs2p.wsi.types import PixelMapping
-from hs2p.wsi.reader import open_slide as open_preprocessing_slide
+from hs2p.wsi.reader import AUTO_BACKEND, open_slide as open_preprocessing_slide
 from hs2p.preprocessing import resolve_tissue_mask
-from hs2p.tiling.mask import open_tissue_mask
+from hs2p.tiling.mask import open_annotation_mask, open_tissue_mask
 from hs2p.artifacts import (
     CompatibilitySpec,
     ProcessListCheckpoint,
@@ -509,12 +510,16 @@ def write_annotation_tiling_preview(
     result: TilingResult,
     output_dir: Path,
     downsample: int,
-    mask_path: Path | str | None,
+    mask: Mask | None,
     pixel_mapping: PixelMapping | None,
     color_mapping: dict[str, list[int] | None] | None,
 ) -> Path | None:
     """Render the tiling preview for one annotation artifact: the label's (or merged) mask in
     full color as backdrop, with the selected tile grid (fixed black line) drawn over it.
+
+    ``mask`` is the open source :class:`~hs2p.mask.Mask` (its lifetime is the caller's);
+    ``pixel_mapping`` and ``color_mapping`` only decide the palette, so they may be
+    restricted to the previewed label while the mask declares the full vocabulary.
 
     The preview subdirectory mirrors the coordinate artifact path 1:1 via the shared
     :func:`is_flattened_annotation` rule (per-annotation subdir, except structural output
@@ -534,7 +539,7 @@ def write_annotation_tiling_preview(
         preview_path = save_dir / annotation / f"{result.sample_id}.jpg"
         preview_annotation = annotation
     palette = None
-    if mask_path is not None and pixel_mapping is not None and color_mapping is not None:
+    if mask is not None and pixel_mapping is not None and color_mapping is not None:
         palette = build_palette(pixel_mapping=pixel_mapping, color_mapping=color_mapping)
     coordinates = list(zip(result.x.tolist(), result.y.tolist()))
     write_coordinate_preview(
@@ -545,13 +550,11 @@ def write_annotation_tiling_preview(
         downsample=downsample,
         backend=result.backend,
         sample_id=result.sample_id,
-        mask_path=Path(mask_path) if mask_path is not None else None,
+        mask=mask,
         annotation=preview_annotation,
         palette=palette,
         pixel_mapping=pixel_mapping,
         color_mapping=color_mapping,
-        # Deferred preview mask read uses the mask's own resolved backend (#163).
-        mask_backend=getattr(result, "mask_backend", None) or "auto",
     )
     return preview_path
 
@@ -1245,19 +1248,29 @@ def _write_annotation_tiling_preview_from_artifacts(
     output_dir: Path,
     downsample: int,
     mask_path: Path | str | None,
+    mask_backend: str | None,
     pixel_mapping: PixelMapping | None,
     color_mapping: dict[str, list[int] | None] | None,
 ) -> Path | None:
+    """Preview worker: receives plain values because a ``Mask`` owns an open reader and
+    cannot cross the process boundary. It builds the mask here, declaring the full
+    ``pixel_mapping`` so validation never sees the per-annotation restriction (which only
+    narrows the palette), and closes it whether or not the render succeeds."""
     result = load_tiling_result(artifact.coordinates_npz_path, artifact.coordinates_meta_path)
     annotation = artifact.annotation
-    return write_annotation_tiling_preview(
-        result=result,
-        output_dir=output_dir,
-        downsample=downsample,
-        mask_path=mask_path,
-        pixel_mapping=_restrict_label_mapping(pixel_mapping, annotation),
-        color_mapping=_restrict_label_mapping(color_mapping, annotation),
-    )
+    with open_annotation_mask(
+        mask_path,
+        pixel_mapping=pixel_mapping,
+        backend=mask_backend if mask_backend is not None else AUTO_BACKEND,
+    ) as mask:
+        return write_annotation_tiling_preview(
+            result=result,
+            output_dir=output_dir,
+            downsample=downsample,
+            mask=mask,
+            pixel_mapping=_restrict_label_mapping(pixel_mapping, annotation),
+            color_mapping=_restrict_label_mapping(color_mapping, annotation),
+        )
 
 
 def tile_slides(
@@ -1716,6 +1729,9 @@ def tile_slides(
             sampling_pixel_mapping = getattr(sampling, "pixel_mapping", None)
             sampling_color_mapping = getattr(sampling, "color_mapping", None)
             mask_path = response.whole_slide.mask_path
+            # The worker rebuilds the mask from these plain values: the path, the
+            # backend preflight resolved for it, and the full label vocabulary.
+            mask_backend = response.mask_backend
             for offset, sampling_artifact in enumerate(
                 (base_artifact, *getattr(response, "extra_artifacts", ()))
             ):
@@ -1730,6 +1746,7 @@ def tile_slides(
                     output_dir=output_dir,
                     downsample=preview.downsample,
                     mask_path=mask_path,
+                    mask_backend=mask_backend,
                     pixel_mapping=sampling_pixel_mapping,
                     color_mapping=sampling_color_mapping,
                 )
