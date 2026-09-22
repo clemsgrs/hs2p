@@ -4,8 +4,8 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from .backend import open_mask_reader
-from .masks import read_aligned_mask
+from hs2p.mask import AlignedMask, Mask
+
 from .types import PixelMapping, pixel_values
 from .preview import (
     build_overlay_alpha,
@@ -224,7 +224,6 @@ def save_overlay_preview(
     mask_preview_path.parent.mkdir(parents=True, exist_ok=True)
     overlay = overlay_mask_on_slide(
         wsi_path=wsi_path,
-        annotation_mask_path=None,
         mask_arr=mask_arr,
         downsample=downsample,
         backend=backend,
@@ -243,11 +242,19 @@ def save_overlay_preview(
     overlay.save(mask_preview_path)
 
 
+def _align_to_slide(mask: Mask, wsi_object: WSI) -> AlignedMask:
+    """Bind a source mask to the slide's level-0 grid."""
+    return mask.align_to(
+        reference_spacing_um=wsi_object.get_level_spacing(0),
+        reference_dimensions=wsi_object.level_dimensions[0],
+    )
+
+
 def overlay_mask_on_slide(
     wsi_path: Path,
-    annotation_mask_path: Path | None,
     downsample: int,
     backend: str,
+    mask: Mask | None = None,
     palette: np.ndarray | None = None,
     pixel_mapping: PixelMapping | None = None,
     color_mapping: dict[str, list[int] | None] | None = None,
@@ -258,8 +265,13 @@ def overlay_mask_on_slide(
     outer_border_color: tuple[int, int, int] = DEFAULT_TISSUE_BORDER_COLOR,
     hole_border_color: tuple[int, int, int] = DEFAULT_TISSUE_HOLE_COLOR,
     stroke_thickness: int | None = None,
-    mask_backend: str = "auto",
 ):
+    """Overlay labels on the slide read at ``downsample``.
+
+    The labels come from ``mask`` (an open source :class:`~hs2p.mask.Mask`, aligned to
+    the slide and read at the preview level exactly as preprocessing reads it), or from
+    the in-memory ``mask_arr``, or are derived from ``contours``.
+    """
     wsi_object = WSI(path=wsi_path, backend=backend)
 
     vis_level = wsi_object.get_best_level_for_downsample_custom(downsample)
@@ -279,18 +291,11 @@ def overlay_mask_on_slide(
             "RGBA"
         )
         width, height = wsi.size
-    if annotation_mask_path is not None:
-        # Resolve mask decoding independently of the slide backend.
-        mask_reader, _ = open_mask_reader(
-            annotation_mask_path, mask_backend=mask_backend
-        )
-        mask_arr = read_aligned_mask(
-            mask_obj=mask_reader,
-            slide_spacing=wsi_object.get_level_spacing(vis_level),
-            slide_dimensions=(base_width, base_height),
-        )
-        if mask_arr.ndim == 3:
-            mask_arr = mask_arr[:, :, 0]
+    if mask is not None:
+        mask_arr = _align_to_slide(mask, wsi_object).read_full(
+            target_spacing_um=wsi_object.get_level_spacing(vis_level),
+            target_dimensions=(base_width, base_height),
+        ).labels
     elif mask_arr is not None:
         if mask_arr.ndim == 3:
             mask_arr = mask_arr[:, :, 0]
@@ -300,9 +305,7 @@ def overlay_mask_on_slide(
             interpolation=cv2.INTER_NEAREST,
         )
     elif contours is None:
-        raise ValueError(
-            "Provide annotation_mask_path, mask_arr, or contours to overlay_mask_on_slide()"
-        )
+        raise ValueError("Provide mask, mask_arr, or contours to overlay_mask_on_slide()")
     else:
         mask_arr = np.zeros((base_height, base_width), dtype=np.uint8)
 
@@ -369,20 +372,17 @@ def write_coordinate_preview(
     sample_id: str | None = None,
     downsample: int = 64,
     grid_thickness: int = 1,
-    mask_path: Path | None = None,
+    mask: Mask | None = None,
     annotation: str | None = None,
     palette: np.ndarray | None = None,
     pixel_mapping: PixelMapping | None = None,
     color_mapping: dict[str, list[int] | None] | None = None,
-    mask_backend: str = "auto",
 ):
+    """Write the tile grid over the slide read at ``downsample``, each tile over its labels
+    from ``mask`` (an open source :class:`~hs2p.mask.Mask`) when one is given."""
     wsi = WSI(wsi_path, backend=backend)
     vis_level = wsi.get_best_level_for_downsample_custom(downsample)
-    if mask_path is not None:
-        # The grid renderer needs the mask reader's read_level/spacings interface.
-        mask, _ = open_mask_reader(mask_path, mask_backend=mask_backend)
-    else:
-        mask = None
+    aligned_mask = _align_to_slide(mask, wsi) if mask is not None else None
 
     canvas = wsi.get_slide(vis_level)
     canvas = Image.fromarray(canvas).convert("RGB")
@@ -412,7 +412,7 @@ def write_coordinate_preview(
         vis_level,
         indices=None,
         thickness=grid_thickness,
-        mask=mask,
+        mask=aligned_mask,
         palette=palette,
         pixel_mapping=pixel_mapping,
         color_mapping=color_mapping,

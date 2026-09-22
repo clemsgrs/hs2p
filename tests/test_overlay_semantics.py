@@ -9,6 +9,8 @@ cv2 = pytest.importorskip("cv2")
 wsi_mod = pytest.importorskip("hs2p.wsi")
 visualization_mod = pytest.importorskip("hs2p.wsi.visualization")
 
+from hs2p.mask import AnnotationLabels, Mask  # noqa: E402
+
 
 def _contour(points: list[tuple[int, int]]) -> np.ndarray:
     return np.asarray(points, dtype=np.int32).reshape((-1, 1, 2))
@@ -64,7 +66,6 @@ def test_overlay_mask_on_slide_renders_outer_and_hole_contours(monkeypatch):
 
     overlay = wsi_mod.overlay_mask_on_slide(
         wsi_path=Path("fake-wsi.tif"),
-        annotation_mask_path=None,
         downsample=1,
         backend="openslide",
         mask_arr=mask_arr,
@@ -104,7 +105,6 @@ def test_overlay_mask_on_slide_scales_level_zero_contours_to_vis_level(monkeypat
 
     overlay = wsi_mod.overlay_mask_on_slide(
         wsi_path=Path("fake-wsi.tif"),
-        annotation_mask_path=None,
         downsample=1,
         backend="openslide",
         mask_arr=np.zeros((5, 5), dtype=np.uint8),
@@ -114,52 +114,6 @@ def test_overlay_mask_on_slide_scales_level_zero_contours_to_vis_level(monkeypat
     overlay_arr = np.array(overlay.convert("RGB"))
 
     assert np.array_equal(overlay_arr[2, 2], np.array([37, 94, 59], dtype=np.uint8))
-
-
-def test_overlay_mask_on_slide_surfaces_actionable_mask_open_error(monkeypatch):
-    """An incompatible mask backend surfaces the centralized actionable open error naming the
-    mask path and requested backend, not a raw codec error (Finding 6)."""
-    import hs2p.wsi.reader as reader_mod
-
-    slide_arr = np.full((10, 10, 3), 200, dtype=np.uint8)
-
-    class FakeWSI:
-        def __init__(self, path, backend="asap"):
-            del backend
-            self.path = Path(path)
-            self.level_downsamples = [(1.0, 1.0)]
-
-        def get_best_level_for_downsample_custom(self, downsample):
-            del downsample
-            return 0
-
-        def get_slide(self, level):
-            del level
-            return slide_arr
-
-        def get_level_spacing(self, level):
-            del level
-            return 0.5
-
-    monkeypatch.setattr(visualization_mod, "WSI", FakeWSI)
-
-    def _boom(path, backend=reader_mod.AUTO_BACKEND, **kwargs):
-        raise RuntimeError("cucim: cannot decode compression")
-
-    monkeypatch.setattr(reader_mod, "open_slide", _boom)
-
-    with pytest.raises(RuntimeError) as excinfo:
-        wsi_mod.overlay_mask_on_slide(
-            wsi_path=Path("fake-wsi.tif"),
-            annotation_mask_path=Path("/masks/incompatible.tif"),
-            downsample=1,
-            backend="openslide",
-            mask_backend="cucim",
-        )
-    message = str(excinfo.value)
-    assert "/masks/incompatible.tif" in message
-    assert "cucim" in message
-    assert "Select another mask backend" in message
 
 
 def test_resolve_stroke_thickness_scales_with_requested_downsample():
@@ -206,7 +160,6 @@ def test_overlay_mask_on_slide_accepts_in_memory_mask_array(monkeypatch):
 
     overlay = wsi_mod.overlay_mask_on_slide(
         wsi_path=Path("fake-wsi.tif"),
-        annotation_mask_path=None,
         mask_arr=mask_arr,
         downsample=1,
         backend="openslide",
@@ -242,7 +195,6 @@ def test_overlay_mask_on_slide_defaults_to_tissue_overlay_style(monkeypatch):
 
     overlay = wsi_mod.overlay_mask_on_slide(
         wsi_path=Path("fake-wsi.tif"),
-        annotation_mask_path=None,
         mask_arr=mask_arr,
         downsample=1,
         backend="openslide",
@@ -323,18 +275,8 @@ def test_write_annotation_tiling_preview_draws_label_backdrop_under_black_grid(
     label_value = 1
     mask_arr = np.zeros((120, 120), dtype=np.uint8)
     mask_arr[0:64, 0:64] = label_value  # the single selected tile lands here
-
-    class FakeReader:
-        # The mask backdrop is read through the backend *reader* (``read_level``/
-        # ``spacings``/``level_downsamples``), never through the WSI. A WSI does not
-        # expose ``read_level``; keeping these only on ``.reader`` guards the
-        # WSI-vs-reader gap that a reader-less fake would otherwise hide.
-        spacings = [0.5]
-        level_downsamples = [(1.0, 1.0)]
-
-        def read_level(self, level):
-            del level
-            return mask_arr
+    mask_path = tmp_path / "mask.png"
+    Image.fromarray(mask_arr, mode="L").save(mask_path)
 
     class FakeWSI:
         def __init__(self, path, backend="asap"):
@@ -344,8 +286,6 @@ def test_write_annotation_tiling_preview_draws_label_backdrop_under_black_grid(
             self.spacing = 0.5
             self.level_dimensions = [(120, 120)]
             self.level_downsamples = [(1.0, 1.0)]
-            self._is_mask = "mask" in str(path).lower()
-            self.reader = FakeReader()
 
         def get_best_level_for_downsample_custom(self, downsample):
             del downsample
@@ -360,13 +300,6 @@ def test_write_annotation_tiling_preview_draws_label_backdrop_under_black_grid(
             return slide_arr
 
     monkeypatch.setattr(visualization_mod, "WSI", FakeWSI)
-    # The grid-preview mask opens through the centralized helper (#163); hand it the fake
-    # backend reader directly rather than routing through the monkeypatched WSI.
-    monkeypatch.setattr(
-        visualization_mod,
-        "open_mask_reader",
-        lambda mask_path, *, mask_backend="auto": (FakeReader(), "asap"),
-    )
 
     result = SimpleNamespace(
         x=np.array([0], dtype=np.int64),
@@ -377,14 +310,18 @@ def test_write_annotation_tiling_preview_draws_label_backdrop_under_black_grid(
         sample_id="slide0",
         annotation="tumor",
     )
-    preview_path = orchestration_mod.write_annotation_tiling_preview(
-        result=result,
-        output_dir=tmp_path,
-        downsample=1,
-        mask_path=Path("fake-mask.tif"),
-        pixel_mapping={"background": 0, "tumor": label_value},
-        color_mapping={"background": None, "tumor": [255, 0, 0]},
-    )
+    pixel_mapping = {"background": 0, "tumor": label_value}
+    with Mask(
+        path=mask_path, labels=AnnotationLabels(pixel_mapping=pixel_mapping), backend="pil"
+    ) as mask:
+        preview_path = orchestration_mod.write_annotation_tiling_preview(
+            result=result,
+            output_dir=tmp_path,
+            downsample=1,
+            mask=mask,
+            pixel_mapping=pixel_mapping,
+            color_mapping={"background": None, "tumor": [255, 0, 0]},
+        )
 
     # Per-annotation subdir mirrors the coordinate artifact layout.
     assert preview_path == tmp_path / "preview" / "tiling" / "tumor" / "slide0.jpg"
@@ -418,7 +355,6 @@ def test_write_annotation_tiling_preview_rejects_reserved_name_before_writing(
         backend="openslide",
         sample_id="slide0",
         annotation="merged",
-        mask_backend=None,
     )
 
     with pytest.raises(ValueError, match="'merged'.*reserved"):
@@ -426,7 +362,7 @@ def test_write_annotation_tiling_preview_rejects_reserved_name_before_writing(
             result=result,
             output_dir=tmp_path,
             downsample=1,
-            mask_path=None,
+            mask=None,
             pixel_mapping=None,
             color_mapping=None,
         )

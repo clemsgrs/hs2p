@@ -49,6 +49,24 @@ def open_tissue_mask(
     )
 
 
+def open_annotation_mask(
+    mask_path: str | Path | None,
+    *,
+    pixel_mapping: PixelMapping | None,
+    backend: str = AUTO_BACKEND,
+) -> AbstractContextManager[Mask | None]:
+    """Context manager over the annotation :class:`~hs2p.mask.Mask` for ``mask_path``,
+    declaring the full ``pixel_mapping`` vocabulary; yields ``None`` without a source mask
+    or a mapping."""
+    if mask_path is None or pixel_mapping is None:
+        return nullcontext()
+    return Mask(
+        path=mask_path,
+        labels=AnnotationLabels(pixel_mapping=pixel_mapping),
+        backend=backend,
+    )
+
+
 def _read_binary_tissue_mask(
     *, mask: Mask, slide, seg_level: int
 ) -> tuple[np.ndarray, int, float]:

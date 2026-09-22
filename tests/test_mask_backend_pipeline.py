@@ -9,7 +9,6 @@ import pytest
 
 import hs2p.tiling.orchestration as orchestration_mod
 import hs2p.wsi.wsi as wsi_mod
-import hs2p.wsi.visualization as vis_mod
 from hs2p.api import (
     CompatibilitySpec,
     FilterConfig,
@@ -392,51 +391,3 @@ def test_wsi_resolves_mask_backend_independently(monkeypatch):
     # the mask reader was opened with the mask's own resolved backend
     assert ("/data/slide-mask.tif", "openslide") in opened
     assert ("/data/slide.svs", "asap") in opened
-
-
-def test_overlay_mask_on_slide_reads_mask_with_its_own_backend(monkeypatch):
-    backends: list[str] = []
-
-    class _FakeWSI:
-        def __init__(self, path, backend, mask_path=None, spacing_at_level_0=None, mask_backend="auto"):
-            backends.append(backend)
-            self.reader = SimpleNamespace(
-                read_level=lambda level: np.zeros((10, 10, 3), np.uint8),
-                spacings=[0.5],
-                level_downsamples=[(1.0, 1.0)],
-            )
-            self.level_downsamples = [(1.0, 1.0)]
-
-        def get_best_level_for_downsample_custom(self, downsample):
-            return 0
-
-        def get_slide(self, level):
-            return np.zeros((10, 10, 3), np.uint8)
-
-        def get_level_spacing(self, level):
-            return 0.5
-
-    def _fake_open_mask_reader(mask_path, *, mask_backend="auto"):
-        # The mask opens through the centralized helper with its own resolved backend (#163).
-        backends.append(mask_backend)
-        reader = SimpleNamespace(
-            read_level=lambda level: np.zeros((10, 10, 3), np.uint8),
-            spacings=[0.5],
-            level_downsamples=[(1.0, 1.0)],
-        )
-        return reader, mask_backend
-
-    monkeypatch.setattr(vis_mod, "WSI", _FakeWSI)
-    monkeypatch.setattr(vis_mod, "open_mask_reader", _fake_open_mask_reader)
-    monkeypatch.setattr(
-        vis_mod, "read_aligned_mask", lambda **kwargs: np.zeros((10, 10), np.uint8)
-    )
-    vis_mod.overlay_mask_on_slide(
-        wsi_path=Path("/data/slide.svs"),
-        annotation_mask_path=Path("/data/mask.tif"),
-        downsample=32,
-        backend="asap",
-        mask_backend="openslide",
-    )
-    # first the slide WSI (asap), then the mask via open_mask_reader (openslide)
-    assert backends == ["asap", "openslide"]
