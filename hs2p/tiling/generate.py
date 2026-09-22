@@ -147,6 +147,7 @@ def generate_tiles(
 
 
 def _tiles_for_contour(
+    *,
     contour: np.ndarray,
     contour_holes: list[np.ndarray],
     tissue_mask: np.ndarray,
@@ -188,10 +189,10 @@ def _tiles_for_contour(
         mask_bounds=(mask_x0, mask_y0, mask_x1, mask_y1),
     )
     fractions = _compute_tile_coverage(
-        candidates,
-        contour_mask,
-        tile_size_lv0,
-        slide_dimensions,
+        candidates=candidates,
+        binary_mask=contour_mask,
+        tile_size_lv0=tile_size_lv0,
+        slide_dimensions=slide_dimensions,
         mask_dimensions=(mask_w, mask_h),
         mask_origin=(mask_x0, mask_y0),
     )

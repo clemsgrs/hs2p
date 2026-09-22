@@ -38,7 +38,7 @@ def is_flattened_annotation(annotation: str | None) -> bool:
     return annotation is None or annotation == "tissue"
 
 
-def promote_temp_file(temp_path: Path, target_path: Path) -> None:
+def promote_temp_file(*, temp_path: Path, target_path: Path) -> None:
     """Move a completed temp file into place, with a CIFS-friendly fallback."""
     try:
         temp_path.replace(target_path)

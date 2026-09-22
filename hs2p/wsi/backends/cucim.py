@@ -233,7 +233,9 @@ class CuCIMReader:
         region = _as_rgb_uint8(
             self._read_region(bounds.read_location, bounds.read_size, level=int(level))
         )
-        return paste_region(bounds.canvas, region, paste_offset=bounds.paste_offset)
+        return paste_region(
+            canvas=bounds.canvas, region=region, paste_offset=bounds.paste_offset
+        )
 
     def read_regions(
         self,
@@ -277,7 +279,9 @@ class CuCIMReader:
                 regions = self._slide.read_region(**kwargs)
         for bounds, region in zip(bounds_per_location, regions):
             arr = _as_rgb_uint8(region)
-            yield paste_region(bounds.canvas, arr, paste_offset=bounds.paste_offset)
+            yield paste_region(
+                canvas=bounds.canvas, region=arr, paste_offset=bounds.paste_offset
+            )
 
     def get_thumbnail(self, size: tuple[int, int]) -> np.ndarray:
         level = self.level_count - 1

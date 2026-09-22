@@ -186,7 +186,9 @@ class VIPSReader:
         x = int(bounds.read_location[0] / self._level_downsamples[level][0])
         y = int(bounds.read_location[1] / self._level_downsamples[level][0])
         region = _vips_to_numpy(image.crop(x, y, int(read_width), int(read_height)))
-        return paste_region(bounds.canvas, region, paste_offset=bounds.paste_offset)
+        return paste_region(
+            canvas=bounds.canvas, region=region, paste_offset=bounds.paste_offset
+        )
 
     def get_thumbnail(self, size: tuple[int, int]) -> np.ndarray:
         image = self._open_level_image(self.level_count - 1)

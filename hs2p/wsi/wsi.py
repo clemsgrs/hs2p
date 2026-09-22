@@ -110,7 +110,9 @@ class WSI(object):
         """Return the full slide image at the given pyramid level."""
         return np.asarray(self.reader.read_level(level))
 
-    def get_tile(self, x: int, y: int, width: int, height: int, level: int) -> np.ndarray:
+    def get_tile(
+        self, *, x: int, y: int, width: int, height: int, level: int
+    ) -> np.ndarray:
         """
         Extracts a tile from a whole slide image at the specified coordinates and pyramid level.
 
@@ -161,7 +163,7 @@ class WSI(object):
             self._level_spacing_cache[level] = self.spacings[level]
         return self._level_spacing_cache[level]
 
-    def get_best_level_for_spacing(self, requested_spacing_um: float, tolerance: float):
+    def get_best_level_for_spacing(self, *, requested_spacing_um: float, tolerance: float):
         """
         Determines the best level in a multi-resolution image pyramid for a given target spacing.
 
@@ -220,10 +222,10 @@ class WSI(object):
 
     def read_region_at_spacing(
         self,
+        *,
         location: tuple[int, int],
         requested_spacing_um: float,
         size: tuple[int, int],
-        *,
         tolerance: float,
         interpolation: str,
         content_kind: ContentKind = "image",

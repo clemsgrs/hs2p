@@ -251,6 +251,7 @@ def _align_to_slide(mask: Mask, wsi_object: WSI) -> AlignedMask:
 
 
 def overlay_mask_on_slide(
+    *,
     wsi_path: Path,
     downsample: int,
     backend: str,
@@ -405,11 +406,11 @@ def write_coordinate_preview(
     canvas = pad_to_patch_size(canvas, tile_size_at_vis_level)
     canvas = np.array(canvas)
     canvas = draw_grid_from_coordinates(
-        canvas,
-        wsi,
-        coordinates,
-        tile_size_at_0,
-        vis_level,
+        canvas=canvas,
+        wsi=wsi,
+        coords=coordinates,
+        tile_size_at_0=tile_size_at_0,
+        vis_level=vis_level,
         indices=None,
         thickness=grid_thickness,
         mask=aligned_mask,

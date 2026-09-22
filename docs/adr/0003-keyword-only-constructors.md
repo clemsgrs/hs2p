@@ -32,8 +32,9 @@ Exemptions:
   as `read_region(location, level, size)`, which matches OpenSlide.
 
 This is a reviewed convention, not a lint gate. No standard Ruff or flake8 rule requires
-keyword-only parameters, so reviewers check new signatures against this ADR, and
-`tests/test_keyword_only_constructors.py` pins the converted constructors.
+keyword-only parameters, so reviewers check new signatures against this ADR;
+`tests/test_keyword_only_constructors.py` pins the converted constructors and
+`tests/test_keyword_only_functions.py` the converted functions and methods.
 
 ## Consequences
 
@@ -44,6 +45,12 @@ keyword-only parameters, so reviewers check new signatures against this ADR, and
   `TileGeometry`, `ContourResult`, `ResolvedTissueMask`, `ResolvedAnnotationMasks`,
   `Sam2Thumbnail`, `LevelSelection`, `SpacingReadPlan`, and `WSI` breaks in 5.0. Callers
   pass keywords.
+- Positional calls to `WSI.get_tile`, `WSI.get_best_level_for_spacing`,
+  `WSI.read_region_at_spacing`, `compute_tile_coverage`, `overlay_mask_on_slide`,
+  `overlay_mask_on_tile`, `draw_grid`, `draw_grid_from_coordinates`, `promote_temp_file`,
+  `write_config`, `make_white_canvas`, and `paste_region` break in 5.0 for the same reason.
+  `read_region(location, level, size)` and `read_regions` stay positional (the exemption
+  above).
 - Persisted artifacts are unaffected: coordinate metadata and `.npz` files are keyed by
   field name and carry no positional information.
 - `dataclasses.replace`, `asdict`, and pickling are unaffected; only direct positional

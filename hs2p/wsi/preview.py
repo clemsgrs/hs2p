@@ -49,6 +49,7 @@ def build_overlay_alpha(
 
 
 def overlay_mask_on_tile(
+    *,
     tile: Image.Image,
     mask: Image.Image,
     palette: np.ndarray,
@@ -68,7 +69,7 @@ def overlay_mask_on_tile(
     return Image.composite(image1=tile, image2=mask_rgb, mask=alpha_content)
 
 
-def draw_grid(img, coord, shape, thickness=2, color=(0, 0, 0, 255)):
+def draw_grid(*, img, coord, shape, thickness=2, color=(0, 0, 0, 255)):
     cv2.rectangle(
         img,
         tuple(np.maximum([0, 0], coord - thickness // 2)),
@@ -80,6 +81,7 @@ def draw_grid(img, coord, shape, thickness=2, color=(0, 0, 0, 255)):
 
 
 def draw_grid_from_coordinates(
+    *,
     canvas,
     wsi,
     coords,
@@ -119,7 +121,7 @@ def draw_grid_from_coordinates(
             coord = np.ceil(
                 np.asarray(coords[indices[idx]], dtype=np.float64) / np.asarray(downsamples)
             ).astype(np.int32)
-            draw_grid(canvas, coord, tile_size, thickness=thickness)
+            draw_grid(img=canvas, coord=coord, shape=tile_size, thickness=thickness)
         return Image.fromarray(canvas)
 
     source_canvas = canvas[:, :, :3].copy()
@@ -171,11 +173,11 @@ def draw_grid_from_coordinates(
             masked_tile = Image.fromarray(masked_tile)
             masked_tile = masked_tile.split()[0]
             overlayed_tile = overlay_mask_on_tile(
-                valid_tile,
-                masked_tile,
-                palette,
-                pixel_mapping,
-                color_mapping,
+                tile=valid_tile,
+                mask=masked_tile,
+                palette=palette,
+                pixel_mapping=pixel_mapping,
+                color_mapping=color_mapping,
             )
             tile[:valid_height, :valid_width, :] = overlayed_tile
 
@@ -189,7 +191,7 @@ def draw_grid_from_coordinates(
             coord[0] : coord[0] + tile_size[0],
             :3,
         ] = tile[: canvas_crop_shape[0], : canvas_crop_shape[1], :]
-        draw_grid(canvas, coord, tile_size, thickness=thickness)
+        draw_grid(img=canvas, coord=coord, shape=tile_size, thickness=thickness)
 
     return Image.fromarray(canvas)
 

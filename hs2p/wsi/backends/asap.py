@@ -118,8 +118,8 @@ class ASAPReader:
             )
         )
         return paste_region(
-            bounds.canvas,
-            region[..., :3] if region.ndim == 3 and region.shape[-1] > 3 else region,
+            canvas=bounds.canvas,
+            region=region[..., :3] if region.ndim == 3 and region.shape[-1] > 3 else region,
             paste_offset=bounds.paste_offset,
         )
 

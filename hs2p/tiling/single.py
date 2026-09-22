@@ -431,10 +431,10 @@ def _build_joint_annotation_results(
 
     for annotation in sampling_spec.active_annotations:
         per_anno_fracs = compute_tile_coverage(
-            candidates,
-            resolved_masks.masks[annotation],
-            base_result.tiles.tile_size_lv0,
-            slide_dims,
+            candidates=candidates,
+            binary_mask=resolved_masks.masks[annotation],
+            tile_size_lv0=base_result.tiles.tile_size_lv0,
+            slide_dimensions=slide_dims,
         )
         threshold = float(sampling_spec.tissue_percentage.get(annotation) or 0.0)
         keep = per_anno_fracs >= threshold
