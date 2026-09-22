@@ -106,7 +106,10 @@ When `is_within_tolerance` is true, `tile_size_lv0` and `step_px_lv0` reflect th
 - `mask_spacing_um`
 
 `requested_seg_downsample` records the configuration value; `seg_downsample` records
-the actual pyramid or SAM2-thumbnail downsample used.
+the actual pyramid or SAM2-thumbnail downsample used. `mask_level` and `mask_spacing_um`
+record the source-mask pyramid level read and its effective spacing, derived from the
+mask-to-slide dimension ratio rather than the file's spacing tag; both are `null` when
+no source mask was used.
 
 ### `filtering`
 

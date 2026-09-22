@@ -355,6 +355,36 @@ def test_flat_png_mask_without_spacing_opens_aligns_and_reads(tmp_path, caplog):
     assert caplog.records == []
 
 
+def test_documented_flat_png_example_runs(tmp_path):
+    """The ``Source masks`` example of ``docs/api.md``, end to end on a real PNG."""
+    labels = np.array(
+        [
+            [0, 1, 1, 0, 0, 1],
+            [1, 1, 0, 0, 1, 1],
+            [0, 0, 1, 1, 0, 0],
+            [1, 0, 0, 1, 1, 0],
+        ],
+        dtype=np.uint8,
+    )
+    path = _write_png(tmp_path / "slide-1-tissue-mask.png", labels)
+
+    with Mask(path=path, labels=TissueLabels(background=0, tissue=1)) as mask:
+        assert mask.backend == "pil"
+        # A 12x8 px slide at 0.5 um/px: the 6x4 px mask covers it at 1.0 um/px.
+        aligned = mask.align_to(reference_spacing_um=0.5, reference_dimensions=(12, 8))
+        full = aligned.read_full(target_spacing_um=2.0, target_dimensions=(3, 2))
+        region = aligned.read_region(
+            location=(4, 2), target_spacing_um=1.0, target_dimensions=(2, 2)
+        )
+
+    assert (full.read_level, full.read_spacing_um) == (0, 1.0)
+    np.testing.assert_array_equal(full.labels, [[0, 1, 0], [0, 1, 0]])
+    # Reference (4, 2) is mask pixel (2, 1); 2 px at 1.0 um span 2 mask px.
+    np.testing.assert_array_equal(region.labels, [[0, 0], [1, 1]])
+    with pytest.raises(ValueError, match="Mask is closed"):
+        aligned.read_full(target_spacing_um=2.0, target_dimensions=(3, 2))
+
+
 @pytest.mark.parametrize("backend", ["openslide", "vips"])
 def test_untagged_tiff_mask_without_spacing_opens_aligns_and_reads(
     tmp_path, caplog, backend

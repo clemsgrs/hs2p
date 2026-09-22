@@ -116,6 +116,9 @@ With `auto`, each path is resolved independently:
 - `.png`, `.jpg`, and `.jpeg` suffixes (case-insensitive) select PIL only. Corrupt, unsupported, or oversized flat rasters fail without trying another reader.
 - Other inputs probe `cucim → vips → openslide → asap` and stop at the first reader that opens the file. PIL is not part of this chain.
 
+Source masks need no spacing metadata: a flat PNG/JPEG or untagged TIFF mask is aligned to
+its slide by dimensions (see [Source masks](api.md#source-masks)).
+
 Selection does not inspect mask labels or retry after a later decode failure. If a native reader opens a mask but cannot decode its pixels, explicitly set `tiling.mask_backend` to a reader that can decode it. Explicit reader choices are authoritative. Missing or incompatible mask backends fail with the mask path and backend in the error; a slide without a source mask does not check mask-reader availability.
 
 Requested and resolved readers are saved separately as provenance. Resume compares resolved readers, including the mask reader when a source mask exists. Pin explicit readers to keep decoder choice stable across environments or backend-priority changes. See [artifact validation](artifacts.md#resume-and-validation) for compatibility rules, including older metadata without mask-backend fields.

@@ -45,9 +45,11 @@ Every public constructor is keyword-only
 tissue coverage per tile. See the [artifact reference](artifacts.md) for saved paths,
 coordinate units, and metadata.
 
-To use a precomputed tissue mask, set `SlideSpec.mask_path`. Its tissue label is `1`;
-the mask is aligned to the slide automatically. You may omit `segmentation` when a
-mask is supplied. A slide without a mask requires a `SegmentationConfig`.
+To use a precomputed tissue mask, set `SlideSpec.mask_path`. Its background label is
+`0` and its tissue label `1`; any other value in the raster fails the read. The mask may
+be a pyramidal TIFF or a flat PNG/JPEG and is aligned to the slide by its dimensions
+(see [Source masks](#source-masks)). You may omit `segmentation` when a mask is
+supplied. A slide without a mask requires a `SegmentationConfig`.
 
 If native spacing is missing or incorrect, set `SlideSpec.spacing_at_level_0` to a
 finite positive value in µm/px. It becomes the effective level-0 spacing for every
@@ -140,21 +142,90 @@ on this contour-only preview. Sampling uses filled label masks with its pixel an
 color mappings; it also supports a tiling preview for each non-empty coordinate
 output. `overlay_mask_on_slide()` is the lower-level overlay helper.
 
+## Source masks
+
+`hs2p.Mask` opens an externally supplied label raster (pyramidal TIFF, flat PNG/JPEG,
+untagged TIFF) together with the meaning of its pixels. `TissueLabels(background=...,
+tissue=...)` declares a binary mask; `AnnotationLabels(pixel_mapping=...)` declares the
+complete name-to-values mapping in the configuration's `pixel_mapping` shape. A `Mask`
+owns one reader and is context-managed; `close()` is idempotent and any read through it,
+or through a view aligned from it, fails afterwards with `ValueError("Mask is closed ...")`.
+No spacing metadata is required: a flat PNG works as is.
+
+```python
+from hs2p import Mask, TissueLabels
+
+# A 6x4 px PNG covering a 12x8 px slide read at 0.5 µm/px.
+with Mask(
+    path="/data/slide-1-tissue-mask.png",
+    labels=TissueLabels(background=0, tissue=1),
+) as mask:
+    print(mask.backend)  # "pil"
+    aligned = mask.align_to(reference_spacing_um=0.5, reference_dimensions=(12, 8))
+    full = aligned.read_full(target_spacing_um=2.0, target_dimensions=(3, 2))
+    region = aligned.read_region(
+        location=(4, 2), target_spacing_um=1.0, target_dimensions=(2, 2)
+    )
+
+full.labels            # 2x3 uint8 array holding only 0 and 1
+full.read_level        # 0
+full.read_spacing_um   # 1.0: the slide's 0.5 µm/px times 12 / 6
+```
+
+`tests/test_mask.py::test_documented_flat_png_example_runs` executes this example.
+
+**Backend.** `backend="auto"` (the default) resolves the reader from the mask path alone
+and never inherits the slide reader; a concrete backend is authoritative. `Mask.backend`
+is the concrete reader that opened the file. Open failures raise `ValueError` or
+`RuntimeError` naming the path and backend.
+
+**Alignment.** `align_to(reference_spacing_um=..., reference_dimensions=...)` binds the
+mask to a slide's level-0 grid, which the mask must cover in full from a shared origin.
+The mask-to-slide dimension ratio is authoritative: both axes must agree on one scale
+within one mask pixel of rounding, and the effective mask spacing is
+`reference_spacing_um * reference_width / mask_width`. When the file carries a spacing
+tag it is only cross-checked: within 1% of the effective spacing nothing is logged, from
+1% to 5% one warning names both values, and above 5% alignment fails. A mask whose shape
+does not fit the slide at one scale fails instead of being stretched. A mask without
+spacing metadata is guarded by the shape check only. The rule and its thresholds are
+recorded in [ADR 0004](adr/0004-first-class-mask.md).
+
+**Reads.** `read_full(target_spacing_um=..., target_dimensions=...)` returns the whole
+canvas; `read_region(location=..., target_spacing_um=..., target_dimensions=...)` returns
+a window whose `location` is the top-left `(x, y)` in the slide's level-0 pixels, the same
+convention as `WSI` reads, never the mask file's own pixels. Both read the mask level
+nearest the target when it is within 1%, otherwise the coarsest level finer than the
+target, and level 0 upsampled when none is fine enough; they resample with
+nearest-neighbour and always return exactly `target_dimensions`. Every
+decode is validated before resampling: integer dtype, values in `0..255`, identical
+channels if any, and only declared IDs; the result is a read-only 2-D `uint8` array in
+`MaskRead.labels`, with `read_level` and `read_spacing_um` (the effective spacing of the
+level read). A region extending past the slide canvas raises `ValueError`; nothing is
+padded. A native level or window above 256 Mpx is refused before decoding.
+
+**Failures** are `ValueError` for invalid semantics, geometry, labels or requests and
+`RuntimeError` for backend open and decode errors; messages start with `Mask open failed`,
+`Mask alignment failed`, `Mask decode failed`, `Mask read produced invalid labels`,
+`Mask read refused` or `Mask region read refused` and name the path and backend.
+
+The lower-level resolvers `resolve_tissue_mask` and `resolve_annotation_masks` consume
+an open `Mask` (declaring `TissueLabels` or `AnnotationLabels`, respectively) whose
+lifetime the caller owns. `hs2p.tiling.mask.open_tissue_mask(path, pixel_mapping=...)`
+and `open_annotation_mask(path, pixel_mapping=...)` build the labels from a configuration
+`pixel_mapping` and return the context-managed mask. Pass `requested_mask_backend` to a
+resolver to record what was asked for; otherwise the mask's concrete backend is recorded
+as the request. `overlay_mask_on_slide` and `write_coordinate_preview` take the same
+open `Mask`; `draw_grid_from_coordinates` takes an `AlignedMask`.
+
 ## Reader selection
 
 `TilingConfig.backend` selects the slide reader and `mask_backend` selects the
 source-mask reader independently. See [Backends](cli.md#backends) for supported
 readers, automatic selection, and decoding errors. This selection also applies to
 deferred mask-preview reads. `jpeg_backend` on `tile_slides()` selects the TAR JPEG
-encoder separately.
-
-The lower-level resolvers `resolve_tissue_mask` and `resolve_annotation_masks` consume
-an open `hs2p.Mask` (declaring `TissueLabels` or `AnnotationLabels`). A `Mask` opened
-with the default `backend="auto"` resolves its reader from the mask path alone and
-never inherits the slide reader; pass `requested_mask_backend` to the resolver to
-record what was asked for, otherwise the mask's concrete backend is recorded as the
-request. The high-level API passes the resolved reader explicitly. A slide without a
-source mask does not check mask-reader availability, and its mask provenance is null.
+encoder separately. The high-level API opens each source mask with the resolved reader;
+a slide without a source mask does not check mask-reader availability, and its mask
+provenance is null.
 
 Results, saved metadata, and process-list rows record requested and resolved readers
 as `requested_backend` / `backend` and `requested_mask_backend` / `mask_backend`.

@@ -20,7 +20,7 @@ Python 3.10 or newer is required. For whole-slide images read with OpenSlide:
 pip install "hs2p[openslide]"
 ```
 
-For flat PNG/JPEG inputs, `pip install hs2p` is sufficient; supply their physical spacing with `spacing_at_level_0`. See the [backend guide](docs/cli.md#backends) for other readers, optional JPEG encoding, and SAM2 installation.
+For flat PNG/JPEG slides, `pip install hs2p` is sufficient; supply their physical spacing with `spacing_at_level_0`. Flat masks need no spacing. See the [backend guide](docs/cli.md#backends) for other readers, optional JPEG encoding, and SAM2 installation.
 
 ## Workflows
 
