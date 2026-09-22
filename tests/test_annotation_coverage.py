@@ -8,12 +8,13 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-import hs2p.tiling.mask as maskmod
+import hs2p.mask as maskmod
 import hs2p.tiling.orchestration as orchmod
 import hs2p.tiling.single as singlemod
 import pandas as pd
 
 from hs2p.api import FilterConfig, SlideSpec, TilingConfig, tile_slide, tile_slides
+from hs2p.mask import AnnotationLabels, Mask, TissueLabels
 from hs2p.tiling.coverage import summarize_annotation_coverage
 from hs2p.tiling.mask import resolve_annotation_masks
 from hs2p.tiling.single import (
@@ -53,11 +54,11 @@ def _fake_resolve_backends(
     )
 
 
-def _mock_resolve_backend(requested_backend, *, wsi_path, mask_path=None):
+def _mock_resolve_backend(requested_backend, *, wsi_path, **kwargs):
     """Stand in for the mask-path openability probe: ``auto`` resolves to the sentinel ``mock``
-    backend (these tests read masks from fake paths, so a real probe cannot run). A direct
-    mask reader that omits ``mask_backend`` now resolves independently from the mask path via
-    ``auto`` (#163) rather than inheriting the slide backend."""
+    backend (these tests read masks from fake paths, so a real probe cannot run). A mask
+    opened without a ``mask_backend`` resolves independently from the mask path via ``auto``
+    (#163) rather than inheriting the slide backend."""
     from hs2p.wsi.backend import BackendSelection
 
     resolved = "mock" if requested_backend == "auto" else requested_backend
@@ -78,9 +79,10 @@ class _FakeMaskSlide:
     def __init__(self, mask: np.ndarray, spacing: float):
         self._mask = mask
         self.spacing = spacing
+        self.native_spacing = spacing
         height, width = mask.shape
         self.level_dimensions = [(width, height)]
-        self.level_downsamples = [1.0]
+        self.level_downsamples = [(1.0, 1.0)]
 
     def read_region(self, location, level, size):
         del location, level, size
@@ -100,23 +102,26 @@ def _mock_slide() -> SimpleNamespace:
     )
 
 
-@pytest.fixture
-def patched_mask_open(monkeypatch):
-    mask = _label_mask()
+def _open_annotation_mask(
+    monkeypatch, native: np.ndarray, *, pixel_mapping=PIXEL_MAPPING
+) -> Mask:
+    """Open an annotation ``Mask`` whose ``mock`` backend decodes to ``native``."""
     monkeypatch.setattr(
         maskmod,
         "open_slide",
-        lambda path, backend=None: _FakeMaskSlide(mask, BASE_SPACING),
+        lambda path, backend=None, **kwargs: _FakeMaskSlide(native, BASE_SPACING),
     )
-    monkeypatch.setattr(maskmod, "resolve_backend", _mock_resolve_backend)
-    return mask
+    return Mask(
+        path="/fake/slide_mask.tif",
+        labels=AnnotationLabels(pixel_mapping=pixel_mapping),
+        backend="mock",
+    )
 
 
-def test_resolve_annotation_masks_splits_per_declared_label(patched_mask_open):
+def test_resolve_annotation_masks_splits_per_declared_label(monkeypatch):
     resolved = resolve_annotation_masks(
         slide=_mock_slide(),
-        mask_path="/fake/slide_mask.tif",
-        pixel_mapping=PIXEL_MAPPING,
+        mask=_open_annotation_mask(monkeypatch, _label_mask()),
         seg_downsample=1,
     )
     # No reserved name: every declared label gets a binary, including "background".
@@ -132,43 +137,40 @@ def test_resolve_annotation_masks_splits_per_declared_label(patched_mask_open):
     assert resolved.seg_spacing_um == pytest.approx(BASE_SPACING)
     assert resolved.seg_downsample == 1
     assert resolved.pixel_mapping == PIXEL_MAPPING
+    assert resolved.mask_path == Path("/fake/slide_mask.tif")
+    assert (resolved.mask_level, resolved.mask_spacing_um) == (0, BASE_SPACING)
 
 
-def test_resolve_annotation_masks_rejects_reserved_name_before_mask_io(monkeypatch):
+def test_resolve_annotation_masks_rejects_a_tissue_mask(monkeypatch):
     monkeypatch.setattr(
         maskmod,
-        "_resolve_mask_backend",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("mask backend resolution must not run")
-        ),
+        "open_slide",
+        lambda path, backend=None, **kwargs: _FakeMaskSlide(_label_mask(), BASE_SPACING),
+    )
+    mask = Mask(
+        path="/fake/slide_mask.tif",
+        labels=TissueLabels(background=0, tissue=1),
+        backend="mock",
     )
 
-    with pytest.raises(ValueError, match="'merged'.*reserved"):
-        resolve_annotation_masks(
-            slide=_mock_slide(),
-            mask_path="/fake/slide_mask.tif",
-            pixel_mapping={"background": 0, "merged": 1},
-            seg_downsample=1,
-        )
+    with pytest.raises(ValueError, match="must declare AnnotationLabels, got TissueLabels"):
+        resolve_annotation_masks(slide=_mock_slide(), mask=mask, seg_downsample=1)
 
 
 def test_resolve_annotation_masks_accepts_uint16_storage_for_preview_safe_labels(
     monkeypatch,
 ):
-    mask = np.zeros((SLIDE_H, SLIDE_W), dtype=np.uint16)
-    mask[0:200, 0:200] = 254
-    mask[200:400, 200:400] = 255
-    monkeypatch.setattr(
-        maskmod,
-        "open_slide",
-        lambda path, backend=None: _FakeMaskSlide(mask, BASE_SPACING),
-    )
-    monkeypatch.setattr(maskmod, "resolve_backend", _mock_resolve_backend)
+    native = np.zeros((SLIDE_H, SLIDE_W), dtype=np.uint16)
+    native[0:200, 0:200] = 254
+    native[200:400, 200:400] = 255
 
     resolved = resolve_annotation_masks(
         slide=_mock_slide(),
-        mask_path="/fake/slide_mask.tif",
-        pixel_mapping={"background": 0, "tumor": 254, "stroma": 255},
+        mask=_open_annotation_mask(
+            monkeypatch,
+            native,
+            pixel_mapping={"background": 0, "tumor": 254, "stroma": 255},
+        ),
         seg_downsample=1,
     )
     assert int(np.count_nonzero(resolved.masks["tumor"])) == 200 * 200
@@ -178,20 +180,15 @@ def test_resolve_annotation_masks_accepts_uint16_storage_for_preview_safe_labels
 def test_resolve_annotation_masks_background_is_optional(monkeypatch):
     """A raster that labels every pixel (no reserved background value) needs no 'background'
     entry — every declared class still validates and is split into a binary."""
-    mask = np.zeros((SLIDE_H, SLIDE_W), dtype=np.uint8)
-    mask[:, : SLIDE_W // 2] = 1  # tumor over the left half
-    mask[:, SLIDE_W // 2 :] = 2  # stroma over the right half
-    monkeypatch.setattr(
-        maskmod,
-        "open_slide",
-        lambda path, backend=None: _FakeMaskSlide(mask, BASE_SPACING),
-    )
-    monkeypatch.setattr(maskmod, "resolve_backend", _mock_resolve_backend)
+    native = np.zeros((SLIDE_H, SLIDE_W), dtype=np.uint8)
+    native[:, : SLIDE_W // 2] = 1  # tumor over the left half
+    native[:, SLIDE_W // 2 :] = 2  # stroma over the right half
 
     resolved = resolve_annotation_masks(
         slide=_mock_slide(),
-        mask_path="/fake/slide_mask.tif",
-        pixel_mapping={"tumor": 1, "stroma": 2},
+        mask=_open_annotation_mask(
+            monkeypatch, native, pixel_mapping={"tumor": 1, "stroma": 2}
+        ),
         seg_downsample=1,
     )
     assert set(resolved.masks) == {"tumor", "stroma"}
@@ -199,11 +196,10 @@ def test_resolve_annotation_masks_background_is_optional(monkeypatch):
     assert int(np.count_nonzero(resolved.masks["stroma"])) == SLIDE_H * (SLIDE_W // 2)
 
 
-def test_summarize_annotation_coverage_area_frac_and_est_tiles(patched_mask_open):
+def test_summarize_annotation_coverage_area_frac_and_est_tiles(monkeypatch):
     resolved = resolve_annotation_masks(
         slide=_mock_slide(),
-        mask_path="/fake/slide_mask.tif",
-        pixel_mapping=PIXEL_MAPPING,
+        mask=_open_annotation_mask(monkeypatch, _label_mask()),
         seg_downsample=1,
     )
     summary = summarize_annotation_coverage(
@@ -230,115 +226,57 @@ def test_summarize_annotation_coverage_area_frac_and_est_tiles(patched_mask_open
     assert summary["necrosis"]["est_tiles"] == 0
 
 
-def test_resolve_annotation_masks_accepts_empty_configured_backend_read_without_fallback(
-    monkeypatch,
-):
-    """A label-valid empty read is authoritative and never triggers another backend."""
-    labeled = _label_mask()
-    empty = np.zeros_like(labeled)
-    opened_backends = []
+def test_annotation_backend_exception_fails_with_mask_context(monkeypatch):
+    """Decoder errors identify the mask and the authoritative backend that read it."""
 
-    def fake_open(path, backend=None):
-        opened_backends.append(backend)
-        if str(backend).lower() == "openslide":
-            return _FakeMaskSlide(labeled, BASE_SPACING)
-        return _FakeMaskSlide(empty, BASE_SPACING)
-
-    monkeypatch.setattr(maskmod, "open_slide", fake_open)
-    monkeypatch.setattr(maskmod, "resolve_backend", _mock_resolve_backend)
-    resolved = resolve_annotation_masks(
-        slide=_mock_slide(),
-        mask_path="/fake/slide_mask.tif",
-        pixel_mapping=PIXEL_MAPPING,
-        seg_downsample=1,
-    )
-    assert opened_backends == ["mock"]
-    assert all(
-        int(np.count_nonzero(resolved.masks[name])) == 0
-        for name in ("tumor", "stroma", "necrosis")
-    )
-
-
-def test_annotation_backend_exception_fails_with_context_without_fallback(monkeypatch):
-    """Decoder errors identify the authoritative backend and offer an operator action."""
-    opened_backends = []
-
-    class _RaisingMaskSlide:
-        spacing = BASE_SPACING
-        level_dimensions = [(SLIDE_W, SLIDE_H)]
-        level_downsamples = [1.0]
-
+    class _RaisingMaskSlide(_FakeMaskSlide):
         def read_region(self, location, level, size):
             raise RuntimeError("backend decode error")
 
-        def close(self):
-            return None
-
-    def fake_open(path, backend=None):
-        opened_backends.append(backend)
-        return _RaisingMaskSlide()
-
-    monkeypatch.setattr(maskmod, "open_slide", fake_open)
-    monkeypatch.setattr(maskmod, "resolve_backend", _mock_resolve_backend)
+    monkeypatch.setattr(
+        maskmod,
+        "open_slide",
+        lambda path, backend=None, **kwargs: _RaisingMaskSlide(
+            _label_mask(), BASE_SPACING
+        ),
+    )
+    mask = Mask(
+        path="/fake/slide_mask.tif",
+        labels=AnnotationLabels(pixel_mapping={"tumor": 1, "stroma": 2}),
+        backend="mock",
+    )
     with pytest.raises(RuntimeError) as excinfo:
-        resolve_annotation_masks(
-            slide=_mock_slide(),
-            mask_path="/fake/slide_mask.tif",
-            pixel_mapping={"tumor": 1, "stroma": 2},
-            seg_downsample=1,
-        )
+        resolve_annotation_masks(slide=_mock_slide(), mask=mask, seg_downsample=1)
 
     message = str(excinfo.value)
-    assert opened_backends == ["mock"]
-    assert "Annotation mask" in message
     assert "/fake/slide_mask.tif" in message
     assert "backend=mock" in message
     assert "backend decode error" in message
-    assert "select another backend" in message.lower()
-    assert "regenerate" in message.lower()
 
 
-def test_invalid_annotation_labels_fail_without_an_openslide_fallback(monkeypatch):
-    """Label validation fails on the configured backend without trying a valid alternate."""
-    invalid = np.full((SLIDE_H, SLIDE_W), 3, dtype=np.uint8)
-    valid_alternate = np.zeros((SLIDE_H, SLIDE_W), dtype=np.uint8)
-    opened_backends = []
+def test_resolve_annotation_masks_rejects_an_undeclared_label_id(monkeypatch):
+    # 3 is not owned by any label of the mapping.
+    native = np.full((SLIDE_H, SLIDE_W), 3, dtype=np.uint8)
+    mask = _open_annotation_mask(
+        monkeypatch, native, pixel_mapping={"background": 0, "tumor": 1}
+    )
 
-    def fake_open(path, backend=None):
-        opened_backends.append(backend)
-        if str(backend).lower() == "openslide":
-            return _FakeMaskSlide(valid_alternate, BASE_SPACING)
-        return _FakeMaskSlide(invalid, BASE_SPACING)
-
-    monkeypatch.setattr(maskmod, "open_slide", fake_open)
-    monkeypatch.setattr(maskmod, "resolve_backend", _mock_resolve_backend)
     with pytest.raises(ValueError) as excinfo:
-        resolve_annotation_masks(
-            slide=_mock_slide(),
-            mask_path="/fake/slide_mask.tif",
-            pixel_mapping={"background": 0, "tumor": 1},
-            seg_downsample=1,
-        )
+        resolve_annotation_masks(slide=_mock_slide(), mask=mask, seg_downsample=1)
 
-    assert opened_backends == ["mock"]
-    assert "non-discrete labels" in str(excinfo.value)
+    message = str(excinfo.value)
+    assert "/fake/slide_mask.tif" in message
+    assert "backend=mock" in message
+    assert "undeclared label IDs [3]; declared [0, 1]" in message
 
 
 def test_resolve_annotation_masks_genuinely_empty_stays_empty(monkeypatch):
-    """When every backend agrees the mask is background, no spurious real labels are invented.
-
-    The background binary correctly fills the slide (every pixel is the background value); the
-    point is that no foreground class picks up phantom pixels.
-    """
+    """A valid all-background read is authoritative: no foreground class picks up phantom
+    pixels, and the background binary fills the slide."""
     empty = np.zeros((SLIDE_H, SLIDE_W), dtype=np.uint8)
-    monkeypatch.setattr(
-        maskmod, "open_slide", lambda path, backend=None: _FakeMaskSlide(empty, BASE_SPACING)
-    )
-    monkeypatch.setattr(maskmod, "resolve_backend", _mock_resolve_backend)
     resolved = resolve_annotation_masks(
         slide=_mock_slide(),
-        mask_path="/fake/slide_mask.tif",
-        pixel_mapping=PIXEL_MAPPING,
+        mask=_open_annotation_mask(monkeypatch, empty),
         seg_downsample=1,
     )
     assert all(
@@ -405,7 +343,7 @@ def test_build_per_annotation_results_rejects_invalid_declaration_before_slide_i
 def patched_slide_and_mask_open(monkeypatch):
     mask = _label_mask()
 
-    def fake_open(path, backend="auto", spacing_override=None):
+    def fake_open(path, backend="auto", spacing_override=None, **kwargs):
         del spacing_override
         if "mask" in str(path).lower():
             return _FakeMaskSlide(mask, BASE_SPACING)
@@ -483,7 +421,7 @@ def test_tile_slide_with_sampling_returns_per_annotation_dict(monkeypatch):
     one TilingResult per active annotation — same capability as tile_slides (no divergence)."""
     mask = _label_mask()
 
-    def fake_open(path, backend="auto", spacing_override=None):
+    def fake_open(path, backend="auto", spacing_override=None, **kwargs):
         del spacing_override
         if "mask" in str(path).lower():
             return _FakeMaskSlide(mask, BASE_SPACING)
@@ -659,7 +597,7 @@ def test_merged_merges_to_one_deduped_result_per_slide(
 def _patch_tile_slides_open(monkeypatch):
     mask = _label_mask()
 
-    def fake_open(path, backend="auto", spacing_override=None):
+    def fake_open(path, backend="auto", spacing_override=None, **kwargs):
         del spacing_override
         if "mask" in str(path).lower():
             return _FakeMaskSlide(mask, BASE_SPACING)
@@ -1110,11 +1048,10 @@ def test_tile_slides_sampling_without_tiling_preview_writes_none(monkeypatch, tm
     assert rows["tiling_preview_path"].isna().all()
 
 
-def test_summarize_annotation_coverage_est_tiles_none_without_threshold(patched_mask_open):
+def test_summarize_annotation_coverage_est_tiles_none_without_threshold(monkeypatch):
     resolved = resolve_annotation_masks(
         slide=_mock_slide(),
-        mask_path="/fake/slide_mask.tif",
-        pixel_mapping=PIXEL_MAPPING,
+        mask=_open_annotation_mask(monkeypatch, _label_mask()),
         seg_downsample=1,
     )
     summary = summarize_annotation_coverage(

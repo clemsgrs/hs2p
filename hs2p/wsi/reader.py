@@ -398,7 +398,7 @@ def open_mask_reader(
     with context naming the mask path and the requested backend (and the resolved
     backend when it got that far). This is the centralized mask-open seam for the
     visualization/overlay and :class:`~hs2p.wsi.wsi.WSI` attached-mask paths
-    (#163), mirroring :func:`hs2p.tiling.mask._raise_mask_decode_error`: a
+    (#163), mirroring :class:`hs2p.mask.Mask` open failures: a
     ``ValueError`` cause reraises as ``ValueError``, anything else as
     ``RuntimeError``.
 

@@ -6,7 +6,7 @@ from PIL import Image
 
 import hs2p.mask as source_mask_mod
 import hs2p.tiling.mask as mask_mod
-from hs2p.mask import Mask, TissueLabels
+from hs2p.mask import AnnotationLabels, Mask, TissueLabels
 from hs2p.tiling.mask import (
     load_precomputed_tissue_mask,
     resolve_annotation_masks,
@@ -204,21 +204,20 @@ def test_single_value_annotation_mask_succeeds_without_empty_mask_warning(
     monkeypatch, caplog
 ):
     monkeypatch.setattr(
-        mask_mod,
+        source_mask_mod,
         "open_slide",
-        lambda path, backend=None: _ArrayMaskSlide(
+        lambda path, backend=None, **kwargs: _ArrayMaskSlide(
             np.zeros((2, 2), dtype=np.uint8)
         ),
     )
     caplog.set_level("WARNING", logger="hs2p.tiling.mask")
 
-    resolved = resolve_annotation_masks(
-        slide=_wsi(),
-        mask_path="/masks/annotations.tif",
-        pixel_mapping={"background": 0, "tumor": 1},
-        seg_downsample=1,
-        mask_backend="cucim",
-    )
+    with Mask(
+        path="/masks/annotations.tif",
+        labels=AnnotationLabels(pixel_mapping={"background": 0, "tumor": 1}),
+        backend="cucim",
+    ) as mask:
+        resolved = resolve_annotation_masks(slide=_wsi(), mask=mask, seg_downsample=1)
 
     assert np.all(resolved.masks["background"] == 255)
     assert not np.any(resolved.masks["tumor"])
