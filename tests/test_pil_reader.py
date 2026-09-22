@@ -5,8 +5,8 @@ import pytest
 from PIL import Image
 
 import hs2p.wsi.reader as reader_mod
-import hs2p.tiling.mask as mask_mod
 from hs2p.configs import TilingConfig
+from hs2p.mask import Mask, TissueLabels
 from hs2p.wsi.backends import pil as pil_mod
 
 
@@ -158,30 +158,7 @@ def test_auto_mask_oversize_error_does_not_recommend_another_backend(
     monkeypatch.setattr(pil_mod, "PIL_MAX_IMAGE_PIXELS", 5)
 
     with pytest.raises(ValueError) as caught:
-        reader_mod.open_mask_reader(path, mask_backend="auto")
-
-    message = str(caught.value)
-    assert "backend=pil" in message
-    assert "ceiling=5" in message
-    assert "another" not in message.lower()
-    assert "select" not in message.lower()
-
-
-def test_tiling_mask_oversize_error_does_not_recommend_another_backend(
-    monkeypatch, tmp_path
-):
-    path = tmp_path / "too-large-tiling-mask.png"
-    Image.fromarray(np.zeros((2, 3), dtype=np.uint8), mode="L").save(path)
-    monkeypatch.setattr(pil_mod, "PIL_MAX_IMAGE_PIXELS", 5)
-
-    with pytest.raises(ValueError) as caught:
-        mask_mod.load_precomputed_tissue_mask(
-            mask_path=path,
-            slide=object(),
-            seg_level=0,
-            tissue_value=1,
-            mask_backend="auto",
-        )
+        Mask(path=path, labels=TissueLabels(background=0, tissue=1), backend="auto")
 
     message = str(caught.value)
     assert "backend=pil" in message

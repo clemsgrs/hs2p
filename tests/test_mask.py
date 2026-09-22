@@ -163,6 +163,18 @@ def test_mask_open_failure_names_path_and_backend(monkeypatch):
         Mask(path="broken.tif", labels=TISSUE, backend="vips")
 
 
+def test_mask_open_value_error_cause_reraises_as_value_error(monkeypatch):
+    def _failing_open_slide(path, backend, **kwargs):
+        raise ValueError("bad mask geometry")
+
+    monkeypatch.setattr(mask_mod, "open_slide", _failing_open_slide)
+
+    with pytest.raises(
+        ValueError, match=r"path=bad\.tif.*backend=openslide.*bad mask geometry"
+    ):
+        Mask(path="bad.tif", labels=TISSUE, backend="openslide")
+
+
 def test_mask_context_manager_closes_its_reader_once(monkeypatch):
     reader = _FakeReader([np.zeros((2, 2), dtype=np.uint8)])
 

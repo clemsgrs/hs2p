@@ -290,49 +290,6 @@ def test_mask_decode_error_names_resolved_mask_backend(monkeypatch):
     assert "cucim" not in message
 
 
-# --- centralized mask-open helper (Finding 6) -------------------------------------------
-
-
-def test_open_mask_reader_incompatible_backend_raises_actionable_error(monkeypatch):
-    """An open failure names the mask path and the requested backend, not a raw codec error."""
-
-    def _boom(path, backend=reader_mod.AUTO_BACKEND, **kwargs):
-        raise RuntimeError("codec: unsupported compression scheme")
-
-    monkeypatch.setattr(reader_mod, "open_slide", _boom)
-    with pytest.raises(RuntimeError) as excinfo:
-        reader_mod.open_mask_reader("/masks/incompatible.tif", mask_backend="cucim")
-    message = str(excinfo.value)
-    assert "/masks/incompatible.tif" in message
-    assert "cucim" in message
-    assert "codec" in message
-    assert "Select another mask backend" in message
-
-
-def test_open_mask_reader_value_error_cause_reraises_as_value_error(monkeypatch):
-    def _boom(path, backend=reader_mod.AUTO_BACKEND, **kwargs):
-        raise ValueError("bad mask geometry")
-
-    monkeypatch.setattr(reader_mod, "open_slide", _boom)
-    with pytest.raises(ValueError) as excinfo:
-        reader_mod.open_mask_reader("/masks/bad.tif", mask_backend="openslide")
-    message = str(excinfo.value)
-    assert "/masks/bad.tif" in message
-    assert "openslide" in message
-
-
-def test_open_mask_reader_returns_reader_and_resolved_backend(monkeypatch):
-    sentinel = object()
-
-    def _open(path, backend=reader_mod.AUTO_BACKEND, **kwargs):
-        return sentinel
-
-    monkeypatch.setattr(reader_mod, "open_slide", _open)
-    reader, resolved = reader_mod.open_mask_reader("/masks/m.tif", mask_backend="asap")
-    assert reader is sentinel
-    assert resolved == "asap"
-
-
 def test_empty_precomputed_warning_names_resolved_mask_backend(monkeypatch, caplog):
     mask = _open_tissue_mask(
         monkeypatch,
