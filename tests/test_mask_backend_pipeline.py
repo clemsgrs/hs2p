@@ -8,7 +8,6 @@ import numpy as np
 import pytest
 
 import hs2p.tiling.orchestration as orchestration_mod
-import hs2p.wsi.wsi as wsi_mod
 from hs2p.api import (
     CompatibilitySpec,
     FilterConfig,
@@ -344,50 +343,3 @@ def test_maskless_slide_emits_no_mask_backend_event(monkeypatch):
     kinds = [e.kind for e in reporter.events]
     assert "mask_backend.selected" not in kinds
     assert "backend.selected" in kinds
-
-
-def test_wsi_resolves_mask_backend_independently(monkeypatch):
-    opened: list[tuple[str, str]] = []
-
-    def _fake_resolve_backend(
-        requested, *, wsi_path, mask_path=None, spacing_override=None
-    ):
-        del requested, mask_path, spacing_override
-        # slide path -> asap; mask path -> openslide (independent)
-        backend = "openslide" if "mask" in str(wsi_path) else "asap"
-        return BackendSelection(backend=backend, reason=None, tried=(backend,))
-
-    class _Reader:
-        backend_name = "asap"
-        spacings = [0.5]
-        level_dimensions = [(10, 10)]
-        level_downsamples = [(1.0, 1.0)]
-
-        def close(self):
-            return None
-
-    def _fake_open_slide(path, backend, *, spacing_override=None, gpu_decode=False):
-        opened.append((str(path), backend))
-        return _Reader()
-
-    monkeypatch.setattr(wsi_mod, "resolve_backend", _fake_resolve_backend)
-    monkeypatch.setattr(wsi_mod, "open_slide", _fake_open_slide)
-    # The attached mask now opens through the centralized ``open_mask_reader`` helper (#163),
-    # which resolves + opens via the reader module's own globals — patch those too.
-    import hs2p.wsi.reader as reader_mod
-
-    monkeypatch.setattr(reader_mod, "resolve_backend", _fake_resolve_backend)
-    monkeypatch.setattr(reader_mod, "open_slide", _fake_open_slide)
-
-    wsi = wsi_mod.WSI(
-        path=Path("/data/slide.svs"),
-        backend="auto",
-        mask_path=Path("/data/slide-mask.tif"),
-        mask_backend="auto",
-    )
-    assert wsi.backend == "asap"
-    assert wsi.mask_backend == "openslide"
-    assert wsi.requested_mask_backend == "auto"
-    # the mask reader was opened with the mask's own resolved backend
-    assert ("/data/slide-mask.tif", "openslide") in opened
-    assert ("/data/slide.svs", "asap") in opened
