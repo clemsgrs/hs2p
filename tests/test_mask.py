@@ -355,17 +355,18 @@ def test_flat_png_mask_without_spacing_opens_aligns_and_reads(tmp_path, caplog):
     assert caplog.records == []
 
 
-def test_untagged_tiff_mask_without_spacing_opens_aligns_and_reads(tmp_path, caplog):
-    pytest.importorskip("openslide")
+@pytest.mark.parametrize("backend", ["openslide", "vips"])
+def test_untagged_tiff_mask_without_spacing_opens_aligns_and_reads(
+    tmp_path, caplog, backend
+):
+    pytest.importorskip({"openslide": "openslide", "vips": "pyvips"}[backend])
     tifffile = pytest.importorskip("tifffile")
     labels = np.zeros((32, 64), dtype=np.uint8)
     labels[:16, 32:] = 1
     path = tmp_path / "mask.tif"
     tifffile.imwrite(path, labels, tile=(32, 32), photometric="minisblack")
 
-    with caplog.at_level("WARNING"), Mask(
-        path=path, labels=TISSUE, backend="openslide"
-    ) as mask:
+    with caplog.at_level("WARNING"), Mask(path=path, labels=TISSUE, backend=backend) as mask:
         aligned = mask.align_to(reference_spacing_um=0.5, reference_dimensions=(256, 128))
         read = aligned.read_full(target_spacing_um=2.0, target_dimensions=(64, 32))
 
