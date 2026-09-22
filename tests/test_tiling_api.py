@@ -1354,7 +1354,16 @@ def test_compute_request_passes_inner_workers_to_tile_extraction(
         ),
         segmentation=SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
         resolved_mask=None,
-        filtering=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
+        filtering=FilterConfig(
+            ref_tile_size=224,
+            a_t=4,
+            a_h=2,
+            filter_white=False,
+            filter_black=False,
+            white_threshold=220,
+            black_threshold=25,
+            fraction_threshold=0.9,
+        ),
         mask_preview_path=None,
         output_dir=tmp_path,
         num_workers=6,
@@ -2517,7 +2526,16 @@ def test_validate_tiling_artifacts_rejects_mismatched_image_path(tmp_path: Path)
                 compatibility=_artifact_compatibility(
                     tiling_config=TilingConfig(requested_spacing_um=0.5, requested_tile_size_px=224, tolerance=0.07, overlap=0.0, min_coverage={"tissue": 0.1}, backend="asap"),
                     segmentation_config=SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
-                    filter_config=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
+                    filter_config=FilterConfig(
+                        ref_tile_size=224,
+                        a_t=4,
+                        a_h=2,
+                        filter_white=False,
+                        filter_black=False,
+                        white_threshold=220,
+                        black_threshold=25,
+                        fraction_threshold=0.9,
+                    ),
                 ),
             )
 
@@ -2542,7 +2560,16 @@ def test_validate_tiling_artifacts_rejects_mismatched_mask_path(tmp_path: Path):
                 compatibility=_artifact_compatibility(
                     tiling_config=TilingConfig(requested_spacing_um=0.5, requested_tile_size_px=224, tolerance=0.07, overlap=0.0, min_coverage={"tissue": 0.1}, backend="asap"),
                     segmentation_config=SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
-                    filter_config=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
+                    filter_config=FilterConfig(
+                        ref_tile_size=224,
+                        a_t=4,
+                        a_h=2,
+                        filter_white=False,
+                        filter_black=False,
+                        white_threshold=220,
+                        black_threshold=25,
+                        fraction_threshold=0.9,
+                    ),
                 ),
             )
 
@@ -3573,7 +3600,16 @@ def test_process_list_checkpoint_removes_temp_file_on_failure(monkeypatch, tmp_p
                 min_coverage={"tissue": 0.2},
             ),
             segmentation=SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
-            filtering=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
+            filtering=FilterConfig(
+                ref_tile_size=224,
+                a_t=4,
+                a_h=2,
+                filter_white=False,
+                filter_black=False,
+                white_threshold=220,
+                black_threshold=25,
+                fraction_threshold=0.9,
+            ),
             output_dir=tmp_path,
         )
 
@@ -3894,7 +3930,16 @@ def test_maybe_load_existing_artifacts_zero_tiles_meta_only(tmp_path: Path):
                     mthresh=7,
                     close=4,
                 ),
-                filter_config=FilterConfig(224, 4, 2, False, False, 220, 25, 0.9),
+                filter_config=FilterConfig(
+                    ref_tile_size=224,
+                    a_t=4,
+                    a_h=2,
+                    filter_white=False,
+                    filter_black=False,
+                    white_threshold=220,
+                    black_threshold=25,
+                    fraction_threshold=0.9,
+                ),
             ),
         )
 

@@ -448,7 +448,16 @@ def test_tile_slide_uses_resolved_backend_for_hash_and_result(monkeypatch):
             backend="auto",
         ),
         segmentation=api_mod.SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
-        filtering=api_mod.FilterConfig(16, 4, 2, False, False, 220, 25, 0.9),
+        filtering=api_mod.FilterConfig(
+            ref_tile_size=16,
+            a_t=4,
+            a_h=2,
+            filter_white=False,
+            filter_black=False,
+            white_threshold=220,
+            black_threshold=25,
+            fraction_threshold=0.9,
+        ),
         num_workers=1,
     )
 
@@ -522,7 +531,16 @@ def test_tile_slide_emits_backend_selection_progress_event(monkeypatch):
                 backend="auto",
             ),
             segmentation=api_mod.SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
-            filtering=api_mod.FilterConfig(16, 4, 2, False, False, 220, 25, 0.9),
+            filtering=api_mod.FilterConfig(
+                ref_tile_size=16,
+                a_t=4,
+                a_h=2,
+                filter_white=False,
+                filter_black=False,
+                white_threshold=220,
+                black_threshold=25,
+                fraction_threshold=0.9,
+            ),
             num_workers=1,
         )
 

@@ -8,7 +8,7 @@ import numpy as np
 ContentKind = Literal["image", "label"]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class LevelSelection:
     level: int
     read_spacing_um: float
@@ -147,7 +147,7 @@ def select_level_for_spacing_read(
     return selection
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SpacingReadPlan:
     """How to read a region of ``target_size_px`` (at ``requested_spacing_um``).
 

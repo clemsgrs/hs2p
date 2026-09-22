@@ -76,7 +76,7 @@ class TilingConfig:
             )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SegmentationConfig:
     """Control tissue segmentation before coordinate extraction."""
 
@@ -110,7 +110,7 @@ class SegmentationConfig:
                 object.__setattr__(self, field_name, Path(value))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class FilterConfig:
     """Control contour and tile-level filtering after segmentation."""
 
@@ -134,7 +134,7 @@ class FilterConfig:
     qc_spacing_um: float = float(_DEFAULT_FILTERING.qc_spacing_um)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class PreviewConfig:
     """Control preview generation in batch tiling."""
 
@@ -148,6 +148,7 @@ class PreviewConfig:
 
     def __init__(
         self,
+        *,
         save_mask_preview: bool = False,
         save_tiling_preview: bool = False,
         downsample: int = int(_DEFAULT_PREVIEW.downsample),

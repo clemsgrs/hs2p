@@ -15,7 +15,7 @@ def pixel_values(value: Any) -> tuple[Any, ...]:
     return (value,)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SamplingSpec:
     pixel_mapping: PixelMapping
     color_mapping: dict[str, list[int] | None] | None
