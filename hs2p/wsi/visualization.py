@@ -380,7 +380,7 @@ def write_coordinate_preview(
 ):
     """Write the tile grid over the slide read at ``downsample``, each tile over its labels
     from ``mask`` (an open source :class:`~hs2p.mask.Mask`) when one is given."""
-    wsi = WSI(wsi_path, backend=backend)
+    wsi = WSI(path=wsi_path, backend=backend)
     vis_level = wsi.get_best_level_for_downsample_custom(downsample)
     aligned_mask = _align_to_slide(mask, wsi) if mask is not None else None
 

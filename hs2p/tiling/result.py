@@ -30,14 +30,14 @@ def _validate_geometry_arrays(
     return tile_index
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class ContourResult:
     contours: list[np.ndarray]
     holes: list[list[np.ndarray]]
     mask: np.ndarray
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class ResolvedTissueMask:
     tissue_mask: np.ndarray
     tissue_method: str
@@ -64,7 +64,7 @@ class ResolvedTissueMask:
         return self.tissue_method == "precomputed_mask" and not np.any(self.tissue_mask)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class ResolvedAnnotationMasks:
     """Multi-label annotation mask resolved for tiling, one binary mask per annotation."""
 
@@ -88,7 +88,7 @@ class ResolvedAnnotationMasks:
             object.__setattr__(self, "mask_path", Path(self.mask_path))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class Sam2Thumbnail:
     image: np.ndarray
     seg_level: int
@@ -97,7 +97,7 @@ class Sam2Thumbnail:
     resized: bool
 
 
-@dataclass
+@dataclass(kw_only=True)
 class TileGeometry:
     x: np.ndarray
     y: np.ndarray
@@ -123,7 +123,7 @@ class TileGeometry:
         )
 
 
-@dataclass
+@dataclass(kw_only=True)
 class TilingResult:
     tiles: TileGeometry
     # -- provenance --

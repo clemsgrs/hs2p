@@ -40,7 +40,8 @@ loaded = load_tiling_result(
 )
 ```
 
-`TilingConfig` is keyword-only. `min_coverage={"tissue": 0.1}` requires at least 10%
+Every public constructor is keyword-only
+([ADR 0003](adr/0003-keyword-only-constructors.md)). `min_coverage={"tissue": 0.1}` requires at least 10%
 tissue coverage per tile. See the [artifact reference](artifacts.md) for saved paths,
 coordinate units, and metadata.
 

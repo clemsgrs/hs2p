@@ -75,6 +75,7 @@ class WSI(object):
 
     def __init__(
         self,
+        *,
         path: Path,
         backend: str,
         spacing_at_level_0: float | None = None,

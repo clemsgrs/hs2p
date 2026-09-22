@@ -21,7 +21,7 @@ from hs2p.fileops import (
 )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SlideSpec:
     """Identify one slide and its optional mask."""
 
@@ -31,7 +31,7 @@ class SlideSpec:
     spacing_at_level_0: float | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class TilingArtifacts:
     """Named on-disk artifacts produced by a tiling run."""
 
@@ -50,7 +50,7 @@ class TilingArtifacts:
     output_mode: str | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class CompatibilitySpec:
     tiling: TilingConfig
     segmentation: SegmentationConfig

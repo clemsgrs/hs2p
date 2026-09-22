@@ -44,7 +44,7 @@ def build_case(name: str):
                 [[[x, y]], [[x + size - 1, y]], [[x + size - 1, y + size - 1]], [[x, y + size - 1]]],
                 dtype=np.int32,
             ) * 16)
-        contour_result = ContourResult(contours, [[] for _ in contours], mask)
+        contour_result = ContourResult(contours=contours, holes=[[] for _ in contours], mask=mask)
 
         def run():
             result = generate_tiles(

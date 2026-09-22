@@ -11,7 +11,8 @@ Start with the [installation and quick starts](../README.md) to tile your first 
 | [Benchmarks](benchmark.md) | Run throughput benchmarks and interpret the recorded results. |
 | [Release notes](release-notes.md) | Check behavior changes and artifact compatibility before upgrading. |
 
-Architecture decisions explain the mask-reading contracts:
+Architecture decisions explain the mask-reading and API contracts:
 
 - [One authoritative backend for mask decoding](adr/0001-authoritative-mask-decoding.md)
 - [Independent slide and mask backends](adr/0002-independent-mask-backend.md)
+- [Keyword-only constructors](adr/0003-keyword-only-constructors.md)
