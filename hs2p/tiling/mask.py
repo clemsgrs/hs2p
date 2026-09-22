@@ -90,25 +90,6 @@ def _read_binary_tissue_mask(
     return tissue_mask, read.read_level, read.read_spacing_um
 
 
-def load_precomputed_tissue_mask(
-    *,
-    mask_path: str | Path,
-    slide,
-    seg_level: int,
-    tissue_value: int,
-    background_value: int = 0,
-    mask_backend: str | None = None,
-) -> tuple[np.ndarray, int, float]:
-    """Path-based tissue loader kept until the legacy mask interfaces are removed; opens a
-    :class:`~hs2p.mask.Mask` and delegates to the same read as :func:`resolve_tissue_mask`."""
-    with Mask(
-        path=mask_path,
-        labels=TissueLabels(background=background_value, tissue=tissue_value),
-        backend=mask_backend if mask_backend is not None else AUTO_BACKEND,
-    ) as mask:
-        return _read_binary_tissue_mask(mask=mask, slide=slide, seg_level=seg_level)
-
-
 def prepare_sam2_thumbnail(
     *,
     slide,
@@ -308,27 +289,6 @@ def _read_annotation_label_mask(
     return read.labels, read.read_level, read.read_spacing_um
 
 
-def load_annotation_label_mask(
-    *,
-    mask_path: str | Path,
-    slide,
-    seg_level: int,
-    valid_values: set[int],
-    mask_backend: str | None = None,
-) -> tuple[np.ndarray, int, float]:
-    """Path-based annotation loader kept until the legacy mask interfaces are removed; opens
-    a :class:`~hs2p.mask.Mask` declaring each of ``valid_values`` as its own label and
-    delegates to the same read as :func:`resolve_annotation_masks`."""
-    with Mask(
-        path=mask_path,
-        labels=AnnotationLabels(
-            pixel_mapping={str(value): int(value) for value in sorted(valid_values)}
-        ),
-        backend=mask_backend if mask_backend is not None else AUTO_BACKEND,
-    ) as mask:
-        return _read_annotation_label_mask(mask=mask, slide=slide, seg_level=seg_level)
-
-
 def _configured_pixel_mapping(labels: AnnotationLabels) -> PixelMapping:
     """The configuration shape of ``labels``: one value, or the list a label merges."""
     return {
@@ -393,8 +353,6 @@ def resolve_annotation_masks(
 
 
 __all__ = [
-    "load_annotation_label_mask",
-    "load_precomputed_tissue_mask",
     "prepare_sam2_thumbnail",
     "resolve_annotation_masks",
     "resolve_tissue_mask",
