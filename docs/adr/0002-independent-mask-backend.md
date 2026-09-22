@@ -3,7 +3,10 @@
 - Status: Accepted
 - Date: 2026-07-21
 - Amended: 2026-07-31 by the flat-raster format policy (#198)
-- Amended: 2026-09-22 by the first-class `Mask` contract (#167, #195)
+- Amended: 2026-09-22 by the first-class `Mask` contract ([ADR 0004](0004-first-class-mask.md),
+  #167, #195): the `open_mask_reader` helper and the `WSI` attached-mask path this ADR
+  originally described no longer exist. The independent mask-backend decision stands; every
+  source mask is now opened as an `hs2p.mask.Mask`.
 
 ## Context
 

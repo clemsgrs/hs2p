@@ -16,3 +16,4 @@ Architecture decisions explain the mask-reading and API contracts:
 - [One authoritative backend for mask decoding](adr/0001-authoritative-mask-decoding.md)
 - [Independent slide and mask backends](adr/0002-independent-mask-backend.md)
 - [Keyword-only constructors](adr/0003-keyword-only-constructors.md)
+- [First-class `Mask` domain object](adr/0004-first-class-mask.md)
