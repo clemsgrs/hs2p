@@ -11,7 +11,7 @@ from hs2p.configs import default_config
 logger = logging.getLogger("hs2p")
 
 
-def write_config(cfg, output_dir, name="config.yaml", skip_logging: bool = False):
+def write_config(*, cfg, output_dir, name="config.yaml", skip_logging: bool = False):
     if not skip_logging:
         logger.info(OmegaConf.to_yaml(cfg))
     saved_cfg_path = os.path.join(output_dir, name)
@@ -70,7 +70,9 @@ def setup(args):
     fix_random_seeds(int(cfg.seed))
     setup_logging(output=cfg.output_dir, level=logging.INFO)
     logger.info("git:\n  {}\n".format(get_sha()))
-    cfg_path = write_config(cfg, cfg.output_dir, skip_logging=args.skip_logging)
+    cfg_path = write_config(
+        cfg=cfg, output_dir=cfg.output_dir, skip_logging=args.skip_logging
+    )
     if cfg.wandb.enable:
         wandb_run.save(cfg_path)
     return cfg

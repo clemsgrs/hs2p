@@ -140,8 +140,8 @@ class PILReader:
             (x, y, x + int(read_width), y + int(read_height))
         )
         return paste_region(
-            canvas,
-            self._array_from_image(region),
+            canvas=canvas,
+            region=self._array_from_image(region),
             paste_offset=bounds.paste_offset,
         )
 

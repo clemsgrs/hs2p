@@ -244,9 +244,9 @@ def extract_tiles_to_tar(
                 )
                 kept_indices.append(record.tile_index)
 
-        promote_temp_file(temp_tar_path, tar_path)
+        promote_temp_file(temp_path=temp_tar_path, target_path=tar_path)
         temp_tar_path = None
-        promote_temp_file(temp_manifest_path, manifest_path)
+        promote_temp_file(temp_path=temp_manifest_path, target_path=manifest_path)
         temp_manifest_path = None
     finally:
         if temp_tar_path is not None:

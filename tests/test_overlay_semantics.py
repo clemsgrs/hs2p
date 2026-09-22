@@ -426,8 +426,8 @@ def test_draw_grid_from_coordinates_crops_loaded_canvas_instead_of_fetching_tile
     )
 
     image = wsi_mod.draw_grid_from_coordinates(
-        canvas.copy(),
-        FakeWSI(),
+        canvas=canvas.copy(),
+        wsi=FakeWSI(),
         coords=[(0, 0)],
         tile_size_at_0=(1, 1),
         vis_level=0,
@@ -452,8 +452,8 @@ def test_draw_grid_from_coordinates_no_mask_preserves_fractional_projected_edges
     canvas = np.full((7, 8, 3), 255, dtype=np.uint8)
     rendered = np.array(
         wsi_mod.draw_grid_from_coordinates(
-            canvas.copy(),
-            FakeWSI(),
+            canvas=canvas.copy(),
+            wsi=FakeWSI(),
             coords=[(0, 0), (2, 0)],
             tile_size_at_0=(3, 3),
             vis_level=1,

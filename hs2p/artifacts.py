@@ -401,7 +401,7 @@ class ProcessListCheckpoint:
                 ) as handle:
                     temp_path = Path(handle.name)
                     pd.DataFrame(process_rows).to_csv(handle, index=False)
-                promote_temp_file(temp_path, self.path)
+                promote_temp_file(temp_path=temp_path, target_path=self.path)
                 temp_path = None
                 return
             except OSError as exc:

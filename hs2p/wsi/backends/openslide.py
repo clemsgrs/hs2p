@@ -120,8 +120,8 @@ class OpenSlideReader:
             (int(read_width), int(read_height)),
         )
         return paste_region(
-            bounds.canvas,
-            np.array(region.convert("RGB")),
+            canvas=bounds.canvas,
+            region=np.array(region.convert("RGB")),
             paste_offset=bounds.paste_offset,
         )
 

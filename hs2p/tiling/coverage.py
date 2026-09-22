@@ -7,6 +7,7 @@ from hs2p.wsi.geometry import project_discrete_grid_origins
 
 
 def compute_tile_coverage(
+    *,
     candidates: np.ndarray,
     binary_mask: np.ndarray,
     tile_size_lv0: int,
@@ -27,21 +28,21 @@ def compute_tile_coverage(
         (N,) float32 array with values in [0, 1].
     """
     return _compute_tile_coverage(
-        candidates,
-        binary_mask,
-        tile_size_lv0,
-        slide_dimensions,
+        candidates=candidates,
+        binary_mask=binary_mask,
+        tile_size_lv0=tile_size_lv0,
+        slide_dimensions=slide_dimensions,
         mask_dimensions=(binary_mask.shape[1], binary_mask.shape[0]),
         mask_origin=(0, 0),
     )
 
 
 def _compute_tile_coverage(
+    *,
     candidates: np.ndarray,
     binary_mask: np.ndarray,
     tile_size_lv0: int,
     slide_dimensions: tuple[int, int],
-    *,
     mask_dimensions: tuple[int, int],
     mask_origin: tuple[int, int],
 ) -> np.ndarray:
@@ -141,7 +142,10 @@ def summarize_annotation_coverage(
             frac: float | None = None
         else:
             coverage = compute_tile_coverage(
-                candidates, binary_mask, tile_size_lv0, (slide_w, slide_h)
+                candidates=candidates,
+                binary_mask=binary_mask,
+                tile_size_lv0=tile_size_lv0,
+                slide_dimensions=(slide_w, slide_h),
             )
             est_tiles = int(np.count_nonzero(coverage >= float(threshold)))
             frac = (area_px / total_of_interest) if total_of_interest > 0 else 0.0

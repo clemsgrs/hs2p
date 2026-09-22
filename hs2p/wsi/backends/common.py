@@ -59,7 +59,7 @@ def resolve_level0_spacing(
     return supplied_spacing
 
 
-def make_white_canvas(width: int, height: int) -> np.ndarray:
+def make_white_canvas(*, width: int, height: int) -> np.ndarray:
     return np.full((int(height), int(width), 3), WHITE_RGB, dtype=np.uint8)
 
 
@@ -79,7 +79,7 @@ def resolve_padded_read_bounds(
     downsample: float,
 ) -> PaddedReadBounds:
     width, height = int(size[0]), int(size[1])
-    canvas = make_white_canvas(width, height)
+    canvas = make_white_canvas(width=width, height=height)
     if width <= 0 or height <= 0:
         return PaddedReadBounds(canvas, (0, 0), (0, 0), (0, 0))
 
@@ -99,9 +99,9 @@ def resolve_padded_read_bounds(
 
 
 def paste_region(
+    *,
     canvas: np.ndarray,
     region: np.ndarray,
-    *,
     paste_offset: tuple[int, int],
 ) -> np.ndarray:
     read_height, read_width = region.shape[:2]

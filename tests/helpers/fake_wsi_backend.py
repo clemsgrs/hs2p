@@ -44,7 +44,7 @@ class FakePyramidWSI:
         x_level = int(round(x / downsample))
         y_level = int(round(y / downsample))
 
-        patch = make_white_canvas(width, height)
+        patch = make_white_canvas(width=width, height=height)
         src = arr[y_level : y_level + height, x_level : x_level + width, :]
         patch[: src.shape[0], : src.shape[1], :] = src
         return patch
@@ -89,7 +89,7 @@ class FakeSlideReader:
         y_level = int(round(location[1] / downsample))
         width = int(size[0])
         height = int(size[1])
-        patch = make_white_canvas(width, height)
+        patch = make_white_canvas(width=width, height=height)
         src = arr[y_level : y_level + height, x_level : x_level + width, :]
         patch[: src.shape[0], : src.shape[1], :] = src
         return patch

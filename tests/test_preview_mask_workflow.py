@@ -166,8 +166,8 @@ def test_grid_preview_renders_the_aligned_mask_under_the_grid_with_a_restricted_
     with _png_mask(tmp_path, labels) as mask:
         aligned = mask.align_to(reference_spacing_um=0.5, reference_dimensions=(6, 6))
         image = draw_grid_from_coordinates(
-            np.full((6, 6, 3), 200, dtype=np.uint8),
-            wsi,
+            canvas=np.full((6, 6, 3), 200, dtype=np.uint8),
+            wsi=wsi,
             coords=[(0, 0)],
             tile_size_at_0=(4, 4),
             vis_level=0,
