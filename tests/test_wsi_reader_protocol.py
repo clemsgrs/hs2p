@@ -395,3 +395,51 @@ def test_vips_reader_import_guard():
 
     with pytest.raises(ImportError, match="pyvips"):
         VIPSReader("fake.svs")
+
+
+def _write_tiff(path: Path, **tags) -> Path:
+    tifffile = pytest.importorskip("tifffile")
+    tifffile.imwrite(
+        path,
+        np.zeros((32, 64), dtype=np.uint8),
+        tile=(32, 32),
+        photometric="minisblack",
+        **tags,
+    )
+    return path
+
+
+def test_vips_reader_rejects_untagged_tiff_by_default(tmp_path):
+    pytest.importorskip("pyvips")
+    from hs2p.wsi.backends.vips import VIPSReader
+
+    path = _write_tiff(tmp_path / "untagged.tif")
+
+    with pytest.raises(ValueError, match="Unable to infer slide spacing"):
+        VIPSReader(path)
+
+
+def test_vips_reader_opens_untagged_tiff_without_spacing(tmp_path):
+    pytest.importorskip("pyvips")
+    from hs2p.wsi.backends.vips import VIPSReader
+
+    path = _write_tiff(tmp_path / "untagged.tif")
+
+    reader = VIPSReader(path, require_spacing=False)
+
+    assert reader.native_spacing is None
+    assert reader.spacing is None
+
+
+def test_vips_reader_reads_spacing_from_tiff_resolution_tag(tmp_path):
+    pytest.importorskip("pyvips")
+    from hs2p.wsi.backends.vips import VIPSReader
+
+    path = _write_tiff(
+        tmp_path / "tagged.tif", resolution=(10000, 10000), resolutionunit="CENTIMETER"
+    )
+
+    reader = VIPSReader(path)
+
+    # 10000 px/cm = 1000 px/mm -> 1000 / 1000 = 1.0 um/px
+    assert reader.native_spacing == 1.0

@@ -67,6 +67,7 @@ RUN python -m pip install \
       --no-color \
       --extra-index-url "${PYTORCH_CUDA_INDEX_URL}" \
       "/opt/app[all,sam2]" \
+      "pyvips[binary]" \
       ${GIT_MODEL_DEPENDENCIES} \
     && rm -rf /root/.cache/pip
 

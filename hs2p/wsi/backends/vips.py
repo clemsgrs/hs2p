@@ -91,7 +91,9 @@ class VIPSReader:
             return float(self._root.get("openslide.mpp-x"))
         if "aperio.MPP" in fields:
             return float(self._root.get("aperio.MPP"))
-        if "xres" in fields:
+        # libvips always sets ``xres`` (1.0 px/mm when the file carries no resolution
+        # tag); only a file that also carries ``resolution-unit`` was actually tagged.
+        if "xres" in fields and "resolution-unit" in fields:
             xres = float(self._root.get("xres"))
             if xres > 0:
                 return 1000.0 / xres
