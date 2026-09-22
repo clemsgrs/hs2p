@@ -387,45 +387,6 @@ def resolve_backend(
     )
 
 
-def open_mask_reader(
-    mask_path: str | Path, *, mask_backend: str = AUTO_BACKEND
-) -> tuple[SlideReader, str]:
-    """Open a source mask through its own resolved backend, with actionable failures.
-
-    Resolves the mask backend from the mask path alone (``auto`` applies the
-    format-aware policy; a concrete name is authoritative) and opens the reader,
-    both inside one ``try`` so any failure — resolution *or* open — is reraised
-    with context naming the mask path and the requested backend (and the resolved
-    backend when it got that far). This is the centralized mask-open seam for the
-    visualization/overlay and :class:`~hs2p.wsi.wsi.WSI` attached-mask paths
-    (#163), mirroring :class:`hs2p.mask.Mask` open failures: a
-    ``ValueError`` cause reraises as ``ValueError``, anything else as
-    ``RuntimeError``.
-
-    Returns ``(reader, resolved_backend)``.
-    """
-    resolved = mask_backend
-    try:
-        resolved = resolve_backend(mask_backend, wsi_path=Path(mask_path)).backend
-        reader = open_slide(mask_path, backend=resolved)
-    except Exception as error:
-        requested = (mask_backend or AUTO_BACKEND).strip().lower()
-        remedy = (
-            "Verify the flat raster file."
-            if requested == AUTO_BACKEND and resolved == "pil"
-            else "Select another mask backend or verify the mask file."
-        )
-        message = (
-            f"Mask open failed for path={Path(mask_path)} with backend={resolved} "
-            f"(requested={mask_backend}): {error}. "
-            f"{remedy}"
-        )
-        if isinstance(error, ValueError):
-            raise ValueError(message) from error
-        raise RuntimeError(message) from error
-    return reader, resolved
-
-
 __all__ = [
     "AUTO_BACKEND",
     "AUTO_BACKEND_ORDER",
@@ -434,7 +395,6 @@ __all__ = [
     "LevelSelection",
     "ResolvedBackends",
     "SlideReader",
-    "open_mask_reader",
     "open_slide",
     "resolve_backend",
     "resolve_backends",

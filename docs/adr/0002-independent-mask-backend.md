@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-07-21
 - Amended: 2026-07-31 by the flat-raster format policy (#198)
+- Amended: 2026-09-22 by the first-class `Mask` contract (#167, #195)
 
 ## Context
 
@@ -32,22 +33,18 @@ fail configuration validation, including when a `TilingConfig` is constructed di
 Python (which is keyword-only, and validates the `requested_*` provenance fields on the same
 allowlist). A slide with no source mask never resolves or validates mask-backend availability,
 and its mask provenance is null. An explicit mask backend applies to every source-mask read —
-precomputed tissue masks, annotation masks, the public low-level readers, overlays, and
-deferred preview reads.
+precomputed tissue masks, annotation masks, overlays, and deferred preview reads.
 
-The public low-level mask readers are decoupled from the slide backend: called **without** a
-`mask_backend` (omitted or `None`) they resolve the mask backend independently from the mask
-path via `auto`, never inheriting the slide's backend, and record `requested_mask_backend ==
-"auto"`. The high-level pipeline is unaffected because it always passes an explicit resolved
-`mask_backend`.
+Every source mask is opened as an `hs2p.mask.Mask` (#167), which is decoupled from the slide
+backend: its default `backend="auto"` resolves the mask backend independently from the mask
+path, never inheriting the slide's backend, and the mask exposes only the concrete backend it
+opened. The high-level pipeline always passes the explicit resolved `mask_backend` and records
+the requested value alongside it.
 
-Opening a source mask is centralized through one helper (`open_mask_reader`) so an open failure
-— from backend resolution or the open itself — is reraised with actionable context naming the
-mask path and the requested backend (and the resolved backend when known), rather than a raw
-codec error. Native-backend failures recommend setting `mask_backend`
-explicitly; an auto-selected flat PIL failure recommends only verifying the
-file, because the format policy has no fallback. Overlays and the `WSI`
-attached-mask path route through this helper.
+Opening a source mask is centralized in `Mask` so an open failure — from backend resolution or
+the open itself — is reraised with actionable context naming the mask path and the backend,
+rather than a raw codec error. The format policy has no fallback: a selected decoder that
+cannot open the mask fails there. Preprocessing, overlays, and previews all route through it.
 
 Requested and resolved values are kept separate for both roles (`requested_backend` /
 `backend`, `requested_mask_backend` / `mask_backend`) and persisted in the tiling metadata,

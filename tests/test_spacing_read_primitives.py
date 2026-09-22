@@ -1,18 +1,17 @@
 """Tests for the spacing-aware read primitives.
 
 Covers the shared planning kernel (:func:`plan_spacing_read`), the resize helper
-(:func:`resize_array`), and the three public read methods built on them:
-``WSI.read_region_at_spacing``, ``WSI.read_full_at_spacing``, and
-the full and regional label helpers. The WSI methods are exercised against a
-lightweight stub (they only touch ``get_level_spacing``, ``level_downsamples``,
-``read_region``, and ``get_slide``) so no slide backend is required.
+(:func:`resize_array`), and the two public read methods built on them:
+``WSI.read_region_at_spacing`` and ``WSI.read_full_at_spacing``. The WSI methods are
+exercised against a lightweight stub (they only touch ``get_level_spacing``,
+``level_downsamples``, ``read_region``, and ``get_slide``) so no slide backend is
+required.
 """
 
 import numpy as np
 import pytest
 
 from hs2p.wsi.geometry import plan_spacing_read
-from hs2p.wsi.masks import read_label_at_spacing, read_label_region_at_spacing
 from hs2p.wsi.wsi import WSI, resize_array
 
 # level0 spacing 0.5 µm/px with x1/x2/x4 downsamples -> spacings [0.5, 1.0, 2.0]
@@ -321,146 +320,3 @@ def test_read_full_at_spacing_downscales_when_no_level_matches():
     )
 
     assert out.shape == (2, 2, 3)
-
-
-# --------------------------------------------------------------------------- #
-# read_label_at_spacing                                                       #
-# --------------------------------------------------------------------------- #
-def test_read_label_at_spacing_allows_finer_request_with_nearest_replication():
-    labels = np.array([[1, 2], [3, 4]], dtype=np.uint8)
-    level0 = np.repeat(labels[..., np.newaxis], 3, axis=2)
-    stub = _StubWSI(level0_spacing_um=0.5, levels=[level0])
-
-    out = read_label_at_spacing(
-        stub,
-        requested_spacing_um=0.25,
-        tolerance=0.05,
-    )
-
-    expected = np.array(
-        [
-            [1, 1, 2, 2],
-            [1, 1, 2, 2],
-            [3, 3, 4, 4],
-            [3, 3, 4, 4],
-        ],
-        dtype=np.uint8,
-    )
-    np.testing.assert_array_equal(out, expected)
-
-
-def test_read_label_region_at_spacing_allows_finer_request_with_nearest_replication():
-    labels = np.array([[1, 2], [3, 4]], dtype=np.uint8)
-    level0 = np.repeat(labels[..., np.newaxis], 3, axis=2)
-    stub = _StubWSI(level0_spacing_um=0.5, levels=[level0])
-
-    out = read_label_region_at_spacing(
-        stub,
-        location=(0, 0),
-        requested_spacing_um=0.25,
-        size=(4, 4),
-        tolerance=0.05,
-    )
-
-    expected = np.array(
-        [
-            [1, 1, 2, 2],
-            [1, 1, 2, 2],
-            [3, 3, 4, 4],
-            [3, 3, 4, 4],
-        ],
-        dtype=np.uint8,
-    )
-    np.testing.assert_array_equal(out, expected)
-
-
-def test_read_label_at_spacing_exact_match_preserves_labels():
-    labels = np.array([[1, 2], [3, 4]], dtype=np.uint8)
-    level0 = np.repeat(labels[..., np.newaxis], 3, axis=2)
-    stub = _StubWSI(level0_spacing_um=0.5, levels=[level0])
-
-    out = read_label_at_spacing(
-        stub,
-        requested_spacing_um=0.5,
-        tolerance=0.05,
-    )
-
-    np.testing.assert_array_equal(out, labels)
-
-
-def test_read_label_at_spacing_downsamples_with_exact_nearest_classes():
-    labels = np.array(
-        [
-            [1, 1, 2, 2],
-            [1, 1, 2, 2],
-            [3, 3, 4, 4],
-            [3, 3, 4, 4],
-        ],
-        dtype=np.uint8,
-    )
-    level0 = np.repeat(labels[..., np.newaxis], 3, axis=2)
-    stub = _StubWSI(level0_spacing_um=0.5, levels=[level0])
-
-    out = read_label_at_spacing(
-        stub,
-        requested_spacing_um=1.0,
-        tolerance=0.05,
-    )
-
-    expected = np.array([[1, 2], [3, 4]], dtype=np.uint8)
-    np.testing.assert_array_equal(out, expected)
-
-
-class _StubLabelWSI:
-    def __init__(self, arr: np.ndarray):
-        self._arr = arr
-        self.calls: list[dict] = []
-
-    def read_full_at_spacing(
-        self, requested_spacing_um, *, tolerance, interpolation, content_kind
-    ):
-        self.calls.append(
-            {
-                "requested_spacing_um": requested_spacing_um,
-                "tolerance": tolerance,
-                "interpolation": interpolation,
-                "content_kind": content_kind,
-            }
-        )
-        return self._arr
-
-
-def test_read_label_at_spacing_collapses_channel_replicated_rgb():
-    labels = np.array([[0, 1], [2, 3]], dtype=np.int32)
-    rgb = np.stack([labels, labels, labels], axis=-1)
-    stub = _StubLabelWSI(rgb)
-
-    out = read_label_at_spacing(stub, requested_spacing_um=2.0, tolerance=0.05)
-
-    np.testing.assert_array_equal(out, labels)
-    # labels must be resampled with nearest-neighbor to avoid inventing ids
-    assert stub.calls == [
-        {
-            "requested_spacing_um": 2.0,
-            "tolerance": 0.05,
-            "interpolation": "nearest",
-            "content_kind": "label",
-        }
-    ]
-
-
-def test_read_label_at_spacing_rejects_genuine_colour_image():
-    colour = np.zeros((2, 2, 3), dtype=np.uint8)
-    colour[..., 0] = 10  # red differs from green/blue -> not a replicated label
-    stub = _StubLabelWSI(colour)
-
-    with pytest.raises(ValueError, match="non-identical RGB channels"):
-        read_label_at_spacing(stub, requested_spacing_um=2.0, tolerance=0.05)
-
-
-def test_read_label_at_spacing_rejects_non_integer_dtype():
-    labels = np.array([[0.0, 1.0], [2.0, 3.0]], dtype=np.float32)
-    stub = _StubLabelWSI(labels)
-
-    with pytest.raises(ValueError, match="integer dtype"):
-        read_label_at_spacing(stub, requested_spacing_um=2.0, tolerance=0.05)

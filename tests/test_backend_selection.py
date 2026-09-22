@@ -381,7 +381,7 @@ def test_reader_backend_probe_uses_backend_openers(monkeypatch):
     assert seen_paths == ["/tmp/slide.tiff", "/tmp/mask.tiff"]
 
 
-def test_wsi_opens_slide_and_mask_readers_with_resolved_backend(monkeypatch):
+def test_wsi_opens_the_slide_reader_with_its_resolved_backend(monkeypatch):
     seen_calls: list[tuple[object, str, float | None]] = []
 
     class _FakeSlideReader:
@@ -421,22 +421,10 @@ def test_wsi_opens_slide_and_mask_readers_with_resolved_backend(monkeypatch):
 
     monkeypatch.setattr(wsi_mod, "resolve_backend", _fake_resolve_backend)
     monkeypatch.setattr(wsi_mod, "open_slide", _fake_open_slide)
-    # The attached mask opens through the centralized ``open_mask_reader`` helper (#163), which
-    # resolves + opens via the reader module's own globals — patch those so the mask open is
-    # captured alongside the slide open.
-    monkeypatch.setattr(reader_mod, "resolve_backend", _fake_resolve_backend)
-    monkeypatch.setattr(reader_mod, "open_slide", _fake_open_slide)
 
-    wsi_mod.WSI(
-        path=Path("/tmp/slide.tiff"),
-        mask_path=Path("/tmp/mask.tiff"),
-        backend="auto",
-    )
+    wsi_mod.WSI(path=Path("/tmp/slide.tiff"), backend="auto")
 
-    assert seen_calls == [
-        (Path("/tmp/slide.tiff"), "cucim", None),
-        (Path("/tmp/mask.tiff"), "cucim", None),
-    ]
+    assert seen_calls == [(Path("/tmp/slide.tiff"), "cucim", None)]
 
 
 def test_tile_slide_uses_resolved_backend_for_hash_and_result(monkeypatch):

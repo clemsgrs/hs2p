@@ -24,7 +24,7 @@ sys.path.insert(0, str(ROOT))
 
 from hs2p.api import FilterConfig, SegmentationConfig, SlideSpec, TilingConfig, tile_slide  # noqa: E402
 from hs2p.tiling.generate import generate_tiles  # noqa: E402
-from hs2p.tiling.mask import load_precomputed_tissue_mask  # noqa: E402
+from hs2p.tiling.mask import open_tissue_mask, resolve_tissue_mask  # noqa: E402
 from hs2p.tiling.result import ContourResult  # noqa: E402
 
 CASES = ("contours_sparse", "contours_dense", "mask_decode", "fixture")
@@ -65,12 +65,11 @@ def build_case(name: str):
         )
 
         def run():
-            with patch("hs2p.mask.open_slide", return_value=reader):
-                result, _, _ = load_precomputed_tissue_mask(
-                    mask_path="benchmark-mask.tif", slide=slide, seg_level=0,
-                    tissue_value=7, mask_backend="openslide",
-                )
-            return (result,)
+            with patch("hs2p.mask.open_slide", return_value=reader), open_tissue_mask(
+                "benchmark-mask.tif", pixel_mapping={"tissue": 7}, backend="openslide",
+            ) as mask:
+                result = resolve_tissue_mask(slide=slide, mask=mask, seg_downsample=1)
+            return (result.tissue_mask,)
 
         return run
     if name == "fixture":

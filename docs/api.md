@@ -147,14 +147,13 @@ readers, automatic selection, and decoding errors. This selection also applies t
 deferred mask-preview reads. `jpeg_backend` on `tile_slides()` selects the TAR JPEG
 encoder separately.
 
-The lower-level helpers `load_precomputed_tissue_mask` and
-`load_annotation_label_mask` accept `mask_backend`. Omitting it or passing `None`
-selects `auto` from the mask path and records `requested_mask_backend="auto"`; it does
-not inherit the slide reader. `resolve_tissue_mask` and `resolve_annotation_masks`
-instead consume an open `hs2p.Mask` (declaring `TissueLabels` or `AnnotationLabels`),
-which resolves its own reader the same way; pass `requested_mask_backend` to record
-what was asked for. The high-level API passes the resolved reader explicitly. A slide without a source
-mask does not check mask-reader availability, and its mask provenance is null.
+The lower-level resolvers `resolve_tissue_mask` and `resolve_annotation_masks` consume
+an open `hs2p.Mask` (declaring `TissueLabels` or `AnnotationLabels`). A `Mask` opened
+with the default `backend="auto"` resolves its reader from the mask path alone and
+never inherits the slide reader; pass `requested_mask_backend` to the resolver to
+record what was asked for, otherwise the mask's concrete backend is recorded as the
+request. The high-level API passes the resolved reader explicitly. A slide without a
+source mask does not check mask-reader availability, and its mask provenance is null.
 
 Results, saved metadata, and process-list rows record requested and resolved readers
 as `requested_backend` / `backend` and `requested_mask_backend` / `mask_backend`.

@@ -2,9 +2,9 @@
 
 A mask whose nearest pyramid level to the requested segmentation spacing is still huge
 (because the mask lacks a coarse pyramid level) would force ``read_region`` to materialise a
-multi-GB raster, OOM-killing the job. Both preprocessing paths read through ``hs2p.mask``,
+multi-GB raster, OOM-killing the job. Both preprocessing resolvers read through ``hs2p.mask``,
 which applies the fixed 256 Mpx cap. These tests assert the guard fires *before* any read,
-and that normal under-cap masks still read/validate unchanged through both paths.
+and that normal under-cap masks still read/validate unchanged through both resolvers.
 """
 
 from types import SimpleNamespace
@@ -13,7 +13,11 @@ import numpy as np
 import pytest
 
 import hs2p.mask as source_mask_mod
-from hs2p.tiling.mask import load_annotation_label_mask, load_precomputed_tissue_mask
+from hs2p.mask import AnnotationLabels, Mask, TissueLabels
+from hs2p.tiling.mask import resolve_annotation_masks, resolve_tissue_mask
+
+TISSUE = TissueLabels(background=0, tissue=1)
+ANNOTATIONS = AnnotationLabels(pixel_mapping={"background": 0, "tumor": 1})
 
 
 class _ExplodingMaskSlide:
@@ -55,6 +59,11 @@ class _FakeMaskSlide:
         pass
 
 
+def _open_mask(monkeypatch, mask_slide, *, path, labels, backend) -> Mask:
+    monkeypatch.setattr(source_mask_mod, "open_slide", lambda *a, **k: mask_slide)
+    return Mask(path=path, labels=labels, backend=backend)
+
+
 def _make_wsi_slide():
     return SimpleNamespace(
         level_downsamples=[1.0, 4.0],
@@ -90,35 +99,35 @@ def _assert_oversized_message(message: str, *, mask_path: str, backend: str) -> 
 # --- guard fires before any read ------------------------------------------------------
 
 
-def test_precomputed_tissue_path_routes_through_guard(monkeypatch):
+def test_tissue_resolver_routes_through_guard(monkeypatch):
     mask_path = "/data/masks/oversized-tissue.tif"
-    mask_slide = _ExplodingMaskSlide(level_dimensions=[_OVERSIZED_DIMS])
-    monkeypatch.setattr(source_mask_mod, "open_slide", lambda *a, **k: mask_slide)
+    mask = _open_mask(
+        monkeypatch,
+        _ExplodingMaskSlide(level_dimensions=[_OVERSIZED_DIMS]),
+        path=mask_path,
+        labels=TISSUE,
+        backend="asap",
+    )
 
     with pytest.raises(ValueError) as excinfo:
-        load_precomputed_tissue_mask(
-            mask_path=mask_path,
-            slide=_oversized_wsi_slide(),
-            seg_level=1,
-            tissue_value=1,
-            mask_backend="asap",
-        )
+        resolve_tissue_mask(slide=_oversized_wsi_slide(), mask=mask, seg_downsample=4)
 
     _assert_oversized_message(str(excinfo.value), mask_path=mask_path, backend="asap")
 
 
-def test_annotation_path_routes_through_guard(monkeypatch):
+def test_annotation_resolver_routes_through_guard(monkeypatch):
     mask_path = "/data/masks/oversized-annotation.tif"
-    mask_slide = _ExplodingMaskSlide(level_dimensions=[_OVERSIZED_DIMS])
-    monkeypatch.setattr(source_mask_mod, "open_slide", lambda *a, **k: mask_slide)
+    mask = _open_mask(
+        monkeypatch,
+        _ExplodingMaskSlide(level_dimensions=[_OVERSIZED_DIMS]),
+        path=mask_path,
+        labels=ANNOTATIONS,
+        backend="openslide",
+    )
 
     with pytest.raises(ValueError) as excinfo:
-        load_annotation_label_mask(
-            mask_path=mask_path,
-            slide=_oversized_wsi_slide(),
-            seg_level=1,
-            valid_values={0, 1},
-            mask_backend="openslide",
+        resolve_annotation_masks(
+            slide=_oversized_wsi_slide(), mask=mask, seg_downsample=4
         )
 
     _assert_oversized_message(
@@ -129,36 +138,43 @@ def test_annotation_path_routes_through_guard(monkeypatch):
 # --- under-cap masks still read/validate unchanged ------------------------------------
 
 
-def test_precomputed_tissue_path_passthrough_under_cap(monkeypatch):
+def test_tissue_resolver_passthrough_under_cap(monkeypatch):
     # A 25 px mask over the 100 px, 0.25 um/px slide: 1.0 um/px.
-    mask_slide = _FakeMaskSlide(level_dimensions=[(25, 25)], spacing=1.0, value=1)
-    monkeypatch.setattr(source_mask_mod, "open_slide", lambda *a, **k: mask_slide)
-
-    mask, mask_level, mask_spacing_um = load_precomputed_tissue_mask(
-        mask_path="/data/masks/small.tif",
-        slide=_make_wsi_slide(),
-        seg_level=1,
-        tissue_value=1,
-        mask_backend="asap",
+    mask = _open_mask(
+        monkeypatch,
+        _FakeMaskSlide(level_dimensions=[(25, 25)], spacing=1.0, value=1),
+        path="/data/masks/small.tif",
+        labels=TISSUE,
+        backend="asap",
     )
 
-    assert mask.shape == (25, 25)
-    assert (mask_level, mask_spacing_um) == (0, 1.0)
-    assert set(np.unique(mask).tolist()) <= {0, 255}
-    assert int(mask.max()) == 255
+    resolved = resolve_tissue_mask(slide=_make_wsi_slide(), mask=mask, seg_downsample=4)
+
+    np.testing.assert_array_equal(
+        resolved.tissue_mask, np.full((25, 25), 255, dtype=np.uint8)
+    )
+    assert resolved.seg_level == 1
+    assert (resolved.mask_level, resolved.mask_spacing_um) == (0, 1.0)
 
 
-def test_annotation_path_passthrough_under_cap(monkeypatch):
-    mask_slide = _FakeMaskSlide(level_dimensions=[(25, 25)], spacing=1.0, value=1)
-    monkeypatch.setattr(source_mask_mod, "open_slide", lambda *a, **k: mask_slide)
-
-    mask, mask_level, mask_spacing_um = load_annotation_label_mask(
-        mask_path="/data/masks/small.tif",
-        slide=_make_wsi_slide(),
-        seg_level=1,
-        valid_values={0, 1},
-        mask_backend="openslide",
+def test_annotation_resolver_passthrough_under_cap(monkeypatch):
+    mask = _open_mask(
+        monkeypatch,
+        _FakeMaskSlide(level_dimensions=[(25, 25)], spacing=1.0, value=1),
+        path="/data/masks/small.tif",
+        labels=ANNOTATIONS,
+        backend="openslide",
     )
 
-    np.testing.assert_array_equal(mask, np.ones((25, 25), dtype=np.uint8))
-    assert (mask_level, mask_spacing_um) == (0, 1.0)
+    resolved = resolve_annotation_masks(
+        slide=_make_wsi_slide(), mask=mask, seg_downsample=4
+    )
+
+    np.testing.assert_array_equal(
+        resolved.masks["tumor"], np.full((25, 25), 255, dtype=np.uint8)
+    )
+    np.testing.assert_array_equal(
+        resolved.masks["background"], np.zeros((25, 25), dtype=np.uint8)
+    )
+    assert resolved.seg_level == 1
+    assert (resolved.mask_level, resolved.mask_spacing_um) == (0, 1.0)

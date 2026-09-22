@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from hs2p.wsi.backend import open_mask_reader, open_slide, resolve_backend
+from hs2p.wsi.backend import open_slide, resolve_backend
 from hs2p.wsi.geometry import (
     ContentKind,
     plan_spacing_read,
@@ -71,24 +71,19 @@ class WSI(object):
         level_dimensions (list[tuple[int, int]]): Dimensions at each level.
         level_downsamples (list[tuple[float, float]]): Downsample factors for each level.
         backend (str): Backend used for opening the wsi.
-        mask_path (Path, optional): Path to the segmentation mask.
-        mask_reader: Segmentation mask reader object.
     """
 
     def __init__(
         self,
         path: Path,
         backend: str,
-        mask_path: Path | None = None,
         spacing_at_level_0: float | None = None,
-        mask_backend: str = "auto",
     ):
         self.path = path
         self.name = path.stem.replace(" ", "_")
         self.fmt = path.suffix
-        # Slide and mask backends resolve independently from their own paths (#163): the slide
-        # backend from ``path`` only, the mask backend from ``mask_path`` only. A slide with no
-        # mask leaves both mask-provenance attributes ``None``.
+        # The slide backend resolves from ``path`` alone; a source mask is a separate
+        # ``hs2p.mask.Mask`` with its own backend.
         self.requested_backend = backend
         selection = resolve_backend(
             backend,
@@ -109,19 +104,6 @@ class WSI(object):
         self.spacings = self.get_spacings()
         self.level_dimensions = list(self.reader.level_dimensions)
         self.level_downsamples = list(self.reader.level_downsamples)
-
-        self.mask_path = mask_path
-        self.mask_reader = None
-        self.requested_mask_backend: str | None = None
-        self.mask_backend: str | None = None
-        if mask_path is not None:
-            # The mask opens through its own resolved backend, independent of the slide's (#163),
-            # via the centralized helper so an open failure names the mask path and requested
-            # backend rather than surfacing a raw codec error.
-            self.requested_mask_backend = mask_backend
-            self.mask_reader, self.mask_backend = open_mask_reader(
-                mask_path, mask_backend=mask_backend
-            )
 
     def get_slide(self, level: int) -> np.ndarray:
         """Return the full slide image at the given pyramid level."""

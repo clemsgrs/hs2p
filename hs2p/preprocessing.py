@@ -29,8 +29,6 @@ from hs2p.tiling.io import (
     validate_tiling_result_provenance,
 )
 from hs2p.tiling.mask import (
-    load_annotation_label_mask,
-    load_precomputed_tissue_mask,
     prepare_sam2_thumbnail,
     resolve_annotation_masks,
     resolve_tissue_mask,
@@ -62,8 +60,6 @@ __all__ = [
     "compute_tile_coverage",
     "detect_contours",
     "generate_tiles",
-    "load_annotation_label_mask",
-    "load_precomputed_tissue_mask",
     "prepare_sam2_thumbnail",
     "resolve_annotation_masks",
     "resolve_tissue_mask",
