@@ -3,7 +3,12 @@
 import cv2
 import numpy as np
 
-from hs2p.wsi.geometry import project_discrete_grid_origins
+from hs2p.tiling.contours import _normalize_level_downsamples
+from hs2p.wsi.geometry import (
+    plan_spacing_read,
+    project_discrete_grid_origins,
+    tile_size_lv0_from_plan,
+)
 
 
 def compute_tile_coverage(
@@ -91,6 +96,7 @@ def summarize_annotation_coverage(
     requested_tile_size_px: int,
     requested_spacing_um: float,
     overlap: float = 0.0,
+    tolerance: float = 0.05,
 ) -> dict[str, dict[str, float | int | None]]:
     """Per-class annotation coverage summary at the resolved ``seg_downsample``.
 
@@ -107,7 +113,10 @@ def summarize_annotation_coverage(
     - ``est_tiles`` — number of tile footprints whose class coverage is at
       least ``min_coverage[class]`` (``None`` when no threshold is given). This is an
       *estimate*: it reuses :func:`compute_tile_coverage` over a regular level-0 grid and
-      uses the requested overlap but deliberately ignores tissue filtering.
+      uses the requested overlap but deliberately ignores tissue filtering. Each footprint
+      is the tile tiling would read: a level within ``tolerance`` of the request is read
+      natively, as in :func:`hs2p.tiling.generate.generate_tiles`, so pass the tolerance
+      the tiling uses.
 
     ``area_mm2`` is reported for every declared class; ``frac``/``est_tiles`` only for the
     thresholded classes. Reuses hs2p's existing coverage primitive (the controllable
@@ -125,7 +134,18 @@ def summarize_annotation_coverage(
     )
 
     base_spacing_um = float(slide.spacing)
-    tile_size_lv0 = max(1, round(requested_tile_size_px * requested_spacing_um / base_spacing_um))
+    read_plan = plan_spacing_read(
+        requested_spacing_um=float(requested_spacing_um),
+        level0_spacing_um=base_spacing_um,
+        level_downsamples=[
+            (float(downsample), float(downsample))
+            for downsample in _normalize_level_downsamples(slide.level_downsamples)
+        ],
+        target_size_px=(int(requested_tile_size_px), int(requested_tile_size_px)),
+        tolerance=float(tolerance),
+        content_kind="image",
+    )
+    tile_size_lv0 = max(1, tile_size_lv0_from_plan(read_plan, level0_spacing_um=base_spacing_um))
     step = max(1, round(tile_size_lv0 * (1.0 - overlap)))
     slide_w, slide_h = int(slide.dimensions[0]), int(slide.dimensions[1])
     xs = np.arange(0, max(1, slide_w), step, dtype=np.int64)

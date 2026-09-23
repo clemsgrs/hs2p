@@ -226,6 +226,84 @@ def test_summarize_annotation_coverage_area_frac_and_est_tiles(monkeypatch):
     assert summary["necrosis"]["est_tiles"] == 0
 
 
+def _slide_at(spacing_um: float) -> SimpleNamespace:
+    return SimpleNamespace(
+        dimensions=(SLIDE_W, SLIDE_H),
+        spacing=spacing_um,
+        level_downsamples=[1.0],
+        level_dimensions=[(SLIDE_W, SLIDE_H)],
+        backend_name="mock",
+    )
+
+
+def _left_column_tumor_est_tiles(monkeypatch, *, spacing_um: float, **kwargs) -> int:
+    """``est_tiles`` for tumor filling the left 200 px column of a 400x400 slide at
+    ``spacing_um``, with 200 px tiles requested at 0.5 um/px and a 0.99 threshold."""
+    native = np.zeros((SLIDE_H, SLIDE_W), dtype=np.uint8)
+    native[:, :200] = 1
+    slide = _slide_at(spacing_um)
+    resolved = resolve_annotation_masks(
+        slide=slide,
+        mask=_open_annotation_mask(monkeypatch, native, pixel_mapping={"background": 0, "tumor": 1}),
+        seg_downsample=1,
+    )
+    summary = summarize_annotation_coverage(
+        slide=slide,
+        resolved_masks=resolved,
+        min_coverage={"tumor": 0.99},
+        requested_tile_size_px=200,
+        requested_spacing_um=BASE_SPACING,
+        **kwargs,
+    )
+    return summary["tumor"]["est_tiles"]
+
+
+def test_est_tiles_uses_the_tiling_footprint_within_tolerance(monkeypatch):
+    """#226: a level within tolerance is read natively, so tiling's footprint on a
+    0.485 um/px slide is 200 level-0 px, not round(200 * 0.5 / 0.485) = 206. With the
+    tiling footprint both left-column tiles are pure tumor; with 206 px they are 97%."""
+    assert _left_column_tumor_est_tiles(monkeypatch, spacing_um=0.485) == 2
+
+
+def test_est_tiles_footprint_matches_generate_tiles(monkeypatch):
+    import hs2p.tiling.coverage as covmod
+    from hs2p.tiling.generate import generate_tiles
+    from hs2p.tiling.result import ContourResult
+
+    original = covmod.compute_tile_coverage
+    captured = {}
+
+    def spy(*, candidates, binary_mask, tile_size_lv0, slide_dimensions):
+        captured["tile_size_lv0"] = tile_size_lv0
+        return original(
+            candidates=candidates,
+            binary_mask=binary_mask,
+            tile_size_lv0=tile_size_lv0,
+            slide_dimensions=slide_dimensions,
+        )
+
+    monkeypatch.setattr(covmod, "compute_tile_coverage", spy)
+    # Finer and coarser within tolerance, and resized outside it (0.485 at 1%).
+    for spacing_um, tolerance in ((0.485, 0.05), (0.52, 0.05), (0.505, 0.05), (0.485, 0.01)):
+        geometry = generate_tiles(
+            (SLIDE_W, SLIDE_H),
+            ContourResult(contours=[], holes=[], mask=np.zeros((1, 1), dtype=np.uint8)),
+            requested_tile_size_px=200,
+            requested_spacing_um=BASE_SPACING,
+            base_spacing_um=spacing_um,
+            level_downsamples=[1.0],
+            tolerance=tolerance,
+        )
+        _left_column_tumor_est_tiles(monkeypatch, spacing_um=spacing_um, tolerance=tolerance)
+        assert captured["tile_size_lv0"] == geometry.tile_size_lv0, (spacing_um, tolerance)
+
+
+def test_est_tiles_keeps_the_requested_footprint_outside_tolerance(monkeypatch):
+    # 0.485 is 3% off 0.5: outside a 1% tolerance the read is resized, and the
+    # footprint stays round(200 * 0.5 / 0.485) = 206, so the column tiles are 97% tumor.
+    assert _left_column_tumor_est_tiles(monkeypatch, spacing_um=0.485, tolerance=0.01) == 0
+
+
 def test_annotation_backend_exception_fails_with_mask_context(monkeypatch):
     """Decoder errors identify the mask and the authoritative backend that read it."""
 
