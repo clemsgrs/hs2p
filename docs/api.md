@@ -201,7 +201,13 @@ decode is validated before resampling: integer dtype, values in `0..255`, identi
 channels if any, and only declared IDs; the result is a read-only 2-D `uint8` array in
 `MaskRead.labels`, with `read_level` and `read_spacing_um` (the effective spacing of the
 level read). A region extending past the slide canvas raises `ValueError`; nothing is
-padded. A native level or window above 256 Mpx is refused before decoding.
+padded. `dimensions_within_canvas(location=..., target_spacing_um=...,
+target_dimensions=...)` returns how much of a region lies on the canvas under the same
+rule, for callers that handle the overhang themselves. A native level or window above 256 Mpx is refused before decoding. A region
+whose `target_spacing_um / reference_spacing_um` ratio is a simple fraction (1, 2, 1/2,
+...) up to float noise (`SPACING_RATIO_RTOL`, 1e-6 relative) is sampled at that exact
+fraction: a target spacing that differs from the reference spacing only by float32
+rounding, as when a TIFF tag and decimal metadata disagree, still returns the native crop.
 
 **Failures** are `ValueError` for invalid semantics, geometry, labels or requests and
 `RuntimeError` for backend open and decode errors; messages start with `Mask open failed`,

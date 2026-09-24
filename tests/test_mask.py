@@ -1075,3 +1075,145 @@ def test_pyramidal_tiff_mask_reads_a_region_from_a_coarser_level(tmp_path):
             [[0, 0, 1, 1], [0, 0, 1, 1], [0, 0, 0, 0], [0, 0, 0, 0]], dtype=np.uint8
         ),
     )
+
+
+# 0.4862 um/px through float32, as a TIFF resolution tag stores it
+_FLOAT32_SPACING_UM = 0.4862000048160553
+
+
+@pytest.mark.parametrize(
+    ("reference_spacing_um", "target_spacing_um"),
+    [(_FLOAT32_SPACING_UM, 0.4862), (0.4862, _FLOAT32_SPACING_UM)],
+    ids=["ratio-a-hair-below-one", "ratio-a-hair-above-one"],
+)
+def test_region_read_at_a_float_noisy_reference_spacing_is_the_native_crop(
+    monkeypatch, reference_spacing_um, target_spacing_um
+):
+    # The same spacing read by two backends differs by float32 noise: the read must
+    # still take every native pixel, not the one before it.
+    native = np.arange(64, dtype=np.uint8).reshape(1, 64)
+    reader = _WindowFakeReader([native])
+    mask = _open_fake_mask(monkeypatch, reader, labels=_numbered_labels(64))
+    aligned = mask.align_to(
+        reference_spacing_um=reference_spacing_um, reference_dimensions=(64, 1)
+    )
+
+    read = aligned.read_region(
+        location=(8, 0),
+        target_spacing_um=target_spacing_um,
+        target_dimensions=(32, 1),
+    )
+
+    np.testing.assert_array_equal(read.labels, native[:, 8:40])
+    assert reader.windows == [((8, 0), 0, (32, 1))]
+
+
+def test_region_read_under_a_coarser_mask_tolerates_a_float_noisy_spacing(
+    monkeypatch,
+):
+    reader, aligned = _coarse_numbered_mask(monkeypatch)
+
+    # 0.25 um a hair low: reference x = 16, 32, 48 still start mask columns 1, 2, 3
+    read = aligned.read_region(
+        location=(0, 0),
+        target_spacing_um=0.25 * (1 - 1e-8),
+        target_dimensions=(64, 1),
+    )
+
+    np.testing.assert_array_equal(
+        read.labels, np.repeat(np.arange(4, dtype=np.uint8), 16)[None, :]
+    )
+
+
+def test_region_read_accepts_a_long_request_ending_on_the_canvas_edge_at_a_noisy_spacing(
+    monkeypatch,
+):
+    # 4096 px a hair wider than the reference pixels overshoot the canvas by 4e-5 px,
+    # far more than a fixed epsilon, and far less than a pixel
+    native = (np.arange(4096) % 2).astype(np.uint8).reshape(1, 4096)
+    reader = _WindowFakeReader([native])
+    mask = _open_fake_mask(monkeypatch, reader)
+    aligned = mask.align_to(reference_spacing_um=0.4862, reference_dimensions=(4096, 1))
+
+    read = aligned.read_region(
+        location=(0, 0),
+        target_spacing_um=_FLOAT32_SPACING_UM,
+        target_dimensions=(4096, 1),
+    )
+
+    np.testing.assert_array_equal(read.labels, native)
+    assert reader.windows == [((0, 0), 0, (4096, 1))]
+
+
+def test_region_read_maps_a_location_on_a_level_pixel_boundary_exactly(monkeypatch):
+    # An 18 px reference over a 14 px mask: reference x = 9 is exactly mask x = 7, but
+    # 9 / (18 / 14) evaluates to 6.999999999999999
+    native = np.tile(np.arange(14, dtype=np.uint8), (14, 1))
+    reader = _WindowFakeReader([native])
+    mask = _open_fake_mask(monkeypatch, reader, labels=_numbered_labels(14))
+    aligned = mask.align_to(reference_spacing_um=1.0, reference_dimensions=(18, 18))
+
+    read = aligned.read_region(
+        location=(9, 0), target_spacing_um=18 / 14, target_dimensions=(1, 1)
+    )
+
+    np.testing.assert_array_equal(read.labels, np.array([[7]], dtype=np.uint8))
+    assert reader.windows == [((7, 0), 0, (1, 1))]
+
+
+@pytest.mark.parametrize(
+    ("location", "target_dimensions", "expected"),
+    [
+        # 4.0 um target pixels are 16 reference px on a 128x64 canvas
+        ((0, 0), (8, 4), (8, 4)),
+        ((96, 0), (4, 2), (2, 2)),
+        ((100, 40), (4, 4), (1, 1)),
+        ((128, 0), (2, 2), (0, 2)),
+        ((-16, 0), (2, 2), (0, 2)),
+    ],
+    ids=["inside", "past-right", "past-both-mid-pixel", "at-right-edge", "left"],
+)
+def test_dimensions_within_canvas_count_the_target_pixels_on_the_canvas(
+    monkeypatch, location, target_dimensions, expected
+):
+    reader, aligned = _coarse_numbered_mask(monkeypatch)
+
+    within = aligned.dimensions_within_canvas(
+        location=location, target_spacing_um=4.0, target_dimensions=target_dimensions
+    )
+
+    assert within == expected
+    assert reader.windows == []
+
+
+def test_dimensions_within_canvas_read_back_as_the_in_canvas_part_of_a_region(
+    monkeypatch,
+):
+    reader, aligned = _coarse_numbered_mask(monkeypatch)
+
+    width, height = aligned.dimensions_within_canvas(
+        location=(96, 32), target_spacing_um=4.0, target_dimensions=(4, 4)
+    )
+    read = aligned.read_region(
+        location=(96, 32), target_spacing_um=4.0, target_dimensions=(width, height)
+    )
+
+    np.testing.assert_array_equal(
+        read.labels, np.array([[22, 23], [30, 31]], dtype=np.uint8)
+    )
+
+
+def test_dimensions_within_canvas_follow_the_float_noise_rule_at_the_edge(
+    monkeypatch,
+):
+    native = (np.arange(4096) % 2).astype(np.uint8).reshape(1, 4096)
+    mask = _open_fake_mask(monkeypatch, _WindowFakeReader([native]))
+    aligned = mask.align_to(reference_spacing_um=0.4862, reference_dimensions=(4096, 1))
+
+    within = aligned.dimensions_within_canvas(
+        location=(96, 0),
+        target_spacing_um=_FLOAT32_SPACING_UM,
+        target_dimensions=(4096, 1),
+    )
+
+    assert within == (4000, 1)
