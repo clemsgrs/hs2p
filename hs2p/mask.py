@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,14 @@ SPACING_FAIL_THRESHOLD = 0.05
 # Float noise allowed past the reference canvas edge, in reference level-0 pixels: a
 # spacing ratio such as 2.007 / 0.2007 evaluates to 10.000000000000002.
 CANVAS_EDGE_EPSILON_PX = 1e-6
+# A region read whose spacing ratio is within this relative distance of a fraction with
+# a denominator up to ``EXACT_STEP_MAX_DENOMINATOR`` samples at that fraction exactly.
+# One spacing read two ways -- a float32 TIFF resolution tag and its decimal metadata,
+# say -- agrees only to about 1e-7: 0.4862 is 0.4862000048160553 through float32. At an
+# exact ratio every sample lands on a native pixel boundary, where that noise would move
+# it into the previous pixel.
+SPACING_RATIO_RTOL = 1e-6
+EXACT_STEP_MAX_DENOMINATOR = 64
 
 logger = logging.getLogger(__name__)
 
@@ -320,25 +329,30 @@ class AlignedMask:
         label of the level pixel holding its top-left corner, ``location + i *
         target_spacing_um / reference_spacing_um`` -- the nearest-neighbor rule of
         :meth:`read_full`, so a region equals the matching crop of a full read.
+
+        A spacing ratio within ``SPACING_RATIO_RTOL`` of a simple fraction -- 1 when the
+        target spacing is the reference spacing up to float noise, 2 or 1/2 -- is taken
+        as that fraction and sampled in exact arithmetic.
         """
         reader = self.mask._require_reader()
         target_width, target_height = _target_dimensions(target_dimensions)
         x, y = (int(v) for v in location)
         selection = self._select_level(reader, target_spacing_um)
         level = selection.level
-        step = float(target_spacing_um) / self.reference_spacing_um
+        step = _region_step(float(target_spacing_um) / self.reference_spacing_um)
         extent_width, extent_height = target_width * step, target_height * step
         reference_width, reference_height = self.reference_dimensions
+        edge_epsilon = 0 if isinstance(step, Fraction) else CANVAS_EDGE_EPSILON_PX
         if (
             x < 0
             or y < 0
-            or x + extent_width > reference_width + CANVAS_EDGE_EPSILON_PX
-            or y + extent_height > reference_height + CANVAS_EDGE_EPSILON_PX
+            or x + extent_width > reference_width + edge_epsilon
+            or y + extent_height > reference_height + edge_epsilon
         ):
             raise ValueError(
                 f"Mask region read refused for path={self.mask.path} with "
                 f"backend={self.mask.backend}: location ({x}, {y}) with extent "
-                f"{extent_width:g}x{extent_height:g} reference px "
+                f"{float(extent_width):g}x{float(extent_height):g} reference px "
                 f"({target_width}x{target_height} px at "
                 f"{float(target_spacing_um):.4f} um/px) extends beyond reference "
                 f"dimensions {reference_width}x{reference_height}. Mask regions are "
@@ -349,14 +363,14 @@ class AlignedMask:
             start=x,
             count=target_width,
             step=step,
-            ratio=reference_width / level_width,
+            reference_size=reference_width,
             level_size=level_width,
         )
         y0, height, rows = _level_span(
             start=y,
             count=target_height,
             step=step,
-            ratio=reference_height / level_height,
+            reference_size=reference_height,
             level_size=level_height,
         )
         labels = self._read_native(
@@ -441,18 +455,44 @@ def _target_dimensions(target_dimensions: tuple[int, int]) -> tuple[int, int]:
     return target_width, target_height
 
 
+def _region_step(step: float) -> Fraction | float:
+    """``step`` as the simple fraction it equals up to float noise, else unchanged."""
+    exact = Fraction(step).limit_denominator(EXACT_STEP_MAX_DENOMINATOR)
+    if exact > 0 and abs(step - exact) <= SPACING_RATIO_RTOL * step:
+        return exact
+    return step
+
+
 def _level_span(
-    *, start: int, count: int, step: float, ratio: float, level_size: int
+    *,
+    start: int,
+    count: int,
+    step: Fraction | float,
+    reference_size: int,
+    level_size: int,
 ) -> tuple[int, int, np.ndarray]:
     """One axis of a regional read, as ``(window start, window size, sampled pixels)``.
 
     ``count`` output pixels, ``step`` reference pixels apart from ``start``, land on a
-    level whose pixels each span ``ratio`` reference pixels. The window rounds that
+    ``level_size`` px level of a ``reference_size`` px reference. The window rounds that
     extent outward, capped at the level; ``sampled`` indexes it once per output pixel.
+    A ``Fraction`` step maps through integer arithmetic, so a sample on a native pixel
+    boundary stays on it.
     """
-    first = math.floor(start / ratio)
-    stop = min(math.ceil((start + count * step) / ratio), level_size)
-    sampled = np.floor((start + np.arange(count) * step) / ratio).astype(np.intp)
+    first = start * level_size // reference_size
+    if isinstance(step, Fraction):
+        numerator, denominator = step.numerator, step.denominator
+        scale = denominator * reference_size
+        end = (start * denominator + count * numerator) * level_size
+        stop = -(-end // scale)
+        offsets = np.arange(count, dtype=np.int64) * numerator
+        sampled = (start * denominator + offsets) * level_size // scale
+    else:
+        stop = math.ceil((start + count * step) * level_size / reference_size)
+        offsets = np.arange(count) * step
+        sampled = np.floor((start + offsets) * level_size / reference_size)
+    stop = min(stop, level_size)
+    sampled = sampled.astype(np.intp)
     return first, stop - first, np.minimum(sampled, stop - 1) - first
 
 
