@@ -307,6 +307,37 @@ class AlignedMask:
             )
         return _mask_read(labels, selection)
 
+    def dimensions_within_canvas(
+        self,
+        *,
+        location: tuple[int, int],
+        target_spacing_um: float,
+        target_dimensions: tuple[int, int],
+    ) -> tuple[int, int]:
+        """The ``(width, height)`` of a region request on the reference canvas.
+
+        :meth:`read_region` never pads, so a caller holding a region that may overhang
+        the slide reads this many target pixels from ``location`` and handles the rest
+        itself. The result is capped at ``target_dimensions``, is ``0`` on an axis whose
+        ``location`` is off the canvas, and follows :meth:`read_region`'s own canvas
+        check, float-noise rule included: it is ``target_dimensions`` exactly when
+        :meth:`read_region` accepts the request.
+        """
+        target_width, target_height = _target_dimensions(target_dimensions)
+        x, y = (int(v) for v in location)
+        step = _region_step(
+            _validated_spacing(target_spacing_um) / self.reference_spacing_um
+        )
+        reference_width, reference_height = self.reference_dimensions
+        return (
+            _count_within_canvas(
+                start=x, count=target_width, step=step, reference_size=reference_width
+            ),
+            _count_within_canvas(
+                start=y, count=target_height, step=step, reference_size=reference_height
+            ),
+        )
+
     def read_region(
         self,
         *,
@@ -342,13 +373,12 @@ class AlignedMask:
         step = _region_step(float(target_spacing_um) / self.reference_spacing_um)
         extent_width, extent_height = target_width * step, target_height * step
         reference_width, reference_height = self.reference_dimensions
-        edge_epsilon = 0 if isinstance(step, Fraction) else CANVAS_EDGE_EPSILON_PX
-        if (
-            x < 0
-            or y < 0
-            or x + extent_width > reference_width + edge_epsilon
-            or y + extent_height > reference_height + edge_epsilon
-        ):
+        within_canvas = self.dimensions_within_canvas(
+            location=(x, y),
+            target_spacing_um=target_spacing_um,
+            target_dimensions=(target_width, target_height),
+        )
+        if within_canvas != (target_width, target_height):
             raise ValueError(
                 f"Mask region read refused for path={self.mask.path} with "
                 f"backend={self.mask.backend}: location ({x}, {y}) with extent "
@@ -384,14 +414,8 @@ class AlignedMask:
     def _select_level(
         self, reader: SlideReader, target_spacing_um: float
     ) -> LevelSelection:
-        target_spacing_um = float(target_spacing_um)
-        if not math.isfinite(target_spacing_um) or target_spacing_um <= 0:
-            raise ValueError(
-                "target_spacing_um must be a finite positive value, "
-                f"got {target_spacing_um!r}"
-            )
         return select_level_for_spacing_read(
-            requested_spacing_um=target_spacing_um,
+            requested_spacing_um=_validated_spacing(target_spacing_um),
             level0_spacing_um=self.level_spacings_um[0],
             level_downsamples=reader.level_downsamples,
             tolerance=LEVEL_SPACING_TOLERANCE,
@@ -455,12 +479,36 @@ def _target_dimensions(target_dimensions: tuple[int, int]) -> tuple[int, int]:
     return target_width, target_height
 
 
+def _validated_spacing(target_spacing_um: float) -> float:
+    target_spacing_um = float(target_spacing_um)
+    if not math.isfinite(target_spacing_um) or target_spacing_um <= 0:
+        raise ValueError(
+            "target_spacing_um must be a finite positive value, "
+            f"got {target_spacing_um!r}"
+        )
+    return target_spacing_um
+
+
 def _region_step(step: float) -> Fraction | float:
     """``step`` as the simple fraction it equals up to float noise, else unchanged."""
     exact = Fraction(step).limit_denominator(EXACT_STEP_MAX_DENOMINATOR)
     if exact > 0 and abs(step - exact) <= SPACING_RATIO_RTOL * step:
         return exact
     return step
+
+
+def _count_within_canvas(
+    *, start: int, count: int, step: Fraction | float, reference_size: int
+) -> int:
+    """How many of ``count`` pixels, ``step`` reference px apart from ``start``, fit."""
+    if start < 0:
+        return 0
+    room = reference_size - start
+    if isinstance(step, Fraction):
+        fitting = math.floor(room / step)
+    else:
+        fitting = math.floor((room + CANVAS_EDGE_EPSILON_PX) / step)
+    return max(0, min(count, fitting))
 
 
 def _level_span(

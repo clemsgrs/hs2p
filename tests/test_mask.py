@@ -1159,3 +1159,61 @@ def test_region_read_maps_a_location_on_a_level_pixel_boundary_exactly(monkeypat
 
     np.testing.assert_array_equal(read.labels, np.array([[7]], dtype=np.uint8))
     assert reader.windows == [((7, 0), 0, (1, 1))]
+
+
+@pytest.mark.parametrize(
+    ("location", "target_dimensions", "expected"),
+    [
+        # 4.0 um target pixels are 16 reference px on a 128x64 canvas
+        ((0, 0), (8, 4), (8, 4)),
+        ((96, 0), (4, 2), (2, 2)),
+        ((100, 40), (4, 4), (1, 1)),
+        ((128, 0), (2, 2), (0, 2)),
+        ((-16, 0), (2, 2), (0, 2)),
+    ],
+    ids=["inside", "past-right", "past-both-mid-pixel", "at-right-edge", "left"],
+)
+def test_dimensions_within_canvas_count_the_target_pixels_on_the_canvas(
+    monkeypatch, location, target_dimensions, expected
+):
+    reader, aligned = _coarse_numbered_mask(monkeypatch)
+
+    within = aligned.dimensions_within_canvas(
+        location=location, target_spacing_um=4.0, target_dimensions=target_dimensions
+    )
+
+    assert within == expected
+    assert reader.windows == []
+
+
+def test_dimensions_within_canvas_read_back_as_the_in_canvas_part_of_a_region(
+    monkeypatch,
+):
+    reader, aligned = _coarse_numbered_mask(monkeypatch)
+
+    width, height = aligned.dimensions_within_canvas(
+        location=(96, 32), target_spacing_um=4.0, target_dimensions=(4, 4)
+    )
+    read = aligned.read_region(
+        location=(96, 32), target_spacing_um=4.0, target_dimensions=(width, height)
+    )
+
+    np.testing.assert_array_equal(
+        read.labels, np.array([[22, 23], [30, 31]], dtype=np.uint8)
+    )
+
+
+def test_dimensions_within_canvas_follow_the_float_noise_rule_at_the_edge(
+    monkeypatch,
+):
+    native = (np.arange(4096) % 2).astype(np.uint8).reshape(1, 4096)
+    mask = _open_fake_mask(monkeypatch, _WindowFakeReader([native]))
+    aligned = mask.align_to(reference_spacing_um=0.4862, reference_dimensions=(4096, 1))
+
+    within = aligned.dimensions_within_canvas(
+        location=(96, 0),
+        target_spacing_um=_FLOAT32_SPACING_UM,
+        target_dimensions=(4096, 1),
+    )
+
+    assert within == (4000, 1)
