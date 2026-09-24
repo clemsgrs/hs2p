@@ -203,3 +203,13 @@ def plan_spacing_read(
         is_within_tolerance=sel.is_within_tolerance,
         read_size_px=(read_w, read_h),
     )
+
+
+def tile_size_lv0_from_plan(plan: SpacingReadPlan, *, level0_spacing_um: float) -> int:
+    """Level-0 footprint, in pixels, of a tile read with ``plan``.
+
+    The read covers ``read_size_px`` pixels at ``read_spacing_um``. Within tolerance that
+    is the target size at the level's native spacing, not at the requested one. Tiling
+    and every tile-footprint estimate take the footprint from here so they agree.
+    """
+    return round(plan.read_size_px[0] * plan.read_spacing_um / float(level0_spacing_um))

@@ -9,7 +9,7 @@ import numpy as np
 from hs2p.tiling.contours import _normalize_level_downsamples
 from hs2p.tiling.coverage import _compute_tile_coverage
 from hs2p.tiling.result import ContourResult, TileGeometry, TilingResult
-from hs2p.wsi.geometry import plan_spacing_read
+from hs2p.wsi.geometry import plan_spacing_read, tile_size_lv0_from_plan
 
 
 def canonicalize_tiling_result(tiles: TileGeometry) -> TileGeometry:
@@ -66,9 +66,7 @@ def generate_tiles(
         content_kind="image",
     )
     read_tile_size_px = level_sel.read_size_px[0]
-    tile_size_lv0 = round(
-        read_tile_size_px * level_sel.read_spacing_um / base_spacing_um
-    )
+    tile_size_lv0 = tile_size_lv0_from_plan(level_sel, level0_spacing_um=base_spacing_um)
     step_lv0 = max(1, round(tile_size_lv0 * (1.0 - overlap)))
 
     def _empty_result() -> TileGeometry:
