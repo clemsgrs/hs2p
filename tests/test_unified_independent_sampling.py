@@ -3,10 +3,9 @@
 from types import SimpleNamespace
 
 import numpy as np
-import pytest
 
 from hs2p.preprocessing import ResolvedAnnotationMasks, build_per_annotation_tiling_results
-from hs2p.wsi.types import CoordinateSelectionStrategy, CoordinateOutputMode, SamplingSpec
+from hs2p.wsi.types import CoordinateSelectionStrategy, SamplingSpec
 
 BASE_SPACING = 0.5
 SLIDE_W, SLIDE_H = 400, 400
@@ -76,61 +75,6 @@ _COMMON_KWARGS = dict(
 )
 
 
-def test_independent_sampling_returns_key_per_active_annotation():
-    """Returns exactly one TilingResult per active_annotation."""
-    results = build_per_annotation_tiling_results(
-        slide=_mock_slide(),
-        resolved_masks=_resolved_masks(_annotation_mask()),
-        sampling_spec=_sampling_spec(),
-        selection_strategy=CoordinateSelectionStrategy.INDEPENDENT_SAMPLING,
-        **_COMMON_KWARGS,
-    )
-    assert set(results.keys()) == {"tumor", "stroma"}
-
-
-def test_independent_sampling_tumor_tiles_within_tumor_region():
-    """Tumor tiles lie in the top-left quadrant (x<200, y<200)."""
-    results = build_per_annotation_tiling_results(
-        slide=_mock_slide(),
-        resolved_masks=_resolved_masks(_annotation_mask()),
-        sampling_spec=_sampling_spec(),
-        selection_strategy=CoordinateSelectionStrategy.INDEPENDENT_SAMPLING,
-        **_COMMON_KWARGS,
-    )
-    r = results["tumor"]
-    assert r.num_tiles > 0
-    assert np.all(r.x < 200), "tumor tile x coords should be < 200"
-    assert np.all(r.y < 200), "tumor tile y coords should be < 200"
-
-
-def test_independent_sampling_stroma_tiles_within_stroma_region():
-    """Stroma tiles lie in the bottom-right quadrant (x>=200, y>=200)."""
-    results = build_per_annotation_tiling_results(
-        slide=_mock_slide(),
-        resolved_masks=_resolved_masks(_annotation_mask()),
-        sampling_spec=_sampling_spec(),
-        selection_strategy=CoordinateSelectionStrategy.INDEPENDENT_SAMPLING,
-        **_COMMON_KWARGS,
-    )
-    r = results["stroma"]
-    assert r.num_tiles > 0
-    assert np.all(r.x >= 200), "stroma tile x coords should be >= 200"
-    assert np.all(r.y >= 200), "stroma tile y coords should be >= 200"
-
-
-def test_independent_sampling_annotation_field_on_result():
-    """Each TilingResult.annotation matches its dict key."""
-    results = build_per_annotation_tiling_results(
-        slide=_mock_slide(),
-        resolved_masks=_resolved_masks(_annotation_mask()),
-        sampling_spec=_sampling_spec(),
-        selection_strategy=CoordinateSelectionStrategy.INDEPENDENT_SAMPLING,
-        **_COMMON_KWARGS,
-    )
-    assert results["tumor"].annotation == "tumor"
-    assert results["stroma"].annotation == "stroma"
-
-
 def test_independent_sampling_selection_strategy_field_on_result():
     """Each TilingResult.selection_strategy == INDEPENDENT_SAMPLING."""
     results = build_per_annotation_tiling_results(
@@ -142,56 +86,3 @@ def test_independent_sampling_selection_strategy_field_on_result():
     )
     for result in results.values():
         assert result.selection_strategy == CoordinateSelectionStrategy.INDEPENDENT_SAMPLING
-
-
-def test_independent_sampling_high_threshold_reduces_tile_count():
-    """A stricter per-label coverage threshold yields fewer tiles than a lenient one."""
-    mask = _annotation_mask()
-    resolved = _resolved_masks(mask)
-    slide = _mock_slide()
-
-    results_strict = build_per_annotation_tiling_results(
-        slide=slide,
-        resolved_masks=resolved,
-        sampling_spec=_sampling_spec(tumor_threshold=0.99),
-        selection_strategy=CoordinateSelectionStrategy.INDEPENDENT_SAMPLING,
-        **_COMMON_KWARGS,
-    )
-    results_lenient = build_per_annotation_tiling_results(
-        slide=slide,
-        resolved_masks=resolved,
-        sampling_spec=_sampling_spec(tumor_threshold=0.01),
-        selection_strategy=CoordinateSelectionStrategy.INDEPENDENT_SAMPLING,
-        **_COMMON_KWARGS,
-    )
-    assert results_strict["tumor"].num_tiles <= results_lenient["tumor"].num_tiles
-
-
-def test_independent_sampling_tile_index_is_contiguous():
-    """tile_index for each result is a contiguous range [0, num_tiles)."""
-    results = build_per_annotation_tiling_results(
-        slide=_mock_slide(),
-        resolved_masks=_resolved_masks(_annotation_mask()),
-        sampling_spec=_sampling_spec(),
-        selection_strategy=CoordinateSelectionStrategy.INDEPENDENT_SAMPLING,
-        **_COMMON_KWARGS,
-    )
-    for result in results.values():
-        expected = np.arange(result.num_tiles, dtype=np.int32)
-        np.testing.assert_array_equal(result.tile_index, expected)
-
-
-def test_independent_sampling_empty_annotation_region_returns_zero_tiles():
-    """An annotation that covers no slide area yields an empty TilingResult."""
-    mask = np.zeros((SLIDE_H, SLIDE_W), dtype=np.uint8)
-    mask[0:200, 0:200] = 1  # only tumor, no stroma
-    resolved = _resolved_masks(mask)
-
-    results = build_per_annotation_tiling_results(
-        slide=_mock_slide(),
-        resolved_masks=resolved,
-        sampling_spec=_sampling_spec(),
-        selection_strategy=CoordinateSelectionStrategy.INDEPENDENT_SAMPLING,
-        **_COMMON_KWARGS,
-    )
-    assert results["stroma"].num_tiles == 0

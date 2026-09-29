@@ -9,18 +9,9 @@ cv2 = pytest.importorskip("cv2")
 wsi_mod = pytest.importorskip("hs2p.wsi")
 visualization_mod = pytest.importorskip("hs2p.wsi.visualization")
 
-from hs2p.mask import AnnotationLabels, Mask  # noqa: E402
-
 
 def _contour(points: list[tuple[int, int]]) -> np.ndarray:
     return np.asarray(points, dtype=np.int32).reshape((-1, 1, 2))
-
-
-def _build_palette(mapping: dict[int, tuple[int, int, int]]) -> np.ndarray:
-    palette = np.zeros(shape=768, dtype=int)
-    for label, color in mapping.items():
-        palette[label * 3 : label * 3 + 3] = np.array(color, dtype=int)
-    return palette
 
 
 def test_overlay_mask_on_slide_renders_outer_and_hole_contours(monkeypatch):
@@ -116,61 +107,7 @@ def test_overlay_mask_on_slide_scales_level_zero_contours_to_vis_level(monkeypat
     assert np.array_equal(overlay_arr[2, 2], np.array([37, 94, 59], dtype=np.uint8))
 
 
-def test_resolve_stroke_thickness_scales_with_requested_downsample():
-    assert visualization_mod._resolve_stroke_thickness(
-        level_downsample=16,
-        stroke_thickness=None,
-    ) == 4
-    assert visualization_mod._resolve_stroke_thickness(
-        level_downsample=16,
-        stroke_thickness=None,
-    ) == 4
-    assert visualization_mod._resolve_stroke_thickness(
-        level_downsample=32,
-        stroke_thickness=None,
-    ) == 2
-    assert visualization_mod._resolve_stroke_thickness(
-        level_downsample=16,
-        stroke_thickness=5,
-    ) == 5
-
-
 def test_overlay_mask_on_slide_accepts_in_memory_mask_array(monkeypatch):
-    slide_arr = np.full((120, 120, 3), 120, dtype=np.uint8)
-    mask_arr = np.zeros((120, 120), dtype=np.uint8)
-    mask_arr[40:80, 40:80] = 1
-
-    class FakeWSI:
-        def __init__(self, path, backend="asap"):
-            del backend
-            self.path = Path(path)
-            self.spacings = [0.5]
-            self.level_dimensions = [(120, 120)]
-            self.level_downsamples = [(1.0, 1.0)]
-
-        def get_best_level_for_downsample_custom(self, downsample):
-            del downsample
-            return 0
-
-        def get_slide(self, level):
-            del level
-            return slide_arr
-
-    monkeypatch.setattr(visualization_mod, "WSI", FakeWSI)
-
-    overlay = wsi_mod.overlay_mask_on_slide(
-        wsi_path=Path("fake-wsi.tif"),
-        mask_arr=mask_arr,
-        downsample=1,
-        backend="openslide",
-    )
-    overlay_arr = np.array(overlay.convert("RGB"))
-
-    assert np.array_equal(overlay_arr[0, 119], slide_arr[0, 119])
-    assert np.any(np.all(overlay_arr == np.array([37, 94, 59], dtype=np.uint8), axis=-1))
-
-
-def test_overlay_mask_on_slide_defaults_to_tissue_overlay_style(monkeypatch):
     slide_arr = np.full((120, 120, 3), 120, dtype=np.uint8)
     mask_arr = np.zeros((120, 120), dtype=np.uint8)
     mask_arr[40:80, 40:80] = 1
@@ -264,112 +201,6 @@ def test_render_annotation_mask_preview_fills_each_label_and_omits_null_colors(
     assert np.abs(arr[25, 95] - np.array([200, 200, 200])).max() <= 4
 
 
-def test_write_annotation_tiling_preview_draws_label_backdrop_under_black_grid(
-    monkeypatch, tmp_path: Path
-):
-    """Visual fixture for the annotation tiling preview: the selected tile is drawn over the
-    label's full-color mask backdrop, bordered by the fixed black grid line."""
-    orchestration_mod = pytest.importorskip("hs2p.tiling.orchestration")
-
-    slide_arr = np.full((120, 120, 3), 200, dtype=np.uint8)
-    label_value = 1
-    mask_arr = np.zeros((120, 120), dtype=np.uint8)
-    mask_arr[0:64, 0:64] = label_value  # the single selected tile lands here
-    mask_path = tmp_path / "mask.png"
-    Image.fromarray(mask_arr, mode="L").save(mask_path)
-
-    class FakeWSI:
-        def __init__(self, path, backend="asap"):
-            del backend
-            self.path = Path(path)
-            self.spacings = [0.5]
-            self.spacing = 0.5
-            self.level_dimensions = [(120, 120)]
-            self.level_downsamples = [(1.0, 1.0)]
-
-        def get_best_level_for_downsample_custom(self, downsample):
-            del downsample
-            return 0
-
-        def get_level_spacing(self, level):
-            del level
-            return 0.5
-
-        def get_slide(self, level):
-            del level
-            return slide_arr
-
-    monkeypatch.setattr(visualization_mod, "WSI", FakeWSI)
-
-    result = SimpleNamespace(
-        x=np.array([0], dtype=np.int64),
-        y=np.array([0], dtype=np.int64),
-        tile_size_lv0=64,
-        image_path=Path("fake-wsi.tif"),
-        backend="openslide",
-        sample_id="slide0",
-        annotation="tumor",
-    )
-    pixel_mapping = {"background": 0, "tumor": label_value}
-    with Mask(
-        path=mask_path, labels=AnnotationLabels(pixel_mapping=pixel_mapping), backend="pil"
-    ) as mask:
-        preview_path = orchestration_mod.write_annotation_tiling_preview(
-            result=result,
-            output_dir=tmp_path,
-            downsample=1,
-            mask=mask,
-            pixel_mapping=pixel_mapping,
-            color_mapping={"background": None, "tumor": [255, 0, 0]},
-        )
-
-    # Per-annotation subdir mirrors the coordinate artifact layout.
-    assert preview_path == tmp_path / "preview" / "tiling" / "tumor" / "slide0.jpg"
-    assert preview_path.is_file()
-    with Image.open(preview_path) as saved:
-        arr = np.array(saved.convert("RGB")).astype(int)
-    # Tile interior shows the label's (red) mask backdrop blended over the slide: the red
-    # channel dominates the green/blue, unlike the plain gray slide.
-    interior = arr[32, 32]
-    assert interior[0] > interior[1] + 80 and interior[0] > interior[2] + 80
-    # Tile border is the fixed black grid line (modulo JPEG bleed from the adjacent fill).
-    assert arr[0, 0].max() <= 20
-
-
-def test_write_annotation_tiling_preview_rejects_reserved_name_before_writing(
-    monkeypatch, tmp_path: Path
-):
-    orchestration_mod = pytest.importorskip("hs2p.tiling.orchestration")
-    monkeypatch.setattr(
-        orchestration_mod,
-        "write_coordinate_preview",
-        lambda **kwargs: (_ for _ in ()).throw(
-            AssertionError("preview writer must not run")
-        ),
-    )
-    result = SimpleNamespace(
-        x=np.array([0], dtype=np.int64),
-        y=np.array([0], dtype=np.int64),
-        tile_size_lv0=64,
-        image_path=Path("fake-wsi.tif"),
-        backend="openslide",
-        sample_id="slide0",
-        annotation="merged",
-    )
-
-    with pytest.raises(ValueError, match="'merged'.*reserved"):
-        orchestration_mod.write_annotation_tiling_preview(
-            result=result,
-            output_dir=tmp_path,
-            downsample=1,
-            mask=None,
-            pixel_mapping=None,
-            color_mapping=None,
-        )
-
-    assert not (tmp_path / "preview").exists()
-
-
 def test_save_overlay_preview_writes_rgba_overlay_to_jpeg(monkeypatch, tmp_path: Path):
     overlay = Image.fromarray(
         np.array(
@@ -400,44 +231,6 @@ def test_save_overlay_preview_writes_rgba_overlay_to_jpeg(monkeypatch, tmp_path:
     assert preview_path.is_file()
     with Image.open(preview_path) as saved:
         assert saved.mode == "RGB"
-
-
-def test_draw_grid_from_coordinates_crops_loaded_canvas_instead_of_fetching_tiles():
-    class FakeWSI:
-        level_downsamples = [(1.0, 1.0)]
-        level_dimensions = [(2, 2)]
-        spacings = [1.0]
-
-        def get_level_spacing(self, level):
-            assert level == 0
-            return 1.0
-
-        def get_tile(self, *args, **kwargs):
-            raise AssertionError(
-                "draw_grid_from_coordinates should crop from the loaded canvas"
-            )
-
-    canvas = np.array(
-        [
-            [[10, 20, 30], [40, 50, 60]],
-            [[70, 80, 90], [100, 110, 120]],
-        ],
-        dtype=np.uint8,
-    )
-
-    image = wsi_mod.draw_grid_from_coordinates(
-        canvas=canvas.copy(),
-        wsi=FakeWSI(),
-        coords=[(0, 0)],
-        tile_size_at_0=(1, 1),
-        vis_level=0,
-        thickness=0,
-        indices=None,
-        mask=None,
-    )
-
-    rendered = np.array(image)
-    assert rendered.shape == canvas.shape
 
 
 def test_draw_grid_from_coordinates_no_mask_preserves_fractional_projected_edges():

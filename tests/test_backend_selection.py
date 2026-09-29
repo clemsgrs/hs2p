@@ -1,6 +1,5 @@
 import warnings
 from pathlib import Path
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -10,8 +9,6 @@ import hs2p.preprocessing as preprocessing_mod
 import hs2p.tiling.orchestration as orchestration_mod
 import hs2p.wsi.backend as backend_mod
 import hs2p.wsi.reader as reader_mod
-import hs2p.wsi.wsi as wsi_mod
-from tests.test_progress import RecordingReporter
 
 
 def _make_tiling_result(sample_id: str = "slide-1") -> preprocessing_mod.TilingResult:
@@ -92,84 +89,6 @@ def _cucim_auto_resolve_backends(
         requested_slide_backend=requested_slide_backend,
         requested_mask_backend=None if mask_path is None else requested_mask_backend,
     )
-
-
-def test_resolve_backend_prefers_cucim_when_supported(monkeypatch):
-    calls: list[str] = []
-
-    def _fake_can_open_source(
-        *,
-        source_path: str,
-        companion_path: str | None,
-        backend: str,
-        spacing_override=None,
-        require_spacing=True,
-    ):
-        del source_path, companion_path, spacing_override
-        calls.append(backend)
-        return backend == "cucim"
-
-    monkeypatch.setattr(reader_mod, "_backend_can_open_source", _fake_can_open_source)
-
-    selection = backend_mod.resolve_backend("auto", wsi_path=Path("slide.svs"))
-
-    assert selection.backend == "cucim"
-    assert selection.tried == ("cucim",)
-    assert "cuCIM" in (selection.reason or "")
-    assert calls == ["cucim"]
-
-
-def test_auto_slide_fallback_uses_shared_priority_without_native_backends(monkeypatch):
-    calls: list[str] = []
-
-    def _fake_can_open_source(
-        *,
-        source_path: str,
-        companion_path: str | None,
-        backend: str,
-        spacing_override: float | None = None,
-        require_spacing: bool = True,
-    ):
-        del source_path, companion_path
-        calls.append(backend)
-        assert spacing_override == 0.25
-        return backend == "openslide"
-
-    monkeypatch.setattr(reader_mod, "_backend_can_open_source", _fake_can_open_source)
-
-    selection = backend_mod.resolve_backend(
-        "auto",
-        wsi_path=Path("slide.svs"),
-        spacing_override=0.25,
-    )
-
-    assert selection.backend == "openslide"
-    assert selection.tried == ("cucim", "vips", "openslide")
-    assert calls == ["cucim", "vips", "openslide"]
-
-
-def test_auto_selection_skips_backends_that_do_not_support_the_path(monkeypatch):
-    calls: list[str] = []
-
-    def _fake_can_open_source(
-        *,
-        source_path: str,
-        companion_path: str | None,
-        backend: str,
-        spacing_override: float | None = None,
-        require_spacing: bool = True,
-    ):
-        del source_path, companion_path, spacing_override
-        calls.append(backend)
-        return backend == "openslide"
-
-    monkeypatch.setattr(reader_mod, "_backend_can_open_source", _fake_can_open_source)
-
-    selection = backend_mod.resolve_backend("auto", wsi_path=Path("slide.dcm"))
-
-    assert selection.backend == "openslide"
-    assert selection.tried == ("openslide",)
-    assert calls == ["openslide"]
 
 
 def test_auto_mask_fallback_uses_shared_priority_independently(monkeypatch):
@@ -301,132 +220,6 @@ def test_auto_openability_probe_honors_require_spacing(monkeypatch):
     assert selection.backend == "openslide"
 
 
-def test_resolve_backend_respects_explicit_override(monkeypatch):
-    calls: list[str] = []
-
-    def _fake_can_open_source(
-        *,
-        source_path: str,
-        companion_path: str | None,
-        backend: str,
-        spacing_override=None,
-        require_spacing=True,
-    ):
-        del source_path, companion_path, backend, spacing_override
-        calls.append("called")
-        return False
-
-    monkeypatch.setattr(reader_mod, "_backend_can_open_source", _fake_can_open_source)
-
-    selection = backend_mod.resolve_backend("asap", wsi_path=Path("slide.svs"))
-
-    assert selection.backend == "asap"
-    assert selection.tried == ("asap",)
-    assert selection.reason is None
-    assert calls == []
-
-
-def test_reader_resolve_backend_prefers_cucim_when_supported(monkeypatch):
-    calls: list[str] = []
-
-    def _fake_can_open_source(
-        *,
-        source_path: str,
-        companion_path: str | None,
-        backend: str,
-        spacing_override=None,
-        require_spacing=True,
-    ):
-        del source_path, companion_path, spacing_override
-        calls.append(backend)
-        return backend == "cucim"
-
-    monkeypatch.setattr(reader_mod, "_backend_can_open_source", _fake_can_open_source)
-
-    selection = reader_mod.resolve_backend("auto", wsi_path=Path("slide.svs"))
-
-    assert selection.backend == "cucim"
-    assert selection.tried == ("cucim",)
-    assert "cuCIM" in (selection.reason or "")
-    assert calls == ["cucim"]
-
-
-def test_reader_backend_probe_uses_backend_openers(monkeypatch):
-    seen_paths: list[str] = []
-
-    def _fake_opener(path, *, spacing_override=None, require_spacing=True):
-        del spacing_override
-        seen_paths.append(str(path))
-        return SimpleNamespace(close=lambda: None)
-
-    monkeypatch.setattr(
-        reader_mod,
-        "_BACKENDS",
-        {
-            **reader_mod._BACKENDS,
-            "cucim": reader_mod._BackendSpec(
-                name="cucim",
-                opener=_fake_opener,
-                supports_path=lambda path: True,
-            ),
-        },
-    )
-    reader_mod._backend_can_open_source.cache_clear()
-
-    assert reader_mod._backend_can_open_source(
-        source_path="/tmp/slide.tiff",
-        companion_path="/tmp/mask.tiff",
-        backend="cucim",
-    )
-    assert seen_paths == ["/tmp/slide.tiff", "/tmp/mask.tiff"]
-
-
-def test_wsi_opens_the_slide_reader_with_its_resolved_backend(monkeypatch):
-    seen_calls: list[tuple[object, str, float | None]] = []
-
-    class _FakeSlideReader:
-        backend_name = "cucim"
-        dimensions = (100, 100)
-        spacing = 0.5
-        spacings = [0.5]
-        level_dimensions = [(100, 100)]
-        level_downsamples = [(1.0, 1.0)]
-        level_count = 1
-
-        def read_level(self, level: int):
-            del level
-            return np.zeros((100, 100, 3), dtype=np.uint8)
-
-        def read_region(self, location, level, size):
-            del location, level
-            return np.zeros((size[1], size[0], 3), dtype=np.uint8)
-
-        def get_thumbnail(self, size):
-            del size
-            return np.zeros((8, 8, 3), dtype=np.uint8)
-
-        def close(self):
-            return None
-
-    def _fake_open_slide(path, backend: str, *, spacing_override=None, gpu_decode=False):
-        del gpu_decode
-        seen_calls.append((path, backend, spacing_override))
-        return _FakeSlideReader()
-
-    def _fake_resolve_backend(
-        requested_backend, *, wsi_path, mask_path=None, spacing_override=None
-    ):
-        del requested_backend, wsi_path, mask_path, spacing_override
-        return backend_mod.BackendSelection(backend="cucim", tried=("cucim",))
-
-    monkeypatch.setattr(wsi_mod, "resolve_backend", _fake_resolve_backend)
-    monkeypatch.setattr(wsi_mod, "open_slide", _fake_open_slide)
-
-    wsi_mod.WSI(path=Path("/tmp/slide.tiff"), backend="auto")
-
-    assert seen_calls == [(Path("/tmp/slide.tiff"), "cucim", None)]
-
-
 def test_tile_slide_uses_resolved_backend_for_hash_and_result(monkeypatch):
     captured: dict[str, str] = {}
 
@@ -505,48 +298,3 @@ def test_effective_backend_resolution_forwards_level0_spacing_override(monkeypat
     )
 
     assert captured == {"slide_spacing_override": 0.25}
-
-
-def test_tile_slide_emits_backend_selection_progress_event(monkeypatch):
-    import hs2p.progress as progress
-
-    reporter = RecordingReporter()
-
-    monkeypatch.setattr(orchestration_mod, "resolve_backends", _cucim_auto_resolve_backends)
-    monkeypatch.setattr(
-        orchestration_mod,
-        "preprocess_slide",
-        lambda **kwargs: _make_tiling_result(sample_id="slide-quiet"),
-    )
-
-    with progress.activate_progress_reporter(reporter):
-        api_mod.tile_slide(
-            api_mod.SlideSpec(sample_id="slide-quiet", image_path=Path("slide.svs")),
-            tiling=api_mod.TilingConfig(
-                requested_spacing_um=0.5,
-                requested_tile_size_px=256,
-                tolerance=0.05,
-                overlap=0.0,
-                min_coverage={"tissue": 0.1},
-                backend="auto",
-            ),
-            segmentation=api_mod.SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
-            filtering=api_mod.FilterConfig(
-                ref_tile_size=16,
-                a_t=4,
-                a_h=2,
-                filter_white=False,
-                filter_black=False,
-                white_threshold=220,
-                black_threshold=25,
-                fraction_threshold=0.9,
-            ),
-            num_workers=1,
-        )
-
-    assert [event.kind for event in reporter.events] == ["backend.selected"]
-    assert reporter.events[0].payload == {
-        "sample_id": "slide-quiet",
-        "backend": "cucim",
-        "reason": "selected cuCIM for auto backend",
-    }

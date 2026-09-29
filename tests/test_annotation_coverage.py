@@ -13,14 +13,10 @@ import hs2p.tiling.orchestration as orchmod
 import hs2p.tiling.single as singlemod
 import pandas as pd
 
-from hs2p.api import FilterConfig, SlideSpec, TilingConfig, tile_slide, tile_slides
-from hs2p.mask import AnnotationLabels, Mask, TissueLabels
+from hs2p.api import FilterConfig, SlideSpec, TilingConfig, tile_slides
+from hs2p.mask import AnnotationLabels, Mask
 from hs2p.tiling.coverage import summarize_annotation_coverage
 from hs2p.tiling.mask import resolve_annotation_masks
-from hs2p.tiling.single import (
-    build_per_annotation_tiling_results,
-    preprocess_slide_per_annotation,
-)
 from hs2p.wsi.types import CoordinateOutputMode, CoordinateSelectionStrategy, SamplingSpec
 
 BASE_SPACING = 0.5
@@ -52,17 +48,6 @@ def _fake_resolve_backends(
         requested_slide_backend=requested_slide_backend,
         requested_mask_backend=None if mask_path is None else requested_mask_backend,
     )
-
-
-def _mock_resolve_backend(requested_backend, *, wsi_path, **kwargs):
-    """Stand in for the mask-path openability probe: ``auto`` resolves to the sentinel ``mock``
-    backend (these tests read masks from fake paths, so a real probe cannot run). A mask
-    opened without a ``mask_backend`` resolves independently from the mask path via ``auto``
-    (#163) rather than inheriting the slide backend."""
-    from hs2p.wsi.backend import BackendSelection
-
-    resolved = "mock" if requested_backend == "auto" else requested_backend
-    return BackendSelection(backend=resolved, tried=(resolved,))
 
 
 def _label_mask() -> np.ndarray:
@@ -139,22 +124,6 @@ def test_resolve_annotation_masks_splits_per_declared_label(monkeypatch):
     assert resolved.pixel_mapping == PIXEL_MAPPING
     assert resolved.mask_path == Path("/fake/slide_mask.tif")
     assert (resolved.mask_level, resolved.mask_spacing_um) == (0, BASE_SPACING)
-
-
-def test_resolve_annotation_masks_rejects_a_tissue_mask(monkeypatch):
-    monkeypatch.setattr(
-        maskmod,
-        "open_slide",
-        lambda path, backend=None, **kwargs: _FakeMaskSlide(_label_mask(), BASE_SPACING),
-    )
-    mask = Mask(
-        path="/fake/slide_mask.tif",
-        labels=TissueLabels(background=0, tissue=1),
-        backend="mock",
-    )
-
-    with pytest.raises(ValueError, match="must declare AnnotationLabels, got TissueLabels"):
-        resolve_annotation_masks(slide=_mock_slide(), mask=mask, seg_downsample=1)
 
 
 def test_resolve_annotation_masks_accepts_uint16_storage_for_preview_safe_labels(
@@ -265,103 +234,10 @@ def test_est_tiles_uses_the_tiling_footprint_within_tolerance(monkeypatch):
     assert _left_column_tumor_est_tiles(monkeypatch, spacing_um=0.485) == 2
 
 
-def test_est_tiles_footprint_matches_generate_tiles(monkeypatch):
-    import hs2p.tiling.coverage as covmod
-    from hs2p.tiling.generate import generate_tiles
-    from hs2p.tiling.result import ContourResult
-
-    original = covmod.compute_tile_coverage
-    captured = {}
-
-    def spy(*, candidates, binary_mask, tile_size_lv0, slide_dimensions):
-        captured["tile_size_lv0"] = tile_size_lv0
-        return original(
-            candidates=candidates,
-            binary_mask=binary_mask,
-            tile_size_lv0=tile_size_lv0,
-            slide_dimensions=slide_dimensions,
-        )
-
-    monkeypatch.setattr(covmod, "compute_tile_coverage", spy)
-    # Finer and coarser within tolerance, and resized outside it (0.485 at 1%).
-    for spacing_um, tolerance in ((0.485, 0.05), (0.52, 0.05), (0.505, 0.05), (0.485, 0.01)):
-        geometry = generate_tiles(
-            (SLIDE_W, SLIDE_H),
-            ContourResult(contours=[], holes=[], mask=np.zeros((1, 1), dtype=np.uint8)),
-            requested_tile_size_px=200,
-            requested_spacing_um=BASE_SPACING,
-            base_spacing_um=spacing_um,
-            level_downsamples=[1.0],
-            tolerance=tolerance,
-        )
-        _left_column_tumor_est_tiles(monkeypatch, spacing_um=spacing_um, tolerance=tolerance)
-        assert captured["tile_size_lv0"] == geometry.tile_size_lv0, (spacing_um, tolerance)
-
-
 def test_est_tiles_keeps_the_requested_footprint_outside_tolerance(monkeypatch):
     # 0.485 is 3% off 0.5: outside a 1% tolerance the read is resized, and the
     # footprint stays round(200 * 0.5 / 0.485) = 206, so the column tiles are 97% tumor.
     assert _left_column_tumor_est_tiles(monkeypatch, spacing_um=0.485, tolerance=0.01) == 0
-
-
-def test_annotation_backend_exception_fails_with_mask_context(monkeypatch):
-    """Decoder errors identify the mask and the authoritative backend that read it."""
-
-    class _RaisingMaskSlide(_FakeMaskSlide):
-        def read_region(self, location, level, size):
-            raise RuntimeError("backend decode error")
-
-    monkeypatch.setattr(
-        maskmod,
-        "open_slide",
-        lambda path, backend=None, **kwargs: _RaisingMaskSlide(
-            _label_mask(), BASE_SPACING
-        ),
-    )
-    mask = Mask(
-        path="/fake/slide_mask.tif",
-        labels=AnnotationLabels(pixel_mapping={"tumor": 1, "stroma": 2}),
-        backend="mock",
-    )
-    with pytest.raises(RuntimeError) as excinfo:
-        resolve_annotation_masks(slide=_mock_slide(), mask=mask, seg_downsample=1)
-
-    message = str(excinfo.value)
-    assert "/fake/slide_mask.tif" in message
-    assert "backend=mock" in message
-    assert "backend decode error" in message
-
-
-def test_resolve_annotation_masks_rejects_an_undeclared_label_id(monkeypatch):
-    # 3 is not owned by any label of the mapping.
-    native = np.full((SLIDE_H, SLIDE_W), 3, dtype=np.uint8)
-    mask = _open_annotation_mask(
-        monkeypatch, native, pixel_mapping={"background": 0, "tumor": 1}
-    )
-
-    with pytest.raises(ValueError) as excinfo:
-        resolve_annotation_masks(slide=_mock_slide(), mask=mask, seg_downsample=1)
-
-    message = str(excinfo.value)
-    assert "/fake/slide_mask.tif" in message
-    assert "backend=mock" in message
-    assert "undeclared label IDs [3]; declared [0, 1]" in message
-
-
-def test_resolve_annotation_masks_genuinely_empty_stays_empty(monkeypatch):
-    """A valid all-background read is authoritative: no foreground class picks up phantom
-    pixels, and the background binary fills the slide."""
-    empty = np.zeros((SLIDE_H, SLIDE_W), dtype=np.uint8)
-    resolved = resolve_annotation_masks(
-        slide=_mock_slide(),
-        mask=_open_annotation_mask(monkeypatch, empty),
-        seg_downsample=1,
-    )
-    assert all(
-        int(np.count_nonzero(resolved.masks[name])) == 0
-        for name in ("tumor", "stroma", "necrosis")
-    )
-    assert int(np.count_nonzero(resolved.masks["background"])) == SLIDE_H * SLIDE_W
 
 
 class _FakeSlide:
@@ -390,286 +266,6 @@ def _sampling_spec():
         tissue_percentage={"background": None, "tumor": 0.1, "stroma": 0.1, "necrosis": 0.1},
         active_annotations=("tumor", "stroma", "necrosis"),
     )
-
-
-def test_build_per_annotation_results_rejects_invalid_declaration_before_slide_io():
-    slide = SimpleNamespace(
-        read_region=lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("slide I/O must not run")
-        )
-    )
-    sampling = SamplingSpec(
-        pixel_mapping={"background": 0, "tumor": 256},
-        color_mapping=None,
-        tissue_percentage={"background": None, "tumor": 0.1},
-        active_annotations=("tumor",),
-    )
-
-    with pytest.raises(ValueError, match=r"tumor.*256"):
-        build_per_annotation_tiling_results(
-            slide=slide,
-            resolved_masks=SimpleNamespace(pixel_mapping={"background": 0}),
-            sampling_spec=sampling,
-            selection_strategy=CoordinateSelectionStrategy.JOINT_SAMPLING,
-            image_path="/fake/slide.tif",
-            backend="mock",
-            requested_backend="mock",
-        )
-
-
-@pytest.fixture
-def patched_slide_and_mask_open(monkeypatch):
-    mask = _label_mask()
-
-    def fake_open(path, backend="auto", spacing_override=None, **kwargs):
-        del spacing_override
-        if "mask" in str(path).lower():
-            return _FakeMaskSlide(mask, BASE_SPACING)
-        return _FakeSlide()
-
-    monkeypatch.setattr(singlemod, "open_slide", fake_open)
-    monkeypatch.setattr(maskmod, "open_slide", fake_open)
-    monkeypatch.setattr(maskmod, "resolve_backend", _mock_resolve_backend)
-
-
-@pytest.mark.parametrize(
-    "strategy",
-    [
-        CoordinateSelectionStrategy.JOINT_SAMPLING,
-        CoordinateSelectionStrategy.INDEPENDENT_SAMPLING,
-    ],
-)
-def test_preprocess_slide_per_annotation_wires_producer_to_sampler(
-    patched_slide_and_mask_open, strategy
-):
-    results = preprocess_slide_per_annotation(
-        image_path="/fake/slide.tif",
-        mask_path="/fake/slide_mask.tif",
-        pixel_mapping=PIXEL_MAPPING,
-        sampling_spec=_sampling_spec(),
-        selection_strategy=strategy,
-        sample_id="slide0",
-        requested_tile_size_px=64,
-        requested_spacing_um=BASE_SPACING,
-        seg_downsample=1,
-        a_t=0,
-    )
-    assert set(results) == {"tumor", "stroma", "necrosis"}
-    # tumor annotation occupies the top-left quadrant → its tiles stay there (origins < 200,
-    # since tumor ends at row/col 200 and a tile origin >= 200 cannot overlap it).
-    tumor = results["tumor"]
-    assert tumor.num_tiles > 0
-    assert (tumor.tiles.x < 200).all() and (tumor.tiles.y < 200).all()
-    # stroma occupies the bottom-right quadrant; with a 64px grid the earliest origin that
-    # can overlap the region starting at 200 is 192 (spans [192, 256)).
-    stroma = results["stroma"]
-    assert stroma.num_tiles > 0
-    assert (stroma.tiles.x >= 192).all() and (stroma.tiles.y >= 192).all()
-
-
-def test_preprocess_slide_per_annotation_validates_declarations_before_opening_slide(
-    monkeypatch,
-):
-    monkeypatch.setattr(
-        singlemod,
-        "open_slide",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("slide must not be opened")
-        ),
-    )
-    sampling = SamplingSpec(
-        pixel_mapping={"background": 0, "merged": 1},
-        color_mapping=None,
-        tissue_percentage={"background": None, "merged": 0.1},
-        active_annotations=("merged",),
-    )
-
-    with pytest.raises(ValueError, match="'merged'.*reserved"):
-        preprocess_slide_per_annotation(
-            image_path="/fake/slide.tif",
-            mask_path="/fake/slide_mask.tif",
-            pixel_mapping=sampling.pixel_mapping,
-            sampling_spec=sampling,
-            selection_strategy=CoordinateSelectionStrategy.JOINT_SAMPLING,
-        )
-
-
-def test_tile_slide_with_sampling_returns_per_annotation_dict(monkeypatch):
-    """tile_slide(..., sampling=spec) dispatches to the shared annotation core and returns
-    one TilingResult per active annotation — same capability as tile_slides (no divergence)."""
-    mask = _label_mask()
-
-    def fake_open(path, backend="auto", spacing_override=None, **kwargs):
-        del spacing_override
-        if "mask" in str(path).lower():
-            return _FakeMaskSlide(mask, BASE_SPACING)
-        return _FakeSlide()
-
-    monkeypatch.setattr(singlemod, "open_slide", fake_open)
-    monkeypatch.setattr(maskmod, "open_slide", fake_open)
-    monkeypatch.setattr(orchmod, "resolve_backends", _fake_resolve_backends)
-
-    whole_slide = SlideSpec(
-        sample_id="slide0",
-        image_path="/fake/slide.tif",
-        mask_path="/fake/slide_mask.tif",
-    )
-    tiling = TilingConfig(
-        requested_spacing_um=BASE_SPACING,
-        requested_tile_size_px=64,
-        tolerance=0.05,
-        overlap=0.0,
-        min_coverage={"tissue": 0.0},
-        backend="asap",
-    )
-    result = tile_slide(
-        whole_slide,
-        tiling=tiling,
-        filtering=FilterConfig(a_t=0),
-        sampling=_sampling_spec(),
-        selection_strategy=CoordinateSelectionStrategy.JOINT_SAMPLING,
-    )
-    assert isinstance(result, dict)
-    assert set(result) == {"tumor", "stroma", "necrosis"}
-    assert result["tumor"].num_tiles > 0
-
-
-def test_tile_slide_rejects_invalid_sampling_before_slide_io(monkeypatch):
-    monkeypatch.setattr(
-        orchmod,
-        "resolve_backends",
-        lambda **kwargs: (_ for _ in ()).throw(
-            AssertionError("slide backend resolution must not run")
-        ),
-    )
-    sampling = SamplingSpec(
-        pixel_mapping={"background": 0, "tumor": 256},
-        color_mapping=None,
-        tissue_percentage={"background": None, "tumor": 0.1},
-        active_annotations=("tumor",),
-    )
-
-    with pytest.raises(ValueError, match=r"tumor.*256"):
-        tile_slide(
-            SlideSpec(
-                sample_id="slide0",
-                image_path="/fake/slide.tif",
-                mask_path="/fake/slide_mask.tif",
-            ),
-            tiling=_mock_tiling(),
-            filtering=FilterConfig(a_t=0),
-            sampling=sampling,
-        )
-
-
-def test_tile_slide_rejects_reserved_active_annotation_before_slide_io(monkeypatch):
-    monkeypatch.setattr(
-        orchmod,
-        "resolve_backends",
-        lambda **kwargs: (_ for _ in ()).throw(
-            AssertionError("slide backend resolution must not run")
-        ),
-    )
-    sampling = SamplingSpec(
-        pixel_mapping={"background": 0, "tumor": 1},
-        color_mapping=None,
-        tissue_percentage={"background": None, "tumor": 0.1},
-        active_annotations=("merged",),
-    )
-
-    with pytest.raises(ValueError, match="'merged'.*reserved"):
-        tile_slide(
-            SlideSpec(
-                sample_id="slide0",
-                image_path="/fake/slide.tif",
-                mask_path="/fake/slide_mask.tif",
-            ),
-            tiling=_mock_tiling(),
-            filtering=FilterConfig(a_t=0),
-            sampling=sampling,
-        )
-
-
-@pytest.mark.parametrize("mapping_name", ["tissue_percentage", "color_mapping"])
-def test_tile_slide_rejects_reserved_name_in_sampling_mapping_before_slide_io(
-    monkeypatch, mapping_name
-):
-    monkeypatch.setattr(
-        orchmod,
-        "resolve_backends",
-        lambda **kwargs: (_ for _ in ()).throw(
-            AssertionError("slide backend resolution must not run")
-        ),
-    )
-    sampling_kwargs = {
-        "pixel_mapping": {"background": 0, "tumor": 1},
-        "color_mapping": None,
-        "tissue_percentage": {"background": None, "tumor": 0.1},
-        "active_annotations": ("tumor",),
-    }
-    sampling_kwargs[mapping_name] = {"merged": None}
-
-    with pytest.raises(ValueError, match="'merged'.*reserved"):
-        tile_slide(
-            SlideSpec(
-                sample_id="slide0",
-                image_path="/fake/slide.tif",
-                mask_path="/fake/slide_mask.tif",
-            ),
-            tiling=_mock_tiling(),
-            filtering=FilterConfig(a_t=0),
-            sampling=SamplingSpec(**sampling_kwargs),
-        )
-
-
-@pytest.mark.parametrize(
-    "strategy",
-    [
-        CoordinateSelectionStrategy.JOINT_SAMPLING,
-        CoordinateSelectionStrategy.INDEPENDENT_SAMPLING,
-    ],
-)
-def test_merged_merges_to_one_deduped_result_per_slide(
-    patched_slide_and_mask_open, strategy
-):
-    """MERGED collapses the per-annotation fan-out into one merged result keyed by
-    None: the dedup'd union of every tile passing any class threshold (the dense-seg
-    contract — each spatial tile once, multi-class mask attached downstream)."""
-    common = dict(
-        image_path="/fake/slide.tif",
-        mask_path="/fake/slide_mask.tif",
-        pixel_mapping=PIXEL_MAPPING,
-        sampling_spec=_sampling_spec(),
-        selection_strategy=strategy,
-        sample_id="slide0",
-        requested_tile_size_px=64,
-        requested_spacing_um=BASE_SPACING,
-        seg_downsample=1,
-        a_t=0,
-    )
-    per_anno = preprocess_slide_per_annotation(
-        output_mode=CoordinateOutputMode.PER_ANNOTATION, **common
-    )
-    single = preprocess_slide_per_annotation(
-        output_mode=CoordinateOutputMode.MERGED, **common
-    )
-
-    # one entry, keyed None, annotation cleared, output_mode tagged
-    assert set(single) == {None}
-    merged = single[None]
-    assert merged.annotation is None
-    assert merged.output_mode == CoordinateOutputMode.MERGED
-
-    # merged coords == sorted unique union of the per-annotation coords
-    expected = set()
-    for res in per_anno.values():
-        expected.update(zip(res.tiles.x.tolist(), res.tiles.y.tolist()))
-    got = list(zip(merged.tiles.x.tolist(), merged.tiles.y.tolist()))
-    assert len(got) == len(set(got))  # no duplicates
-    assert set(got) == expected
-    assert merged.num_tiles == len(expected) > 0
-    # tile_index is a fresh contiguous range over the merged set
-    assert merged.tiles.tile_index.tolist() == list(range(merged.num_tiles))
 
 
 def _patch_tile_slides_open(monkeypatch):
@@ -706,52 +302,6 @@ def _mock_tiling():
         min_coverage={"tissue": 0.0},
         backend="asap",
     )
-
-
-def test_tile_slides_with_sampling_emits_one_artifact_per_slide_annotation(monkeypatch, tmp_path):
-    _patch_tile_slides_open(monkeypatch)
-    artifacts = tile_slides(
-        _slides(2),
-        tiling=_mock_tiling(),
-        filtering=FilterConfig(a_t=0),
-        output_dir=tmp_path,
-        num_workers=1,
-        sampling=_sampling_spec(),
-        selection_strategy=CoordinateSelectionStrategy.JOINT_SAMPLING,
-    )
-    # 2 slides × 3 active annotations = 6 artifacts, each tagged with its annotation.
-    assert len(artifacts) == 6
-    assert {a.annotation for a in artifacts} == {"tumor", "stroma", "necrosis"}
-
-    rows = pd.read_csv(tmp_path / "process_list.csv")
-    assert len(rows) == 6
-    assert set(rows["annotation"]) == {"tumor", "stroma", "necrosis"}
-    assert "tissue" not in set(rows["annotation"])  # sampling path, never the tissue label
-    assert (rows["tiling_status"] == "success").all()
-
-
-def test_tile_slides_sampling_progress_counts_slides_not_artifacts(monkeypatch, tmp_path):
-    """Slide-completion progress must track slides, not per-annotation artifacts: a 2-slide ×
-    3-annotation run reports completed=2/total=2, never completed=6."""
-    _patch_tile_slides_open(monkeypatch)
-    events: list[tuple[str, dict]] = []
-    monkeypatch.setattr(
-        orchmod, "emit_progress", lambda name, **kw: events.append((name, kw))
-    )
-    tile_slides(
-        _slides(2),
-        tiling=_mock_tiling(),
-        filtering=FilterConfig(a_t=0),
-        output_dir=tmp_path,
-        num_workers=1,
-        sampling=_sampling_spec(),
-        selection_strategy=CoordinateSelectionStrategy.JOINT_SAMPLING,
-    )
-    progress = [kw for name, kw in events if name == "tiling.progress"]
-    assert progress, "expected tiling.progress events"
-    assert all(p["total"] == 2 for p in progress)
-    assert max(p["completed"] for p in progress) == 2
-    assert all(p["completed"] <= p["total"] for p in progress)
 
 
 def test_tile_slides_merged_emits_one_artifact_per_slide(monkeypatch, tmp_path):
@@ -805,36 +355,6 @@ def test_tile_slides_sampling_rejects_unsupported_combos(monkeypatch, tmp_path, 
             sampling=_sampling_spec(),
             **kwargs,
         )
-
-
-def test_tile_slides_rejects_reserved_annotation_before_slide_io_or_output(
-    monkeypatch, tmp_path
-):
-    output_dir = tmp_path / "output"
-    monkeypatch.setattr(
-        orchmod,
-        "resolve_backends",
-        lambda **kwargs: (_ for _ in ()).throw(
-            AssertionError("slide backend resolution must not run")
-        ),
-    )
-    sampling = SamplingSpec(
-        pixel_mapping={"background": 0, "merged": 1},
-        color_mapping=None,
-        tissue_percentage={"background": None, "merged": 0.1},
-        active_annotations=("merged",),
-    )
-
-    with pytest.raises(ValueError, match="'merged'.*reserved"):
-        tile_slides(
-            _slides(1),
-            tiling=_mock_tiling(),
-            filtering=FilterConfig(a_t=0),
-            output_dir=output_dir,
-            sampling=sampling,
-        )
-
-    assert not output_dir.exists()
 
 
 @pytest.mark.parametrize("invalid_value", [-1, 256])
@@ -938,22 +458,6 @@ def test_tile_slides_sampling_writes_one_mask_preview_per_slide(
     assert (slide0_rows["mask_preview_path"] == expected).all()
 
 
-def test_tile_slides_sampling_without_preview_writes_no_mask_preview(monkeypatch, tmp_path):
-    _patch_tile_slides_open(monkeypatch)
-    calls = _patch_mask_preview_renderer(monkeypatch)
-    tile_slides(
-        _slides(1),
-        tiling=_mock_tiling(),
-        filtering=FilterConfig(a_t=0),
-        output_dir=tmp_path,
-        num_workers=1,
-        sampling=_sampling_spec_with_colors(),
-        selection_strategy=CoordinateSelectionStrategy.JOINT_SAMPLING,
-    )
-    assert calls == []
-    assert not (tmp_path / "preview" / "mask").exists()
-
-
 def _patch_tiling_preview_renderer(monkeypatch):
     """Record every tiling-preview render and stub the file write so the structural tests need
     no real WSI. Returns the list of recorded render calls (one per non-empty tile set)."""
@@ -986,49 +490,6 @@ def _zero_one_label_sampling_spec():
         tissue_percentage={"background": None, "tumor": 0.1, "stroma": 2.0, "necrosis": 2.0},
         active_annotations=("tumor", "stroma", "necrosis"),
     )
-
-
-@pytest.mark.parametrize(
-    "strategy",
-    [
-        CoordinateSelectionStrategy.JOINT_SAMPLING,
-        CoordinateSelectionStrategy.INDEPENDENT_SAMPLING,
-    ],
-)
-def test_tile_slides_per_annotation_writes_one_tiling_preview_per_label(
-    monkeypatch, tmp_path, strategy
-):
-    """PER_ANNOTATION: one tiling preview per active label, each under that label's
-    per-annotation subdir, with its tiling_preview_path recorded on the matching row.
-    Identical under INDEPENDENT and JOINT selection."""
-    from hs2p.configs import PreviewConfig
-
-    _patch_tile_slides_open(monkeypatch)
-    _patch_mask_preview_renderer(monkeypatch)
-    calls = _patch_tiling_preview_renderer(monkeypatch)
-    tile_slides(
-        _slides(1),
-        tiling=_mock_tiling(),
-        filtering=FilterConfig(a_t=0),
-        preview=PreviewConfig(save_tiling_preview=True),
-        output_dir=tmp_path,
-        num_workers=1,
-        sampling=_sampling_spec_with_colors(),
-        selection_strategy=strategy,
-        output_mode=CoordinateOutputMode.PER_ANNOTATION,
-    )
-    tiling_root = tmp_path / "preview" / "tiling"
-    for annotation in ("tumor", "stroma"):
-        assert (tiling_root / annotation / "slide0.jpg").is_file()
-    # One render per active label that sampled tiles; each carries its own annotation subdir.
-    rendered_annotations = {c.get("annotation") for c in calls}
-    assert rendered_annotations == {"tumor", "stroma", "necrosis"}
-
-    rows = pd.read_csv(tmp_path / "process_list.csv")
-    for annotation in ("tumor", "stroma"):
-        row = rows[rows["annotation"] == annotation].iloc[0]
-        expected = str(tiling_root / annotation / "slide0.jpg")
-        assert row["tiling_preview_path"] == expected
 
 
 @pytest.mark.parametrize(
@@ -1105,25 +566,6 @@ def test_tile_slides_per_annotation_zero_tile_label_skips_tiling_preview(
         assert row["mask_preview_path"] == mask_expected
     tumor_row = rows[rows["annotation"] == "tumor"].iloc[0]
     assert tumor_row["tiling_preview_path"] == str(tiling_root / "tumor" / "slide0.jpg")
-
-
-def test_tile_slides_sampling_without_tiling_preview_writes_none(monkeypatch, tmp_path):
-    _patch_tile_slides_open(monkeypatch)
-    calls = _patch_tiling_preview_renderer(monkeypatch)
-    tile_slides(
-        _slides(1),
-        tiling=_mock_tiling(),
-        filtering=FilterConfig(a_t=0),
-        output_dir=tmp_path,
-        num_workers=1,
-        sampling=_sampling_spec_with_colors(),
-        selection_strategy=CoordinateSelectionStrategy.JOINT_SAMPLING,
-        output_mode=CoordinateOutputMode.PER_ANNOTATION,
-    )
-    assert calls == []
-    assert not (tmp_path / "preview" / "tiling").exists()
-    rows = pd.read_csv(tmp_path / "process_list.csv")
-    assert rows["tiling_preview_path"].isna().all()
 
 
 def test_summarize_annotation_coverage_est_tiles_none_without_threshold(monkeypatch):

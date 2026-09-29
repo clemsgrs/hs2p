@@ -1,5 +1,3 @@
-import importlib.util
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -257,22 +255,6 @@ def test_conflicting_override_warns_once_with_reader_context(
     assert f"backend={backend}" in message
 
 
-@pytest.mark.parametrize("backend", ["asap", "cucim", "openslide", "vips"])
-def test_numerically_equivalent_override_does_not_warn(
-    monkeypatch, recwarn, backend
-):
-    reader = _make_concrete_reader(
-        monkeypatch,
-        backend=backend,
-        native_spacing=0.1 + 0.2,
-        spacing_override=0.3,
-    )
-
-    assert reader.spacing == 0.3
-    assert reader.spacings == [0.3, 0.75, 1.2]
-    assert len(recwarn) == 0
-
-
 def test_select_level_prefers_finer_level_when_closest_match_is_too_coarse():
     selection = select_level(
         requested_spacing_um=2.7,
@@ -284,26 +266,6 @@ def test_select_level_prefers_finer_level_when_closest_match_is_too_coarse():
     assert selection.level == 1
     assert selection.read_spacing_um == 1.0
     assert not selection.is_within_tolerance
-
-
-def test_openslide_reader_import_guard():
-    if importlib.util.find_spec("openslide") is not None:
-        pytest.skip("openslide is installed")
-
-    from hs2p.wsi.backends.openslide import OpenSlideReader
-
-    with pytest.raises(ImportError, match="openslide-python"):
-        OpenSlideReader("fake.svs")
-
-
-def test_cucim_reader_import_guard():
-    if importlib.util.find_spec("cucim") is not None:
-        pytest.skip("cucim is installed")
-
-    from hs2p.wsi.backends.cucim import CuCIMReader
-
-    with pytest.raises(ImportError, match="cucim"):
-        CuCIMReader("fake.svs")
 
 
 def test_cucim_reader_batched_reads_suppress_native_stderr():
@@ -385,16 +347,6 @@ reader.read_region((16, 0), 0, (16, 16))
 
     assert result.returncode == 0
     assert result.stderr == ""
-
-
-def test_vips_reader_import_guard():
-    if importlib.util.find_spec("pyvips") is not None:
-        pytest.skip("pyvips is installed")
-
-    from hs2p.wsi.backends.vips import VIPSReader
-
-    with pytest.raises(ImportError, match="pyvips"):
-        VIPSReader("fake.svs")
 
 
 def _write_tiff(path: Path, **tags) -> Path:

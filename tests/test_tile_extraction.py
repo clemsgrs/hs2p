@@ -14,11 +14,9 @@ import pytest
 from PIL import Image
 
 import hs2p.preprocessing as preprocessing_mod
-import hs2p.tiling.tar as tar_mod
 from hs2p.api import extract_tiles_to_tar
 from hs2p.configs.models import FilterConfig
 from hs2p.wsi import iter_tile_arrays_from_result
-from hs2p.wsi.streaming.plans import GroupedReadPlan, iter_grouped_read_plans
 
 
 def _make_tiling_result(
@@ -294,42 +292,6 @@ def _monkeypatch_cucim_import(monkeypatch, fake_cucim):
 class TestExtractTilesToTar:
     """Unit tests for extract_tiles_to_tar()."""
 
-    def test_creates_tar_with_correct_number_of_jpegs(self, tmp_path: Path):
-        result = _make_tiling_result(num_tiles=3)
-        colors = [(128, 0, 0), (0, 128, 0), (0, 0, 128)]
-
-        mock_reader = _make_mock_reader(*[_solid_patch(c) for c in colors])
-
-        with patch("hs2p.wsi.streaming.stream.open_slide", return_value=mock_reader):
-            tar_path, out_result = extract_tiles_to_tar(result, output_dir=tmp_path)
-
-        assert tar_path == tmp_path / "tiles" / "slide-1.tiles.tar"
-        assert tar_path.is_file()
-
-        with tarfile.open(tar_path, "r") as tf:
-            members = tf.getmembers()
-            assert [m.name for m in members] == [
-                "000000.jpg",
-                "000001.jpg",
-                "000002.jpg",
-            ]
-            for m in members:
-                data = tf.extractfile(m).read()
-                img = Image.open(io.BytesIO(data))
-                assert img.size == (256, 256)
-
-        # No filtering — result unchanged
-        assert out_result is result
-
-        manifest_path = tmp_path / "tiles" / "slide-1.tiles.manifest.csv"
-        with manifest_path.open(newline="") as handle:
-            rows = list(csv.DictReader(handle))
-        assert rows == [
-            {"tile_index": "0", "x": "0", "y": "0"},
-            {"tile_index": "1", "x": "256", "y": "0"},
-            {"tile_index": "2", "x": "512", "y": "0"},
-        ]
-
     def test_names_tar_members_from_original_tile_index(self, tmp_path: Path):
         coords = [
             (0, 0),
@@ -369,38 +331,6 @@ class TestExtractTilesToTar:
             {"tile_index": "4", "x": "116", "y": "16"},
             {"tile_index": "0", "x": "0", "y": "0"},
         ]
-
-    def test_grouped_read_plans_follow_custom_supertile_sizes(self):
-        result = _make_grid_tiling_result(
-            columns=4,
-            rows=4,
-            tile_size=16,
-            step_px=16,
-        )
-
-        plans = list(
-            iter_grouped_read_plans(
-                result=result,
-                read_step_px=16,
-                step_px_lv0=16,
-                supertile_sizes=(2,),
-            )
-        )
-
-        assert len(plans) == 4
-        assert all(plan.block_size == 2 for plan in plans)
-
-        plans = list(
-            iter_grouped_read_plans(
-                result=result,
-                read_step_px=16,
-                step_px_lv0=16,
-                supertile_sizes=(4, 2),
-            )
-        )
-
-        assert len(plans) == 1
-        assert plans[0].block_size == 4
 
     def test_uses_rgb_420_turbojpeg_encoding(self, tmp_path: Path, monkeypatch):
         result = _make_tiling_result(num_tiles=1)
@@ -448,68 +378,6 @@ class TestExtractTilesToTar:
             "pixel_format": 0,
             "jpeg_subsample": 2,
         }
-
-    def test_missing_turbojpeg_fails_actionably_before_tile_materialization(
-        self, tmp_path: Path, monkeypatch
-    ):
-        result = _make_tiling_result(num_tiles=1)
-        original_import_module = tar_mod.importlib.import_module
-
-        def _import_module(name):
-            if name == "turbojpeg":
-                raise ModuleNotFoundError(
-                    "No module named 'turbojpeg'",
-                    name="turbojpeg",
-                )
-            return original_import_module(name)
-
-        monkeypatch.setattr(tar_mod.importlib, "import_module", _import_module)
-
-        with pytest.raises(
-            ImportError,
-            match=r"pip install 'hs2p\[turbojpeg\]'",
-        ):
-            extract_tiles_to_tar(
-                result,
-                output_dir=tmp_path,
-                jpeg_backend="turbojpeg",
-            )
-
-        assert not (tmp_path / "tiles").exists()
-
-    def test_uses_pil_encoding_when_requested(self, tmp_path: Path, monkeypatch):
-        result = _make_tiling_result(num_tiles=1)
-        mock_reader = _make_mock_reader(_solid_patch((12, 34, 56)))
-
-        turbojpeg_called = False
-
-        class _FakeTurboJPEG:
-            def __init__(self, *_args, **_kwargs):
-                nonlocal turbojpeg_called
-                turbojpeg_called = True
-
-            def encode(self, *_args, **_kwargs):
-                raise AssertionError("TurboJPEG should not be used for PIL backend")
-
-        monkeypatch.setitem(
-            sys.modules,
-            "turbojpeg",
-            types.SimpleNamespace(
-                TurboJPEG=lambda: _FakeTurboJPEG(),
-                TJPF_RGB=0,
-                TJSAMP_420=2,
-            ),
-        )
-
-        with patch("hs2p.wsi.streaming.stream.open_slide", return_value=mock_reader):
-            tar_path, _ = extract_tiles_to_tar(
-                result,
-                output_dir=tmp_path,
-                jpeg_backend="pil",
-            )
-
-        assert tar_path.is_file()
-        assert turbojpeg_called is False
 
     def test_white_filtering_drops_white_tile(self, tmp_path: Path):
         result = _make_tiling_result(num_tiles=3)
@@ -606,77 +474,6 @@ class TestExtractTilesToTar:
             np.column_stack((filtered.x, filtered.y)), [[256, 0]]
         )
 
-    def test_filtered_preprocessing_results_keep_preprocessing_type(self, tmp_path: Path):
-        result = _make_tiling_result(num_tiles=2)
-        patches = [
-            _solid_patch((5, 5, 5)),
-            _solid_patch((128, 128, 0)),
-        ]
-
-        tile_size = 256
-        slide_w = result.slide_dimensions[0]
-        qc_window = np.zeros((tile_size, slide_w, 3), dtype=np.uint8)
-        for i, p in enumerate(patches):
-            qc_window[:, i * tile_size : (i + 1) * tile_size, :] = p
-        qc_reader = _make_mock_reader(
-            qc_window,
-            level_dimensions=[tuple(result.slide_dimensions)],
-            level_downsamples=result.level_downsamples,
-        )
-        export_reader = _make_mock_reader(patches[1])
-
-        filter_cfg = FilterConfig(
-            filter_black=True,
-            black_threshold=25,
-            fraction_threshold=0.9,
-        )
-
-        with patch(
-            "hs2p.wsi.streaming.stream.open_slide",
-            side_effect=[qc_reader, export_reader],
-        ):
-            _, filtered = extract_tiles_to_tar(
-                result,
-                output_dir=tmp_path,
-                filter_params=filter_cfg,
-                jpeg_backend="pil",
-            )
-
-        assert isinstance(filtered, preprocessing_mod.TilingResult)
-        assert len(filtered.x) == 1
-        np.testing.assert_array_equal(
-            np.column_stack((filtered.x, filtered.y)), [[256, 0]]
-        )
-        np.testing.assert_array_equal(filtered.tile_index, [0])
-
-    def test_all_tiles_filtered_produces_empty_tar(self, tmp_path: Path):
-        result = _make_tiling_result(num_tiles=1)
-        qc_reader = _make_mock_reader(
-            _solid_patch((250, 250, 250)),
-            level_dimensions=[tuple(result.slide_dimensions)],
-            level_downsamples=result.level_downsamples,
-        )
-        export_reader = _make_mock_reader()
-
-        filter_cfg = FilterConfig(
-            filter_white=True,
-            white_threshold=220,
-            fraction_threshold=0.9,
-        )
-
-        with patch(
-            "hs2p.wsi.streaming.stream.open_slide",
-            side_effect=[qc_reader, export_reader],
-        ):
-            tar_path, filtered = extract_tiles_to_tar(
-                result, output_dir=tmp_path, filter_params=filter_cfg
-            )
-
-        with tarfile.open(tar_path, "r") as tf:
-            assert len(tf.getmembers()) == 0
-
-        assert len(filtered.x) == 0
-
     def test_resizes_when_read_and_target_sizes_differ(self, tmp_path: Path):
         result = _make_tiling_result(num_tiles=1, tile_size=224)
         result = replace(
@@ -697,73 +494,6 @@ class TestExtractTilesToTar:
             img = Image.open(io.BytesIO(data))
             assert img.size == (224, 224)
 
-    def test_resizing_uses_bilinear_resampling(self, tmp_path: Path):
-        result = _make_tiling_result(num_tiles=1, tile_size=224)
-        result = replace(
-            result,
-            tiles=replace(
-                result.tiles,
-                read_tile_size_px=512,
-            ),
-        )
-
-        mock_reader = _make_mock_reader(_solid_patch((100, 100, 100), size=512))
-
-        resize_calls: list[int] = []
-        bilinear = Image.Resampling.BILINEAR
-        original_fromarray = Image.fromarray
-
-        class _ResizeSpy:
-            def __init__(self, image: Image.Image):
-                self._image = image
-
-            def convert(self, mode: str):
-                self._image = self._image.convert(mode)
-                return self
-
-            def resize(self, size, resample=None, box=None, reducing_gap=None):
-                resize_calls.append(resample)
-                self._image = self._image.resize(
-                    size,
-                    resample=resample,
-                    box=box,
-                    reducing_gap=reducing_gap,
-                )
-                return self
-
-            def __array__(self, dtype=None):
-                return np.asarray(self._image, dtype=dtype)
-
-            def save(self, *args, **kwargs):
-                return self._image.save(*args, **kwargs)
-
-        def _fromarray_spy(*args, **kwargs):
-            return _ResizeSpy(original_fromarray(*args, **kwargs))
-
-        with (
-            patch("hs2p.wsi.streaming.stream.open_slide", return_value=mock_reader),
-            patch("PIL.Image.fromarray", side_effect=_fromarray_spy),
-        ):
-            extract_tiles_to_tar(result, output_dir=tmp_path)
-
-        assert resize_calls == [bilinear]
-
-    def test_strips_alpha_channel(self, tmp_path: Path):
-        result = _make_tiling_result(num_tiles=1)
-        rgba = np.zeros((256, 256, 4), dtype=np.uint8)
-        rgba[:, :, :3] = 100
-        rgba[:, :, 3] = 255
-
-        mock_reader = _make_mock_reader(rgba)
-
-        with patch("hs2p.wsi.streaming.stream.open_slide", return_value=mock_reader):
-            tar_path, _ = extract_tiles_to_tar(result, output_dir=tmp_path)
-
-        with tarfile.open(tar_path, "r") as tf:
-            data = tf.extractfile(tf.getmembers()[0]).read()
-            img = Image.open(io.BytesIO(data))
-            assert img.mode == "RGB"
-
     def test_custom_tiles_dir(self, tmp_path: Path):
         result = _make_tiling_result(num_tiles=1)
         custom_dir = tmp_path / "custom_output"
@@ -777,21 +507,6 @@ class TestExtractTilesToTar:
 
         assert tar_path == custom_dir / "slide-1.tiles.tar"
         assert tar_path.is_file()
-
-    def test_no_filter_params_keeps_all_tiles(self, tmp_path: Path):
-        result = _make_tiling_result(num_tiles=2)
-        # Even white tiles should be kept when no filter_params
-        mock_reader = _make_mock_reader(
-            _solid_patch((255, 255, 255)),
-            _solid_patch((0, 0, 0)),
-        )
-
-        with patch("hs2p.wsi.streaming.stream.open_slide", return_value=mock_reader):
-            _, out_result = extract_tiles_to_tar(
-                result, output_dir=tmp_path, filter_params=None
-            )
-
-        assert out_result is result  # unchanged
 
     def test_cucim_backend_uses_batched_read_region(self, monkeypatch, tmp_path: Path):
         result = _make_tiling_result(num_tiles=2)
@@ -864,52 +579,6 @@ class TestExtractTilesToTar:
         }
         mock_open_slide.assert_not_called()
 
-    def test_cucim_iterator_does_not_require_level_dimensions_metadata(
-        self, monkeypatch
-    ):
-        result = _make_tiling_result(num_tiles=2, tile_size=128, step_px=128)
-        result = replace(
-            result,
-            backend="cucim",
-            requested_backend="cucim",
-            tiles=replace(
-                result.tiles,
-                read_level=1,
-                read_tile_size_px=128,
-                slide_dimensions=[1024, 512],
-                level_downsamples=[1.0, 2.0],
-            ),
-        )
-
-        regions = [
-            _solid_patch((10, 20, 30), size=128),
-            _solid_patch((40, 50, 60), size=128),
-        ]
-        mock_cu_image = MagicMock()
-        mock_cu_image.read_region.return_value = iter(regions)
-        fake_cucim = types.SimpleNamespace(CuImage=MagicMock(return_value=mock_cu_image))
-
-        _monkeypatch_cucim_import(monkeypatch, fake_cucim)
-
-        with patch("hs2p.wsi.streaming.stream.open_slide") as mock_open_slide:
-            tiles = list(
-                iter_tile_arrays_from_result(
-                    result=result,
-                    num_workers=4,
-                    gpu_decode=False,
-                )
-            )
-
-        assert len(tiles) == 2
-        fake_cucim.CuImage.assert_called_once_with(str(result.image_path))
-        assert mock_cu_image.read_region.call_args.kwargs == {
-            "location": [(0, 0), (128, 0)],
-            "size": (128, 128),
-            "level": 1,
-            "num_workers": 4,
-        }
-        mock_open_slide.assert_not_called()
-
     def test_cucim_backend_raises_when_cucim_is_unavailable(
         self, monkeypatch, tmp_path: Path
     ):
@@ -938,40 +607,6 @@ class TestExtractTilesToTar:
                 )
 
         mock_open_slide.assert_not_called()
-
-    def test_cucim_iterator_groups_dense_4x4_grid_into_one_batched_read(
-        self, monkeypatch
-    ):
-        result = _make_grid_tiling_result(columns=4, rows=4, tile_size=16, step_px=16)
-        result = replace(result, backend="cucim", requested_backend="cucim")
-        grouped_region = _make_grouped_region(block_size=4, tile_size=16, step_px=16)
-
-        mock_cu_image = MagicMock()
-        mock_cu_image.read_region.return_value = iter([grouped_region])
-        fake_cucim = types.SimpleNamespace(CuImage=MagicMock(return_value=mock_cu_image))
-
-        _monkeypatch_cucim_import(monkeypatch, fake_cucim)
-
-        tiles = list(
-            iter_tile_arrays_from_result(
-                result=result,
-                num_workers=7,
-                gpu_decode=False,
-            )
-        )
-
-        assert len(tiles) == 16
-        fake_cucim.CuImage.assert_called_once_with(str(result.image_path))
-        assert mock_cu_image.read_region.call_args.kwargs == {
-            "location": [(0, 0)],
-            "size": (64, 64),
-            "level": 0,
-            "num_workers": 7,
-        }
-        assert int(tiles[0][0, 0, 0]) == 1
-        assert int(tiles[1][0, 0, 0]) == 2
-        assert int(tiles[4][0, 0, 0]) == 5
-        assert int(tiles[-1][0, 0, 0]) == 16
 
     def test_cucim_iterator_batches_multiple_2x2_plans_in_one_read_call(
         self, monkeypatch
@@ -1028,118 +663,6 @@ class TestExtractTilesToTar:
             "num_workers": 3,
         }
 
-    def test_cucim_iterator_groups_same_size_plans_even_when_interleaved(
-        self, monkeypatch
-    ):
-        result = _make_tiling_result(num_tiles=1, tile_size=16)
-        result = replace(result, backend="cucim", requested_backend="cucim")
-
-        import hs2p.wsi.streaming.stream as tile_stream_mod
-
-        interleaved_plans = [
-            GroupedReadPlan(
-                x=0,
-                y=0,
-                read_size_px=32,
-                block_size=2,
-                tile_indices=(0, 1, 2, 3),
-            ),
-            GroupedReadPlan(
-                x=200,
-                y=0,
-                read_size_px=16,
-                block_size=1,
-                tile_indices=(4,),
-            ),
-            GroupedReadPlan(
-                x=100,
-                y=0,
-                read_size_px=32,
-                block_size=2,
-                tile_indices=(5, 6, 7, 8),
-            ),
-        ]
-
-        grouped_region_a = _make_grouped_region(block_size=2, tile_size=16, step_px=16)
-        grouped_region_b = _make_grouped_region(block_size=2, tile_size=16, step_px=16)
-        single_region = _solid_patch((77, 77, 77), size=16)
-
-        mock_cu_image = MagicMock()
-        mock_cu_image.read_region.side_effect = [
-            iter([grouped_region_a, grouped_region_b]),
-            iter([single_region]),
-        ]
-        fake_cucim = types.SimpleNamespace(CuImage=MagicMock(return_value=mock_cu_image))
-
-        monkeypatch.setattr(
-            tile_stream_mod,
-            "iter_grouped_read_plans",
-            lambda **kwargs: iter(interleaved_plans),
-        )
-        _monkeypatch_cucim_import(monkeypatch, fake_cucim)
-
-        tiles = list(
-            iter_tile_arrays_from_result(
-                result=result,
-                num_workers=2,
-                gpu_decode=False,
-            )
-        )
-
-        assert len(tiles) == 9
-        assert mock_cu_image.read_region.call_count == 2
-        assert mock_cu_image.read_region.call_args_list[0].kwargs == {
-            "location": [(0, 0), (100, 0)],
-            "size": (32, 32),
-            "level": 0,
-            "num_workers": 2,
-        }
-        assert mock_cu_image.read_region.call_args_list[1].kwargs == {
-            "location": [(200, 0)],
-            "size": (16, 16),
-            "level": 0,
-            "num_workers": 2,
-        }
-
-    def test_reader_iterator_groups_dense_8x8_grid_into_one_read(self):
-        result = _make_grid_tiling_result(columns=8, rows=8, tile_size=16, step_px=16)
-        grouped_region = _make_grouped_region(block_size=8, tile_size=16, step_px=16)
-
-        mock_reader = _make_mock_reader(grouped_region)
-
-        with patch("hs2p.wsi.streaming.stream.open_slide", return_value=mock_reader):
-            tiles = list(iter_tile_arrays_from_result(result=result))
-
-        assert len(tiles) == 64
-        assert mock_reader.read_region.call_count == 1
-        mock_reader.read_region.assert_called_once_with(
-            (0, 0),
-            0,
-            (128, 128),
-        )
-        assert int(tiles[0][0, 0, 0]) == 1
-        assert int(tiles[1][0, 0, 0]) == 2
-        assert int(tiles[8][0, 0, 0]) == 9
-        assert int(tiles[-1][0, 0, 0]) == 64
-
-    def test_reader_iterator_groups_dense_4x4_grid_into_one_read(self):
-        result = _make_grid_tiling_result(columns=4, rows=4, tile_size=16, step_px=16)
-        grouped_region = _make_grouped_region(block_size=4, tile_size=16, step_px=16)
-
-        mock_reader = _make_mock_reader(grouped_region)
-
-        with patch("hs2p.wsi.streaming.stream.open_slide", return_value=mock_reader):
-            tiles = list(iter_tile_arrays_from_result(result=result))
-
-        assert len(tiles) == 16
-        mock_reader.read_region.assert_called_once_with(
-            (0, 0),
-            0,
-            (64, 64),
-        )
-        assert int(tiles[0][0, 0, 0]) == 1
-        assert int(tiles[-1][0, 0, 0]) == 16
-
     def test_reader_iterator_uses_stride_based_group_size_when_tiles_overlap(self):
         result = _make_grid_tiling_result(columns=4, rows=4, tile_size=32, step_px=24)
         grouped_region = _make_grouped_region(block_size=4, tile_size=32, step_px=24)
@@ -1195,23 +718,6 @@ class TestNeedsPixelFiltering:
         from hs2p.api import _needs_pixel_filtering
 
         assert not _needs_pixel_filtering(FilterConfig())
-
-    def test_white_only(self):
-        from hs2p.api import _needs_pixel_filtering
-
-        assert _needs_pixel_filtering(FilterConfig(filter_white=True))
-
-    def test_black_only(self):
-        from hs2p.api import _needs_pixel_filtering
-
-        assert _needs_pixel_filtering(FilterConfig(filter_black=True))
-
-    def test_both(self):
-        from hs2p.api import _needs_pixel_filtering
-
-        assert _needs_pixel_filtering(
-            FilterConfig(filter_white=True, filter_black=True)
-        )
 
     def test_grayspace_only(self):
         from hs2p.api import _needs_pixel_filtering

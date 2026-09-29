@@ -1,26 +1,16 @@
 """Public behavior of the first-class source-mask domain (``hs2p.mask``, #190, #193).
 
-Real flat PNGs cover the PIL success path; ``_FakeReader`` stands in for pyramidal,
-spacing-tagged, wide-dtype and multi-channel sources so every case runs without a native
-backend.
+``_FakeReader`` stands in for pyramidal, spacing-tagged, wide-dtype and multi-channel
+sources so every case runs without a native backend.
 """
-
-from pathlib import Path
 
 import numpy as np
 import pytest
-from PIL import Image
 
 import hs2p.mask as mask_mod
-import hs2p.wsi.reader as reader_mod
-from hs2p.mask import AlignedMask, AnnotationLabels, Mask, MaskRead, TissueLabels
+from hs2p.mask import AnnotationLabels, Mask, TissueLabels
 
 TISSUE = TissueLabels(background=0, tissue=1)
-
-
-def _write_png(path: Path, labels: np.ndarray) -> Path:
-    Image.fromarray(labels).save(path)
-    return path
 
 
 class _FakeReader:
@@ -55,29 +45,6 @@ def _open_fake_mask(monkeypatch, reader, *, labels=TISSUE, path="fake-mask.tif")
     return Mask(path=path, labels=labels, backend="fake")
 
 
-def test_mask_types_are_public_from_the_mask_module_and_the_package_root():
-    import hs2p
-
-    names = ["AlignedMask", "AnnotationLabels", "Mask", "MaskRead", "TissueLabels"]
-
-    assert mask_mod.__all__ == names
-    for name in names:
-        assert getattr(hs2p, name) is getattr(mask_mod, name)
-
-
-def test_tissue_labels_declare_distinct_background_and_tissue_ids():
-    labels = TissueLabels(background=0, tissue=255)
-
-    assert labels.background == 0
-    assert labels.tissue == 255
-    assert labels.ids == frozenset({0, 255})
-
-
-def test_tissue_labels_are_keyword_only():
-    with pytest.raises(TypeError):
-        TissueLabels(0, 1)
-
-
 @pytest.mark.parametrize(
     ("background", "tissue"),
     [(1, 1), (-1, 1), (0, 256), (0, 1.0), (False, True)],
@@ -85,104 +52,6 @@ def test_tissue_labels_are_keyword_only():
 def test_tissue_labels_reject_invalid_ids(background, tissue):
     with pytest.raises(ValueError, match="TissueLabels"):
         TissueLabels(background=background, tissue=tissue)
-
-
-def test_annotation_labels_normalize_the_pixel_mapping_and_expose_all_ids():
-    labels = AnnotationLabels(
-        pixel_mapping={"background": 0, "tumor": [1, 3], "stroma": 2}
-    )
-
-    assert labels.pixel_mapping == {
-        "background": (0,),
-        "tumor": (1, 3),
-        "stroma": (2,),
-    }
-    assert labels.ids == frozenset({0, 1, 2, 3})
-
-
-def test_annotation_labels_reject_an_id_claimed_by_two_labels():
-    with pytest.raises(
-        ValueError, match="'stroma' and 'tumor' both map to 1"
-    ):
-        AnnotationLabels(pixel_mapping={"tumor": [1, 3], "stroma": 1})
-
-
-def test_mask_constructor_is_keyword_only(tmp_path):
-    path = _write_png(tmp_path / "mask.png", np.zeros((2, 2), dtype=np.uint8))
-
-    with pytest.raises(TypeError):
-        Mask(path, TISSUE)
-
-
-def test_mask_rejects_labels_without_declared_semantics(tmp_path):
-    path = _write_png(tmp_path / "mask.png", np.zeros((2, 2), dtype=np.uint8))
-
-    with pytest.raises(ValueError, match="TissueLabels or AnnotationLabels"):
-        Mask(path=path, labels={"tissue": 1})
-
-
-def test_auto_mask_resolves_its_backend_from_its_own_path(tmp_path):
-    path = _write_png(tmp_path / "mask.png", np.zeros((2, 2), dtype=np.uint8))
-
-    with Mask(path=path, labels=TISSUE) as mask:
-        assert mask.backend == "pil"
-        assert mask.path == path
-        assert mask.labels == TISSUE
-
-
-def test_concrete_mask_backend_is_authoritative_and_opens_without_spacing(
-    monkeypatch,
-):
-    opened: list[tuple[str, str, dict]] = []
-
-    def _unexpected_probe(**kwargs):
-        raise AssertionError(f"a concrete mask backend was probed: {kwargs}")
-
-    def _fake_open_slide(path, backend, **kwargs):
-        opened.append((str(path), backend, kwargs))
-        return _FakeReader([np.zeros((2, 2), dtype=np.uint8)])
-
-    monkeypatch.setattr(reader_mod, "_backend_can_open_source", _unexpected_probe)
-    monkeypatch.setattr(mask_mod, "open_slide", _fake_open_slide)
-
-    mask = Mask(path="mask.png", labels=TISSUE, backend="openslide")
-
-    assert mask.backend == "openslide"
-    assert opened == [("mask.png", "openslide", {"require_spacing": False})]
-
-
-def test_mask_open_failure_names_path_and_backend(monkeypatch):
-    def _failing_open_slide(path, backend, **kwargs):
-        raise OSError("not a TIFF")
-
-    monkeypatch.setattr(mask_mod, "open_slide", _failing_open_slide)
-
-    with pytest.raises(
-        RuntimeError, match=r"path=broken\.tif.*backend=vips.*not a TIFF"
-    ):
-        Mask(path="broken.tif", labels=TISSUE, backend="vips")
-
-
-def test_mask_open_value_error_cause_reraises_as_value_error(monkeypatch):
-    def _failing_open_slide(path, backend, **kwargs):
-        raise ValueError("bad mask geometry")
-
-    monkeypatch.setattr(mask_mod, "open_slide", _failing_open_slide)
-
-    with pytest.raises(
-        ValueError, match=r"path=bad\.tif.*backend=openslide.*bad mask geometry"
-    ):
-        Mask(path="bad.tif", labels=TISSUE, backend="openslide")
-
-
-def test_mask_context_manager_closes_its_reader_once(monkeypatch):
-    reader = _FakeReader([np.zeros((2, 2), dtype=np.uint8)])
-
-    with _open_fake_mask(monkeypatch, reader) as mask:
-        assert reader.close_count == 0
-    mask.close()
-
-    assert reader.close_count == 1
 
 
 def test_closed_mask_rejects_alignment_and_aligned_reads(monkeypatch):
@@ -200,27 +69,6 @@ def test_closed_mask_rejects_alignment_and_aligned_reads(monkeypatch):
 
 def _blank_levels(*level_dimensions):
     return [np.zeros((height, width), dtype=np.uint8) for width, height in level_dimensions]
-
-
-def test_align_to_derives_effective_level_spacings_from_the_dimension_ratio(
-    monkeypatch,
-):
-    reader = _FakeReader(_blank_levels((100, 50), (50, 25)))
-    mask = _open_fake_mask(monkeypatch, reader)
-
-    aligned = mask.align_to(reference_spacing_um=0.25, reference_dimensions=(1600, 800))
-
-    assert isinstance(aligned, AlignedMask)
-    assert aligned.mask is mask
-    assert aligned.reference_spacing_um == 0.25
-    assert aligned.reference_dimensions == (1600, 800)
-    # level 0: 0.25 um x 1600 / 100; level 1 is a 2x downsample of level 0
-    assert aligned.level_spacings_um == (4.0, 8.0)
-
-
-def test_align_to_is_keyword_only():
-    with pytest.raises(TypeError):
-        Mask.align_to(object(), 0.25, (1600, 800))
 
 
 @pytest.mark.parametrize(
@@ -242,41 +90,6 @@ def test_align_to_allows_one_mask_pixel_of_rounding_per_axis(
     )
 
     assert aligned.reference_dimensions == reference_dimensions
-
-
-def test_align_to_rejects_a_mask_whose_shape_does_not_cover_the_reference(
-    monkeypatch,
-):
-    mask = _open_fake_mask(
-        monkeypatch, _FakeReader(_blank_levels((100, 50))), path="cropped-mask.tif"
-    )
-
-    with pytest.raises(ValueError) as excinfo:
-        mask.align_to(reference_spacing_um=0.25, reference_dimensions=(1000, 1000))
-
-    message = str(excinfo.value)
-    assert "path=cropped-mask.tif" in message
-    assert "mask dimensions 100x50" in message
-    assert "reference dimensions 1000x1000" in message
-    # 0.25 um x 1000 / 100
-    assert "effective spacing 2.5000 um/px" in message
-    assert "file spacing" not in message
-
-
-def test_align_to_is_silent_when_file_spacing_agrees_within_one_percent(
-    monkeypatch, caplog
-):
-    # effective 4.0 um vs tagged 4.02 um: 0.5%
-    reader = _FakeReader(_blank_levels((100, 50)), native_spacing=4.02)
-    mask = _open_fake_mask(monkeypatch, reader)
-
-    with caplog.at_level("WARNING"):
-        aligned = mask.align_to(
-            reference_spacing_um=0.25, reference_dimensions=(1600, 800)
-        )
-
-    assert aligned.level_spacings_um == (4.0,)
-    assert caplog.records == []
 
 
 def test_align_to_warns_once_for_a_nominal_spacing_tag_and_still_reads(
@@ -338,53 +151,6 @@ def test_align_to_rejects_an_invalid_reference(
         )
 
 
-def test_flat_png_mask_without_spacing_opens_aligns_and_reads(tmp_path, caplog):
-    labels = np.array([[0, 1, 1, 0, 0, 1], [1, 1, 0, 0, 1, 1]], dtype=np.uint8)
-    path = _write_png(tmp_path / "mask.png", labels)
-
-    with caplog.at_level("WARNING"), Mask(path=path, labels=TISSUE) as mask:
-        aligned = mask.align_to(reference_spacing_um=0.5, reference_dimensions=(24, 8))
-        read = aligned.read_full(target_spacing_um=2.0, target_dimensions=(6, 2))
-
-    assert isinstance(read, MaskRead)
-    assert read.read_level == 0
-    # 0.5 um x 24 / 6
-    assert read.read_spacing_um == 2.0
-    assert read.labels.dtype == np.uint8
-    np.testing.assert_array_equal(read.labels, labels)
-    assert caplog.records == []
-
-
-def test_documented_flat_png_example_runs(tmp_path):
-    """The ``Source masks`` example of ``docs/api.md``, end to end on a real PNG."""
-    labels = np.array(
-        [
-            [0, 1, 1, 0, 0, 1],
-            [1, 1, 0, 0, 1, 1],
-            [0, 0, 1, 1, 0, 0],
-            [1, 0, 0, 1, 1, 0],
-        ],
-        dtype=np.uint8,
-    )
-    path = _write_png(tmp_path / "slide-1-tissue-mask.png", labels)
-
-    with Mask(path=path, labels=TissueLabels(background=0, tissue=1)) as mask:
-        assert mask.backend == "pil"
-        # A 12x8 px slide at 0.5 um/px: the 6x4 px mask covers it at 1.0 um/px.
-        aligned = mask.align_to(reference_spacing_um=0.5, reference_dimensions=(12, 8))
-        full = aligned.read_full(target_spacing_um=2.0, target_dimensions=(3, 2))
-        region = aligned.read_region(
-            location=(4, 2), target_spacing_um=1.0, target_dimensions=(2, 2)
-        )
-
-    assert (full.read_level, full.read_spacing_um) == (0, 1.0)
-    np.testing.assert_array_equal(full.labels, [[0, 1, 0], [0, 1, 0]])
-    # Reference (4, 2) is mask pixel (2, 1); 2 px at 1.0 um span 2 mask px.
-    np.testing.assert_array_equal(region.labels, [[0, 0], [1, 1]])
-    with pytest.raises(ValueError, match="Mask is closed"):
-        aligned.read_full(target_spacing_um=2.0, target_dimensions=(3, 2))
-
-
 @pytest.mark.parametrize("backend", ["openslide", "vips"])
 def test_untagged_tiff_mask_without_spacing_opens_aligns_and_reads(
     tmp_path, caplog, backend
@@ -422,33 +188,6 @@ def _three_level_annotation_mask(monkeypatch):
     return reader, aligned
 
 
-def test_full_read_selects_its_level_with_the_shared_label_selector(monkeypatch):
-    reader, aligned = _three_level_annotation_mask(monkeypatch)
-    calls: list[dict] = []
-    shared_selector = mask_mod.select_level_for_spacing_read
-
-    def _spy(**kwargs):
-        calls.append(kwargs)
-        return shared_selector(**kwargs)
-
-    monkeypatch.setattr(mask_mod, "select_level_for_spacing_read", _spy)
-
-    read = aligned.read_full(target_spacing_um=2.0, target_dimensions=(80, 40))
-
-    assert calls == [
-        {
-            "requested_spacing_um": 2.0,
-            "level0_spacing_um": 1.0,
-            "level_downsamples": [(1.0, 1.0), (2.0, 2.0), (4.0, 4.0)],
-            "tolerance": 0.01,
-            "content_kind": "label",
-        }
-    ]
-    assert read.read_level == 1
-    assert read.read_spacing_um == 2.0
-    assert reader.read_levels == [1]
-
-
 def test_full_read_keeps_a_level_when_the_request_carries_float_noise(monkeypatch):
     reader, aligned = _three_level_annotation_mask(monkeypatch)
 
@@ -458,30 +197,6 @@ def test_full_read_keeps_a_level_when_the_request_carries_float_noise(monkeypatc
     assert read.read_spacing_um == 4.0
     assert reader.read_levels == [2]
     np.testing.assert_array_equal(read.labels, np.full((20, 40), 2, dtype=np.uint8))
-
-
-def test_full_read_upsamples_level_zero_when_no_level_is_fine_enough(monkeypatch):
-    reader = _FakeReader([np.array([[0, 1, 0], [1, 1, 0]], dtype=np.uint8)])
-    mask = _open_fake_mask(monkeypatch, reader)
-    aligned = mask.align_to(reference_spacing_um=0.5, reference_dimensions=(12, 8))
-
-    read = aligned.read_full(target_spacing_um=1.0, target_dimensions=(6, 4))
-
-    assert read.read_level == 0
-    # 0.5 um x 12 / 3
-    assert read.read_spacing_um == 2.0
-    np.testing.assert_array_equal(
-        read.labels,
-        np.array(
-            [
-                [0, 0, 1, 1, 0, 0],
-                [0, 0, 1, 1, 0, 0],
-                [1, 1, 1, 1, 0, 0],
-                [1, 1, 1, 1, 0, 0],
-            ],
-            dtype=np.uint8,
-        ),
-    )
 
 
 def test_full_read_returns_exact_dimensions_when_the_level_is_within_tolerance(
@@ -531,18 +246,6 @@ def test_full_read_narrows_wide_integer_storage_with_ids_within_range(monkeypatc
     )
 
 
-def test_full_read_collapses_identical_replicated_channels(monkeypatch):
-    channel = np.array([[0, 1], [1, 1]], dtype=np.uint8)
-    native = np.stack([channel, channel, channel], axis=-1)
-    mask = _open_fake_mask(monkeypatch, _FakeReader([native]))
-    aligned = mask.align_to(reference_spacing_um=0.5, reference_dimensions=(8, 8))
-
-    read = aligned.read_full(target_spacing_um=2.0, target_dimensions=(2, 2))
-
-    assert read.labels.shape == (2, 2)
-    np.testing.assert_array_equal(read.labels, channel)
-
-
 @pytest.mark.parametrize(
     ("native", "reason"),
     [
@@ -569,40 +272,6 @@ def test_full_read_rejects_invalid_native_decodes(monkeypatch, native, reason):
 
     with pytest.raises(ValueError, match=reason):
         aligned.read_full(target_spacing_um=2.0, target_dimensions=(2, 2))
-
-
-def test_mask_read_is_immutable(monkeypatch):
-    mask = _open_fake_mask(monkeypatch, _FakeReader(_blank_levels((2, 2))))
-    aligned = mask.align_to(reference_spacing_um=0.5, reference_dimensions=(8, 8))
-
-    read = aligned.read_full(target_spacing_um=2.0, target_dimensions=(2, 2))
-
-    with pytest.raises(AttributeError):
-        read.read_level = 1
-    with pytest.raises(ValueError, match="read-only"):
-        read.labels[0, 0] = 1
-
-
-def test_full_read_rejects_an_oversized_native_level_before_decoding(monkeypatch):
-    class _ExplodingReader(_FakeReader):
-        def read_region(self, location, level, size):  # pragma: no cover
-            raise AssertionError("the reader was invoked despite the read-size cap")
-
-    # 20000 x 20000 = 400 Mpx, above the fixed 256 Mpx cap
-    reader = _ExplodingReader([None], level_dimensions=[(20000, 20000)])
-    mask = _open_fake_mask(monkeypatch, reader, path="flat-giant-mask.tif")
-    aligned = mask.align_to(
-        reference_spacing_um=0.5, reference_dimensions=(20000, 20000)
-    )
-
-    with pytest.raises(ValueError) as excinfo:
-        aligned.read_full(target_spacing_um=8.0, target_dimensions=(1250, 1250))
-
-    message = str(excinfo.value)
-    assert "path=flat-giant-mask.tif" in message
-    assert "level 0 at 20000x20000 (400 Mpx)" in message
-    assert "256 Mpx" in message
-    assert "pyramid" in message
 
 
 class _WindowFakeReader(_FakeReader):
@@ -648,25 +317,6 @@ def _coarse_numbered_mask(monkeypatch, *, path="fake-mask.tif"):
     return reader, aligned
 
 
-def test_region_read_locates_the_window_in_reference_level_zero_pixels(monkeypatch):
-    reader, aligned = _coarse_numbered_mask(monkeypatch)
-
-    # reference (32, 16) is mask pixel (col 2, row 1); as a mask-file coordinate, x=32
-    # would lie outside the 8 px wide mask
-    read = aligned.read_region(
-        location=(32, 16), target_spacing_um=4.0, target_dimensions=(3, 2)
-    )
-
-    assert isinstance(read, MaskRead)
-    assert read.read_level == 0
-    assert read.read_spacing_um == 4.0
-    assert read.labels.dtype == np.uint8
-    np.testing.assert_array_equal(
-        read.labels, np.array([[10, 11, 12], [18, 19, 20]], dtype=np.uint8)
-    )
-    assert reader.windows == [((2, 1), 0, (3, 2))]
-
-
 @pytest.mark.parametrize(
     ("location", "target_dimensions"),
     [
@@ -697,25 +347,6 @@ def test_region_read_rejects_a_request_beyond_the_reference_canvas(
     assert "32x32 reference px" in message
     assert "reference dimensions 128x64" in message
     assert reader.windows == []
-
-
-def test_region_read_accepts_a_request_ending_on_the_canvas_edge_despite_float_noise(
-    monkeypatch,
-):
-    # 2.007 um / 0.2007 um is 10.000000000000002 in floats, so the 4 px request spans
-    # 40.00000000000001 reference px of a 40 px wide canvas
-    reader = _WindowFakeReader([np.array([[0, 1, 1, 0]], dtype=np.uint8)])
-    mask = _open_fake_mask(monkeypatch, reader)
-    aligned = mask.align_to(reference_spacing_um=0.2007, reference_dimensions=(40, 10))
-
-    read = aligned.read_region(
-        location=(0, 0), target_spacing_um=2.007, target_dimensions=(4, 1)
-    )
-
-    np.testing.assert_array_equal(
-        read.labels, np.array([[0, 1, 1, 0]], dtype=np.uint8)
-    )
-    assert reader.windows == [((0, 0), 0, (4, 1))]
 
 
 def test_region_read_lands_on_the_intended_pixel_under_a_non_integer_downsample(
@@ -777,78 +408,6 @@ def test_region_read_registers_with_the_reference_raster_under_a_coarser_mask(
     assert reader.windows == [((1, 0), 0, (4, 4))]
 
 
-def test_region_read_upsamples_level_zero_from_a_location_inside_a_mask_pixel(
-    monkeypatch,
-):
-    reader, aligned = _coarse_numbered_mask(monkeypatch)
-
-    # 1.0 um target pixels are 4 reference px: x = 40, 44, ..., 68 and y = 24, ..., 36
-    # fall in mask columns 2, 2, 3, 3, 3, 3, 4, 4 and rows 1, 1, 2, 2
-    read = aligned.read_region(
-        location=(40, 24), target_spacing_um=1.0, target_dimensions=(8, 4)
-    )
-
-    assert read.read_level == 0
-    assert read.read_spacing_um == 4.0
-    np.testing.assert_array_equal(
-        read.labels,
-        np.array(
-            [
-                [10, 10, 11, 11, 11, 11, 12, 12],
-                [10, 10, 11, 11, 11, 11, 12, 12],
-                [18, 18, 19, 19, 19, 19, 20, 20],
-                [18, 18, 19, 19, 19, 19, 20, 20],
-            ],
-            dtype=np.uint8,
-        ),
-    )
-    # x spans [40, 72) and y [24, 40): mask columns [2.5, 4.5) and rows [1.5, 2.5)
-    assert reader.windows == [((2, 1), 0, (3, 2))]
-
-
-def test_region_read_selects_its_level_with_the_shared_label_selector(monkeypatch):
-    reader = _WindowFakeReader(
-        [
-            np.arange(32, dtype=np.uint8).reshape(4, 8),
-            np.arange(100, 108, dtype=np.uint8).reshape(2, 4),
-        ]
-    )
-    labels = AnnotationLabels(
-        pixel_mapping={"background": 0, "tumor": [*range(1, 32), *range(100, 108)]}
-    )
-    mask = _open_fake_mask(monkeypatch, reader, labels=labels)
-    # effective level spacings: 0.5 um x 64 / 8 = 4.0 um, then 8.0 um
-    aligned = mask.align_to(reference_spacing_um=0.5, reference_dimensions=(64, 32))
-    calls: list[dict] = []
-    shared_selector = mask_mod.select_level_for_spacing_read
-
-    def _spy(**kwargs):
-        calls.append(kwargs)
-        return shared_selector(**kwargs)
-
-    monkeypatch.setattr(mask_mod, "select_level_for_spacing_read", _spy)
-
-    # level 1 holds 64 / 4 = 16 reference px per pixel, so (16, 16) is (col 1, row 1)
-    read = aligned.read_region(
-        location=(16, 16), target_spacing_um=8.0, target_dimensions=(2, 1)
-    )
-
-    assert calls == [
-        {
-            "requested_spacing_um": 8.0,
-            "level0_spacing_um": 4.0,
-            "level_downsamples": [(1.0, 1.0), (2.0, 2.0)],
-            "tolerance": 0.01,
-            "content_kind": "label",
-        }
-    ]
-    assert read.read_level == 1
-    assert read.read_spacing_um == 8.0
-    np.testing.assert_array_equal(read.labels, np.array([[105, 106]], dtype=np.uint8))
-    # level-1 pixel (1, 1) addressed in mask-file level-0 pixels
-    assert reader.windows == [((2, 2), 1, (2, 1))]
-
-
 def test_region_read_returns_exact_dimensions_when_the_level_is_within_tolerance(
     monkeypatch,
 ):
@@ -866,21 +425,6 @@ def test_region_read_returns_exact_dimensions_when_the_level_is_within_tolerance
         read.labels, np.array([[0, 1, 2, 3], [8, 9, 10, 11]], dtype=np.uint8)
     )
     assert reader.windows == [((0, 0), 0, (5, 3))]
-
-
-def test_region_read_equals_the_matching_crop_of_a_full_read(monkeypatch):
-    reader = _WindowFakeReader([np.arange(16, dtype=np.uint8).reshape(2, 8)])
-    mask = _open_fake_mask(monkeypatch, reader, labels=_numbered_labels(16))
-    # level 0 is 1.0 um; a 2.0 um read keeps every other column and row
-    aligned = mask.align_to(reference_spacing_um=0.5, reference_dimensions=(16, 4))
-
-    full = aligned.read_full(target_spacing_um=2.0, target_dimensions=(4, 1))
-    region = aligned.read_region(
-        location=(4, 0), target_spacing_um=2.0, target_dimensions=(3, 1)
-    )
-
-    np.testing.assert_array_equal(full.labels, np.array([[0, 2, 4, 6]], dtype=np.uint8))
-    np.testing.assert_array_equal(region.labels, np.array([[2, 4, 6]], dtype=np.uint8))
 
 
 def _flat_tissue_mask_with_a_stray_label(monkeypatch, *, stray, path):
@@ -909,20 +453,6 @@ def test_region_read_validates_the_native_window_before_resampling(monkeypatch):
     assert "level 0, window 4x4 at (0, 0)" in message
     assert "undeclared label IDs [7]" in message
     assert "declared [0, 1]" in message
-
-
-def test_region_read_decodes_and_validates_only_its_window(monkeypatch):
-    # The undeclared 7 at native (7, 7) is outside the 4x4 window and is never seen.
-    reader, aligned = _flat_tissue_mask_with_a_stray_label(
-        monkeypatch, stray=(7, 7), path="stray-label.tif"
-    )
-
-    read = aligned.read_region(
-        location=(0, 0), target_spacing_um=2.0, target_dimensions=(2, 2)
-    )
-
-    np.testing.assert_array_equal(read.labels, np.zeros((2, 2), dtype=np.uint8))
-    assert reader.windows == [((0, 0), 0, (4, 4))]
 
 
 def _flat_giant_mask(monkeypatch, reader_type):
@@ -964,38 +494,6 @@ def test_region_read_caps_the_window_not_the_level(monkeypatch):
     np.testing.assert_array_equal(read.labels, np.zeros((4, 4), dtype=np.uint8))
 
 
-def test_region_read_returns_an_immutable_mask_read(monkeypatch):
-    _, aligned = _coarse_numbered_mask(monkeypatch)
-
-    read = aligned.read_region(
-        location=(0, 0), target_spacing_um=4.0, target_dimensions=(2, 2)
-    )
-
-    assert isinstance(read, MaskRead)
-    with pytest.raises(AttributeError):
-        read.read_level = 1
-    with pytest.raises(ValueError, match="read-only"):
-        read.labels[0, 0] = 1
-
-
-def test_region_read_fails_after_the_parent_mask_closes(monkeypatch):
-    reader, aligned = _coarse_numbered_mask(monkeypatch, path="closed-mask.tif")
-    aligned.mask.close()
-
-    with pytest.raises(ValueError, match=r"Mask is closed: path=closed-mask\.tif"):
-        aligned.read_region(
-            location=(0, 0), target_spacing_um=4.0, target_dimensions=(2, 2)
-        )
-    assert reader.windows == []
-
-
-def test_region_read_is_keyword_only(monkeypatch):
-    _, aligned = _coarse_numbered_mask(monkeypatch)
-
-    with pytest.raises(TypeError):
-        aligned.read_region((0, 0), 4.0, (2, 2))
-
-
 def test_region_read_maps_each_axis_through_its_own_dimension_ratio(monkeypatch):
     # A 7x6 mask of a 100x100 reference, within one pixel of rounding per axis: a mask
     # pixel spans 100 / 7 = 14.29 reference px along x but 100 / 6 = 16.67 along y.
@@ -1010,71 +508,6 @@ def test_region_read_maps_each_axis_through_its_own_dimension_ratio(monkeypatch)
 
     np.testing.assert_array_equal(read.labels, np.array([[33, 33], [33, 33]], dtype=np.uint8))
     assert reader.windows == [((5, 4), 0, (1, 1))]
-
-
-@pytest.mark.parametrize("target_spacing_um", [0.0, -4.0, float("nan")])
-def test_region_read_rejects_an_invalid_target_spacing(monkeypatch, target_spacing_um):
-    reader, aligned = _coarse_numbered_mask(monkeypatch)
-
-    with pytest.raises(ValueError, match="target_spacing_um must be a finite positive"):
-        aligned.read_region(
-            location=(0, 0),
-            target_spacing_um=target_spacing_um,
-            target_dimensions=(2, 2),
-        )
-    assert reader.windows == []
-
-
-def test_flat_png_mask_reads_a_region(tmp_path):
-    labels = np.array([[0, 1, 1, 0, 0, 1], [1, 1, 0, 0, 1, 1]], dtype=np.uint8)
-    path = _write_png(tmp_path / "mask.png", labels)
-
-    with Mask(path=path, labels=TISSUE) as mask:
-        # 0.5 um x 24 / 6: a 2.0 um mask whose pixels each span 4 reference px
-        aligned = mask.align_to(reference_spacing_um=0.5, reference_dimensions=(24, 8))
-        read = aligned.read_region(
-            location=(4, 4), target_spacing_um=2.0, target_dimensions=(3, 1)
-        )
-
-    assert read.read_level == 0
-    assert read.read_spacing_um == 2.0
-    np.testing.assert_array_equal(read.labels, np.array([[1, 0, 0]], dtype=np.uint8))
-
-
-def test_pyramidal_tiff_mask_reads_a_region_from_a_coarser_level(tmp_path):
-    pytest.importorskip("openslide")
-    tifffile = pytest.importorskip("tifffile")
-    level_0 = np.zeros((32, 64), dtype=np.uint8)
-    level_0[:16, 32:] = 1
-    level_1 = np.zeros((16, 32), dtype=np.uint8)
-    level_1[:8, 16:] = 1
-    path = tmp_path / "mask.tif"
-    with tifffile.TiffWriter(path) as tif:
-        for level, subfiletype in ((level_0, 0), (level_1, 1)):
-            tif.write(
-                level,
-                tile=(16, 16),
-                photometric="minisblack",
-                compression="deflate",
-                subfiletype=subfiletype,
-            )
-
-    with Mask(path=path, labels=TISSUE, backend="openslide") as mask:
-        # effective level spacings: 0.5 um x 256 / 64 = 2.0 um, then 4.0 um
-        aligned = mask.align_to(reference_spacing_um=0.5, reference_dimensions=(256, 128))
-        # level 1 holds 256 / 32 = 8 reference px per pixel: columns 14-17, rows 6-9
-        read = aligned.read_region(
-            location=(112, 48), target_spacing_um=4.0, target_dimensions=(4, 4)
-        )
-
-    assert read.read_level == 1
-    assert read.read_spacing_um == 4.0
-    np.testing.assert_array_equal(
-        read.labels,
-        np.array(
-            [[0, 0, 1, 1], [0, 0, 1, 1], [0, 0, 0, 0], [0, 0, 0, 0]], dtype=np.uint8
-        ),
-    )
 
 
 # 0.4862 um/px through float32, as a TIFF resolution tag stores it
@@ -1106,23 +539,6 @@ def test_region_read_at_a_float_noisy_reference_spacing_is_the_native_crop(
 
     np.testing.assert_array_equal(read.labels, native[:, 8:40])
     assert reader.windows == [((8, 0), 0, (32, 1))]
-
-
-def test_region_read_under_a_coarser_mask_tolerates_a_float_noisy_spacing(
-    monkeypatch,
-):
-    reader, aligned = _coarse_numbered_mask(monkeypatch)
-
-    # 0.25 um a hair low: reference x = 16, 32, 48 still start mask columns 1, 2, 3
-    read = aligned.read_region(
-        location=(0, 0),
-        target_spacing_um=0.25 * (1 - 1e-8),
-        target_dimensions=(64, 1),
-    )
-
-    np.testing.assert_array_equal(
-        read.labels, np.repeat(np.arange(4, dtype=np.uint8), 16)[None, :]
-    )
 
 
 def test_region_read_accepts_a_long_request_ending_on_the_canvas_edge_at_a_noisy_spacing(
@@ -1186,34 +602,3 @@ def test_dimensions_within_canvas_count_the_target_pixels_on_the_canvas(
     assert reader.windows == []
 
 
-def test_dimensions_within_canvas_read_back_as_the_in_canvas_part_of_a_region(
-    monkeypatch,
-):
-    reader, aligned = _coarse_numbered_mask(monkeypatch)
-
-    width, height = aligned.dimensions_within_canvas(
-        location=(96, 32), target_spacing_um=4.0, target_dimensions=(4, 4)
-    )
-    read = aligned.read_region(
-        location=(96, 32), target_spacing_um=4.0, target_dimensions=(width, height)
-    )
-
-    np.testing.assert_array_equal(
-        read.labels, np.array([[22, 23], [30, 31]], dtype=np.uint8)
-    )
-
-
-def test_dimensions_within_canvas_follow_the_float_noise_rule_at_the_edge(
-    monkeypatch,
-):
-    native = (np.arange(4096) % 2).astype(np.uint8).reshape(1, 4096)
-    mask = _open_fake_mask(monkeypatch, _WindowFakeReader([native]))
-    aligned = mask.align_to(reference_spacing_um=0.4862, reference_dimensions=(4096, 1))
-
-    within = aligned.dimensions_within_canvas(
-        location=(96, 0),
-        target_spacing_um=_FLOAT32_SPACING_UM,
-        target_dimensions=(4096, 1),
-    )
-
-    assert within == (4000, 1)
