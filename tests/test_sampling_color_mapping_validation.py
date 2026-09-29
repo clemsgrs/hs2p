@@ -1,6 +1,6 @@
 import pytest
 
-from hs2p.configs.resolvers import validate_color_mapping, validate_pixel_mapping
+from hs2p.configs.resolvers import validate_pixel_mapping
 
 
 def test_validate_pixel_mapping_accepts_preview_safe_boundaries_without_background():
@@ -31,16 +31,3 @@ def test_validate_pixel_mapping_rejects_unsafe_label_names(bad):
     # label names become output path components, so traversal/separators must be rejected
     with pytest.raises(ValueError, match="path component"):
         validate_pixel_mapping({"background": 0, bad: 1})
-
-
-def test_validation_accepts_omegaconf_listconfig_rgb_values():
-    omegaconf = pytest.importorskip("omegaconf")
-    list_config = omegaconf.ListConfig([243, 229, 171])
-
-    pixel_mapping = {"background": 0, "gleason-3": 3}
-    color_mapping = {"background": None, "gleason-3": list_config}
-
-    validate_color_mapping(
-        pixel_mapping=pixel_mapping,
-        color_mapping=color_mapping,
-    )

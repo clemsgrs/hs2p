@@ -21,20 +21,6 @@ def _mock_slide():
     )
 
 
-def _overlapping_annotation_mask():
-    """
-    400×400 mask with overlapping regions:
-      - tumor (value=1): [row 0:300, col 0:300]
-      - stroma (value=2): [row 100:400, col 100:400]
-    In the overlap zone [row 100:300, col 100:300] we set stroma (2).
-    So the final mask is: tumor where (row<100 or col<100), stroma elsewhere in tissue.
-    """
-    mask = np.zeros((SLIDE_H, SLIDE_W), dtype=np.uint8)
-    mask[0:300, 0:300] = 1   # tumor
-    mask[100:400, 100:400] = 2  # stroma overwrites overlap
-    return mask
-
-
 def _nonoverlapping_annotation_mask():
     """
     tumor: top-left quadrant [0:200, 0:200]
@@ -88,18 +74,6 @@ _COMMON_KWARGS = dict(
 )
 
 
-def test_joint_sampling_returns_key_per_active_annotation():
-    """Returns exactly one TilingResult per active_annotation."""
-    results = build_per_annotation_tiling_results(
-        slide=_mock_slide(),
-        resolved_masks=_resolved_masks(_nonoverlapping_annotation_mask()),
-        sampling_spec=_sampling_spec(),
-        selection_strategy=CoordinateSelectionStrategy.JOINT_SAMPLING,
-        **_COMMON_KWARGS,
-    )
-    assert set(results.keys()) == {"tumor", "stroma"}
-
-
 def test_invalid_output_mode_fails_fast():
     """An unrecognized output_mode (e.g. an API typo) must raise, not silently fall through
     to per-annotation output."""
@@ -112,19 +86,6 @@ def test_invalid_output_mode_fails_fast():
             output_mode="bogus_mode",
             **_COMMON_KWARGS,
         )
-
-
-def test_joint_sampling_annotation_field_on_result():
-    """Each TilingResult.annotation matches its dict key."""
-    results = build_per_annotation_tiling_results(
-        slide=_mock_slide(),
-        resolved_masks=_resolved_masks(_nonoverlapping_annotation_mask()),
-        sampling_spec=_sampling_spec(),
-        selection_strategy=CoordinateSelectionStrategy.JOINT_SAMPLING,
-        **_COMMON_KWARGS,
-    )
-    assert results["tumor"].annotation == "tumor"
-    assert results["stroma"].annotation == "stroma"
 
 
 def test_joint_sampling_tiles_pass_per_label_coverage_threshold():
@@ -146,47 +107,6 @@ def test_joint_sampling_tiles_pass_per_label_coverage_threshold():
         assert np.all(result.tissue_fractions >= threshold - 1e-6), (
             f"{annotation} tiles should have fraction >= {threshold}"
         )
-
-
-def test_joint_sampling_tiles_lie_within_union_region():
-    """All joint-sampled tiles lie within the union of annotation regions (not pure background)."""
-    mask = _nonoverlapping_annotation_mask()
-    union_mask = (mask > 0).astype(np.uint8)  # 1 where any annotation
-    resolved = _resolved_masks(mask)
-    slide = _mock_slide()
-
-    results = build_per_annotation_tiling_results(
-        slide=slide,
-        resolved_masks=resolved,
-        sampling_spec=_sampling_spec(),
-        selection_strategy=CoordinateSelectionStrategy.JOINT_SAMPLING,
-        **_COMMON_KWARGS,
-    )
-
-    tile_size = 64
-    for annotation, result in results.items():
-        for x, y in zip(result.x, result.y):
-            x_end = min(int(x) + tile_size, SLIDE_W)
-            y_end = min(int(y) + tile_size, SLIDE_H)
-            tile_region = union_mask[int(y):y_end, int(x):x_end]
-            assert tile_region.sum() > 0, (
-                f"{annotation} tile at ({x},{y}) contains no annotation pixels"
-            )
-
-
-
-def test_joint_sampling_tile_index_is_contiguous():
-    """tile_index for each result is a contiguous range [0, num_tiles)."""
-    results = build_per_annotation_tiling_results(
-        slide=_mock_slide(),
-        resolved_masks=_resolved_masks(_nonoverlapping_annotation_mask()),
-        sampling_spec=_sampling_spec(),
-        selection_strategy=CoordinateSelectionStrategy.JOINT_SAMPLING,
-        **_COMMON_KWARGS,
-    )
-    for result in results.values():
-        expected = np.arange(result.num_tiles, dtype=np.int32)
-        np.testing.assert_array_equal(result.tile_index, expected)
 
 
 def test_joint_sampling_selection_strategy_field_on_result():

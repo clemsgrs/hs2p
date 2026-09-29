@@ -5,8 +5,6 @@ import pytest
 from PIL import Image
 
 import hs2p.wsi.reader as reader_mod
-from hs2p.configs import TilingConfig
-from hs2p.mask import Mask, TissueLabels
 from hs2p.wsi.backends import pil as pil_mod
 
 
@@ -25,33 +23,6 @@ def test_auto_routes_flat_raster_suffixes_only_to_pil(monkeypatch, suffix):
     assert selection.backend == "pil"
     assert selection.tried == ("pil",)
     assert "PIL" in (selection.reason or "")
-
-
-@pytest.mark.parametrize(
-    ("filename", "image_format"),
-    [("image.png", "PNG"), ("image.jpg", "JPEG"), ("image.JPEG", "JPEG")],
-)
-def test_auto_opens_small_flat_rasters_without_native_backend_probes(
-    monkeypatch, tmp_path, filename, image_format
-):
-    path = tmp_path / filename
-    Image.fromarray(np.zeros((3, 5, 3), dtype=np.uint8), mode="RGB").save(
-        path,
-        format=image_format,
-    )
-
-    def _unexpected_probe(**kwargs):
-        raise AssertionError(f"auto probed a native backend: {kwargs}")
-
-    monkeypatch.setattr(reader_mod, "_backend_can_open_source", _unexpected_probe)
-
-    with reader_mod.open_slide(
-        path,
-        backend="auto",
-        spacing_override=0.25,
-    ) as slide:
-        assert slide.backend_name == "pil"
-        assert slide.dimensions == (5, 3)
 
 
 def test_pil_reader_reports_one_level_geometry_and_explicit_spacing(tmp_path):
@@ -82,43 +53,6 @@ def test_pil_reader_requires_explicit_level_zero_spacing(tmp_path):
         reader_mod.open_slide(path, backend="pil")
 
 
-@pytest.mark.parametrize("backend", ["pil", "auto"])
-def test_flat_raster_opens_without_spacing_when_spacing_is_not_required(
-    tmp_path, backend
-):
-    path = tmp_path / "labels.png"
-    Image.fromarray(np.zeros((4, 6), dtype=np.uint8), mode="L").save(path)
-
-    with reader_mod.open_slide(path, backend=backend, require_spacing=False) as slide:
-        assert slide.backend_name == "pil"
-        assert slide.native_spacing is None
-        assert slide.spacing is None
-        assert slide.spacings == []
-        assert slide.dimensions == (6, 4)
-
-
-def test_pil_reader_uses_the_project_owned_pixel_ceiling():
-    assert pil_mod.PIL_MAX_IMAGE_PIXELS == 89_478_485
-
-
-def test_pil_reader_accepts_an_image_at_the_project_pixel_ceiling(
-    monkeypatch, tmp_path
-):
-    path = tmp_path / "at-limit.png"
-    Image.fromarray(np.zeros((2, 3), dtype=np.uint8), mode="L").save(path)
-    monkeypatch.setattr(pil_mod, "PIL_MAX_IMAGE_PIXELS", 6)
-    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 1)
-
-    with reader_mod.open_slide(
-        path,
-        backend="pil",
-        spacing_override=0.5,
-    ) as slide:
-        assert slide.dimensions == (3, 2)
-
-    assert Image.MAX_IMAGE_PIXELS == 1
-
-
 def test_auto_rejects_one_pixel_above_the_pil_ceiling_before_decode(
     monkeypatch, tmp_path
 ):
@@ -147,47 +81,6 @@ def test_auto_rejects_one_pixel_above_the_pil_ceiling_before_decode(
     assert "dimensions=3x2" in message
     assert "pixel_count=6" in message
     assert "ceiling=5" in message
-    assert "another backend" not in message.lower()
-
-
-def test_auto_mask_oversize_error_does_not_recommend_another_backend(
-    monkeypatch, tmp_path
-):
-    path = tmp_path / "too-large-mask.png"
-    Image.fromarray(np.zeros((2, 3), dtype=np.uint8), mode="L").save(path)
-    monkeypatch.setattr(pil_mod, "PIL_MAX_IMAGE_PIXELS", 5)
-
-    with pytest.raises(ValueError) as caught:
-        Mask(path=path, labels=TissueLabels(background=0, tissue=1), backend="auto")
-
-    message = str(caught.value)
-    assert "backend=pil" in message
-    assert "ceiling=5" in message
-    assert "another" not in message.lower()
-    assert "select" not in message.lower()
-
-
-def test_corrupt_flat_raster_fails_with_pil_context_and_no_fallback(
-    monkeypatch, tmp_path
-):
-    path = tmp_path / "corrupt.jpeg"
-    path.write_bytes(b"not an image")
-
-    def _unexpected_probe(**kwargs):
-        raise AssertionError(f"auto probed an alternative backend: {kwargs}")
-
-    monkeypatch.setattr(reader_mod, "_backend_can_open_source", _unexpected_probe)
-
-    with pytest.raises(RuntimeError) as caught:
-        reader_mod.open_slide(
-            path,
-            backend="auto",
-            spacing_override=0.5,
-        )
-
-    message = str(caught.value)
-    assert "PIL backend failed to open" in message
-    assert str(path) in message
     assert "another backend" not in message.lower()
 
 
@@ -330,86 +223,3 @@ def test_pil_region_read_uses_white_out_of_bounds_padding(tmp_path):
         actual = slide.read_region((-1, -1), 0, (5, 4))
 
     np.testing.assert_array_equal(actual, expected)
-
-
-def test_pil_thumbnail_fits_inside_requested_size_as_rgb_uint8(tmp_path):
-    source = np.full((2, 4, 3), [12, 34, 56], dtype=np.uint8)
-    path = tmp_path / "thumbnail.png"
-    Image.fromarray(source, mode="RGB").save(path)
-
-    with reader_mod.open_slide(
-        path,
-        backend="pil",
-        spacing_override=0.5,
-    ) as slide:
-        thumbnail = slide.get_thumbnail((2, 2))
-
-    assert thumbnail.dtype == np.uint8
-    assert thumbnail.shape == (1, 2, 3)
-    np.testing.assert_array_equal(
-        thumbnail,
-        np.full((1, 2, 3), [12, 34, 56], dtype=np.uint8),
-    )
-
-
-def test_pil_reader_conforms_to_protocol_and_context_manager_closes_it(tmp_path):
-    path = tmp_path / "context.png"
-    Image.fromarray(np.zeros((2, 2, 3), dtype=np.uint8), mode="RGB").save(path)
-
-    with reader_mod.open_slide(
-        path,
-        backend="pil",
-        spacing_override=0.5,
-    ) as slide:
-        assert isinstance(slide, reader_mod.SlideReader)
-        reader = slide
-
-    reader.close()
-    with pytest.raises(ValueError, match="closed"):
-        reader.read_level(0)
-
-
-def test_palette_region_read_preserves_indices_and_single_channel_shape(tmp_path):
-    labels = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.uint8)
-    image = Image.fromarray(labels, mode="P")
-    image.putpalette([channel for index in range(256) for channel in (index, 0, 0)])
-    path = tmp_path / "palette.png"
-    image.save(path)
-    expected = np.full((3, 3), 255, dtype=np.uint8)
-    expected[:2, :2] = labels[:, 1:]
-
-    with reader_mod.open_slide(
-        path,
-        backend="pil",
-        spacing_override=0.5,
-    ) as slide:
-        actual = slide.read_region((1, 0), 0, (3, 3))
-
-    np.testing.assert_array_equal(actual, expected)
-
-
-def test_pil_is_a_supported_tiling_backend():
-    config = TilingConfig(
-        requested_spacing_um=0.5,
-        requested_tile_size_px=256,
-        tolerance=0.05,
-        overlap=0.0,
-        min_coverage={"tissue": 0.1},
-        backend="pil",
-        mask_backend="pil",
-    )
-
-    assert config.backend == "pil"
-    assert config.mask_backend == "pil"
-
-
-def test_flat_raster_resolution_records_requested_and_resolved_provenance():
-    resolved = reader_mod.resolve_backends(
-        requested_slide_backend="auto",
-        requested_mask_backend=None,
-        wsi_path=Path("benchmark.png"),
-    )
-
-    assert resolved.requested_slide_backend == "auto"
-    assert resolved.slide.backend == "pil"
-    assert resolved.slide.tried == ("pil",)

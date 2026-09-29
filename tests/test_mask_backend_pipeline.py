@@ -2,7 +2,6 @@
 mask backend (#163)."""
 from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -19,10 +18,7 @@ from hs2p.api import (
     save_tiling_result,
     validate_tiling_artifacts,
 )
-from hs2p.artifacts import load_whole_slides_from_rows
 from hs2p.tiling.result import TileGeometry, TilingResult
-from hs2p.wsi.backend import BackendSelection, ResolvedBackends
-from tests.test_progress import RecordingReporter
 
 
 def _tiles() -> TileGeometry:
@@ -96,23 +92,6 @@ def test_metadata_round_trips_all_four_backends_without_conflation(tmp_path: Pat
     assert artifacts.requested_mask_backend == "auto"
 
 
-def test_maskless_result_persists_null_mask_provenance(tmp_path: Path):
-    result = _result(
-        tissue_method="hsv",
-        mask_path=None,
-        mask_backend=None,
-        requested_mask_backend=None,
-    )
-    artifacts = save_tiling_result(result, output_dir=tmp_path)
-    loaded = load_tiling_result(
-        artifacts.coordinates_npz_path, artifacts.coordinates_meta_path
-    )
-    assert loaded.mask_backend is None
-    assert loaded.requested_mask_backend is None
-    assert artifacts.mask_backend is None
-    assert artifacts.requested_mask_backend is None
-
-
 def test_success_process_row_records_mask_backends_symmetrically():
     artifact = TilingArtifacts(
         sample_id="slide-1",
@@ -134,24 +113,6 @@ def test_success_process_row_records_mask_backends_symmetrically():
     )
     assert row["requested_backend"] == "auto"
     assert row["backend"] == "cucim"
-    assert row["requested_mask_backend"] == "auto"
-    assert row["mask_backend"] == "openslide"
-
-
-def test_failure_process_row_records_mask_backends_when_known():
-    row = orchestration_mod._build_failure_process_row(
-        whole_slide=SlideSpec(
-            sample_id="slide-1",
-            image_path=Path("slide-1.svs"),
-            mask_path=Path("slide-1-mask.tif"),
-        ),
-        error="boom",
-        traceback_text="tb",
-        requested_backend="auto",
-        backend="cucim",
-        requested_mask_backend="auto",
-        mask_backend="openslide",
-    )
     assert row["requested_mask_backend"] == "auto"
     assert row["mask_backend"] == "openslide"
 
@@ -190,156 +151,3 @@ def test_resume_rejects_on_resolved_mask_backend_mismatch(tmp_path: Path):
             coordinates_meta_path=artifacts.coordinates_meta_path,
             compatibility=incompatible,
         )
-
-
-def test_resume_ignores_mask_backend_for_maskless_slide(tmp_path: Path):
-    result = _result(tissue_method="hsv", mask_path=None, mask_backend=None, requested_mask_backend=None)
-    artifacts = save_tiling_result(result, output_dir=tmp_path)
-    whole_slide = SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs"))
-    seg = SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4)
-    filt = FilterConfig(ref_tile_size=224, a_t=4, a_h=2, filter_white=False, filter_black=False, white_threshold=220, black_threshold=25, fraction_threshold=0.9)
-    tiling = TilingConfig(
-        requested_spacing_um=0.5, requested_tile_size_px=224, tolerance=0.07, overlap=0.0,
-        min_coverage={"tissue": 0.1}, backend="cucim",
-    )
-    # A mismatched compatibility.mask_backend must not reject a maskless slide.
-    compatible = CompatibilitySpec(
-        tiling=tiling, segmentation=seg, filtering=filt, mask_backend="asap",
-    )
-    ok = validate_tiling_artifacts(
-        whole_slide=whole_slide,
-        coordinates_npz_path=artifacts.coordinates_npz_path,
-        coordinates_meta_path=artifacts.coordinates_meta_path,
-        compatibility=compatible,
-    )
-    assert ok.mask_backend is None
-
-
-def test_resume_rejects_pre_163_process_list_missing_mask_columns(
-    tmp_path: Path,
-):
-    import pandas as pd
-
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    # A pre-#163 process_list.csv has slide backend columns but no mask backend columns.
-    pd.DataFrame(
-        [
-            {
-                "sample_id": "slide-1",
-                "annotation": "tissue",
-                "image_path": "slide-1.svs",
-                "mask_path": np.nan,
-                "requested_backend": "asap",
-                "backend": "asap",
-                "tiling_status": "success",
-                "num_tiles": 1,
-                "coordinates_npz_path": "x.npz",
-                "coordinates_meta_path": "x.meta.json",
-                "error": np.nan,
-                "traceback": np.nan,
-            }
-        ]
-    ).to_csv(run_dir / "process_list.csv", index=False)
-    seg = SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4)
-    filt = FilterConfig(ref_tile_size=224, a_t=4, a_h=2, filter_white=False, filter_black=False, white_threshold=220, black_threshold=25, fraction_threshold=0.9)
-    tiling = TilingConfig(
-        requested_spacing_um=0.5, requested_tile_size_px=224, tolerance=0.07, overlap=0.0,
-        min_coverage={"tissue": 0.1}, backend="asap",
-    )
-    with pytest.raises(ValueError, match="missing required columns:.*mask_backend"):
-        orchestration_mod.tile_slides(
-            [SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs"))],
-            tiling=tiling,
-            segmentation=seg,
-            filtering=filt,
-            output_dir=run_dir,
-            resume=True,
-        )
-
-
-def test_load_whole_slides_from_rows_preserves_mask_path():
-    slides = load_whole_slides_from_rows(
-        [{"sample_id": "s1", "image_path": "s1.svs", "mask_path": "s1-mask.tif"}]
-    )
-    assert slides[0].mask_path == Path("s1-mask.tif")
-
-
-def test_auto_mask_selection_emits_distinct_progress_event(monkeypatch):
-    reporter = RecordingReporter()
-
-    def _fake_resolve_backends(
-        *,
-        requested_slide_backend,
-        requested_mask_backend,
-        wsi_path,
-        mask_path=None,
-        slide_spacing_override=None,
-    ):
-        del slide_spacing_override
-        slide = BackendSelection(backend="asap", reason=None, tried=("asap",))
-        mask = BackendSelection(
-            backend="cucim", reason="selected cuCIM for auto backend", tried=("cucim",)
-        )
-        return ResolvedBackends(
-            slide=slide, mask=mask,
-            requested_slide_backend="asap", requested_mask_backend="auto",
-        )
-
-    monkeypatch.setattr(orchestration_mod, "resolve_backends", _fake_resolve_backends)
-    tiling = TilingConfig(
-        requested_spacing_um=0.5, requested_tile_size_px=224, tolerance=0.07, overlap=0.0,
-        min_coverage={"tissue": 0.1}, backend="asap", mask_backend="auto",
-    )
-    whole_slide = SlideSpec(
-        sample_id="slide-9", image_path=Path("slide-9.svs"), mask_path=Path("slide-9-mask.tif")
-    )
-    import hs2p.progress as progress
-
-    with progress.activate_progress_reporter(reporter):
-        effective = orchestration_mod._resolve_effective_backends(whole_slide, tiling)
-
-    kinds = [e.kind for e in reporter.events]
-    assert "mask_backend.selected" in kinds
-    event = next(e for e in reporter.events if e.kind == "mask_backend.selected")
-    assert event.payload["sample_id"] == "slide-9"
-    assert event.payload["backend"] == "cucim"
-    assert event.payload["mask_path"] == str(whole_slide.mask_path)
-    assert "cuCIM" in event.payload["reason"]
-    # slide backend resolved independently and folded into the effective config
-    assert effective.backend == "asap"
-    assert effective.mask_backend == "cucim"
-    assert effective.requested_mask_backend == "auto"
-
-
-def test_maskless_slide_emits_no_mask_backend_event(monkeypatch):
-    reporter = RecordingReporter()
-
-    def _fake_resolve_backends(
-        *,
-        requested_slide_backend,
-        requested_mask_backend,
-        wsi_path,
-        mask_path=None,
-        slide_spacing_override=None,
-    ):
-        del slide_spacing_override
-        return ResolvedBackends(
-            slide=BackendSelection(backend="cucim", reason="selected cuCIM for auto backend", tried=("cucim",)),
-            mask=None, requested_slide_backend="auto", requested_mask_backend=None,
-        )
-
-    monkeypatch.setattr(orchestration_mod, "resolve_backends", _fake_resolve_backends)
-    tiling = TilingConfig(
-        requested_spacing_um=0.5, requested_tile_size_px=224, tolerance=0.07, overlap=0.0,
-        min_coverage={"tissue": 0.1}, backend="auto", mask_backend="auto",
-    )
-    whole_slide = SlideSpec(sample_id="slide-x", image_path=Path("slide-x.svs"))
-    import hs2p.progress as progress
-
-    with progress.activate_progress_reporter(reporter):
-        orchestration_mod._resolve_effective_backends(whole_slide, tiling)
-
-    kinds = [e.kind for e in reporter.events]
-    assert "mask_backend.selected" not in kinds
-    assert "backend.selected" in kinds

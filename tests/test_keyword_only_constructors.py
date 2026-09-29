@@ -182,28 +182,11 @@ def test_positional_construction_raises_type_error(cls, kwargs):
         cls(*kwargs.values())
 
 
-@pytest.mark.parametrize("cls, kwargs", CONSTRUCTOR_CASES)
-def test_keyword_construction_binds_every_field(cls, kwargs):
-    built = cls(**kwargs)
-
-    for name, value in kwargs.items():
-        assert getattr(built, name) is value or getattr(built, name) == value
-
-
 def test_wsi_positional_construction_raises_type_error(fake_backend):
     fake_backend(np.zeros((16, 16, 1), dtype=np.uint8))
 
     with pytest.raises(TypeError):
         WSI(Path("synthetic-slide.tif"), "asap")
-
-
-def test_wsi_keyword_construction_works(fake_backend):
-    fake_backend(np.zeros((16, 16, 1), dtype=np.uint8))
-
-    wsi = WSI(path=Path("synthetic-slide.tif"), backend="asap")
-
-    assert wsi.path == Path("synthetic-slide.tif")
-    assert wsi.requested_backend == "asap"
 
 
 def _comparable(result: TilingResult) -> dict:

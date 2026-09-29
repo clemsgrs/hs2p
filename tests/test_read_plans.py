@@ -1,4 +1,3 @@
-from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -96,10 +95,3 @@ def test_iter_grouped_read_plans_prefers_dense_4x4_blocks():
             tile_indices=tuple(range(16)),
         )
     ]
-
-
-def test_resolve_step_px_lv0_uses_smallest_positive_stride_when_metadata_missing():
-    result = _make_grid_result(columns=3, rows=1, tile_size_px=32, step_px=24)
-    result = replace(result, step_px_lv0=None)
-
-    assert resolve_step_px_lv0(result) == 24

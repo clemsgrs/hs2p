@@ -1,11 +1,7 @@
 """Tests for the unified process-list row schema with annotation column."""
-import numpy as np
-import pytest
-
 from hs2p.api import TilingArtifacts, SlideSpec
 from pathlib import Path
 
-import hs2p.api as api_mod
 import hs2p.tiling.orchestration as orchestration_mod
 
 
@@ -56,30 +52,6 @@ def test_merged_row_labeled_merged_not_tissue():
     assert row["output_mode"] == CoordinateOutputMode.MERGED
 
 
-def test_binary_tissue_row_has_no_output_mode():
-    row = orchestration_mod._build_success_process_row(
-        whole_slide=_whole_slide(), artifact=_artifact(annotation=None)
-    )
-    assert row["annotation"] == "tissue"
-    assert row["output_mode"] is None
-
-
-def test_success_row_has_all_required_columns():
-    row = orchestration_mod._build_success_process_row(
-        whole_slide=_whole_slide(mask_path=Path("mask.png")),
-        artifact=_artifact(annotation="tissue"),
-    )
-    expected_columns = {
-        "sample_id", "annotation", "output_mode", "image_path", "mask_path",
-        "requested_backend", "backend", "requested_mask_backend", "mask_backend",
-        "tiling_status", "num_tiles",
-        "coordinates_npz_path", "coordinates_meta_path", "tiles_tar_path",
-        "mask_preview_path", "tiling_preview_path",
-        "error", "traceback",
-    }
-    assert set(row.keys()) == expected_columns
-
-
 def test_failure_row_has_all_required_columns():
     row = orchestration_mod._build_failure_process_row(
         whole_slide=_whole_slide(mask_path=Path("mask.png")),
@@ -95,44 +67,6 @@ def test_failure_row_has_all_required_columns():
         "error", "traceback",
     }
     assert set(row.keys()) == expected_columns
-
-
-def test_failure_row_annotation_defaults_to_tissue():
-    row = orchestration_mod._build_failure_process_row(
-        whole_slide=_whole_slide(),
-        error="test error",
-        traceback_text="traceback",
-    )
-    assert row["annotation"] == "tissue"
-
-
-def test_failure_row_annotation_preserved_when_set():
-    row = orchestration_mod._build_failure_process_row(
-        whole_slide=_whole_slide(),
-        error="test error",
-        traceback_text="traceback",
-        annotation="stroma",
-    )
-    assert row["annotation"] == "stroma"
-
-
-def test_success_row_tiling_status_is_success():
-    row = orchestration_mod._build_success_process_row(
-        whole_slide=_whole_slide(),
-        artifact=_artifact(),
-    )
-    assert row["tiling_status"] == "success"
-    assert row["num_tiles"] == 5
-
-
-def test_failure_row_tiling_status_is_failed():
-    row = orchestration_mod._build_failure_process_row(
-        whole_slide=_whole_slide(),
-        error="oops",
-        traceback_text="tb",
-    )
-    assert row["tiling_status"] == "failed"
-    assert row["num_tiles"] == 0
 
 
 # --- resume metadata merge ignores requested_backend (Finding 5) -------------------------

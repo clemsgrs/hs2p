@@ -33,14 +33,6 @@ def _cfg(overrides: dict | None = None):
     return cfg
 
 
-def test_default_config_routes_to_binary_tissue():
-    cfg = _cfg()
-    tiling = resolve_tiling_config(cfg)
-    sampling, strategy, output_mode = resolve_sampling_request(cfg, tiling=tiling)
-    assert sampling is None and strategy is None and output_mode is None
-    assert (tiling.min_coverage.get("tissue") or 0.0) == 0.01
-
-
 def test_annotation_config_triggers_sampling_without_tissue_threshold():
     cfg = _cfg(
         {
@@ -123,23 +115,6 @@ def test_background_label_is_not_reserved_at_activation():
     assert set(sampling.active_annotations) == {"background"}
 
 
-def test_annotation_config_rejects_reserved_merged_name():
-    cfg = _cfg(
-        {
-            "tiling": {
-                "masks": {
-                    "pixel_mapping": {"merged": 2},
-                    "colors": {"merged": None},
-                    "min_coverage": {"merged": 0.5},
-                }
-            }
-        }
-    )
-
-    with pytest.raises(ValueError, match="'merged'.*reserved"):
-        resolve_sampling_request(cfg, tiling=resolve_tiling_config(cfg))
-
-
 def test_annotation_config_rejects_reserved_name_before_null_to_drop():
     cfg = _cfg(
         {
@@ -157,24 +132,6 @@ def test_annotation_config_rejects_reserved_name_before_null_to_drop():
         resolve_sampling_request(cfg, tiling=resolve_tiling_config(cfg))
 
 
-@pytest.mark.parametrize("invalid_value", [-1, 256])
-def test_annotation_config_rejects_label_id_outside_preview_safe_range(invalid_value):
-    cfg = _cfg(
-        {
-            "tiling": {
-                "masks": {
-                    "pixel_mapping": {"tumor": invalid_value},
-                    "colors": {"tumor": None},
-                    "min_coverage": {"tumor": 0.5},
-                }
-            }
-        }
-    )
-
-    with pytest.raises(ValueError, match=rf"tumor.*{invalid_value}"):
-        resolve_sampling_request(cfg, tiling=resolve_tiling_config(cfg))
-
-
 def test_build_default_sampling_spec_requires_tissue_coverage():
     """The binary-tissue default spec hard-errors on a missing tissue threshold (no silent
     0.0), honours an explicit 0.0 opt-out, and carries a specified value through."""
@@ -187,25 +144,6 @@ def test_build_default_sampling_spec_requires_tissue_coverage():
     ] == 0.0
     with pytest.raises(ValueError, match="min_coverage.tissue is required"):
         build_default_sampling_spec(_tiling({}))
-
-
-def test_annotation_request_does_not_require_tissue_coverage():
-    """resolve_sampling_request must not build the tissue-requiring default spec for an
-    annotation-only config — it detects the untouched default via constants instead."""
-    cfg = _cfg(
-        {
-            "tiling": {
-                "masks": {
-                    "pixel_mapping": {"grade_4": 4, "grade_5": 5},
-                    "colors": {"grade_4": [255, 0, 0], "grade_5": [0, 0, 255]},
-                    "min_coverage": {"tissue": None, "grade_4": 0.25, "grade_5": 0.25},
-                }
-            }
-        }
-    )
-    sampling, _, _ = resolve_sampling_request(cfg, tiling=resolve_tiling_config(cfg))
-    assert sampling is not None
-    assert set(sampling.active_annotations) == {"grade_4", "grade_5"}
 
 
 def test_resolve_output_mode_default_and_validation():

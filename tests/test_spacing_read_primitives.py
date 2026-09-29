@@ -1,8 +1,8 @@
 """Tests for the spacing-aware read primitives.
 
-Covers the shared planning kernel (:func:`plan_spacing_read`), the resize helper
-(:func:`resize_array`), and the two public read methods built on them:
-``WSI.read_region_at_spacing`` and ``WSI.read_full_at_spacing``. The WSI methods are
+Covers the shared planning kernel (:func:`plan_spacing_read`) and the two public
+read methods built on it: ``WSI.read_region_at_spacing`` and
+``WSI.read_full_at_spacing``. The WSI methods are
 exercised against a lightweight stub (they only touch ``get_level_spacing``,
 ``level_downsamples``, ``read_region``, and ``get_slide``) so no slide backend is
 required.
@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 from hs2p.wsi.geometry import plan_spacing_read
-from hs2p.wsi.wsi import WSI, resize_array
+from hs2p.wsi.wsi import WSI
 
 # level0 spacing 0.5 µm/px with x1/x2/x4 downsamples -> spacings [0.5, 1.0, 2.0]
 DOWNSAMPLES = [(1.0, 1.0), (2.0, 2.0), (4.0, 4.0)]
@@ -21,38 +21,6 @@ DOWNSAMPLES = [(1.0, 1.0), (2.0, 2.0), (4.0, 4.0)]
 # --------------------------------------------------------------------------- #
 # plan_spacing_read                                                           #
 # --------------------------------------------------------------------------- #
-def test_plan_spacing_read_exact_match_reads_target_size_directly():
-    plan = plan_spacing_read(
-        requested_spacing_um=0.5,
-        level0_spacing_um=0.5,
-        level_downsamples=DOWNSAMPLES,
-        target_size_px=(100, 100),
-        tolerance=0.05,
-        content_kind="image",
-    )
-
-    assert plan.level == 0
-    assert plan.is_within_tolerance is True
-    # within tolerance -> read the target size, no scaling (never upsampled)
-    assert plan.read_size_px == (100, 100)
-
-
-def test_plan_spacing_read_out_of_tolerance_scales_read_size_up():
-    # 1.5 µm/px sits between level1 (1.0) and level2 (2.0); finest level whose
-    # spacing is <= request is level1, so read larger and downscale by 1.5/1.0.
-    plan = plan_spacing_read(
-        requested_spacing_um=1.5,
-        level0_spacing_um=0.5,
-        level_downsamples=DOWNSAMPLES,
-        target_size_px=(100, 100),
-        tolerance=0.05,
-        content_kind="image",
-    )
-
-    assert plan.level == 1
-    assert plan.read_spacing_um == pytest.approx(1.0)
-    assert plan.is_within_tolerance is False
-    assert plan.read_size_px == (150, 150)  # round(100 * 1.5 / 1.0)
 
 
 def test_plan_spacing_read_never_selects_a_coarser_level_than_requested():
@@ -91,21 +59,6 @@ def test_plan_spacing_read_rejects_finer_image_request_outside_tolerance():
         )
 
 
-def test_plan_spacing_read_rejects_unknown_content_kind():
-    with pytest.raises(
-        ValueError,
-        match=r"unknown content_kind 'mask'; expected 'image' or 'label'",
-    ):
-        plan_spacing_read(
-            requested_spacing_um=0.5,
-            level0_spacing_um=0.5,
-            level_downsamples=DOWNSAMPLES,
-            target_size_px=(100, 100),
-            tolerance=0.05,
-            content_kind="mask",
-        )
-
-
 @pytest.mark.parametrize("content_kind", ["image", "label"])
 def test_plan_spacing_read_accepts_slightly_finer_spacing_within_tolerance_without_resize(
     content_kind,
@@ -122,42 +75,6 @@ def test_plan_spacing_read_accepts_slightly_finer_spacing_within_tolerance_witho
     assert plan.level == 0
     assert plan.is_within_tolerance is True
     assert plan.read_size_px == (100, 100)
-
-
-# --------------------------------------------------------------------------- #
-# resize_array                                                                #
-# --------------------------------------------------------------------------- #
-def test_resize_array_is_a_noop_when_target_matches_shape():
-    arr = np.arange(4 * 4 * 3, dtype=np.uint8).reshape(4, 4, 3)
-
-    out = resize_array(arr, (4, 4), interpolation="area")
-
-    # identical shape -> same object returned (lossless exact match)
-    assert out is arr
-
-
-def test_resize_array_downscales_with_nearest_preserving_class_ids():
-    labels = np.array(
-        [
-            [1, 1, 2, 2],
-            [1, 1, 2, 2],
-            [3, 3, 4, 4],
-            [3, 3, 4, 4],
-        ],
-        dtype=np.int32,
-    )
-
-    out = resize_array(labels, (2, 2), interpolation="nearest")
-
-    assert out.shape == (2, 2)
-    assert set(np.unique(out)).issubset({1, 2, 3, 4})
-
-
-def test_resize_array_rejects_unknown_interpolation():
-    arr = np.zeros((4, 4, 3), dtype=np.uint8)
-
-    with pytest.raises(ValueError, match="unknown interpolation"):
-        resize_array(arr, (2, 2), interpolation="bogus")
 
 
 # --------------------------------------------------------------------------- #

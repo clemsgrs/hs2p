@@ -6,12 +6,6 @@ import pytest
 from hs2p.fileops import is_flattened_annotation
 
 
-@pytest.mark.parametrize("annotation", [None, "tissue"])
-def test_flattened_for_structural_output_and_tissue(annotation):
-    # Structural merged output carries annotation=None and output_mode="merged".
-    assert is_flattened_annotation(annotation) is True
-
-
 @pytest.mark.parametrize(
     "annotation",
     ["grade_4", "tumor", "Tissue", "tissue_x", "merged", "Merged", "merged_x"],

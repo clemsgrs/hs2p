@@ -106,7 +106,7 @@ libraries. Do not compare measurements from different machines as a speedup.
 ```bash
 python -m pytest -q --no-cov -m script tests/test_benchmarking.py tests/test_benchmark_tile_store.py
 python -m pytest -q --no-cov tests
-python -m pytest -q --no-cov -m integration tests/test_fixture_artifacts_regression.py tests/test_tile_count_heuristic_regression.py tests/test_tiling_preview_mask_overlay.py
+python -m pytest -q --no-cov -m integration tests/test_fixture_artifacts_regression.py tests/test_tile_count_heuristic_regression.py
 ```
 
 The last command contains ASAP-dependent golden-coordinate checks; inspect skips

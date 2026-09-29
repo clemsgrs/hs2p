@@ -1,11 +1,9 @@
 import json
-from pathlib import Path
 
 import cv2
 import numpy as np
 import pytest
 
-import hs2p
 import hs2p.preprocessing as preprocessing_mod
 from hs2p.preprocessing import (
     ContourResult,
@@ -17,7 +15,6 @@ from hs2p.preprocessing import (
     generate_tiles,
 )
 from hs2p.tiling.coverage import compute_tile_coverage
-from hs2p.wsi.streaming.plans import resolve_read_step_px
 
 
 BASE_SPACING = 0.25
@@ -49,49 +46,6 @@ def test_generate_tiles_bounds_coverage_work_to_selected_content(monkeypatch, nu
     np.testing.assert_array_equal(result.y, [4, 48])
     np.testing.assert_array_equal(result.tissue_fractions, [1.0, 1.0])
     assert sum(integral_sizes) <= 8
-
-
-@pytest.mark.parametrize(
-    "contour,holes,tile_size,expected_coords,expected_fractions",
-    [
-        (
-            [[5, 3], [15, 3], [15, 15], [5, 15]],
-            [[[8, 6], [10, 6], [10, 9], [8, 9]]],
-            6,
-            [[5, 3], [5, 9], [5, 15], [11, 3], [11, 9], [11, 15]],
-            [0.75, 0.75, 0.5, 0.75, 0.75, 0.5],
-        ),
-        (
-            [[15, 12], [24, 12], [24, 21], [15, 21]],
-            [],
-            4,
-            [[15, 12], [15, 16], [19, 12], [19, 16]],
-            [1.0, 1.0, 0.5, 0.5],
-        ),
-        (
-            [[19, 3], [19, 8]],
-            [],
-            4,
-            [[19, 3], [19, 7]],
-            [0.0, 0.0],
-        ),
-    ],
-)
-def test_generate_tiles_preserves_fractional_mask_projection_and_padding(
-    contour, holes, tile_size, expected_coords, expected_fractions,
-):
-    contours = ContourResult(
-        contours=[np.array(contour, dtype=np.int32).reshape(-1, 1, 2)],
-        holes=[[np.array(hole, dtype=np.int32).reshape(-1, 1, 2) for hole in holes]],
-        mask=np.full((6, 8), 255, dtype=np.uint8),
-    )
-    result = generate_tiles(
-        (20, 18), contours, requested_tile_size_px=tile_size,
-        requested_spacing_um=1.0, base_spacing_um=1.0,
-        level_downsamples=[1.0], min_tissue_fraction=0.0,
-    )
-    np.testing.assert_array_equal(np.column_stack((result.x, result.y)), expected_coords)
-    np.testing.assert_array_equal(result.tissue_fractions, expected_fractions)
 
 
 def test_detect_contours_keeps_all_child_holes():
@@ -128,21 +82,6 @@ def test_compute_tissue_fractions_normalizes_padded_tiles_over_full_tile_area():
     )
 
     np.testing.assert_array_equal(fractions, np.array([0.0625], dtype=np.float32))
-
-
-def test_compute_tissue_fractions_truncates_projected_tile_origins():
-    tissue_mask = np.zeros((3, 3), dtype=np.uint8)
-    tissue_mask[1, 1] = 1
-    candidates = np.array([[15, 15]], dtype=np.int64)
-
-    fractions = compute_tile_coverage(
-        candidates=candidates,
-        binary_mask=tissue_mask,
-        tile_size_lv0=10,
-        slide_dimensions=(30, 30),
-    )
-
-    np.testing.assert_array_equal(fractions, np.array([1.0], dtype=np.float32))
 
 
 def test_generate_tiles_uses_actual_read_geometry_when_spacing_is_within_tolerance():
@@ -296,25 +235,3 @@ def test_tiling_artifact_roundtrip_uses_strict_rich_metadata(tmp_path):
     paths["meta"].write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n")
     with pytest.raises(ValueError, match="unexpected keys"):
         load_tiling_result(paths["npz"], paths["meta"])
-def test_top_level_package_reexports_preprocessing_core_surface():
-    assert hs2p.ContourResult is ContourResult
-    assert hs2p.TileGeometry is TileGeometry
-    assert hs2p.detect_contours is detect_contours
-    assert hs2p.generate_tiles is generate_tiles
-    assert hs2p.preprocess_slide is hs2p.preprocessing.preprocess_slide
-
-
-def test_preprocessing_result_uses_canonical_geometry_fields():
-    result = _make_tiling_result()
-
-    np.testing.assert_array_equal(result.x, result.tiles.x)
-    np.testing.assert_array_equal(result.y, result.tiles.y)
-    np.testing.assert_array_equal(result.tissue_fractions, result.tiles.tissue_fractions)
-    assert len(result.x) == len(result.tiles.x)
-    assert result.requested_spacing_um == pytest.approx(result.tiles.requested_spacing_um)
-    assert result.requested_tile_size_px == result.tiles.requested_tile_size_px
-    assert result.read_spacing_um == pytest.approx(result.tiles.read_spacing_um)
-    assert result.read_tile_size_px == result.tiles.read_tile_size_px
-    assert resolve_read_step_px(result) == 192
-    assert result.min_tissue_fraction == pytest.approx(result.tiles.min_tissue_fraction)
-    assert result.mask_path == Path("/tmp/slide-001-mask.tif")

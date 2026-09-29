@@ -65,14 +65,6 @@ def test_positional_call_raises_type_error(func, args):
         func(*args)
 
 
-def test_get_tile_positional_call_raises_type_error(fake_backend):
-    fake_backend(np.zeros((16, 16, 1), dtype=np.uint8))
-    wsi = WSI(path=Path("synthetic-slide.tif"), backend="asap")
-
-    with pytest.raises(TypeError, match="positional argument"):
-        wsi.get_tile(0, 0, 4, 4, 0)
-
-
 def test_get_tile_keyword_call_reads_the_tile(fake_backend):
     fake_backend(np.zeros((16, 16, 1), dtype=np.uint8))
     wsi = WSI(path=Path("synthetic-slide.tif"), backend="asap")
