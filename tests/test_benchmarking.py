@@ -11,6 +11,24 @@ import hs2p.preprocessing as preprocessing_mod
 pytestmark = pytest.mark.script
 
 
+def test_read_benchmark_resume_preserves_completed_csv_results(monkeypatch, tmp_path):
+    module = _load_benchmark_script_module()
+    summary = tmp_path / "benchmark_summary.csv"
+    runs = tmp_path / "benchmark_runs.csv"
+    summary.write_text("mode,tiles\nregular_wsd,2\n")
+    runs.write_text("mode,repeat_index,tiles\nregular_wsd,0,2\n")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["benchmark_tile_read.py", "--config-file", "unused.json",
+         "--output-dir", str(tmp_path), "--modes", "regular_wsd"],
+    )
+
+    assert module.main() == 0
+    assert summary.read_text() == "mode,tiles\nregular_wsd,2\n"
+    assert runs.read_text() == "mode,repeat_index,tiles\nregular_wsd,0,2\n"
+
+
 def _make_grid_result(
     *,
     columns: int,

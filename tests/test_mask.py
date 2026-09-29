@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 import hs2p.mask as mask_mod
-from hs2p.mask import AnnotationLabels, Mask, TissueLabels
+from hs2p.mask import AnnotationLabels, Mask, MaskRead, TissueLabels
 
 TISSUE = TissueLabels(background=0, tissue=1)
 
@@ -274,6 +274,18 @@ def test_full_read_rejects_invalid_native_decodes(monkeypatch, native, reason):
         aligned.read_full(target_spacing_um=2.0, target_dimensions=(2, 2))
 
 
+def test_mask_read_is_immutable(monkeypatch):
+    mask = _open_fake_mask(monkeypatch, _FakeReader(_blank_levels((2, 2))))
+    aligned = mask.align_to(reference_spacing_um=0.5, reference_dimensions=(8, 8))
+
+    read = aligned.read_full(target_spacing_um=2.0, target_dimensions=(2, 2))
+
+    with pytest.raises(AttributeError):
+        read.read_level = 1
+    with pytest.raises(ValueError, match="read-only"):
+        read.labels[0, 0] = 1
+
+
 class _WindowFakeReader(_FakeReader):
     """A ``_FakeReader`` that crops windows the way every hs2p backend addresses them.
 
@@ -435,6 +447,20 @@ def _flat_tissue_mask_with_a_stray_label(monkeypatch, *, stray, path):
     mask = _open_fake_mask(monkeypatch, reader, path=path)
     aligned = mask.align_to(reference_spacing_um=0.5, reference_dimensions=(16, 16))
     return reader, aligned
+
+
+def test_region_read_returns_an_immutable_mask_read(monkeypatch):
+    _, aligned = _coarse_numbered_mask(monkeypatch)
+
+    read = aligned.read_region(
+        location=(0, 0), target_spacing_um=4.0, target_dimensions=(2, 2)
+    )
+
+    assert isinstance(read, MaskRead)
+    with pytest.raises(AttributeError):
+        read.read_level = 1
+    with pytest.raises(ValueError, match="read-only"):
+        read.labels[0, 0] = 1
 
 
 def test_region_read_validates_the_native_window_before_resampling(monkeypatch):
