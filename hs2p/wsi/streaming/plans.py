@@ -80,10 +80,11 @@ def resolve_step_px_lv0(result: Any) -> int:
         diffs = diffs[diffs > 0]
         if diffs.size > 0:
             return int(diffs.min())
-    return max(
-        1,
-        int(round(int(result.tile_size_lv0) * (1.0 - float(result.overlap)), 0)),
-    )
+    return resolve_tile_stride(
+        read_tile_size_px=result.read_tile_size_px,
+        tile_size_lv0=result.tile_size_lv0,
+        overlap=result.overlap,
+    ).step_px_lv0
 
 
 def iter_grouped_read_plans(

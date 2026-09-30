@@ -195,6 +195,38 @@ def test_summarize_annotation_coverage_area_frac_and_est_tiles(monkeypatch):
     assert summary["necrosis"]["est_tiles"] == 0
 
 
+def test_est_tiles_uses_the_tiling_stride_for_overlap_above_level_0(monkeypatch):
+    """The summary grid must step like tiling: 16 px tiles read at a 2x level with 0.1
+    overlap stride 14 read-level px, i.e. 28 level-0 px, not round(32 * 0.9) = 29. On a
+    116 px full-foreground canvas that is a 4x4 grid of whole tiles (origins 0, 28, 56,
+    84), where the legacy stride fits only 3x3 at a 1.0 threshold."""
+    size = 116
+    slide = SimpleNamespace(
+        dimensions=(size, size),
+        spacing=BASE_SPACING,
+        level_downsamples=[1.0, 2.0],
+        level_dimensions=[(size, size), (size // 2, size // 2)],
+        backend_name="mock",
+    )
+    native = np.ones((size, size), dtype=np.uint8)
+    resolved = resolve_annotation_masks(
+        slide=slide,
+        mask=_open_annotation_mask(monkeypatch, native, pixel_mapping={"background": 0, "tumor": 1}),
+        seg_downsample=1,
+    )
+
+    summary = summarize_annotation_coverage(
+        slide=slide,
+        resolved_masks=resolved,
+        min_coverage={"tumor": 1.0},
+        requested_tile_size_px=16,
+        requested_spacing_um=2 * BASE_SPACING,
+        overlap=0.1,
+    )
+
+    assert summary["tumor"]["est_tiles"] == 16
+
+
 def _slide_at(spacing_um: float) -> SimpleNamespace:
     return SimpleNamespace(
         dimensions=(SLIDE_W, SLIDE_H),

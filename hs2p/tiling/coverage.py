@@ -7,6 +7,7 @@ from hs2p.tiling.contours import _normalize_level_downsamples
 from hs2p.wsi.geometry import (
     plan_spacing_read,
     project_discrete_grid_origins,
+    resolve_tile_stride,
     tile_size_lv0_from_plan,
 )
 
@@ -112,8 +113,10 @@ def summarize_annotation_coverage(
       both the numerator set and the denominator.
     - ``est_tiles`` — number of tile footprints whose class coverage is at
       least ``min_coverage[class]`` (``None`` when no threshold is given). This is an
-      *estimate*: it reuses :func:`compute_tile_coverage` over a regular level-0 grid and
-      uses the requested overlap but deliberately ignores tissue filtering. Each footprint
+      *estimate*: it reuses :func:`compute_tile_coverage` over a regular level-0 grid at
+      the stride tiling uses for the requested overlap (see
+      :func:`hs2p.wsi.geometry.resolve_tile_stride`) but deliberately ignores tissue
+      filtering. Each footprint
       is the tile tiling would read: a level within ``tolerance`` of the request is read
       natively, as in :func:`hs2p.tiling.generate.generate_tiles`, so pass the tolerance
       the tiling uses.
@@ -146,7 +149,13 @@ def summarize_annotation_coverage(
         content_kind="image",
     )
     tile_size_lv0 = max(1, tile_size_lv0_from_plan(read_plan, level0_spacing_um=base_spacing_um))
-    step = max(1, round(tile_size_lv0 * (1.0 - overlap)))
+    # The same stride tiling lays its grid with: rounded once at the read level, then
+    # projected to level 0, so the estimate counts the footprints tiling would visit.
+    step = resolve_tile_stride(
+        read_tile_size_px=read_plan.read_size_px[0],
+        tile_size_lv0=tile_size_lv0,
+        overlap=overlap,
+    ).step_px_lv0
     slide_w, slide_h = int(slide.dimensions[0]), int(slide.dimensions[1])
     xs = np.arange(0, max(1, slide_w), step, dtype=np.int64)
     ys = np.arange(0, max(1, slide_h), step, dtype=np.int64)
