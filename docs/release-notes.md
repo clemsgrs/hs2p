@@ -1,5 +1,24 @@
 # Release Notes
 
+## Unreleased
+
+### One tile stride, defined at the read level
+
+- The stride between overlapping tiles is now rounded once, in read-level pixels, and
+  the level-0 stride is derived from it (`hs2p.wsi.geometry.resolve_tile_stride`).
+  Tiling and grouped streaming reads used to round independently: with a 16 px read at a
+  2x level and 10% overlap, tiling placed origins 29 level-0 px apart (14.5 read px)
+  while grouped reads cropped every 14 px, so batched tiles drifted up to 3 px from the
+  pixels their saved coordinates name. Coordinates for runs with `overlap > 0` read
+  above level 0 change accordingly (28 instead of 29 in that example); runs with no
+  overlap, or read at level 0, are unchanged.
+- Grouped read plans now admit a tile only when its own floored read-level origin is
+  exactly where the group's crop is taken, and otherwise read it individually, so a
+  grouped tile is always the pixels an individual read at its coordinate returns.
+- Reusing or resuming a coordinate artifact whose level-0 stride differs from the one
+  the current version derives fails with `precomputed tiles stride mismatch`, so a
+  resumed batch cannot mix strides with a fresh one.
+
 ## 5.0.0
 
 hs2p 5.0 is a breaking release. Source masks are now first-class `hs2p.Mask` objects
