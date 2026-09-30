@@ -12,9 +12,11 @@ from hs2p.wsi.backends import (
     CuCIMReader,
     OpenSlideReader,
     PILReader,
+    TifffileReader,
     VIPSReader,
     supports_cucim_path,
     supports_pil_path,
+    supports_tifffile_path,
     supports_vips_path,
 )
 from hs2p.wsi.geometry import LevelSelection, select_level, select_level_for_downsample
@@ -225,11 +227,28 @@ def _open_pil(
     )
 
 
+def _open_tifffile(
+    path: str | Path,
+    *,
+    spacing_override: float | None = None,
+    require_spacing: bool = True,
+) -> SlideReader:
+    return TifffileReader(
+        path,
+        spacing_override=spacing_override,
+        require_spacing=require_spacing,
+    )
+
+
+# ``tifffile`` is explicit-only: it is not part of ``AUTO_BACKEND_ORDER`` because it
+# returns stored samples unchanged, which is what a label mask needs and what an RGB
+# slide read path does not expect from ``auto``.
 _BACKENDS: dict[str, _BackendSpec] = {
     "cucim": _BackendSpec("cucim", _open_cucim, supports_cucim_path),
     "asap": _BackendSpec("asap", _open_asap, _supports_all_paths),
     "openslide": _BackendSpec("openslide", _open_openslide, _supports_all_paths),
     "pil": _BackendSpec("pil", _open_pil, supports_pil_path),
+    "tifffile": _BackendSpec("tifffile", _open_tifffile, supports_tifffile_path),
     "vips": _BackendSpec("vips", _open_vips, supports_vips_path),
 }
 

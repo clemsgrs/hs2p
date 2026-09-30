@@ -177,7 +177,14 @@ full.read_spacing_um   # 1.0: the slide's 0.5 µm/px times 12 / 6
 **Backend.** `backend="auto"` (the default) resolves the reader from the mask path alone
 and never inherits the slide reader; a concrete backend is authoritative. `Mask.backend`
 is the concrete reader that opened the file. Open failures raise `ValueError` or
-`RuntimeError` naming the path and backend.
+`RuntimeError` naming the path and backend. The native display readers (`cucim`, `vips`,
+`openslide`, `asap`) decode to 8-bit RGB, which only preserves labels stored as 8-bit
+unsigned, non-palette samples; a TIFF mask stored any other way is refused before it is
+opened (`ValueError`, "Mask open failed ... converts to 8-bit RGB for display"), because
+the converted values would pass every later check. `backend="tifffile"`
+(`pip install "hs2p[tifffile]"`) reads pyramidal TIFF masks losslessly in their stored
+dtype, so a 16-bit label 300 still fails validation as out of range instead of decoding
+as 1. `auto` never selects `tifffile`.
 
 **Alignment.** `align_to(reference_spacing_um=..., reference_dimensions=...)` binds the
 mask to a slide's level-0 grid, which the mask must cover in full from a shared origin.

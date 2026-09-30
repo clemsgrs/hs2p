@@ -19,6 +19,7 @@ from hs2p.wsi.geometry import (
     select_level_for_spacing_read,
 )
 from hs2p.wsi.reader import AUTO_BACKEND, SlideReader, open_slide, resolve_backend
+from hs2p.wsi.tiff_header import read_tiff_sample_format
 from hs2p.wsi.types import pixel_values
 
 MAX_LABEL_ID = 255
@@ -43,6 +44,10 @@ CANVAS_EDGE_EPSILON_PX = 1e-6
 # it into the previous pixel.
 SPACING_RATIO_RTOL = 1e-6
 EXACT_STEP_MAX_DENOMINATOR = 64
+# Readers that decode every source to 8-bit RGB for display. They return a TIFF's
+# stored values only when those already are 8-bit unsigned, non-palette samples.
+DISPLAY_DECODING_BACKENDS = frozenset({"asap", "cucim", "openslide", "vips"})
+LOSSLESS_LABEL_BACKEND = "tifffile"
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +150,7 @@ class Mask:
             self._backend = resolve_backend(
                 self._backend, wsi_path=self._path, require_spacing=False
             ).backend
+            _refuse_lossy_label_decode(path=self._path, backend=self._backend)
             self._reader: SlideReader | None = open_slide(
                 self._path, self._backend, require_spacing=False
             )
@@ -552,6 +558,26 @@ def _mask_read(labels: np.ndarray, selection: LevelSelection) -> MaskRead:
         labels=labels,
         read_level=selection.level,
         read_spacing_um=selection.read_spacing_um,
+    )
+
+
+def _refuse_lossy_label_decode(*, path: Path, backend: str) -> None:
+    """Raise before a display reader silently rewrites a TIFF mask's stored labels.
+
+    cuCIM, OpenSlide, VIPS and ASAP decode to 8-bit RGB: a 16-bit label 1 comes back as
+    0 and 257 as 1, palette indices become colors, and no later validation can tell.
+    The check reads the TIFF header only; a non-TIFF source is left to its reader.
+    """
+    if backend not in DISPLAY_DECODING_BACKENDS:
+        return
+    sample_format = read_tiff_sample_format(path)
+    if sample_format is None or sample_format.is_lossless_for_display_readers:
+        return
+    raise ValueError(
+        f"the TIFF stores {sample_format.describe()}, which the {backend} backend "
+        "converts to 8-bit RGB for display, silently changing label values. Open it "
+        f"with backend='{LOSSLESS_LABEL_BACKEND}' (pip install 'hs2p[{LOSSLESS_LABEL_BACKEND}]') "
+        "or re-export the mask with 8-bit unsigned samples"
     )
 
 

@@ -1,5 +1,20 @@
 # Release Notes
 
+## Unreleased
+
+### Lossless TIFF masks
+
+- `Mask` refuses a TIFF mask through `cucim`, `vips`, `openslide` or `asap` when its
+  samples are not 8-bit unsigned, non-palette. Those readers decode to 8-bit RGB for
+  display, so a 16-bit label 1 came back as 0 and 257 as 1, and the empty or wrong tissue
+  mask passed validation. The check reads the TIFF header only and names the stored
+  sample format and the fix in its `ValueError`.
+- New explicit `tifffile` backend (`pip install "hs2p[tifffile]"`, included in
+  `hs2p[all]`) for slide and mask reads: it returns stored samples in their stored dtype
+  from tiled or stripped, flat or pyramidal (SubIFD or multi-page) TIFFs, decoding only
+  the segments a region read touches. `auto` never selects it. Spacing comes from the
+  resolution tags when present; untagged masks open without spacing as before.
+
 ## 5.0.0
 
 hs2p 5.0 is a breaking release. Source masks are now first-class `hs2p.Mask` objects
