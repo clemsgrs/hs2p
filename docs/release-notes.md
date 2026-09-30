@@ -10,11 +10,21 @@
   came back as 0 and 257 as 1, a min-is-white 255 as 0, and the empty or wrong tissue
   mask passed validation. The check reads the TIFF directories only and names the
   offending directory, its sample layout and the fix in its `ValueError`.
-- New explicit `tifffile` backend (`pip install "hs2p[tifffile]"`, included in
-  `hs2p[all]`) for slide and mask reads: it returns stored samples in their stored dtype
-  from tiled or stripped, flat or pyramidal (SubIFD or multi-page) TIFFs, decoding only
-  the segments a region read touches. `auto` never selects it. Spacing comes from the
-  resolution tags when present; untagged masks open without spacing as before.
+- New `tifffile` backend (`pip install "hs2p[tifffile]"`, included in `hs2p[all]`) for
+  slide and mask reads: it returns stored samples in their stored dtype from tiled or
+  stripped, flat or pyramidal (SubIFD or multi-page) TIFFs, decoding only the segments a
+  region read touches. Spacing comes from the resolution tags when present; untagged
+  masks open without spacing as before.
+- `mask_backend: auto` now resolves through `hs2p.wsi.reader.resolve_mask_backend`, the
+  contract `Mask` itself opens with. It reads every TIFF directory first and selects
+  `tifffile` when any level stores samples the display readers would convert, recording
+  the directory and the reason in the `mask_backend.selected` event; every other mask
+  keeps the `cucim → vips → openslide → asap` chain. A slide path never selects
+  `tifffile`.
+- Batch preflight no longer requires spacing metadata from a mask. An untagged 8-bit
+  TIFF mask that `Mask(...)` opened fine used to be skipped by the usable native reader
+  in `tile_slide`/`tile_slides` and fall through to a reader that fabricated a file
+  spacing, failing alignment; the preflight and the mask open now share one rule.
 
 ## 5.0.0
 

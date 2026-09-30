@@ -20,9 +20,11 @@ from hs2p.wsi.backends import (
     supports_vips_path,
 )
 from hs2p.wsi.geometry import LevelSelection, select_level, select_level_for_downsample
+from hs2p.wsi.tiff_header import find_lossy_tiff_directory
 
 AUTO_BACKEND = "auto"
 AUTO_BACKEND_ORDER = ("cucim", "vips", "openslide", "asap")
+LOSSLESS_LABEL_BACKEND = "tifffile"
 
 
 @runtime_checkable
@@ -116,10 +118,10 @@ def resolve_backends(
 ) -> ResolvedBackends:
     """Resolve slide and mask backends independently from their own paths.
 
-    Slide ``auto`` and mask ``auto`` share the same format-aware selection policy
-    (:func:`resolve_backend`): flat raster suffixes select PIL directly, while other
-    suffixes use the native-backend openability chain. An explicit backend is
-    authoritative and returned without a probe. A slide with no ``mask_path``
+    The slide role uses :func:`resolve_backend`; the mask role uses
+    :func:`resolve_mask_backend`, the one contract :class:`hs2p.mask.Mask` opens with, so
+    a preflight here never selects a reader the mask open would then reject. An explicit
+    backend is authoritative and returned without a probe. A slide with no ``mask_path``
     resolves only the slide role.
     """
     requested_slide = (requested_slide_backend or AUTO_BACKEND).strip().lower()
@@ -139,7 +141,7 @@ def resolve_backends(
         requested_mask_backend if requested_mask_backend is not None else AUTO_BACKEND
     )
     requested_mask = (requested_mask or AUTO_BACKEND).strip().lower()
-    mask_selection = resolve_backend(requested_mask, wsi_path=Path(mask_path))
+    mask_selection = resolve_mask_backend(requested_mask, mask_path=Path(mask_path))
     return ResolvedBackends(
         slide=slide_selection,
         mask=mask_selection,
@@ -337,6 +339,37 @@ def _backend_can_open_source(
         return False
 
 
+def resolve_mask_backend(requested_backend: str, *, mask_path: Path) -> BackendSelection:
+    """Resolve the reader for a source mask from the mask path alone.
+
+    An explicit backend is authoritative. ``auto`` first reads every TIFF directory,
+    reduced pyramid levels included: a directory whose samples a display reader would
+    rescale, convert, invert or expand (anything but 8-bit unsigned min-is-black or RGB)
+    selects ``tifffile``, the lossless label reader, and records which directory and why.
+    Every other file goes through the same format-aware chain as a slide
+    (:func:`resolve_backend`), without requiring spacing metadata: a mask's spacing comes
+    from its dimensions relative to the slide, so an untagged TIFF is a valid mask.
+    """
+    requested_backend = (requested_backend or AUTO_BACKEND).strip().lower()
+    if requested_backend != AUTO_BACKEND:
+        return BackendSelection(
+            backend=requested_backend,
+            reason=None,
+            tried=(requested_backend,),
+        )
+    lossy = find_lossy_tiff_directory(mask_path)
+    if lossy is not None:
+        return BackendSelection(
+            backend=LOSSLESS_LABEL_BACKEND,
+            reason=(
+                f"selected {LOSSLESS_LABEL_BACKEND} for lossless label reads: the TIFF's "
+                f"{lossy.describe()}, which a display reader {lossy.display_conversion()}"
+            ),
+            tried=(LOSSLESS_LABEL_BACKEND,),
+        )
+    return resolve_backend(requested_backend, wsi_path=mask_path, require_spacing=False)
+
+
 def resolve_backend(
     requested_backend: str,
     *,
@@ -409,6 +442,7 @@ def resolve_backend(
 __all__ = [
     "AUTO_BACKEND",
     "AUTO_BACKEND_ORDER",
+    "LOSSLESS_LABEL_BACKEND",
     "BackendSelection",
     "BatchRegionReader",
     "LevelSelection",
@@ -417,6 +451,7 @@ __all__ = [
     "open_slide",
     "resolve_backend",
     "resolve_backends",
+    "resolve_mask_backend",
     "select_level",
     "select_level_for_downsample",
 ]

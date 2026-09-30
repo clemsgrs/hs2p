@@ -203,10 +203,90 @@ def test_mask_rejects_out_of_range_uint16_labels_through_tifffile(tmp_path):
             aligned.read_full(target_spacing_um=2.0, target_dimensions=(64, 32))
 
 
-def _write_min_is_white_pair(tmp_path):
-    """The same stored 0/255 raster under both grayscale photometrics."""
+def _write_flat_slide(path, size=64):
+    from PIL import Image
+
+    Image.fromarray(np.full((size, size, 3), 120, dtype=np.uint8)).save(path)
+    return path
+
+
+def _sixteen_tile_config(mask_backend):
+    from hs2p import TilingConfig
+
+    return TilingConfig(
+        requested_spacing_um=1.0,
+        requested_tile_size_px=16,
+        tolerance=0.01,
+        overlap=0,
+        min_coverage={"tissue": 0.5},
+        backend="pil",
+        mask_backend=mask_backend,
+    )
+
+
+EXPECTED_SIXTEEN = sorted([(x, y) for x in (0, 16, 32, 48) for y in (0, 16, 32, 48)])
+
+
+def test_tile_slide_auto_reads_a_uint16_mask_through_tifffile(tmp_path, monkeypatch):
+    from hs2p import FilterConfig, SlideSpec, tile_slide
+    import hs2p.tiling.orchestration as orchestration_mod
+
+    slide_path = _write_flat_slide(tmp_path / "slide.png")
+    mask_path = tmp_path / "mask.tif"
+    tifffile.imwrite(
+        mask_path, np.ones((64, 64), dtype=np.uint16), tile=(16, 16), photometric="minisblack"
+    )
+    events = []
+    monkeypatch.setattr(
+        orchestration_mod,
+        "emit_progress",
+        lambda kind, **payload: events.append((kind, payload)),
+    )
+
+    result = tile_slide(
+        SlideSpec(sample_id="s", image_path=slide_path, mask_path=mask_path, spacing_at_level_0=1.0),
+        tiling=_sixteen_tile_config("auto"),
+        filtering=FilterConfig(a_t=0, a_h=0),
+    )
+
+    assert sorted(zip(result.x.tolist(), result.y.tolist())) == EXPECTED_SIXTEEN
+    assert np.unique(result.tissue_mask).tolist() == [255]
+    assert result.mask_backend == "tifffile"
+    assert result.requested_mask_backend == "auto"
+    selected = [payload for kind, payload in events if kind == "mask_backend.selected"]
+    assert len(selected) == 1
+    assert selected[0]["backend"] == "tifffile"
+    assert "16-bit unsigned integer samples" in selected[0]["reason"]
+
+
+def test_tile_slide_auto_opens_an_untagged_8bit_mask_with_a_native_reader(tmp_path):
+    if not any(
+        __import__("importlib").util.find_spec(module) is not None
+        for module in ("cucim", "openslide")
+    ):
+        pytest.skip("no native reader installed for the auto chain")
+    from hs2p import FilterConfig, SlideSpec, tile_slide
+
+    slide_path = _write_flat_slide(tmp_path / "slide.png")
+    mask_path = tmp_path / "mask.tif"
+    tifffile.imwrite(
+        mask_path, np.ones((64, 64), dtype=np.uint8), tile=(16, 16), photometric="minisblack"
+    )
+
+    result = tile_slide(
+        SlideSpec(sample_id="s", image_path=slide_path, mask_path=mask_path, spacing_at_level_0=1.0),
+        tiling=_sixteen_tile_config("auto"),
+        filtering=FilterConfig(a_t=0, a_h=0),
+    )
+
+    assert sorted(zip(result.x.tolist(), result.y.tolist())) == EXPECTED_SIXTEEN
+    assert result.mask_backend in {"cucim", "openslide"}
+
+
+def _write_min_is_white_pair(tmp_path, *, tissue=255):
+    """The same stored 0/``tissue`` raster under both grayscale photometrics."""
     labels = np.zeros((64, 64), dtype=np.uint8)
-    labels[:32, :] = 255
+    labels[:32, :] = tissue
     paths = {}
     for photometric in ("miniswhite", "minisblack"):
         paths[photometric] = tmp_path / f"{photometric}.tif"
@@ -261,3 +341,79 @@ def test_mask_reads_a_mixed_width_pyramid_losslessly_through_tifffile(tmp_path):
 
     assert read.read_level == 0
     np.testing.assert_array_equal(read.labels, np.ones((32, 32), dtype=np.uint8))
+
+
+def _native_reader_installed():
+    import importlib.util
+
+    return any(
+        importlib.util.find_spec(module) is not None for module in ("cucim", "openslide")
+    )
+
+
+def test_tile_slide_auto_routes_a_min_is_white_mask_to_tifffile(tmp_path, monkeypatch):
+    """Stored 0/1 under min-is-white: auto reads it through tifffile and finds the same
+    tiles as the min-is-black control through a native reader (a native decode of the
+    min-is-white file inverts it to 255/254, which no longer names any tissue)."""
+    from hs2p import FilterConfig, SlideSpec, tile_slide
+    import hs2p.tiling.orchestration as orchestration_mod
+
+    slide_path = _write_flat_slide(tmp_path / "slide.png")
+    labels, paths = _write_min_is_white_pair(tmp_path, tissue=1)
+    events = []
+    monkeypatch.setattr(
+        orchestration_mod,
+        "emit_progress",
+        lambda kind, **payload: events.append((kind, payload)),
+    )
+
+    def _tile(mask_path):
+        result = tile_slide(
+            SlideSpec(
+                sample_id="s", image_path=slide_path, mask_path=mask_path, spacing_at_level_0=1.0
+            ),
+            tiling=_sixteen_tile_config("auto"),
+            filtering=FilterConfig(a_t=0, a_h=0),
+        )
+        return result, sorted(zip(result.x.tolist(), result.y.tolist()))
+
+    # the top half is tissue: eight 16 px tiles
+    expected = sorted([(x, y) for x in (0, 16, 32, 48) for y in (0, 16)])
+    inverted, inverted_tiles = _tile(paths["miniswhite"])
+    assert inverted.mask_backend == "tifffile"
+    assert inverted_tiles == expected
+    selected = [payload for kind, payload in events if kind == "mask_backend.selected"]
+    assert [payload["backend"] for payload in selected] == ["tifffile"]
+    assert "min-is-white, which a display reader inverts" in selected[0]["reason"]
+
+    if _native_reader_installed():
+        control, control_tiles = _tile(paths["minisblack"])
+        assert control.mask_backend in {"cucim", "openslide"}
+        assert control_tiles == expected
+        np.testing.assert_array_equal(control.tissue_mask, inverted.tissue_mask)
+
+
+def test_tile_slide_auto_routes_a_mixed_width_pyramid_to_tifffile(tmp_path):
+    """A uint8 root with a uint16 reduced level (class 1 everywhere) yields the full
+    sixteen tiles through tifffile; a native reduced-level decode returned zeros."""
+    from hs2p import FilterConfig, SlideSpec, tile_slide
+
+    slide_path = _write_flat_slide(tmp_path / "slide.png")
+    mask_path = tmp_path / "mixed.tif"
+    with tifffile.TiffWriter(mask_path) as writer:
+        writer.write(np.ones((64, 64), dtype=np.uint8), tile=(16, 16), photometric="minisblack")
+        writer.write(
+            np.ones((32, 32), dtype=np.uint16),
+            tile=(16, 16),
+            photometric="minisblack",
+            subfiletype=1,
+        )
+
+    result = tile_slide(
+        SlideSpec(sample_id="s", image_path=slide_path, mask_path=mask_path, spacing_at_level_0=1.0),
+        tiling=_sixteen_tile_config("auto"),
+        filtering=FilterConfig(a_t=0, a_h=0),
+    )
+
+    assert result.mask_backend == "tifffile"
+    assert sorted(zip(result.x.tolist(), result.y.tolist())) == EXPECTED_SIXTEEN
