@@ -201,3 +201,63 @@ def test_mask_rejects_out_of_range_uint16_labels_through_tifffile(tmp_path):
         aligned = mask.align_to(reference_spacing_um=0.5, reference_dimensions=(256, 128))
         with pytest.raises(ValueError, match=r"outside \[0, 255\]"):
             aligned.read_full(target_spacing_um=2.0, target_dimensions=(64, 32))
+
+
+def _write_min_is_white_pair(tmp_path):
+    """The same stored 0/255 raster under both grayscale photometrics."""
+    labels = np.zeros((64, 64), dtype=np.uint8)
+    labels[:32, :] = 255
+    paths = {}
+    for photometric in ("miniswhite", "minisblack"):
+        paths[photometric] = tmp_path / f"{photometric}.tif"
+        tifffile.imwrite(
+            paths[photometric], labels, tile=(16, 16), photometric=photometric
+        )
+    return labels, paths
+
+
+def _read_full_labels(path, backend):
+    with Mask(path=path, labels=TissueLabels(background=0, tissue=255), backend=backend) as mask:
+        aligned = mask.align_to(reference_spacing_um=0.5, reference_dimensions=(64, 64))
+        return aligned.read_full(target_spacing_um=0.5, target_dimensions=(64, 64)).labels
+
+
+def test_mask_reads_min_is_white_labels_unchanged_through_tifffile(tmp_path):
+    labels, paths = _write_min_is_white_pair(tmp_path)
+
+    np.testing.assert_array_equal(_read_full_labels(paths["miniswhite"], "tifffile"), labels)
+    np.testing.assert_array_equal(_read_full_labels(paths["minisblack"], "tifffile"), labels)
+
+
+def test_native_control_matches_tifffile_for_min_is_black_only(tmp_path):
+    """cuCIM inverts min-is-white on decode (stored 255 -> 0), so the guard refuses it,
+    while the min-is-black control decodes to the stored values through both readers."""
+    pytest.importorskip("cucim")
+    labels, paths = _write_min_is_white_pair(tmp_path)
+
+    np.testing.assert_array_equal(_read_full_labels(paths["minisblack"], "cucim"), labels)
+    with pytest.raises(ValueError, match="which the cucim backend inverts"):
+        _read_full_labels(paths["miniswhite"], "cucim")
+
+
+def test_mask_reads_a_mixed_width_pyramid_losslessly_through_tifffile(tmp_path):
+    """A uint8 root with a uint16 reduced level: tifffile serves the root and resamples
+    it, so a reduced-level request still returns the stored class."""
+    path = tmp_path / "mixed.tif"
+    with tifffile.TiffWriter(path) as writer:
+        writer.write(
+            np.ones((64, 64), dtype=np.uint8), tile=(16, 16), photometric="minisblack"
+        )
+        writer.write(
+            np.ones((32, 32), dtype=np.uint16),
+            tile=(16, 16),
+            photometric="minisblack",
+            subfiletype=1,
+        )
+
+    with Mask(path=path, labels=TissueLabels(background=0, tissue=1), backend="tifffile") as mask:
+        aligned = mask.align_to(reference_spacing_um=1.0, reference_dimensions=(64, 64))
+        read = aligned.read_full(target_spacing_um=2.0, target_dimensions=(32, 32))
+
+    assert read.read_level == 0
+    np.testing.assert_array_equal(read.labels, np.ones((32, 32), dtype=np.uint8))

@@ -678,3 +678,52 @@ def test_display_backend_opens_an_8bit_tiff_mask(tmp_path, monkeypatch):
 
     with Mask(path=path, labels=TISSUE, backend="openslide") as mask:
         assert mask.backend == "openslide"
+
+
+def test_display_backend_refuses_a_min_is_white_tiff_mask_before_opening(
+    tmp_path, monkeypatch
+):
+    tifffile = pytest.importorskip("tifffile")
+    path = tmp_path / "mask.tif"
+    tifffile.imwrite(path, np.full((8, 8), 255, dtype=np.uint8), photometric="miniswhite")
+    monkeypatch.setattr(
+        mask_mod, "open_slide", lambda *args, **kwargs: pytest.fail("opened")
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        Mask(path=path, labels=TISSUE, backend="cucim")
+
+    message = str(excinfo.value)
+    assert "photometric min-is-white, which the cucim backend inverts" in message
+    assert "backend='tifffile'" in message
+
+
+@pytest.mark.parametrize("chained", [False, True])
+def test_display_backend_refuses_a_pyramid_with_a_lossy_reduced_level(
+    tmp_path, monkeypatch, chained
+):
+    tifffile = pytest.importorskip("tifffile")
+    path = tmp_path / "mask.tif"
+    with tifffile.TiffWriter(path) as writer:
+        writer.write(
+            np.ones((64, 64), dtype=np.uint8),
+            tile=(16, 16),
+            photometric="minisblack",
+            subifds=0 if chained else 1,
+        )
+        writer.write(
+            np.ones((32, 32), dtype=np.uint16),
+            tile=(16, 16),
+            photometric="minisblack",
+            subfiletype=1,
+        )
+    monkeypatch.setattr(
+        mask_mod, "open_slide", lambda *args, **kwargs: pytest.fail("opened")
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        Mask(path=path, labels=TISSUE, backend="openslide")
+
+    message = str(excinfo.value)
+    assert "directory 1 stores 16-bit unsigned integer samples" in message
+    assert "rescales to 8 bits" in message

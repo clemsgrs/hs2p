@@ -122,10 +122,12 @@ its slide by dimensions (see [Source masks](api.md#source-masks)).
 
 `cucim`, `vips`, `openslide` and `asap` decode every TIFF to 8-bit RGB for display, which
 silently rewrites labels stored any other way (16-bit label 1 decodes as 0, 257 as 1; a
-palette index becomes its color). A TIFF mask whose samples are not 8-bit unsigned and
-non-palette is therefore refused by those readers at open time, with a message pointing at
-`tiling.mask_backend: tifffile`, which reads pyramidal TIFF masks losslessly. Re-exporting
-the mask with 8-bit unsigned samples is the alternative.
+min-is-white 255 as 0; a palette index becomes its color). A TIFF mask whose samples are
+not 8-bit unsigned min-is-black or RGB in every directory, reduced pyramid levels
+included, is therefore refused by those readers at open time, with a message naming the
+offending directory and pointing at `tiling.mask_backend: tifffile`, which reads pyramidal
+TIFF masks losslessly. Re-exporting every level of the mask as 8-bit unsigned min-is-black
+samples is the alternative.
 
 Selection does not inspect mask labels or retry after a later decode failure. If a native reader opens a mask but cannot decode its pixels, explicitly set `tiling.mask_backend` to a reader that can decode it. Explicit reader choices are authoritative. Missing or incompatible mask backends fail with the mask path and backend in the error; a slide without a source mask does not check mask-reader availability.
 

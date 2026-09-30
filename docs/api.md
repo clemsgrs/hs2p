@@ -179,9 +179,10 @@ and never inherits the slide reader; a concrete backend is authoritative. `Mask.
 is the concrete reader that opened the file. Open failures raise `ValueError` or
 `RuntimeError` naming the path and backend. The native display readers (`cucim`, `vips`,
 `openslide`, `asap`) decode to 8-bit RGB, which only preserves labels stored as 8-bit
-unsigned, non-palette samples; a TIFF mask stored any other way is refused before it is
-opened (`ValueError`, "Mask open failed ... converts to 8-bit RGB for display"), because
-the converted values would pass every later check. `backend="tifffile"`
+unsigned min-is-black or RGB samples (min-is-white is inverted on decode); a TIFF mask
+with any other sample layout in any directory, including a pyramid's reduced levels, is
+refused before it is opened (`ValueError`, "Mask open failed ... silently changing label
+values"), because the converted values would pass every later check. `backend="tifffile"`
 (`pip install "hs2p[tifffile]"`) reads pyramidal TIFF masks losslessly in their stored
 dtype, so a 16-bit label 300 still fails validation as out of range instead of decoding
 as 1. `auto` never selects `tifffile`.
