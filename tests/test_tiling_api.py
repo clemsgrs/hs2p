@@ -3076,6 +3076,77 @@ def test_tile_slides_resume_preserves_extra_columns_and_existing_preview_paths(
     assert Path(row["tiling_preview_path"]) == tiling_preview_path
 
 
+@pytest.mark.parametrize("sample_id", ["001", "NA", "nan"])
+def test_tile_slides_resume_matches_numeric_and_na_like_sample_ids(
+    monkeypatch,
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+    sample_id: str,
+):
+    run_dir = tmp_path / "run"
+    result = _build_preprocessing_result(sample_id=sample_id, image_path="slide.svs")
+    artifacts = save_tiling_result(result, output_dir=run_dir)
+    mask_preview_path = run_dir / "preview" / "mask" / f"{sample_id}.jpg"
+    tiling_preview_path = run_dir / "preview" / "tiling" / f"{sample_id}.jpg"
+    for path in (mask_preview_path, tiling_preview_path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"preview")
+    pd.DataFrame(
+        [
+            {
+                "sample_id": sample_id,
+                "annotation": "tissue",
+                "image_path": "slide.svs",
+                "mask_path": np.nan,
+                "requested_backend": "asap",
+                "backend": "asap",
+                "requested_mask_backend": np.nan,
+                "mask_backend": np.nan,
+                "tiling_status": "success",
+                "num_tiles": artifacts.num_tiles,
+                "coordinates_npz_path": str(artifacts.coordinates_npz_path),
+                "coordinates_meta_path": str(artifacts.coordinates_meta_path),
+                "tiles_tar_path": np.nan,
+                "mask_preview_path": str(mask_preview_path),
+                "tiling_preview_path": str(tiling_preview_path),
+                "feature_status": "done",
+                "feature_path": "features/case.pt",
+                "error": np.nan,
+                "traceback": np.nan,
+            }
+        ]
+    ).to_csv(run_dir / "process_list.csv", index=False)
+
+    monkeypatch.setattr(
+        orchestration_mod,
+        "preprocess_slide",
+        lambda **_: (_ for _ in ()).throw(
+            AssertionError(f"resumed slide {sample_id!r} must not be recomputed")
+        ),
+    )
+
+    reused = tile_slides(
+        [SlideSpec(sample_id=sample_id, image_path=Path("slide.svs"))],
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        preview=PreviewConfig(save_mask_preview=True, save_tiling_preview=True),
+        output_dir=run_dir,
+        resume=True,
+    )
+
+    assert len(reused) == 1
+    assert reused[0].sample_id == sample_id
+    process_df = pd.read_csv(run_dir / "process_list.csv", converters={"sample_id": str})
+    row = process_df.to_dict(orient="records")[0]
+    assert row["sample_id"] == sample_id
+    assert row["tiling_status"] == "success"
+    assert row["feature_status"] == "done"
+    assert row["feature_path"] == "features/case.pt"
+
+
 @pytest.mark.parametrize("request_downstream_outputs", [False, True])
 def test_tile_slides_resume_trusts_recorded_downstream_output_provenance(
     tmp_path: Path,
