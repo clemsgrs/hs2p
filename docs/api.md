@@ -140,7 +140,10 @@ contours: evergreen `#255E3B` outer borders and coral `#F26B3A` hole borders.
 `tissue_contour_color` changes the outer border; `mask_overlay_alpha` has no effect
 on this contour-only preview. Sampling uses filled label masks with its pixel and
 color mappings; it also supports a tiling preview for each non-empty coordinate
-output. `overlay_mask_on_slide()` is the lower-level overlay helper.
+output. `overlay_mask_on_slide()` is the lower-level overlay helper. Previews reopen the
+slide exactly as preprocessing did, including a `spacing_at_level_0` override, so a flat
+PNG/JPEG slide previews with the same spacing it was tiled at; `overlay_mask_on_slide`
+and `write_coordinate_preview` take that override as `spacing_at_level_0`.
 
 ## Source masks
 

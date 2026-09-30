@@ -1,5 +1,17 @@
 # Release Notes
 
+## Unreleased
+
+### Previews keep the slide's spacing override
+
+- Mask and tiling previews reopened the slide from its path and backend only, dropping
+  the `spacing_at_level_0` a `SlideSpec` or CSV supplied. A flat PNG/JPEG slide, which
+  has no other spacing, tiled successfully and then failed in the preview step with
+  "Unable to infer slide spacing", so the default CLI configuration (both previews on)
+  recorded the slide as failed and exited non-zero. Every preview path now reopens the
+  slide with the override the result records; `overlay_mask_on_slide` and
+  `write_coordinate_preview` accept it as `spacing_at_level_0`.
+
 ## 5.0.0
 
 hs2p 5.0 is a breaking release. Source masks are now first-class `hs2p.Mask` objects

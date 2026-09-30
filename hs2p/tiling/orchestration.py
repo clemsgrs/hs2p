@@ -127,6 +127,7 @@ def _write_mask_preview(
     *,
     wsi_path: Path,
     backend: str,
+    spacing_at_level_0: float | None,
     mask_preview_path: Path | None,
     tissue_mask: np.ndarray | None,
     contours=None,
@@ -159,6 +160,7 @@ def _write_mask_preview(
     save_overlay_preview(
         wsi_path=wsi_path,
         backend=backend,
+        spacing_at_level_0=spacing_at_level_0,
         mask_arr=normalize_tissue_mask(np.asarray(tissue_mask)),
         mask_preview_path=mask_preview_path,
         downsample=downsample,
@@ -316,6 +318,7 @@ def _compute_tiling_result(
         _write_mask_preview(
             wsi_path=preprocessing_result.image_path,
             backend=preprocessing_result.backend,
+            spacing_at_level_0=preprocessing_result.spacing_at_level_0,
             mask_preview_path=mask_preview_path,
             tissue_mask=preprocessing_result.tissue_mask,
             contours=preprocessing_result.contours,
@@ -500,6 +503,7 @@ def write_tiling_preview(
         save_dir=save_dir,
         downsample=downsample,
         backend=result.backend,
+        spacing_at_level_0=result.spacing_at_level_0,
         sample_id=result.sample_id,
     )
     return save_dir / f"{result.sample_id}.jpg"
@@ -549,6 +553,7 @@ def write_annotation_tiling_preview(
         save_dir=save_dir,
         downsample=downsample,
         backend=result.backend,
+        spacing_at_level_0=result.spacing_at_level_0,
         sample_id=result.sample_id,
         mask=mask,
         annotation=preview_annotation,

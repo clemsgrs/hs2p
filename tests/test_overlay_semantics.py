@@ -33,7 +33,7 @@ def test_overlay_mask_on_slide_renders_outer_and_hole_contours(monkeypatch):
             return mask_arr
 
     class FakeWSI:
-        def __init__(self, path, backend="asap"):
+        def __init__(self, path, backend="asap", spacing_at_level_0=None):
             del backend
             self.path = Path(path)
             self.spacings = [0.5]
@@ -77,7 +77,7 @@ def test_overlay_mask_on_slide_scales_level_zero_contours_to_vis_level(monkeypat
     )
 
     class FakeWSI:
-        def __init__(self, path, backend="asap"):
+        def __init__(self, path, backend="asap", spacing_at_level_0=None):
             del backend
             self.path = Path(path)
             self.spacings = [0.5]
@@ -113,7 +113,7 @@ def test_overlay_mask_on_slide_accepts_in_memory_mask_array(monkeypatch):
     mask_arr[40:80, 40:80] = 1
 
     class FakeWSI:
-        def __init__(self, path, backend="asap"):
+        def __init__(self, path, backend="asap", spacing_at_level_0=None):
             del backend
             self.path = Path(path)
             self.spacings = [0.5]
@@ -150,7 +150,7 @@ def test_render_annotation_mask_preview_fills_each_label_and_omits_null_colors(
     slide_arr = np.full((120, 120, 3), 200, dtype=np.uint8)
 
     class FakeWSI:
-        def __init__(self, path, backend="asap"):
+        def __init__(self, path, backend="asap", spacing_at_level_0=None):
             del backend
             self.path = Path(path)
             self.spacings = [0.5]

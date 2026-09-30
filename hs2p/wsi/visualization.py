@@ -208,6 +208,7 @@ def save_overlay_preview(
     *,
     wsi_path: Path,
     backend: str,
+    spacing_at_level_0: float | None = None,
     mask_arr: np.ndarray,
     mask_preview_path: Path,
     downsample: int = 32,
@@ -227,6 +228,7 @@ def save_overlay_preview(
         mask_arr=mask_arr,
         downsample=downsample,
         backend=backend,
+        spacing_at_level_0=spacing_at_level_0,
         palette=palette,
         pixel_mapping=pixel_mapping,
         color_mapping=color_mapping,
@@ -255,6 +257,7 @@ def overlay_mask_on_slide(
     wsi_path: Path,
     downsample: int,
     backend: str,
+    spacing_at_level_0: float | None = None,
     mask: Mask | None = None,
     palette: np.ndarray | None = None,
     pixel_mapping: PixelMapping | None = None,
@@ -272,8 +275,11 @@ def overlay_mask_on_slide(
     The labels come from ``mask`` (an open source :class:`~hs2p.mask.Mask`, aligned to
     the slide and read at the preview level exactly as preprocessing reads it), or from
     the in-memory ``mask_arr``, or are derived from ``contours``.
+
+    ``spacing_at_level_0`` is the slide's spacing override, the same one preprocessing
+    opened it with; a flat raster has no other spacing to read.
     """
-    wsi_object = WSI(path=wsi_path, backend=backend)
+    wsi_object = WSI(path=wsi_path, backend=backend, spacing_at_level_0=spacing_at_level_0)
 
     vis_level = wsi_object.get_best_level_for_downsample_custom(downsample)
     wsi_arr = wsi_object.get_slide(vis_level)
@@ -370,6 +376,7 @@ def write_coordinate_preview(
     tile_size_lv0: int,
     save_dir: Path,
     backend: str,
+    spacing_at_level_0: float | None = None,
     sample_id: str | None = None,
     downsample: int = 64,
     grid_thickness: int = 1,
@@ -380,8 +387,9 @@ def write_coordinate_preview(
     color_mapping: dict[str, list[int] | None] | None = None,
 ):
     """Write the tile grid over the slide read at ``downsample``, each tile over its labels
-    from ``mask`` (an open source :class:`~hs2p.mask.Mask`) when one is given."""
-    wsi = WSI(path=wsi_path, backend=backend)
+    from ``mask`` (an open source :class:`~hs2p.mask.Mask`) when one is given.
+    ``spacing_at_level_0`` is the slide's spacing override, as preprocessing opened it."""
+    wsi = WSI(path=wsi_path, backend=backend, spacing_at_level_0=spacing_at_level_0)
     vis_level = wsi.get_best_level_for_downsample_custom(downsample)
     aligned_mask = _align_to_slide(mask, wsi) if mask is not None else None
 

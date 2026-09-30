@@ -422,6 +422,7 @@ def _patch_preprocess_slide(
             orchestration_mod._write_mask_preview(
                 wsi_path=out.image_path,
                 backend=out.backend,
+                spacing_at_level_0=out.spacing_at_level_0,
                 mask_preview_path=mask_preview_path,
                 tissue_mask=out.tissue_mask,
                 downsample=preview_downsample,
