@@ -230,8 +230,16 @@ def _build_contour_tissue_mask(
             hole_scaled[:, 0, 0] *= scale_x
             hole_scaled[:, 0, 1] *= scale_y
             holes_scaled.append(np.round(hole_scaled).astype(np.int32))
+        # A hole contour runs through the foreground pixels bordering the hole, so a
+        # filled draw clears that ring of tissue along with the hole. The ring is the
+        # contour itself: redraw it as a one-pixel line. The source-mask intersection
+        # below keeps everything honest, while the fill still excludes any island of
+        # tissue nested inside the hole, which is its own contour.
         cv2.drawContours(
             contour_mask, holes_scaled, -1, 0, thickness=-1, offset=(-x0, -y0)
+        )
+        cv2.drawContours(
+            contour_mask, holes_scaled, -1, 1, thickness=1, offset=(-x0, -y0)
         )
 
     return contour_mask * (tissue_mask[y0:y1, x0:x1] > 0).astype(np.uint8)
