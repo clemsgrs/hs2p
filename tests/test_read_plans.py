@@ -93,5 +93,8 @@ def test_iter_grouped_read_plans_prefers_dense_4x4_blocks():
             read_size_px=128,
             block_size=4,
             tile_indices=tuple(range(16)),
+            tile_origins=tuple(
+                (int(result.x[idx]), int(result.y[idx])) for idx in range(16)
+            ),
         )
     ]

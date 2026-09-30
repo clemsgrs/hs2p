@@ -7,11 +7,27 @@ import numpy as np
 
 @dataclass(frozen=True)
 class GroupedReadPlan:
+    """One region read covering ``block_size`` x ``block_size`` tiles.
+
+    ``x``/``y`` is the level-0 origin of the read; ``tile_indices`` lists the member
+    tiles in outer-X / inner-Y order and ``tile_origins`` their level-0 coordinates in
+    the same order, straight from the tiling result. Crop offsets inside the region are
+    read-level pixels and are never added to a level-0 coordinate.
+    """
+
     x: int
     y: int
     read_size_px: int
     block_size: int
     tile_indices: tuple[int, ...]
+    tile_origins: tuple[tuple[int, int], ...]
+
+    def __post_init__(self) -> None:
+        if len(self.tile_origins) != len(self.tile_indices):
+            raise ValueError(
+                "tile_origins must name one level-0 origin per tile index, got "
+                f"{len(self.tile_origins)} for {len(self.tile_indices)} tiles"
+            )
 
 
 @dataclass
@@ -114,6 +130,9 @@ def iter_grouped_read_plans(
             read_size_px=tile_size_px + (block_size - 1) * read_step_px,
             block_size=block_size,
             tile_indices=tuple(indices),
+            tile_origins=tuple(
+                (int(coordinates[i, 0]), int(coordinates[i, 1])) for i in indices
+            ),
         )
 
     for block_size in grouped_sizes:
@@ -138,6 +157,7 @@ def iter_grouped_read_plans(
                 read_size_px=tile_size_px,
                 block_size=1,
                 tile_indices=(idx,),
+                tile_origins=((int(coordinates[idx, 0]), int(coordinates[idx, 1])),),
             )
         )
 
