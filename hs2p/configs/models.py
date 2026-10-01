@@ -9,7 +9,7 @@ AUTO_BACKEND = "auto"
 # registry in ``hs2p.wsi.reader._BACKENDS`` (plus ``auto``); duplicated here so the config
 # layer validates without importing the (heavier) WSI reader package at model-definition time.
 VALID_BACKENDS: frozenset[str] = frozenset(
-    {AUTO_BACKEND, "cucim", "asap", "openslide", "pil", "vips"}
+    {AUTO_BACKEND, "cucim", "asap", "openslide", "pil", "tifffile", "vips"}
 )
 
 
