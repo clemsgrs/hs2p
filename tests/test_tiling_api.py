@@ -422,6 +422,7 @@ def _patch_preprocess_slide(
             orchestration_mod._write_mask_preview(
                 wsi_path=out.image_path,
                 backend=out.backend,
+                spacing_at_level_0=out.spacing_at_level_0,
                 mask_preview_path=mask_preview_path,
                 tissue_mask=out.tissue_mask,
                 downsample=preview_downsample,
@@ -2088,6 +2089,32 @@ def test_validate_tiling_artifacts_rejects_mismatched_tiling_config(
         )
 
 
+def test_validate_tiling_artifacts_rejects_a_legacy_level0_stride(
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    # an artifact written when the level-0 stride was rounded on its own: 403 is the
+    # stride the read-level rounding derives for this geometry, 404 is not
+    legacy = _build_preprocessing_result(
+        sample_id="slide-stride", image_path="slide-stride.svs", step_px_lv0=404
+    )
+    artifacts = save_tiling_result(legacy, output_dir=tmp_path)
+
+    with pytest.raises(ValueError, match="stride mismatch"):
+        validate_tiling_artifacts(
+            whole_slide=SlideSpec(sample_id="slide-stride", image_path=Path("slide-stride.svs")),
+            coordinates_npz_path=artifacts.coordinates_npz_path,
+            coordinates_meta_path=artifacts.coordinates_meta_path,
+            compatibility=_artifact_compatibility(
+                tiling_config=tiling_config,
+                segmentation_config=segmentation_config,
+                filter_config=filter_config,
+            ),
+        )
+
+
 def test_validate_tiling_artifacts_reuses_matching_explicit_level0_spacing(
     tmp_path: Path,
     tiling_config: TilingConfig,
@@ -3074,6 +3101,77 @@ def test_tile_slides_resume_preserves_extra_columns_and_existing_preview_paths(
     assert row["feature_path"] == "tile_embeddings/slide-resume.npz"
     assert Path(row["mask_preview_path"]) == mask_preview_path
     assert Path(row["tiling_preview_path"]) == tiling_preview_path
+
+
+@pytest.mark.parametrize("sample_id", ["001", "NA", "nan"])
+def test_tile_slides_resume_matches_numeric_and_na_like_sample_ids(
+    monkeypatch,
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+    sample_id: str,
+):
+    run_dir = tmp_path / "run"
+    result = _build_preprocessing_result(sample_id=sample_id, image_path="slide.svs")
+    artifacts = save_tiling_result(result, output_dir=run_dir)
+    mask_preview_path = run_dir / "preview" / "mask" / f"{sample_id}.jpg"
+    tiling_preview_path = run_dir / "preview" / "tiling" / f"{sample_id}.jpg"
+    for path in (mask_preview_path, tiling_preview_path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"preview")
+    pd.DataFrame(
+        [
+            {
+                "sample_id": sample_id,
+                "annotation": "tissue",
+                "image_path": "slide.svs",
+                "mask_path": np.nan,
+                "requested_backend": "asap",
+                "backend": "asap",
+                "requested_mask_backend": np.nan,
+                "mask_backend": np.nan,
+                "tiling_status": "success",
+                "num_tiles": artifacts.num_tiles,
+                "coordinates_npz_path": str(artifacts.coordinates_npz_path),
+                "coordinates_meta_path": str(artifacts.coordinates_meta_path),
+                "tiles_tar_path": np.nan,
+                "mask_preview_path": str(mask_preview_path),
+                "tiling_preview_path": str(tiling_preview_path),
+                "feature_status": "done",
+                "feature_path": "features/case.pt",
+                "error": np.nan,
+                "traceback": np.nan,
+            }
+        ]
+    ).to_csv(run_dir / "process_list.csv", index=False)
+
+    monkeypatch.setattr(
+        orchestration_mod,
+        "preprocess_slide",
+        lambda **_: (_ for _ in ()).throw(
+            AssertionError(f"resumed slide {sample_id!r} must not be recomputed")
+        ),
+    )
+
+    reused = tile_slides(
+        [SlideSpec(sample_id=sample_id, image_path=Path("slide.svs"))],
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+        preview=PreviewConfig(save_mask_preview=True, save_tiling_preview=True),
+        output_dir=run_dir,
+        resume=True,
+    )
+
+    assert len(reused) == 1
+    assert reused[0].sample_id == sample_id
+    process_df = pd.read_csv(run_dir / "process_list.csv", converters={"sample_id": str})
+    row = process_df.to_dict(orient="records")[0]
+    assert row["sample_id"] == sample_id
+    assert row["tiling_status"] == "success"
+    assert row["feature_status"] == "done"
+    assert row["feature_path"] == "features/case.pt"
 
 
 @pytest.mark.parametrize("request_downstream_outputs", [False, True])

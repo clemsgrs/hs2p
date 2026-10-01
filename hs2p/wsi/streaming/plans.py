@@ -4,14 +4,32 @@ from typing import Any, Iterable, Sequence
 
 import numpy as np
 
+from hs2p.wsi.geometry import resolve_tile_stride
+
 
 @dataclass(frozen=True)
 class GroupedReadPlan:
+    """One region read covering ``block_size`` x ``block_size`` tiles.
+
+    ``x``/``y`` is the level-0 origin of the read; ``tile_indices`` lists the member
+    tiles in outer-X / inner-Y order and ``tile_origins`` their level-0 coordinates in
+    the same order, straight from the tiling result. Crop offsets inside the region are
+    read-level pixels and are never added to a level-0 coordinate.
+    """
+
     x: int
     y: int
     read_size_px: int
     block_size: int
     tile_indices: tuple[int, ...]
+    tile_origins: tuple[tuple[int, int], ...]
+
+    def __post_init__(self) -> None:
+        if len(self.tile_origins) != len(self.tile_indices):
+            raise ValueError(
+                "tile_origins must name one level-0 origin per tile index, got "
+                f"{len(self.tile_origins)} for {len(self.tile_indices)} tiles"
+            )
 
 
 @dataclass
@@ -38,10 +56,28 @@ def resolve_read_step_px(result: Any) -> int:
     read_tile_size_px = int(result.read_tile_size_px)
     if read_tile_size_px <= 0:
         raise ValueError("read_tile_size_px must be > 0")
-    return max(
-        1,
-        int(round(read_tile_size_px * (1.0 - float(result.overlap)), 0)),
-    )
+    return resolve_tile_stride(
+        read_tile_size_px=read_tile_size_px,
+        tile_size_lv0=int(result.tile_size_lv0),
+        overlap=float(result.overlap),
+    ).read_step_px
+
+
+def resolve_read_downsample(result: Any) -> float:
+    """The x downsample of the level the tiles are read from.
+
+    Taken from the pyramid metadata, which is what a reader floors locations with; a
+    result whose metadata does not describe the read level falls back to the ratio of the
+    tile's level-0 footprint to its read size.
+    """
+    level_downsamples = list(result.level_downsamples)
+    read_level = int(result.read_level)
+    if 0 <= read_level < len(level_downsamples):
+        downsample = level_downsamples[read_level]
+        if isinstance(downsample, (tuple, list)):
+            downsample = downsample[0]
+        return float(downsample)
+    return float(result.tile_size_lv0) / float(result.read_tile_size_px)
 
 
 def resolve_step_px_lv0(result: Any) -> int:
@@ -60,10 +96,11 @@ def resolve_step_px_lv0(result: Any) -> int:
         diffs = diffs[diffs > 0]
         if diffs.size > 0:
             return int(diffs.min())
-    return max(
-        1,
-        int(round(int(result.tile_size_lv0) * (1.0 - float(result.overlap)), 0)),
-    )
+    return resolve_tile_stride(
+        read_tile_size_px=result.read_tile_size_px,
+        tile_size_lv0=result.tile_size_lv0,
+        overlap=result.overlap,
+    ).step_px_lv0
 
 
 def iter_grouped_read_plans(
@@ -89,6 +126,11 @@ def iter_grouped_read_plans(
     }
     consumed = np.zeros(len(coordinates), dtype=bool)
     tile_size_px = int(result.read_tile_size_px)
+    downsample = resolve_read_downsample(result)
+    # Readers floor a level-0 location onto the read level. A member joins a group only
+    # when its own floored origin is exactly where the group's crop will be taken, so a
+    # grouped tile is always the pixels an individual read at its coordinate returns.
+    level_origin = np.floor(coordinates / downsample).astype(np.int64)
     grouped_plans: dict[int, list[GroupedReadPlan]] = {size: [] for size in grouped_sizes}
     grouped_plans[1] = []
 
@@ -97,6 +139,7 @@ def iter_grouped_read_plans(
             return None
         x0 = int(coordinates[idx, 0])
         y0 = int(coordinates[idx, 1])
+        origin_x, origin_y = (int(v) for v in level_origin[idx])
         indices: list[int] = []
         for x_idx in range(block_size):
             for y_idx in range(block_size):
@@ -107,6 +150,13 @@ def iter_grouped_read_plans(
                 match_idx = coord_to_index.get(coord)
                 if match_idx is None or consumed[match_idx]:
                     return None
+                crop_x = origin_x + x_idx * read_step_px
+                crop_y = origin_y + y_idx * read_step_px
+                if (
+                    int(level_origin[match_idx, 0]) != crop_x
+                    or int(level_origin[match_idx, 1]) != crop_y
+                ):
+                    return None
                 indices.append(match_idx)
         return GroupedReadPlan(
             x=x0,
@@ -114,6 +164,9 @@ def iter_grouped_read_plans(
             read_size_px=tile_size_px + (block_size - 1) * read_step_px,
             block_size=block_size,
             tile_indices=tuple(indices),
+            tile_origins=tuple(
+                (int(coordinates[i, 0]), int(coordinates[i, 1])) for i in indices
+            ),
         )
 
     for block_size in grouped_sizes:
@@ -138,6 +191,7 @@ def iter_grouped_read_plans(
                 read_size_px=tile_size_px,
                 block_size=1,
                 tile_indices=(idx,),
+                tile_origins=((int(coordinates[idx, 0]), int(coordinates[idx, 1])),),
             )
         )
 

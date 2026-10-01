@@ -19,6 +19,7 @@ from hs2p.tiling.mask import (
     resolve_tissue_mask,
 )
 from hs2p.tile_qc import filter_coordinate_tiles, needs_pixel_qc
+from hs2p.wsi.geometry import resolve_tile_stride
 from hs2p.wsi.reader import AUTO_BACKEND, open_slide
 from hs2p.wsi.types import CoordinateOutputMode, CoordinateSelectionStrategy, PixelMapping
 from hs2p.wsi.visualization import _combine_label_masks, save_overlay_preview
@@ -40,6 +41,7 @@ def _render_annotation_mask_preview(
     resolved_masks: ResolvedAnnotationMasks,
     image_path: str | Path,
     backend: str,
+    spacing_at_level_0: float | None,
 ) -> None:
     """Render one filled, semi-transparent multi-label overlay from the *resolved* per-label
     binary masks (never a re-read of the raw mask file), once per slide. Labels with a null
@@ -53,6 +55,7 @@ def _render_annotation_mask_preview(
     save_overlay_preview(
         wsi_path=Path(image_path),
         backend=backend,
+        spacing_at_level_0=spacing_at_level_0,
         mask_arr=label_arr,
         mask_preview_path=Path(request.mask_preview_path),
         downsample=request.downsample,
@@ -169,7 +172,11 @@ def build_tiling_result_from_mask(
             tissue_fractions=tiles.tissue_fractions[keep],
             tile_index=np.arange(int(keep.sum()), dtype=np.int32),
         )
-    step_px_lv0 = max(1, round(tiles.tile_size_lv0 * (1.0 - overlap)))
+    step_px_lv0 = resolve_tile_stride(
+        read_tile_size_px=tiles.read_tile_size_px,
+        tile_size_lv0=tiles.tile_size_lv0,
+        overlap=overlap,
+    ).step_px_lv0
     is_sam2 = str(resolved_mask.tissue_method).lower() == "sam2"
     return TilingResult(
         tiles=tiles,
@@ -812,6 +819,7 @@ def preprocess_slide_per_annotation(
                 resolved_masks=resolved_masks,
                 image_path=image_path,
                 backend=slide.backend_name,
+                spacing_at_level_0=spacing_override,
             )
         return build_per_annotation_tiling_results(
             slide=slide,

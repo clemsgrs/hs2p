@@ -14,6 +14,7 @@ from hs2p.preprocessing import (
     _load_tiling_result_from_paths,
     _save_tiling_result,
 )
+from hs2p.wsi.geometry import resolve_tile_stride
 from hs2p.fileops import (
     is_flattened_annotation,
     promote_temp_file,
@@ -230,6 +231,17 @@ def validate_tiling_artifacts(
         raise ValueError("precomputed tiles requested_tile_size_px mismatch")
     if result.overlap != compatibility.tiling.overlap:
         raise ValueError("precomputed tiles overlap mismatch")
+    expected_stride = resolve_tile_stride(
+        read_tile_size_px=result.read_tile_size_px,
+        tile_size_lv0=result.tile_size_lv0,
+        overlap=result.overlap,
+    )
+    if result.step_px_lv0 != expected_stride.step_px_lv0:
+        raise ValueError(
+            "precomputed tiles stride mismatch: the artifact was written with a level-0 "
+            f"stride of {result.step_px_lv0} px, the current version derives "
+            f"{expected_stride.step_px_lv0} px from the read-level stride"
+        )
     if result.min_tissue_fraction != (compatibility.tiling.min_coverage.get("tissue") or 0.0):
         raise ValueError("precomputed tiles tissue_threshold mismatch")
     if result.tolerance != compatibility.tiling.tolerance:

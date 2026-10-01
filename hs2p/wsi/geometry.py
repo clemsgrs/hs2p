@@ -205,6 +205,37 @@ def plan_spacing_read(
     )
 
 
+@dataclass(frozen=True, kw_only=True)
+class TileStride:
+    """Stride between neighbouring tile origins, at the read level and at level 0."""
+
+    read_step_px: int
+    step_px_lv0: int
+
+
+def resolve_tile_stride(
+    *, read_tile_size_px: int, tile_size_lv0: int, overlap: float
+) -> TileStride:
+    """Define the tile stride once, in read-level pixels, and project it to level 0.
+
+    ``overlap`` is applied to the read-level tile size and rounded there; the level-0
+    stride is that read-level stride scaled by the tile's level-0 footprint. Rounding
+    the two independently (32 x 0.9 = 28.8 -> 29 at level 0, 16 x 0.9 = 14.4 -> 14 at
+    the read level) puts tile origins at 14.5 read-level pixels while grouped reads crop
+    every 14, so batched tiles drift from the pixels their coordinates name.
+    """
+    read_tile_size_px = int(read_tile_size_px)
+    tile_size_lv0 = int(tile_size_lv0)
+    if read_tile_size_px <= 0 or tile_size_lv0 <= 0:
+        raise ValueError(
+            "read_tile_size_px and tile_size_lv0 must be > 0, "
+            f"got {read_tile_size_px} and {tile_size_lv0}"
+        )
+    read_step_px = max(1, round(read_tile_size_px * (1.0 - float(overlap))))
+    step_px_lv0 = max(1, round(read_step_px * tile_size_lv0 / read_tile_size_px))
+    return TileStride(read_step_px=read_step_px, step_px_lv0=step_px_lv0)
+
+
 def tile_size_lv0_from_plan(plan: SpacingReadPlan, *, level0_spacing_um: float) -> int:
     """Level-0 footprint, in pixels, of a tile read with ``plan``.
 

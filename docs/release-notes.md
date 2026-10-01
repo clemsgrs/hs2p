@@ -2,6 +2,86 @@
 
 ## Unreleased
 
+### Lossless TIFF masks
+
+- `Mask` refuses a TIFF mask through `cucim`, `vips`, `openslide` or `asap` when any
+  directory, reduced pyramid levels included, stores samples other than 8-bit unsigned
+  min-is-black or RGB. Those readers decode to 8-bit RGB for display, so a 16-bit label 1
+  came back as 0 and 257 as 1, a min-is-white 255 as 0, and the empty or wrong tissue
+  mask passed validation. The check reads the TIFF directories only and names the
+  offending directory, its sample layout and the fix in its `ValueError`.
+- New `tifffile` backend (`pip install "hs2p[tifffile]"`, included in `hs2p[all]`) for
+  slide and mask reads: it returns stored samples in their stored dtype from tiled or
+  stripped, flat or pyramidal (SubIFD or multi-page) TIFFs, decoding only the segments a
+  region read touches. Spacing comes from the resolution tags when present; untagged
+  masks open without spacing as before.
+- `mask_backend: auto` now resolves through `hs2p.wsi.reader.resolve_mask_backend`, the
+  contract `Mask` itself opens with. It reads every TIFF directory first and selects
+  `tifffile` when any level stores samples the display readers would convert, recording
+  the directory and the reason in the `mask_backend.selected` event; every other mask
+  keeps the `cucim → vips → openslide → asap` chain. A slide path never selects
+  `tifffile`.
+- Batch preflight no longer requires spacing metadata from a mask. An untagged 8-bit
+  TIFF mask that `Mask(...)` opened fine used to be skipped by the usable native reader
+  in `tile_slide`/`tile_slides` and fall through to a reader that fabricated a file
+  spacing, failing alignment; the preflight and the mask open now share one rule.
+
+### One tile stride, defined at the read level
+
+- The stride between overlapping tiles is now rounded once, in read-level pixels, and
+  the level-0 stride is derived from it (`hs2p.wsi.geometry.resolve_tile_stride`).
+  Tiling and grouped streaming reads used to round independently: with a 16 px read at a
+  2x level and 10% overlap, tiling placed origins 29 level-0 px apart (14.5 read px)
+  while grouped reads cropped every 14 px, so batched tiles drifted up to 3 px from the
+  pixels their saved coordinates name. Coordinates for runs with `overlap > 0` read
+  above level 0 change accordingly (28 instead of 29 in that example); runs with no
+  overlap, or read at level 0, are unchanged.
+- Grouped read plans now admit a tile only when its own floored read-level origin is
+  exactly where the group's crop is taken, and otherwise read it individually, so a
+  grouped tile is always the pixels an individual read at its coordinate returns.
+- Reusing or resuming a coordinate artifact whose level-0 stride differs from the one
+  the current version derives fails with `precomputed tiles stride mismatch`, so a
+  resumed batch cannot mix strides with a fresh one.
+
+### TAR manifests name the saved coordinates
+
+- Tile records streamed from grouped region reads took their `x`/`y` from the group's
+  level-0 origin plus the crop offset inside the region, which is in read-level pixels.
+  For any export read above level 0 (a 0.5 um/px slide tiled at 1.0 um/px, say), every
+  manifest row except the first of each group named the wrong slide location; the JPEG
+  pixels themselves were correct. `GroupedReadPlan` now carries each member's level-0
+  origin straight from the tiling result and every record, and so every
+  `{sample_id}.tiles.manifest.csv` row, reports exactly that coordinate.
+
+### Region reads on non-integer pyramid levels start at the intended pixel
+
+- The shared padded-read helper mapped a clipped level index back to level 0 with
+  `round`, which on a non-integer downsample can fall below the pixel boundary (index 1
+  at 3.2x is 3.2, rounded to 3, which the reader floors to index 0). Every backend region
+  read, and so every `AlignedMask.read_region` window on such a mask, decoded the
+  preceding pixels. The helper now uses `ceil`, the convention `AlignedMask` already
+  used for its own origins, so a reader flooring the location lands on the same level
+  pixel. Integer-downsample pyramids are unaffected.
+
+### Resume keeps sample IDs verbatim
+
+- Resume read `process_list.csv` with pandas' defaults, so a sample ID such as `001`
+  became the integer `1` and `NA` or `nan` became missing values. Those rows no longer
+  matched their `SlideSpec`, completed slides were recomputed, and columns added
+  downstream (`feature_status`, `feature_path`, ...) were dropped from the rewritten row.
+  Every CSV keyed by `sample_id` (the input CSV, resume, the CLI's final summary) now
+  reads through one helper that keeps `sample_id` as the string written.
+
+### Previews keep the slide's spacing override
+
+- Mask and tiling previews reopened the slide from its path and backend only, dropping
+  the `spacing_at_level_0` a `SlideSpec` or CSV supplied. A flat PNG/JPEG slide, which
+  has no other spacing, tiled successfully and then failed in the preview step with
+  "Unable to infer slide spacing", so the default CLI configuration (both previews on)
+  recorded the slide as failed and exited non-zero. Every preview path now reopens the
+  slide with the override the result records; `overlay_mask_on_slide` and
+  `write_coordinate_preview` accept it as `spacing_at_level_0`.
+
 ### Hole borders count as tissue again
 
 - When a tissue contour has holes, coverage was measured on a per-contour mask that

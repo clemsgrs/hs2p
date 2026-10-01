@@ -140,7 +140,10 @@ contours: evergreen `#255E3B` outer borders and coral `#F26B3A` hole borders.
 `tissue_contour_color` changes the outer border; `mask_overlay_alpha` has no effect
 on this contour-only preview. Sampling uses filled label masks with its pixel and
 color mappings; it also supports a tiling preview for each non-empty coordinate
-output. `overlay_mask_on_slide()` is the lower-level overlay helper.
+output. `overlay_mask_on_slide()` is the lower-level overlay helper. Previews reopen the
+slide exactly as preprocessing did, including a `spacing_at_level_0` override, so a flat
+PNG/JPEG slide previews with the same spacing it was tiled at; `overlay_mask_on_slide`
+and `write_coordinate_preview` take that override as `spacing_at_level_0`.
 
 ## Source masks
 
@@ -175,9 +178,20 @@ full.read_spacing_um   # 1.0: the slide's 0.5 µm/px times 12 / 6
 `tests/test_mask.py::test_documented_flat_png_example_runs` executes this example.
 
 **Backend.** `backend="auto"` (the default) resolves the reader from the mask path alone
-and never inherits the slide reader; a concrete backend is authoritative. `Mask.backend`
-is the concrete reader that opened the file. Open failures raise `ValueError` or
-`RuntimeError` naming the path and backend.
+(`hs2p.wsi.reader.resolve_mask_backend`, the same contract batch preflight uses) and never
+inherits the slide reader; a concrete backend is authoritative. `Mask.backend` is the
+concrete reader that opened the file. Open failures raise `ValueError` or `RuntimeError`
+naming the path and backend. The native display readers (`cucim`, `vips`, `openslide`,
+`asap`) decode to 8-bit RGB, which only preserves labels stored as 8-bit unsigned
+min-is-black or RGB samples (min-is-white is inverted on decode). `auto` reads every TIFF
+directory first, a pyramid's reduced levels included, and selects `tifffile`
+(`pip install "hs2p[tifffile]"`) when any directory stores another sample layout; that
+reader returns pyramidal TIFF masks losslessly in their stored dtype, so a 16-bit label
+300 still fails validation as out of range instead of decoding as 1. Other masks go
+through the usual `cucim → vips → openslide → asap` chain without requiring spacing
+metadata. An explicit display reader asked to open such a mask is refused before it is
+opened (`ValueError`, "Mask open failed ... silently changing label values"), because the
+converted values would pass every later check.
 
 **Alignment.** `align_to(reference_spacing_um=..., reference_dimensions=...)` binds the
 mask to a slide's level-0 grid, which the mask must cover in full from a shared origin.
