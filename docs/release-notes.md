@@ -82,6 +82,17 @@
   slide with the override the result records; `overlay_mask_on_slide` and
   `write_coordinate_preview` accept it as `spacing_at_level_0`.
 
+### Hole borders count as tissue again
+
+- When a tissue contour has holes, coverage was measured on a per-contour mask that
+  zero-filled each hole contour. OpenCV traces a hole contour through the foreground
+  pixels bordering the hole, so the fill also cleared that one-pixel ring of tissue and
+  the later intersection with the source mask could not restore it. Coverage was
+  underestimated around every hole, dropping valid tiles near the threshold; the report's
+  4x4 mask with one hole measured 11/16 instead of 15/16. The ring is now redrawn
+  after the fill. Islands of tissue nested inside a hole stay excluded from the
+  enclosing contour, as before, and are measured as their own contour.
+
 ## 5.0.0
 
 hs2p 5.0 is a breaking release. Source masks are now first-class `hs2p.Mask` objects
