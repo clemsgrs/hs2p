@@ -43,6 +43,16 @@
   the current version derives fails with `precomputed tiles stride mismatch`, so a
   resumed batch cannot mix strides with a fresh one.
 
+### TAR manifests name the saved coordinates
+
+- Tile records streamed from grouped region reads took their `x`/`y` from the group's
+  level-0 origin plus the crop offset inside the region, which is in read-level pixels.
+  For any export read above level 0 (a 0.5 um/px slide tiled at 1.0 um/px, say), every
+  manifest row except the first of each group named the wrong slide location; the JPEG
+  pixels themselves were correct. `GroupedReadPlan` now carries each member's level-0
+  origin straight from the tiling result and every record, and so every
+  `{sample_id}.tiles.manifest.csv` row, reports exactly that coordinate.
+
 ## 5.0.0
 
 hs2p 5.0 is a breaking release. Source masks are now first-class `hs2p.Mask` objects

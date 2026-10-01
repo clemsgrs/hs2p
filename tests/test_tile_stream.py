@@ -92,6 +92,31 @@ def test_iter_tile_records_from_reader_preserves_tile_index_and_coordinates():
     reader.read_region.assert_called_once_with((0, 0), 0, (32, 32))
 
 
+def test_grouped_records_above_level_0_keep_the_saved_coordinates():
+    from dataclasses import replace
+
+    # a 2x2 grid read at a 2x level: 16 px tiles are 32 level-0 px apart
+    result = _make_result(coords=[(0, 0), (0, 32), (32, 0), (32, 32)], tile_size=16)
+    result = replace(
+        result,
+        tiles=replace(
+            result.tiles, read_level=1, tile_size_lv0=32, level_downsamples=[1.0, 2.0]
+        ),
+        step_px_lv0=32,
+    )
+    reader = _mock_reader(np.zeros((32, 32, 3), dtype=np.uint8))
+
+    records = list(iter_tile_records_from_reader(reader, result=result))
+
+    reader.read_region.assert_called_once_with((0, 0), 1, (32, 32))
+    assert [(record.tile_index, record.x, record.y) for record in records] == [
+        (0, 0, 0),
+        (1, 0, 32),
+        (2, 32, 0),
+        (3, 32, 32),
+    ]
+
+
 class _CoordinateCodedReader:
     """A 2x pyramid whose level-1 pixels encode their own level-1 coordinates."""
 
