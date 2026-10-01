@@ -18,7 +18,14 @@ from hs2p.wsi.geometry import (
     compute_level_spacings,
     select_level_for_spacing_read,
 )
-from hs2p.wsi.reader import AUTO_BACKEND, SlideReader, open_slide, resolve_backend
+from hs2p.wsi.reader import (
+    AUTO_BACKEND,
+    LOSSLESS_LABEL_BACKEND,
+    SlideReader,
+    open_slide,
+    resolve_mask_backend,
+)
+from hs2p.wsi.tiff_header import find_lossy_tiff_directory
 from hs2p.wsi.types import pixel_values
 
 MAX_LABEL_ID = 255
@@ -43,6 +50,9 @@ CANVAS_EDGE_EPSILON_PX = 1e-6
 # it into the previous pixel.
 SPACING_RATIO_RTOL = 1e-6
 EXACT_STEP_MAX_DENOMINATOR = 64
+# Readers that decode every source to 8-bit RGB for display. They return a TIFF's
+# stored values only when those already are 8-bit unsigned min-is-black or RGB samples.
+DISPLAY_DECODING_BACKENDS = frozenset({"asap", "cucim", "openslide", "vips"})
 
 logger = logging.getLogger(__name__)
 
@@ -122,8 +132,9 @@ class Mask:
     """An externally supplied, source-backed mask with one closed label semantics.
 
     Owns one open reader for ``path``: ``auto`` resolves the backend from the mask path
-    alone, a concrete backend is authoritative. The source opens without requiring
-    spacing metadata, so flat PNG/JPEG and untagged TIFF masks are supported.
+    alone (:func:`hs2p.wsi.reader.resolve_mask_backend`), a concrete backend is
+    authoritative. The source opens without requiring spacing metadata, so flat PNG/JPEG
+    and untagged TIFF masks are supported.
     """
 
     def __init__(
@@ -142,9 +153,10 @@ class Mask:
         self._labels = labels
         self._backend = (backend or AUTO_BACKEND).strip().lower()
         try:
-            self._backend = resolve_backend(
-                self._backend, wsi_path=self._path, require_spacing=False
+            self._backend = resolve_mask_backend(
+                self._backend, mask_path=self._path
             ).backend
+            _refuse_lossy_label_decode(path=self._path, backend=self._backend)
             self._reader: SlideReader | None = open_slide(
                 self._path, self._backend, require_spacing=False
             )
@@ -552,6 +564,29 @@ def _mask_read(labels: np.ndarray, selection: LevelSelection) -> MaskRead:
         labels=labels,
         read_level=selection.level,
         read_spacing_um=selection.read_spacing_um,
+    )
+
+
+def _refuse_lossy_label_decode(*, path: Path, backend: str) -> None:
+    """Raise before a display reader silently rewrites a TIFF mask's stored labels.
+
+    cuCIM, OpenSlide, VIPS and ASAP decode to 8-bit RGB: a 16-bit label 1 comes back as
+    0 and 257 as 1, a min-is-white 255 as 0, palette indices become colors, and no later
+    validation can tell. Every directory is checked, because a pyramid's reduced levels
+    are read natively too. The check reads the TIFF header only; a non-TIFF source is
+    left to its reader.
+    """
+    if backend not in DISPLAY_DECODING_BACKENDS:
+        return
+    lossy = find_lossy_tiff_directory(path)
+    if lossy is None:
+        return
+    raise ValueError(
+        f"the TIFF's {lossy.describe()}, which the {backend} backend "
+        f"{lossy.display_conversion()} for display, silently changing label values. "
+        f"Open it with backend='{LOSSLESS_LABEL_BACKEND}' "
+        f"(pip install 'hs2p[{LOSSLESS_LABEL_BACKEND}]') or re-export every level of "
+        "the mask as 8-bit unsigned min-is-black samples"
     )
 
 
