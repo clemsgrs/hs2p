@@ -15,3 +15,15 @@ def test_turbojpeg_extra_is_dedicated_and_included_in_all():
 
     assert optional_dependencies["turbojpeg"] == ["PyTurboJPEG"]
     assert "PyTurboJPEG" in optional_dependencies["all"]
+
+
+def test_tifffile_extra_is_dedicated_and_included_in_all():
+    pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    with pyproject_path.open("rb") as handle:
+        optional_dependencies = tomllib.load(handle)["project"][
+            "optional-dependencies"
+        ]
+
+    assert optional_dependencies["tifffile"] == ["tifffile", "imagecodecs"]
+    assert "tifffile" in optional_dependencies["all"]
+    assert "imagecodecs" in optional_dependencies["all"]

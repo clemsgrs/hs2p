@@ -2088,6 +2088,32 @@ def test_validate_tiling_artifacts_rejects_mismatched_tiling_config(
         )
 
 
+def test_validate_tiling_artifacts_rejects_a_legacy_level0_stride(
+    tmp_path: Path,
+    tiling_config: TilingConfig,
+    segmentation_config: SegmentationConfig,
+    filter_config: FilterConfig,
+):
+    # an artifact written when the level-0 stride was rounded on its own: 403 is the
+    # stride the read-level rounding derives for this geometry, 404 is not
+    legacy = _build_preprocessing_result(
+        sample_id="slide-stride", image_path="slide-stride.svs", step_px_lv0=404
+    )
+    artifacts = save_tiling_result(legacy, output_dir=tmp_path)
+
+    with pytest.raises(ValueError, match="stride mismatch"):
+        validate_tiling_artifacts(
+            whole_slide=SlideSpec(sample_id="slide-stride", image_path=Path("slide-stride.svs")),
+            coordinates_npz_path=artifacts.coordinates_npz_path,
+            coordinates_meta_path=artifacts.coordinates_meta_path,
+            compatibility=_artifact_compatibility(
+                tiling_config=tiling_config,
+                segmentation_config=segmentation_config,
+                filter_config=filter_config,
+            ),
+        )
+
+
 def test_validate_tiling_artifacts_reuses_matching_explicit_level0_spacing(
     tmp_path: Path,
     tiling_config: TilingConfig,

@@ -73,8 +73,6 @@ def iter_tiles_from_region(
 ):
     for tile_view in iter_region_tile_views(
         region,
-        origin_x=int(plan.x),
-        origin_y=int(plan.y),
         block_size=int(plan.block_size),
         tile_size_px=int(tile_size_px),
         read_step_px=int(read_step_px),
