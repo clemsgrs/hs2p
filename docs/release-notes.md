@@ -63,6 +63,15 @@
   used for its own origins, so a reader flooring the location lands on the same level
   pixel. Integer-downsample pyramids are unaffected.
 
+### Resume keeps sample IDs verbatim
+
+- Resume read `process_list.csv` with pandas' defaults, so a sample ID such as `001`
+  became the integer `1` and `NA` or `nan` became missing values. Those rows no longer
+  matched their `SlideSpec`, completed slides were recomputed, and columns added
+  downstream (`feature_status`, `feature_path`, ...) were dropped from the rewritten row.
+  Every CSV keyed by `sample_id` (the input CSV, resume, the CLI's final summary) now
+  reads through one helper that keeps `sample_id` as the string written.
+
 ## 5.0.0
 
 hs2p 5.0 is a breaking release. Source masks are now first-class `hs2p.Mask` objects
