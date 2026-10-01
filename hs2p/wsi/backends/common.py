@@ -78,6 +78,14 @@ def resolve_padded_read_bounds(
     level_dimensions: tuple[int, int],
     downsample: float,
 ) -> PaddedReadBounds:
+    """Clip a level read to the level canvas and say where to paste it.
+
+    ``location`` is in level-0 pixels; readers floor it onto ``level`` through
+    ``downsample``. The clipped origin goes back to level 0 with ``ceil`` so that a
+    reader flooring it again lands on the same level pixel: with a non-integer
+    downsample, ``round`` can fall below the pixel boundary (index 1 at 3.2x is 3.2,
+    rounded to 3, which floors to index 0) and decode the preceding pixels.
+    """
     width, height = int(size[0]), int(size[1])
     canvas = make_white_canvas(width=width, height=height)
     if width <= 0 or height <= 0:
@@ -92,7 +100,7 @@ def resolve_padded_read_bounds(
     if x2 <= x1 or y2 <= y1:
         return PaddedReadBounds(canvas, (0, 0), (0, 0), (0, 0))
 
-    read_location = (int(round(x1 * downsample)), int(round(y1 * downsample)))
+    read_location = (int(math.ceil(x1 * downsample)), int(math.ceil(y1 * downsample)))
     read_size = (x2 - x1, y2 - y1)
     paste_offset = (x1 - x_level, y1 - y_level)
     return PaddedReadBounds(canvas, read_location, read_size, paste_offset)

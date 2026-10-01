@@ -53,6 +53,16 @@
   origin straight from the tiling result and every record, and so every
   `{sample_id}.tiles.manifest.csv` row, reports exactly that coordinate.
 
+### Region reads on non-integer pyramid levels start at the intended pixel
+
+- The shared padded-read helper mapped a clipped level index back to level 0 with
+  `round`, which on a non-integer downsample can fall below the pixel boundary (index 1
+  at 3.2x is 3.2, rounded to 3, which the reader floors to index 0). Every backend region
+  read, and so every `AlignedMask.read_region` window on such a mask, decoded the
+  preceding pixels. The helper now uses `ceil`, the convention `AlignedMask` already
+  used for its own origins, so a reader flooring the location lands on the same level
+  pixel. Integer-downsample pyramids are unaffected.
+
 ## 5.0.0
 
 hs2p 5.0 is a breaking release. Source masks are now first-class `hs2p.Mask` objects
