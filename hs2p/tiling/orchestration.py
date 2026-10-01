@@ -31,7 +31,11 @@ from hs2p.tiling.tar import (
     _needs_pixel_filtering,
     extract_tiles_to_tar,
 )
-from hs2p.fileops import is_flattened_annotation, validate_annotation_name
+from hs2p.fileops import (
+    is_flattened_annotation,
+    read_csv_keyed_by_sample_id,
+    validate_annotation_name,
+)
 from hs2p.wsi import (
     CoordinateOutputMode,
     CoordinateSelectionStrategy,
@@ -1329,7 +1333,7 @@ def tile_slides(
     process_list_checkpoint = ProcessListCheckpoint(process_list_path)
     existing_successes: dict[str, dict[str, Any]] = {}
     if resume and process_list_path.is_file():
-        existing_df = pd.read_csv(process_list_path)
+        existing_df = read_csv_keyed_by_sample_id(process_list_path)
         legacy_mask_columns = [
             column
             for column in ("tissue_mask_path", "annotation_mask_path")

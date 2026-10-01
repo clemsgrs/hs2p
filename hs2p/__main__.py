@@ -7,6 +7,7 @@ import pandas as pd
 import hs2p.progress as progress
 from hs2p.api import TilingArtifacts, tile_slides
 from hs2p.artifacts import summarize_failed_slides
+from hs2p.fileops import read_csv_keyed_by_sample_id
 from hs2p.configs.loader import DEFAULT_JPEG_BACKEND
 from hs2p.configs.resolvers import (
     resolve_filter_config,
@@ -135,7 +136,7 @@ def main(args):
             artifacts = tile_slides(whole_slides, **tile_kwargs)
             process_list_path = output_dir / "process_list.csv"
             try:
-                process_df = pd.read_csv(process_list_path)
+                process_df = read_csv_keyed_by_sample_id(process_list_path)
             except pd.errors.EmptyDataError:
                 failed_slide_count = 0
             else:

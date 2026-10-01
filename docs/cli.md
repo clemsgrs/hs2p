@@ -99,7 +99,7 @@ Annotation sampling supports filled mask previews and a tiling-grid preview for 
 
 ## Backends
 
-`tiling.backend` selects the slide reader; `tiling.mask_backend` selects the source-mask reader. Both accept `auto`, `pil`, `cucim`, `vips`, `openslide`, or `asap`. Null and unknown values fail configuration validation.
+`tiling.backend` selects the slide reader; `tiling.mask_backend` selects the source-mask reader. Both accept `auto`, `pil`, `cucim`, `vips`, `openslide`, `asap`, or `tifffile`. Null and unknown values fail configuration validation.
 
 | Reader | Install | Prerequisite |
 | --- | --- | --- |
@@ -108,6 +108,7 @@ Annotation sampling supports filled mask previews and a tiling-grid preview for 
 | `vips` | `pip install "hs2p[vips]"` | libvips must also be available. |
 | `asap` | `pip install "hs2p[asap]"` | Native ASAP with its Python bindings must also be installed. |
 | `cucim` | `pip install "hs2p[cucim]"` | The extra supplies the CUDA 12 cuCIM stack. |
+| `tifffile` | `pip install "hs2p[tifffile]"` | Lossless TIFF reader for label masks; returns stored samples in their stored dtype. Explicit only, never chosen by `auto`. |
 
 `pip install "hs2p[all]"` installs all reader extras and the optional TurboJPEG encoder; it does not install SAM2 or replace native system prerequisites.
 
@@ -115,9 +116,19 @@ With `auto`, each path is resolved independently:
 
 - `.png`, `.jpg`, and `.jpeg` suffixes (case-insensitive) select PIL only. Corrupt, unsupported, or oversized flat rasters fail without trying another reader.
 - Other inputs probe `cucim → vips → openslide → asap` and stop at the first reader that opens the file. PIL is not part of this chain.
+- A mask path is resolved with the same chain, but the probe does not require spacing metadata (a mask's spacing comes from its dimensions), and the TIFF header is read first: samples that are not 8-bit unsigned, non-palette select `tifffile` directly, with the reason recorded in the `mask_backend.selected` event and the resolved `mask_backend` provenance. A slide path never selects `tifffile`.
 
 Source masks need no spacing metadata: a flat PNG/JPEG or untagged TIFF mask is aligned to
 its slide by dimensions (see [Source masks](api.md#source-masks)).
+
+`cucim`, `vips`, `openslide` and `asap` decode every TIFF to 8-bit RGB for display, which
+silently rewrites labels stored any other way (16-bit label 1 decodes as 0, 257 as 1; a
+min-is-white 255 as 0; a palette index becomes its color). A TIFF mask whose samples are
+not 8-bit unsigned min-is-black or RGB in every directory, reduced pyramid levels
+included, is routed to `tifffile` by `auto`; an explicit display reader refuses it at open
+time, with a message naming the offending directory and pointing at
+`tiling.mask_backend: tifffile`, which reads pyramidal TIFF masks losslessly. Re-exporting
+every level of the mask as 8-bit unsigned min-is-black samples is the alternative.
 
 Selection does not inspect mask labels or retry after a later decode failure. If a native reader opens a mask but cannot decode its pixels, explicitly set `tiling.mask_backend` to a reader that can decode it. Explicit reader choices are authoritative. Missing or incompatible mask backends fail with the mask path and backend in the error; a slide without a source mask does not check mask-reader availability.
 

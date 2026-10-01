@@ -332,6 +332,38 @@ class TestExtractTilesToTar:
             {"tile_index": "0", "x": "0", "y": "0"},
         ]
 
+    def test_manifest_rows_keep_level0_origins_for_grouped_reads_above_level_0(
+        self, tmp_path: Path
+    ):
+        from dataclasses import replace
+
+        # a 2x2 grid of 16 px tiles read at a 2x level: origins 32 level-0 px apart
+        coords = [(0, 0), (0, 32), (32, 0), (32, 32)]
+        result = _make_custom_tiling_result(coords=coords, tile_size=16)
+        result = replace(
+            result,
+            tiles=replace(
+                result.tiles, read_level=1, tile_size_lv0=32, level_downsamples=[1.0, 2.0]
+            ),
+            step_px_lv0=32,
+        )
+        grouped_region = _make_grouped_region(block_size=2, tile_size=16, step_px=16)
+        mock_reader = _make_mock_reader(grouped_region)
+
+        with patch("hs2p.wsi.streaming.stream.open_slide", return_value=mock_reader):
+            extract_tiles_to_tar(result, output_dir=tmp_path)
+
+        mock_reader.read_region.assert_called_once_with((0, 0), 1, (32, 32))
+        manifest_path = tmp_path / "tiles" / "custom-slide.tiles.manifest.csv"
+        with manifest_path.open(newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        assert rows == [
+            {"tile_index": "0", "x": "0", "y": "0"},
+            {"tile_index": "1", "x": "0", "y": "32"},
+            {"tile_index": "2", "x": "32", "y": "0"},
+            {"tile_index": "3", "x": "32", "y": "32"},
+        ]
+
     def test_uses_rgb_420_turbojpeg_encoding(self, tmp_path: Path, monkeypatch):
         result = _make_tiling_result(num_tiles=1)
         mock_reader = _make_mock_reader(_solid_patch((12, 34, 56)))

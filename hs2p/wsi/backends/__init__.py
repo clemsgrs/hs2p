@@ -12,6 +12,11 @@ from hs2p.wsi.backends.pil import (
     PILReader,
     supports_pil_path,
 )
+from hs2p.wsi.backends.tifffile import (
+    TIFFFILE_SUPPORTED_SUFFIXES,
+    TifffileReader,
+    supports_tifffile_path,
+)
 from hs2p.wsi.backends.vips import VIPSReader, supports_vips_path
 
 __all__ = [
@@ -23,8 +28,11 @@ __all__ = [
     "PIL_SUPPORTED_SUFFIXES",
     "PILImageTooLargeError",
     "PILReader",
+    "TIFFFILE_SUPPORTED_SUFFIXES",
+    "TifffileReader",
     "VIPSReader",
     "supports_cucim_path",
     "supports_pil_path",
+    "supports_tifffile_path",
     "supports_vips_path",
 ]

@@ -10,6 +10,7 @@ from pathlib import Path
 from omegaconf import DictConfig, OmegaConf
 
 from hs2p.api import SlideSpec
+from hs2p.fileops import read_csv_keyed_by_sample_id
 
 
 def fix_random_seeds(seed=31):
@@ -74,7 +75,7 @@ def load_csv(
     require_mask_column: bool = False,
 ):
     csv_path = Path(cfg.csv).resolve()
-    df = pd.read_csv(csv_path, converters={"sample_id": str})
+    df = read_csv_keyed_by_sample_id(csv_path)
     required = {"sample_id", "image_path"}
     missing = sorted(required - set(df.columns))
     if missing:

@@ -4,6 +4,21 @@ import errno
 import shutil
 from pathlib import Path
 
+import pandas as pd
+
+# ``sample_id`` is an opaque string. Read with pandas' defaults, "001" becomes the
+# integer 1 and "NA" or "nan" become missing values, so a row can no longer be matched
+# to the SlideSpec that produced it. Every CSV keyed by sample_id reads through here.
+SAMPLE_ID_CONVERTERS = {"sample_id": str}
+
+
+def read_csv_keyed_by_sample_id(path: str | Path) -> pd.DataFrame:
+    """Read a CSV whose rows are keyed by ``sample_id``, kept verbatim as strings.
+
+    Other columns keep pandas' usual inference and missing-value handling.
+    """
+    return pd.read_csv(path, converters=SAMPLE_ID_CONVERTERS)
+
 
 def validate_annotation_name(annotation: str | None) -> str | None:
     """Validate an annotation name, accepting ``None`` for structural output."""

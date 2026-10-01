@@ -21,8 +21,6 @@ def test_iter_region_tile_views_uses_stride_for_overlap_reads():
     tiles = list(
         iter_region_tile_views(
             region,
-            origin_x=100,
-            origin_y=200,
             block_size=4,
             tile_size_px=12,
             read_step_px=8,
@@ -30,8 +28,36 @@ def test_iter_region_tile_views_uses_stride_for_overlap_reads():
     )
 
     assert len(tiles) == 16
-    assert tiles[0].x == 100 and tiles[0].y == 200
-    assert tiles[1].x == 100 and tiles[1].y == 208
-    assert tiles[4].x == 108 and tiles[4].y == 200
+    assert (tiles[0].crop_x, tiles[0].crop_y) == (0, 0)
+    assert (tiles[1].crop_x, tiles[1].crop_y) == (0, 8)
+    assert (tiles[4].crop_x, tiles[4].crop_y) == (8, 0)
     assert tiles[0].tile_arr.shape == (12, 12, 3)
     assert int(tiles[1].tile_arr[0, 0, 0]) == 2
+
+
+def test_planned_views_carry_the_plan_origins_not_crop_offsets():
+    from hs2p.wsi.streaming.plans import GroupedReadPlan
+    from hs2p.wsi.streaming.regions import iter_plan_region_tile_views
+
+    # a 2x2 group read at a 2x level: origins are 32 level-0 px apart, crops 16 px
+    plan = GroupedReadPlan(
+        x=0,
+        y=0,
+        read_size_px=32,
+        block_size=2,
+        tile_indices=(5, 6, 7, 8),
+        tile_origins=((0, 0), (0, 32), (32, 0), (32, 32)),
+    )
+    region = _make_grouped_region(block_size=2, tile_size_px=16, step_px=16)
+
+    records = list(
+        iter_plan_region_tile_views(region, read_plan=plan, tile_size_px=16, read_step_px=16)
+    )
+
+    assert [(r.tile_index, r.x, r.y) for r in records] == [
+        (5, 0, 0),
+        (6, 0, 32),
+        (7, 32, 0),
+        (8, 32, 32),
+    ]
+    assert [int(r.tile_arr[0, 0, 0]) for r in records] == [1, 2, 3, 4]
