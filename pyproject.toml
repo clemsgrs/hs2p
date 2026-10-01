@@ -57,6 +57,10 @@ cucim = [
 vips = [
     "pyvips",
 ]
+tifffile = [
+    "tifffile",
+    "imagecodecs",
+]
 turbojpeg = [
     "PyTurboJPEG",
 ]
@@ -69,6 +73,8 @@ all = [
     "cupy-cuda12x",
     "nvidia-nvimgcodec-cu12>=0.7.0",
     "pyvips",
+    "tifffile",
+    "imagecodecs",
     "PyTurboJPEG",
 ]
 testing = [

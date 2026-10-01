@@ -19,6 +19,7 @@ from hs2p.tiling.mask import (
     resolve_tissue_mask,
 )
 from hs2p.tile_qc import filter_coordinate_tiles, needs_pixel_qc
+from hs2p.wsi.geometry import resolve_tile_stride
 from hs2p.wsi.reader import AUTO_BACKEND, open_slide
 from hs2p.wsi.types import CoordinateOutputMode, CoordinateSelectionStrategy, PixelMapping
 from hs2p.wsi.visualization import _combine_label_masks, save_overlay_preview
@@ -169,7 +170,11 @@ def build_tiling_result_from_mask(
             tissue_fractions=tiles.tissue_fractions[keep],
             tile_index=np.arange(int(keep.sum()), dtype=np.int32),
         )
-    step_px_lv0 = max(1, round(tiles.tile_size_lv0 * (1.0 - overlap)))
+    step_px_lv0 = resolve_tile_stride(
+        read_tile_size_px=tiles.read_tile_size_px,
+        tile_size_lv0=tiles.tile_size_lv0,
+        overlap=overlap,
+    ).step_px_lv0
     is_sam2 = str(resolved_mask.tissue_method).lower() == "sam2"
     return TilingResult(
         tiles=tiles,

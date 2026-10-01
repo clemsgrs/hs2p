@@ -298,3 +298,112 @@ def test_effective_backend_resolution_forwards_level0_spacing_override(monkeypat
     )
 
     assert captured == {"slide_spacing_override": 0.25}
+
+
+def test_mask_role_probe_never_requires_spacing_while_slide_role_does(monkeypatch):
+    calls: list[tuple[str, str, bool]] = []
+
+    def _fake_can_open_source(
+        *,
+        source_path: str,
+        companion_path: str | None,
+        backend: str,
+        spacing_override: float | None = None,
+        require_spacing: bool = True,
+    ):
+        del companion_path, spacing_override
+        calls.append((source_path, backend, require_spacing))
+        return backend == "cucim"
+
+    monkeypatch.setattr(reader_mod, "_backend_can_open_source", _fake_can_open_source)
+
+    resolved = reader_mod.resolve_backends(
+        requested_slide_backend="auto",
+        requested_mask_backend="auto",
+        wsi_path=Path("slide.svs"),
+        mask_path=Path("untagged-mask.tif"),
+    )
+
+    assert resolved.slide_backend == "cucim"
+    assert resolved.mask_backend == "cucim"
+    # the mask's spacing comes from its dimensions, so the probe must accept an
+    # untagged TIFF; the slide still needs spacing
+    assert calls == [
+        ("slide.svs", "cucim", True),
+        ("untagged-mask.tif", "cucim", False),
+    ]
+
+
+def test_mask_role_auto_selects_tifffile_from_a_lossy_header(tmp_path, monkeypatch):
+    tifffile = pytest.importorskip("tifffile")
+    mask_path = tmp_path / "mask.tif"
+    tifffile.imwrite(mask_path, np.ones((8, 8), dtype=np.uint16), photometric="minisblack")
+    monkeypatch.setattr(
+        reader_mod,
+        "_backend_can_open_source",
+        lambda **kwargs: pytest.fail("the openability chain must not run"),
+    )
+
+    selection = reader_mod.resolve_mask_backend("auto", mask_path=mask_path)
+
+    assert selection.backend == "tifffile"
+    assert selection.tried == ("tifffile",)
+    assert "16-bit unsigned integer samples" in selection.reason
+    assert "which a display reader rescales to 8 bits" in selection.reason
+
+
+def test_mask_role_auto_selects_tifffile_for_a_min_is_white_header(tmp_path):
+    tifffile = pytest.importorskip("tifffile")
+    mask_path = tmp_path / "mask.tif"
+    tifffile.imwrite(mask_path, np.full((8, 8), 255, dtype=np.uint8), photometric="miniswhite")
+
+    selection = reader_mod.resolve_mask_backend("auto", mask_path=mask_path)
+
+    assert selection.backend == "tifffile"
+    assert "photometric min-is-white, which a display reader inverts" in selection.reason
+
+
+def test_mask_role_auto_selects_tifffile_for_a_lossy_reduced_level(tmp_path):
+    tifffile = pytest.importorskip("tifffile")
+    mask_path = tmp_path / "mask.tif"
+    with tifffile.TiffWriter(mask_path) as writer:
+        writer.write(np.ones((64, 64), dtype=np.uint8), tile=(16, 16), photometric="minisblack")
+        writer.write(
+            np.ones((32, 32), dtype=np.uint16),
+            tile=(16, 16),
+            photometric="minisblack",
+            subfiletype=1,
+        )
+
+    selection = reader_mod.resolve_mask_backend("auto", mask_path=mask_path)
+
+    assert selection.backend == "tifffile"
+    assert "directory 1 stores 16-bit unsigned integer samples" in selection.reason
+
+
+def test_mask_role_auto_keeps_the_chain_for_an_8bit_header(tmp_path, monkeypatch):
+    tifffile = pytest.importorskip("tifffile")
+    mask_path = tmp_path / "mask.tif"
+    tifffile.imwrite(mask_path, np.ones((8, 8), dtype=np.uint8), photometric="minisblack")
+    probed: list[str] = []
+
+    def _fake_can_open_source(*, backend: str, **kwargs):
+        probed.append(backend)
+        return backend == "openslide"
+
+    monkeypatch.setattr(reader_mod, "_backend_can_open_source", _fake_can_open_source)
+
+    selection = reader_mod.resolve_mask_backend("auto", mask_path=mask_path)
+
+    assert selection.backend == "openslide"
+    assert probed == ["cucim", "vips", "openslide"]
+
+
+def test_mask_role_explicit_backend_is_authoritative_over_the_header(tmp_path):
+    tifffile = pytest.importorskip("tifffile")
+    mask_path = tmp_path / "mask.tif"
+    tifffile.imwrite(mask_path, np.ones((8, 8), dtype=np.uint16), photometric="minisblack")
+
+    selection = reader_mod.resolve_mask_backend("cucim", mask_path=mask_path)
+
+    assert selection == reader_mod.BackendSelection(backend="cucim", reason=None, tried=("cucim",))
