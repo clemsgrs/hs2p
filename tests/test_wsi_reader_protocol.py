@@ -395,3 +395,143 @@ def test_vips_reader_reads_spacing_from_tiff_resolution_tag(tmp_path):
 
     # 10000 px/cm = 1000 px/mm -> 1000 / 1000 = 1.0 um/px
     assert reader.native_spacing == 1.0
+
+
+class _FakeNativeCuImage:
+    """Stand-in for ``cucim.CuImage`` that records every ``read_region`` call."""
+
+    def __init__(self, read_region):
+        self.metadata = {
+            "openslide": {"MPP": 0.5},
+            "cucim": {
+                "resolutions": {
+                    "level_dimensions": [[400, 200]],
+                    "level_downsamples": [1.0],
+                }
+            },
+        }
+        self.calls: list[dict] = []
+        self._read_region = read_region
+
+    def read_region(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        return self._read_region(**kwargs)
+
+
+def _make_cucim_reader_over(monkeypatch, native, *, gpu_decode: bool):
+    import hs2p.wsi.backends.cucim as cucim_reader_mod
+
+    monkeypatch.setenv("ENABLE_CUSLIDE2", "0")
+    fake_module = SimpleNamespace(CuImage=MagicMock(return_value=native))
+    original_import_module = cucim_reader_mod.importlib.import_module
+    monkeypatch.setattr(
+        cucim_reader_mod.importlib,
+        "import_module",
+        lambda name: (
+            fake_module if name == "cucim" else original_import_module(name)
+        ),
+    )
+    return cucim_reader_mod.CuCIMReader("fake.svs", gpu_decode=gpu_decode)
+
+
+def _raise(error):
+    def read_region(**kwargs):
+        del kwargs
+        raise error
+
+    return read_region
+
+
+def test_cucim_single_cpu_read_type_error_propagates_after_one_native_call(
+    monkeypatch,
+):
+    original = TypeError("native read_region rejected arguments")
+    native = _FakeNativeCuImage(_raise(original))
+    reader = _make_cucim_reader_over(monkeypatch, native, gpu_decode=False)
+
+    with pytest.raises(TypeError) as excinfo:
+        reader.read_region((0, 0), 0, (16, 16))
+
+    assert excinfo.value is original
+    assert len(native.calls) == 1
+
+
+def test_cucim_batched_cpu_read_type_error_propagates_after_one_native_call(
+    monkeypatch,
+):
+    original = TypeError("native read_region rejected arguments")
+    native = _FakeNativeCuImage(_raise(original))
+    reader = _make_cucim_reader_over(monkeypatch, native, gpu_decode=False)
+
+    with pytest.raises(TypeError) as excinfo:
+        list(reader.read_regions([(0, 0), (16, 0)], 0, (16, 16), num_workers=2))
+
+    assert excinfo.value is original
+    assert len(native.calls) == 1
+
+
+def _raise_type_error_on_gpu_request(error, pixels):
+    """Native fake whose GPU request fails but whose CPU request would succeed.
+
+    A device-less retry would therefore silently return CPU-decoded pixels.
+    """
+
+    def read_region(**kwargs):
+        if kwargs.get("device") == "cuda":
+            raise error
+        return pixels
+
+    return read_region
+
+
+def test_cucim_single_gpu_read_type_error_propagates_without_cpu_fallback(
+    monkeypatch,
+):
+    original = TypeError("GPU decode request rejected")
+    cpu_pixels = np.full((16, 16, 3), 7, dtype=np.uint8)
+    native = _FakeNativeCuImage(_raise_type_error_on_gpu_request(original, cpu_pixels))
+    reader = _make_cucim_reader_over(monkeypatch, native, gpu_decode=True)
+
+    with pytest.raises(TypeError) as excinfo:
+        reader.read_region((0, 0), 0, (16, 16))
+
+    assert excinfo.value is original
+    assert [call.get("device") for call in native.calls] == ["cuda"]
+
+
+def test_cucim_batched_gpu_read_type_error_propagates_without_cpu_fallback(
+    monkeypatch,
+):
+    original = TypeError("GPU decode request rejected")
+    cpu_pixels = [np.full((16, 16, 3), 7, dtype=np.uint8)] * 2
+    native = _FakeNativeCuImage(_raise_type_error_on_gpu_request(original, cpu_pixels))
+    reader = _make_cucim_reader_over(monkeypatch, native, gpu_decode=True)
+
+    with pytest.raises(TypeError) as excinfo:
+        list(reader.read_regions([(0, 0), (16, 0)], 0, (16, 16), num_workers=2))
+
+    assert excinfo.value is original
+    assert [call.get("device") for call in native.calls] == ["cuda"]
+
+
+def test_cucim_successful_gpu_requests_keep_cuda_device_and_decoded_pixels(
+    monkeypatch,
+):
+    def read_region(**kwargs):
+        if isinstance(kwargs["location"], list):
+            return [
+                np.full((16, 16, 3), 10 + index, dtype=np.uint8)
+                for index, _ in enumerate(kwargs["location"])
+            ]
+        return np.full((16, 16, 3), 42, dtype=np.uint8)
+
+    native = _FakeNativeCuImage(read_region)
+    reader = _make_cucim_reader_over(monkeypatch, native, gpu_decode=True)
+
+    single = reader.read_region((0, 0), 0, (16, 16))
+    batched = list(reader.read_regions([(0, 0), (16, 0)], 0, (16, 16), num_workers=3))
+
+    assert np.array_equal(single, np.full((16, 16, 3), 42, dtype=np.uint8))
+    assert [int(tile[0, 0, 0]) for tile in batched] == [10, 11]
+    assert [call.get("device") for call in native.calls] == ["cuda", "cuda"]
+    assert native.calls[1]["num_workers"] == 3

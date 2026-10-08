@@ -204,11 +204,7 @@ class CuCIMReader:
         if self._gpu_decode:
             kwargs["device"] = "cuda"
         with _suppress_native_stderr():
-            try:
-                return self._slide.read_region(**kwargs)
-            except TypeError:
-                kwargs.pop("device", None)
-                return self._slide.read_region(**kwargs)
+            return self._slide.read_region(**kwargs)
 
     def read_level(self, level: int) -> np.ndarray:
         dims = self._level_dimensions[level]
@@ -272,11 +268,7 @@ class CuCIMReader:
         if self._gpu_decode:
             kwargs["device"] = "cuda"
         with _suppress_native_stderr():
-            try:
-                regions = self._slide.read_region(**kwargs)
-            except TypeError:
-                kwargs.pop("device", None)
-                regions = self._slide.read_region(**kwargs)
+            regions = self._slide.read_region(**kwargs)
         for bounds, region in zip(bounds_per_location, regions):
             arr = _as_rgb_uint8(region)
             yield paste_region(
