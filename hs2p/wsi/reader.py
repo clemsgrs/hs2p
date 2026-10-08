@@ -152,7 +152,12 @@ def resolve_backends(
 
 @dataclass(frozen=True)
 class _BackendSpec:
-    name: str
+    """A registered reader: its constructor and the paths it can open.
+
+    ``opener`` is the reader class itself; every reader takes ``spacing_override`` and
+    ``require_spacing`` as keywords, and only :class:`CuCIMReader` takes ``gpu_decode``.
+    """
+
     opener: Callable[..., SlideReader]
     supports_path: Callable[[str | Path], bool]
 
@@ -162,96 +167,16 @@ def _supports_all_paths(path: str | Path) -> bool:
     return True
 
 
-def _open_asap(
-    path: str | Path,
-    *,
-    spacing_override: float | None = None,
-    require_spacing: bool = True,
-) -> SlideReader:
-    return ASAPReader(
-        path,
-        spacing_override=spacing_override,
-        require_spacing=require_spacing,
-    )
-
-
-def _open_openslide(
-    path: str | Path,
-    *,
-    spacing_override: float | None = None,
-    require_spacing: bool = True,
-) -> SlideReader:
-    return OpenSlideReader(
-        path,
-        spacing_override=spacing_override,
-        require_spacing=require_spacing,
-    )
-
-
-def _open_cucim(
-    path: str | Path,
-    *,
-    spacing_override: float | None = None,
-    gpu_decode: bool = False,
-    require_spacing: bool = True,
-) -> SlideReader:
-    return CuCIMReader(
-        path,
-        spacing_override=spacing_override,
-        gpu_decode=gpu_decode,
-        require_spacing=require_spacing,
-    )
-
-
-def _open_vips(
-    path: str | Path,
-    *,
-    spacing_override: float | None = None,
-    require_spacing: bool = True,
-) -> SlideReader:
-    return VIPSReader(
-        path,
-        spacing_override=spacing_override,
-        require_spacing=require_spacing,
-    )
-
-
-def _open_pil(
-    path: str | Path,
-    *,
-    spacing_override: float | None = None,
-    require_spacing: bool = True,
-) -> SlideReader:
-    return PILReader(
-        path,
-        spacing_override=spacing_override,
-        require_spacing=require_spacing,
-    )
-
-
-def _open_tifffile(
-    path: str | Path,
-    *,
-    spacing_override: float | None = None,
-    require_spacing: bool = True,
-) -> SlideReader:
-    return TifffileReader(
-        path,
-        spacing_override=spacing_override,
-        require_spacing=require_spacing,
-    )
-
-
 # ``tifffile`` is explicit-only: it is not part of ``AUTO_BACKEND_ORDER`` because it
 # returns stored samples unchanged, which is what a label mask needs and what an RGB
 # slide read path does not expect from ``auto``.
 _BACKENDS: dict[str, _BackendSpec] = {
-    "cucim": _BackendSpec("cucim", _open_cucim, supports_cucim_path),
-    "asap": _BackendSpec("asap", _open_asap, _supports_all_paths),
-    "openslide": _BackendSpec("openslide", _open_openslide, _supports_all_paths),
-    "pil": _BackendSpec("pil", _open_pil, supports_pil_path),
-    "tifffile": _BackendSpec("tifffile", _open_tifffile, supports_tifffile_path),
-    "vips": _BackendSpec("vips", _open_vips, supports_vips_path),
+    "cucim": _BackendSpec(CuCIMReader, supports_cucim_path),
+    "asap": _BackendSpec(ASAPReader, _supports_all_paths),
+    "openslide": _BackendSpec(OpenSlideReader, _supports_all_paths),
+    "pil": _BackendSpec(PILReader, supports_pil_path),
+    "tifffile": _BackendSpec(TifffileReader, supports_tifffile_path),
+    "vips": _BackendSpec(VIPSReader, supports_vips_path),
 }
 
 

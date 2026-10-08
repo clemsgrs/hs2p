@@ -160,7 +160,6 @@ def test_auto_open_uses_spacing_override_for_probe_and_warns_only_on_selected_op
         "_BACKENDS",
         {
             "cucim": reader_mod._BackendSpec(
-                name="cucim",
                 opener=_fake_opener,
                 supports_path=lambda path: True,
             ),
@@ -199,7 +198,6 @@ def test_auto_openability_probe_honors_require_spacing(monkeypatch):
         "_BACKENDS",
         {
             "openslide": reader_mod._BackendSpec(
-                name="openslide",
                 opener=_fake_opener,
                 supports_path=lambda path: True,
             ),
@@ -218,6 +216,52 @@ def test_auto_openability_probe_honors_require_spacing(monkeypatch):
     )
 
     assert selection.backend == "openslide"
+
+
+def test_open_slide_forwards_gpu_decode_to_cucim_only(monkeypatch):
+    """Only the cuCIM reader takes ``gpu_decode``; every other reader opens without it."""
+    opened: dict[str, dict] = {}
+
+    class _Reader:
+        def close(self):
+            return None
+
+    def _cucim(path, *, spacing_override=None, gpu_decode=False, require_spacing=True):
+        opened["cucim"] = dict(
+            spacing_override=spacing_override,
+            gpu_decode=gpu_decode,
+            require_spacing=require_spacing,
+        )
+        return _Reader()
+
+    def _openslide(path, *, spacing_override=None, require_spacing=True):
+        opened["openslide"] = dict(
+            spacing_override=spacing_override, require_spacing=require_spacing
+        )
+        return _Reader()
+
+    monkeypatch.setitem(
+        reader_mod._BACKENDS, "cucim", reader_mod._BackendSpec(_cucim, lambda p: True)
+    )
+    monkeypatch.setitem(
+        reader_mod._BACKENDS,
+        "openslide",
+        reader_mod._BackendSpec(_openslide, lambda p: True),
+    )
+
+    for backend in ("cucim", "openslide"):
+        reader_mod.open_slide(
+            Path("slide.svs"),
+            backend=backend,
+            spacing_override=0.25,
+            gpu_decode=True,
+            require_spacing=False,
+        ).close()
+
+    assert opened == {
+        "cucim": {"spacing_override": 0.25, "gpu_decode": True, "require_spacing": False},
+        "openslide": {"spacing_override": 0.25, "require_spacing": False},
+    }
 
 
 def test_tile_slide_uses_resolved_backend_for_hash_and_result(monkeypatch):
