@@ -17,6 +17,7 @@ from .models import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfi
 
 
 def resolve_tiling_config(cfg: Any) -> TilingConfig:
+    _reject_retired_sampling_params(cfg.tiling)
     min_coverage = dict(
         _merge_sampling_mapping(cfg.tiling.masks.min_coverage, field_name="min_coverage")
         or {}
@@ -276,15 +277,30 @@ def resolve_sampling_spec(
     *,
     tiling: TilingConfig,
 ) -> SamplingSpec:
+    _reject_retired_sampling_params(cfg.tiling)
     masks_cfg = getattr(cfg.tiling, "masks", None)
-    if masks_cfg is not None:
-        return _resolve_sampling_spec_from_masks(masks_cfg)
-
-    # Fall back to legacy sampling_params key
-    sampling_config = getattr(cfg.tiling, "sampling_params", None)
-    if sampling_config is None:
+    if masks_cfg is None:
         return build_default_sampling_spec(tiling)
-    return _resolve_sampling_spec_from_sampling_params(sampling_config)
+    return _resolve_sampling_spec_from_masks(masks_cfg)
+
+
+def _reject_retired_sampling_params(tiling_cfg: Any) -> None:
+    """Refuse the retired ``tiling.sampling_params`` schema instead of ignoring it.
+
+    File/CLI loading merges the default ``tiling.masks`` section first, so a legacy
+    ``sampling_params`` block would otherwise be silently dropped in favour of default
+    binary tissue tiling.
+    """
+    if isinstance(tiling_cfg, Mapping):
+        present = "sampling_params" in tiling_cfg
+    else:
+        present = hasattr(tiling_cfg, "sampling_params")
+    if present:
+        raise ValueError(
+            "tiling.sampling_params is no longer supported; move it to tiling.masks: "
+            "pixel_mapping stays pixel_mapping, color_mapping becomes colors, and "
+            "tissue_percentage becomes min_coverage."
+        )
 
 
 def _drop_null_labels(
@@ -359,59 +375,6 @@ def _resolve_sampling_spec_from_masks(masks_cfg: Any) -> SamplingSpec:
         active_annotations=tuple(
             annotation
             for annotation, pct in min_coverage.items()
-            if annotation in pixel_mapping and pct is not None
-        ),
-    )
-
-
-def _resolve_sampling_spec_from_sampling_params(
-    sampling_config: Any,
-) -> SamplingSpec:
-    pixel_mapping = _merge_sampling_mapping(
-        getattr(sampling_config, "pixel_mapping", None),
-        field_name="pixel_mapping",
-    )
-    tissue_percentage = _merge_sampling_mapping(
-        getattr(sampling_config, "tissue_percentage", None),
-        field_name="tissue_percentage",
-    )
-    if pixel_mapping is None:
-        raise ValueError("sampling pixel_mapping is required when sampling config is provided")
-    if tissue_percentage is None:
-        raise ValueError(
-            "sampling tissue_percentage is required when sampling config is provided"
-        )
-    color_mapping = _merge_sampling_mapping(
-        getattr(sampling_config, "color_mapping", None),
-        field_name="color_mapping",
-    )
-    _validate_annotation_names(pixel_mapping, tissue_percentage, color_mapping)
-    pixel_mapping, (tissue_percentage, color_mapping) = _drop_null_labels(
-        pixel_mapping, tissue_percentage, color_mapping
-    )
-    pixel_mapping = _plain_pixel_lists(pixel_mapping)
-    validate_pixel_mapping(pixel_mapping)
-    missing_threshold_labels = sorted(
-        set(tissue_percentage.keys()) - set(pixel_mapping.keys())
-    )
-    if missing_threshold_labels:
-        raise ValueError(
-            "sampling tissue_percentage references unknown labels: "
-            + ", ".join(missing_threshold_labels)
-        )
-    if color_mapping is not None:
-        validate_color_mapping(
-            pixel_mapping=pixel_mapping,
-            color_mapping=color_mapping,
-        )
-
-    return SamplingSpec(
-        pixel_mapping=pixel_mapping,
-        color_mapping=color_mapping,
-        tissue_percentage=tissue_percentage,
-        active_annotations=tuple(
-            annotation
-            for annotation, pct in tissue_percentage.items()
             if annotation in pixel_mapping and pct is not None
         ),
     )

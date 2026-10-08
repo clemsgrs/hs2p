@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### `tiling.sampling_params` is rejected
+
+- A config that still declares the retired `tiling.sampling_params` section now fails
+  with a `ValueError` naming it, before any slide is tiled. File and CLI loading merge
+  the default `tiling.masks` section first, so a legacy tumor-sampling config was
+  silently ignored and tiled binary tissue instead; configs passed straight to
+  `resolve_tiling_config`, `resolve_sampling_spec` or `resolve_sampling_request`
+  reached a second, legacy parser. That parser is gone and no compatibility shim
+  replaces it: the key is refused whether or not a `tiling.masks` section sits next
+  to it.
+- To migrate, move the section to `tiling.masks`: `pixel_mapping` keeps its name,
+  `color_mapping` becomes `colors` and `tissue_percentage` becomes `min_coverage`.
+
 ### Lossless TIFF masks
 
 - `Mask` refuses a TIFF mask through `cucim`, `vips`, `openslide` or `asap` when any
