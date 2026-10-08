@@ -4,17 +4,20 @@ import cv2
 import numpy as np
 import pytest
 
-import hs2p.preprocessing as preprocessing_mod
 from hs2p.preprocessing import (
     ContourResult,
     TileGeometry,
     TilingResult,
-    _load_tiling_result_from_paths as load_tiling_result,
-    _save_tiling_result as save_tiling_result,
     detect_contours,
     generate_tiles,
 )
 from hs2p.tiling.coverage import compute_tile_coverage
+from hs2p.tiling.io import (
+    _PROVENANCE_KEYS,
+    _SEGMENTATION_KEYS,
+    _load_tiling_result_from_paths as load_tiling_result,
+    _save_tiling_result as save_tiling_result,
+)
 
 
 BASE_SPACING = 0.25
@@ -206,8 +209,8 @@ def test_tiling_artifact_roundtrip_uses_strict_rich_metadata(tmp_path):
     assert meta["segmentation"]["mask_path"] == "/tmp/slide-001-mask.tif"
     assert meta["segmentation"]["mask_level"] == 1
     assert meta["segmentation"]["mask_spacing_um"] == 0.5
-    assert set(meta["provenance"].keys()) == preprocessing_mod._PROVENANCE_KEYS
-    assert set(meta["segmentation"].keys()) == preprocessing_mod._SEGMENTATION_KEYS
+    assert set(meta["provenance"].keys()) == _PROVENANCE_KEYS
+    assert set(meta["segmentation"].keys()) == _SEGMENTATION_KEYS
 
     loaded = load_tiling_result(paths["npz"], paths["meta"])
     np.testing.assert_array_equal(

@@ -41,18 +41,6 @@ def project_discrete_grid_origins(
     return projected
 
 
-def compute_level_downsamples(
-    level_dimensions: list[tuple[int, int]],
-) -> list[tuple[float, float]]:
-    if not level_dimensions:
-        return []
-    width_0, height_0 = level_dimensions[0]
-    return [
-        (width_0 / float(width), height_0 / float(height))
-        for width, height in level_dimensions
-    ]
-
-
 def compute_level_spacings(
     *,
     level0_spacing_um: float,

@@ -34,7 +34,7 @@ class TextReporter:
         line = self._format_line(event.kind, event.payload)
         if line is None:
             return
-        if event.kind in {"tiling.progress", "preview.progress", "sampling.progress"}:
+        if event.kind in {"tiling.progress", "preview.progress"}:
             now = time.monotonic()
             last = self._last_line_by_kind.get(event.kind)
             if last is not None and last[1] == line and (now - last[0]) < 1.0:
@@ -92,18 +92,6 @@ class TextReporter:
             return (
                 f"Preview generation finished: {payload['completed']}/{payload['total']} complete, "
                 f"{payload['failed']} failed"
-            )
-        if kind == "sampling.started":
-            return f"Sampling slides ({payload['total']} total)..."
-        if kind == "sampling.progress":
-            return (
-                f"Sampling progress: {payload['completed']}/{payload['total']} complete, "
-                f"{payload['failed']} failed, {payload['sampled_tiles']} tiles kept"
-            )
-        if kind == "sampling.finished":
-            return (
-                f"Sampling finished: {payload['completed']}/{payload['total']} complete, "
-                f"{payload['failed']} failed, {payload['sampled_tiles']} tiles kept"
             )
         if kind == "backend.selected":
             reason = payload.get("reason")
@@ -271,36 +259,6 @@ class RichReporter:
                     ("Failed", str(payload["failed"])),
                 ],
             )
-            return
-        if kind == "sampling.started":
-            self._task_ids["sampling"] = self.progress.add_task(
-                "Sampling slides", total=payload["total"]
-            )
-            return
-        if kind == "sampling.progress":
-            task_id = self._task_ids.get("sampling")
-            if task_id is not None:
-                self.progress.update(
-                    task_id,
-                    completed=payload["completed"] + payload["failed"],
-                    description=f"Sampling slides ({payload['sampled_tiles']} tiles kept)",
-                )
-            return
-        if kind == "sampling.finished":
-            zero_tile_total = sum(payload["zero_tile_successes_by_annotation"].values())
-            rows = [
-                ("Slides", str(payload["total"])),
-                ("Completed", str(payload["completed"])),
-                ("Failed", str(payload["failed"])),
-                ("Zero-tile", str(zero_tile_total)),
-                ("Total tiles", str(payload["sampled_tiles"])),
-                ("Process list", payload["process_list_path"]),
-            ]
-            for annotation, count in sorted(
-                payload["zero_tile_successes_by_annotation"].items()
-            ):
-                rows.append((f"Zero-tile {annotation}", str(count)))
-            self._print_summary("Sampling Summary", rows)
             return
         if kind == "backend.selected":
             sample_id = payload["sample_id"]

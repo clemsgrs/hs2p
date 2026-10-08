@@ -106,6 +106,18 @@
   after the fill. Islands of tissue nested inside a hole stay excluded from the
   enclosing contour, as before, and are measured as their own contour.
 
+### Unused internals removed
+
+- `hs2p.wsi.streaming.plans.group_read_plans_by_size`,
+  `hs2p.wsi.geometry.compute_level_downsamples` and
+  `hs2p.utils.stderr.run_with_filtered_stdio` had no callers in hs2p, slide2vec or soma
+  and are gone. `run_with_filtered_stderr` stays.
+- `hs2p.preprocessing` and `hs2p.api` no longer re-export underscore-prefixed helpers;
+  import them from the module that defines them. Their `__all__` exports are unchanged.
+- The progress reporters no longer handle `sampling.started`, `sampling.progress` and
+  `sampling.finished`. Nothing emits them: annotation sampling reports through the
+  `tissue.*`, `tiling.*` and `preview.*` events.
+
 ## 5.0.0
 
 hs2p 5.0 is a breaking release. Source masks are now first-class `hs2p.Mask` objects

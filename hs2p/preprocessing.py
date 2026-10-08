@@ -1,10 +1,8 @@
 """Reusable low-level preprocessing primitives shared with downstream projects."""
 
-from hs2p.tiling.contours import _normalize_level_downsamples, detect_contours
+from hs2p.tiling.contours import detect_contours
 from hs2p.tiling.coverage import compute_tile_coverage, summarize_annotation_coverage
 from hs2p.tiling.generate import (
-    _build_contour_tissue_mask,
-    _tiles_for_contour,
     canonicalize_tiling_result,
     generate_tiles,
     resolve_base_spacing_um,
@@ -12,19 +10,6 @@ from hs2p.tiling.generate import (
 from hs2p.tiling.io import (
     COORDINATE_SPACE,
     TILE_ORDER,
-    _ARTIFACT_KEYS,
-    _FILTERING_KEYS,
-    _PROVENANCE_KEYS,
-    _SEGMENTATION_KEYS,
-    _SLIDE_KEYS,
-    _TILING_KEYS,
-    _TOP_LEVEL_META_KEYS,
-    _build_tiling_metadata,
-    _load_tiling_result,
-    _load_tiling_result_from_paths,
-    _save_tiling_result,
-    _validate_metadata_schema,
-    _validate_tile_index,
     normalize_artifact_path,
     validate_tiling_result_provenance,
 )

@@ -16,6 +16,7 @@ from PIL import Image
 import hs2p.preprocessing as preprocessing_mod
 from hs2p.api import extract_tiles_to_tar
 from hs2p.configs.models import FilterConfig
+from hs2p.tile_qc import needs_pixel_qc
 from hs2p.wsi import iter_tile_arrays_from_result
 
 
@@ -745,18 +746,12 @@ class TestExtractTilesToTar:
         assert read_sizes == [32, 32, 32, 16, 16, 16]
 
 
-class TestNeedsPixelFiltering:
+class TestNeedsPixelQc:
     def test_no_filtering(self):
-        from hs2p.api import _needs_pixel_filtering
-
-        assert not _needs_pixel_filtering(FilterConfig())
+        assert not needs_pixel_qc(FilterConfig())
 
     def test_grayspace_only(self):
-        from hs2p.api import _needs_pixel_filtering
-
-        assert _needs_pixel_filtering(FilterConfig(filter_grayspace=True))
+        assert needs_pixel_qc(FilterConfig(filter_grayspace=True))
 
     def test_blur_only(self):
-        from hs2p.api import _needs_pixel_filtering
-
-        assert _needs_pixel_filtering(FilterConfig(filter_blur=True))
+        assert needs_pixel_qc(FilterConfig(filter_blur=True))

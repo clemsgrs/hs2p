@@ -45,6 +45,7 @@ from hs2p.wsi.streaming.plans import resolve_read_step_px
 import hs2p.wsi.wsi as wsi_mod
 import hs2p.api as api_mod
 import hs2p.tiling.orchestration as orchestration_mod
+import hs2p.tiling.io as tiling_io_mod
 
 
 @pytest.fixture
@@ -447,7 +448,7 @@ def _save_valid_preprocessing_artifact(
         image_path=f"{sample_id}.svs",
         mask_path=f"{sample_id}-mask.png",
     )
-    paths = preprocessing_mod._save_tiling_result(result, output_dir=tmp_path)
+    paths = tiling_io_mod._save_tiling_result(result, output_dir=tmp_path)
     return Path(paths["npz"]), Path(paths["meta"])
 
 
@@ -928,7 +929,7 @@ def test_load_tiling_result_accepts_preprocessing_artifact(tmp_path: Path):
         output_mode="multi_output",
     )
 
-    artifacts = preprocessing_mod._save_tiling_result(
+    artifacts = tiling_io_mod._save_tiling_result(
         preprocessing_result,
         output_dir=tmp_path / "tiles",
     )
