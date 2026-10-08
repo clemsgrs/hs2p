@@ -16,7 +16,7 @@ from PIL import Image
 import hs2p.mask as maskmod
 import hs2p.tiling.orchestration as orchmod
 import hs2p.wsi.visualization as visualization_mod
-from hs2p.api import PreviewConfig, SlideSpec, TilingConfig, tile_slides
+from hs2p.api import PreviewConfig, SlideSpec, TilingArtifacts, TilingConfig, tile_slides
 from hs2p.mask import AlignedMask, AnnotationLabels, Mask
 from hs2p.wsi.preview import build_palette, draw_grid_from_coordinates
 from hs2p.wsi.types import CoordinateOutputMode, CoordinateSelectionStrategy, SamplingSpec
@@ -265,10 +265,12 @@ def test_overlay_decode_failure_names_the_mask_path_and_backend(monkeypatch):
 # --- tiling-preview worker -----------------------------------------------------------
 
 
-def _artifact(annotation: str | None) -> SimpleNamespace:
-    return SimpleNamespace(
+def _artifact(annotation: str | None) -> TilingArtifacts:
+    return TilingArtifacts(
+        sample_id="slide",
         coordinates_npz_path=Path("slide.npz"),
         coordinates_meta_path=Path("slide.json"),
+        num_tiles=1,
         annotation=annotation,
     )
 

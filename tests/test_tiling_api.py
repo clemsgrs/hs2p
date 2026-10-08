@@ -1085,6 +1085,62 @@ def test_tile_slides_defers_preview_writes_until_after_next_slide_compute(
     ]
 
 
+def test_pooled_tile_slides_render_tiling_previews_from_saved_artifacts(tmp_path: Path):
+    """Pooled workers return no in-memory TilingResult (result=None), so each tiling preview
+    is rendered from the persisted coordinate artifacts instead."""
+    from PIL import Image
+
+    rng = np.random.default_rng(0)
+    labels = np.zeros((256, 256), dtype=np.uint8)
+    labels[:128, :128] = 1
+    whole_slides = []
+    for sample_id in ("slide-a", "slide-b"):
+        slide_path = tmp_path / f"{sample_id}.png"
+        Image.fromarray(
+            rng.integers(90, 200, size=(256, 256, 3), dtype=np.uint8)
+        ).save(slide_path)
+        mask_path = tmp_path / f"{sample_id}-mask.png"
+        Image.fromarray(labels, mode="L").save(mask_path)
+        whole_slides.append(
+            SlideSpec(
+                sample_id=sample_id,
+                image_path=slide_path,
+                mask_path=mask_path,
+                spacing_at_level_0=0.5,
+            )
+        )
+    output_dir = tmp_path / "out"
+
+    artifacts = tile_slides(
+        whole_slides,
+        tiling=TilingConfig(
+            requested_spacing_um=0.5,
+            requested_tile_size_px=64,
+            tolerance=0.05,
+            overlap=0.0,
+            min_coverage={"tissue": 0.5},
+            backend="pil",
+            mask_backend="pil",
+        ),
+        filtering=FilterConfig(a_t=0, a_h=0),
+        preview=PreviewConfig(save_tiling_preview=True, downsample=1),
+        output_dir=output_dir,
+        num_workers=2,
+    )
+
+    assert [artifact.sample_id for artifact in artifacts] == ["slide-a", "slide-b"]
+    assert [artifact.num_tiles for artifact in artifacts] == [4, 4]
+    process_df = pd.read_csv(output_dir / "process_list.csv")
+    assert process_df["tiling_status"].tolist() == ["success", "success"]
+    for sample_id, preview_path in zip(
+        process_df["sample_id"], process_df["tiling_preview_path"]
+    ):
+        expected = output_dir / "preview" / "tiling" / f"{sample_id}.jpg"
+        assert Path(preview_path) == expected
+        with Image.open(expected) as image:
+            assert image.size == (256, 256)
+
+
 def test_tile_slides_uses_slide_level_pool_and_preserves_input_order(
     monkeypatch,
     tmp_path: Path,
@@ -1102,7 +1158,7 @@ def test_tile_slides_uses_slide_level_pool_and_preserves_input_order(
         meta_path = tiles_dir / f"{request.whole_slide.sample_id}.coordinates.meta.json"
         npz_path.write_bytes(b"npz")
         meta_path.write_text("{}")
-        return SimpleNamespace(
+        return orchestration_mod._ComputeResponse(
             input_index=request.input_index,
             whole_slide=request.whole_slide,
             ok=True,
@@ -1112,9 +1168,10 @@ def test_tile_slides_uses_slide_level_pool_and_preserves_input_order(
                 coordinates_meta_path=meta_path,
                 num_tiles=1,
             ),
-            mask_preview_path=None,
-            error=None,
-            traceback_text=None,
+            requested_backend=request.tiling.requested_backend,
+            backend=request.tiling.backend,
+            requested_mask_backend=request.tiling.requested_mask_backend,
+            mask_backend=request.tiling.mask_backend,
         )
 
     class _FakePool:
@@ -1192,7 +1249,7 @@ def test_tile_slides_assigns_inner_workers_when_batch_is_small(
         meta_path = tiles_dir / f"{request.whole_slide.sample_id}.coordinates.meta.json"
         npz_path.write_bytes(b"npz")
         meta_path.write_text("{}")
-        return SimpleNamespace(
+        return orchestration_mod._ComputeResponse(
             input_index=request.input_index,
             whole_slide=request.whole_slide,
             ok=True,
@@ -1202,9 +1259,10 @@ def test_tile_slides_assigns_inner_workers_when_batch_is_small(
                 coordinates_meta_path=meta_path,
                 num_tiles=1,
             ),
-            mask_preview_path=None,
-            error=None,
-            traceback_text=None,
+            requested_backend=request.tiling.requested_backend,
+            backend=request.tiling.backend,
+            requested_mask_backend=request.tiling.requested_mask_backend,
+            mask_backend=request.tiling.mask_backend,
         )
 
     class _FakePool:
@@ -1611,7 +1669,7 @@ def test_tile_slides_uses_process_pool_for_tissue_resolution(
         meta_path = tiles_dir / f"{request.whole_slide.sample_id}.coordinates.meta.json"
         npz_path.write_bytes(b"npz")
         meta_path.write_text("{}")
-        return SimpleNamespace(
+        return orchestration_mod._ComputeResponse(
             input_index=request.input_index,
             whole_slide=request.whole_slide,
             ok=True,
@@ -1621,9 +1679,10 @@ def test_tile_slides_uses_process_pool_for_tissue_resolution(
                 coordinates_meta_path=meta_path,
                 num_tiles=1,
             ),
-            mask_preview_path=None,
-            error=None,
-            traceback_text=None,
+            requested_backend=request.tiling.requested_backend,
+            backend=request.tiling.backend,
+            requested_mask_backend=request.tiling.requested_mask_backend,
+            mask_backend=request.tiling.mask_backend,
         )
 
     class _FakePool:
@@ -1715,7 +1774,7 @@ def test_tile_slides_uses_spawn_pool_for_sam2_work(
         meta_path = tiles_dir / f"{request.whole_slide.sample_id}.coordinates.meta.json"
         npz_path.write_bytes(b"npz")
         meta_path.write_text("{}")
-        return SimpleNamespace(
+        return orchestration_mod._ComputeResponse(
             input_index=request.input_index,
             whole_slide=request.whole_slide,
             ok=True,
@@ -1725,9 +1784,10 @@ def test_tile_slides_uses_spawn_pool_for_sam2_work(
                 coordinates_meta_path=meta_path,
                 num_tiles=1,
             ),
-            mask_preview_path=None,
-            error=None,
-            traceback_text=None,
+            requested_backend=request.tiling.requested_backend,
+            backend=request.tiling.backend,
+            requested_mask_backend=request.tiling.requested_mask_backend,
+            mask_backend=request.tiling.mask_backend,
         )
 
     class _FakePool:
@@ -1840,7 +1900,7 @@ def test_tile_slides_uses_spawn_pool_for_non_sam2_work(
         meta_path = tiles_dir / f"{request.whole_slide.sample_id}.coordinates.meta.json"
         npz_path.write_bytes(b"npz")
         meta_path.write_text("{}")
-        return SimpleNamespace(
+        return orchestration_mod._ComputeResponse(
             input_index=request.input_index,
             whole_slide=request.whole_slide,
             ok=True,
@@ -1850,9 +1910,10 @@ def test_tile_slides_uses_spawn_pool_for_non_sam2_work(
                 coordinates_meta_path=meta_path,
                 num_tiles=1,
             ),
-            mask_preview_path=None,
-            error=None,
-            traceback_text=None,
+            requested_backend=request.tiling.requested_backend,
+            backend=request.tiling.backend,
+            requested_mask_backend=request.tiling.requested_mask_backend,
+            mask_backend=request.tiling.mask_backend,
         )
 
     class _FakePool:
