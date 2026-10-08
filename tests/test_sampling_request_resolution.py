@@ -2,6 +2,8 @@
 annotation sampling from the merged config, resolve_output_mode validates the mode, and
 resolve_tiling_config tolerates configs that declare no 'tissue' threshold."""
 
+from types import SimpleNamespace
+
 import pytest
 from omegaconf import OmegaConf
 
@@ -11,6 +13,7 @@ from hs2p.configs.resolvers import (
     build_default_sampling_spec,
     resolve_output_mode,
     resolve_sampling_request,
+    resolve_sampling_spec,
     resolve_tiling_config,
 )
 from hs2p.wsi.types import CoordinateOutputMode, CoordinateSelectionStrategy
@@ -150,3 +153,105 @@ def test_resolve_output_mode_default_and_validation():
     assert resolve_output_mode(_cfg()) == CoordinateOutputMode.PER_ANNOTATION
     with pytest.raises(ValueError, match="output_mode"):
         resolve_output_mode(_cfg({"tiling": {"masks": {"output_mode": "bogus"}}}))
+
+
+_LEGACY_SAMPLING_PARAMS = {
+    "pixel_mapping": [{"background": 0}, {"tissue": 1}, {"tumor": 2}],
+    "color_mapping": [{"background": None}, {"tissue": None}, {"tumor": [255, 0, 0]}],
+    "tissue_percentage": [{"background": None}, {"tissue": None}, {"tumor": 0.5}],
+}
+
+_CURRENT_MASKS = {
+    "pixel_mapping": {"background": 0, "tissue": 1},
+    "colors": {"background": None, "tissue": [157, 219, 129]},
+    "min_coverage": {"background": None, "tissue": 0.01},
+}
+
+
+def _resolve_tiling(cfg):
+    return resolve_tiling_config(cfg)
+
+
+def _resolve_spec(cfg):
+    return resolve_sampling_spec(cfg, tiling=_tiling({"tissue": 0.01}))
+
+
+def _resolve_request(cfg):
+    return resolve_sampling_request(cfg, tiling=_tiling({"tissue": 0.01}))
+
+
+@pytest.mark.parametrize(
+    "resolve", [_resolve_tiling, _resolve_spec, _resolve_request],
+    ids=["resolve_tiling_config", "resolve_sampling_spec", "resolve_sampling_request"],
+)
+@pytest.mark.parametrize(
+    "tiling_section",
+    [
+        {"sampling_params": _LEGACY_SAMPLING_PARAMS},
+        {"sampling_params": _LEGACY_SAMPLING_PARAMS, "masks": _CURRENT_MASKS},
+    ],
+    ids=["alone", "alongside_masks"],
+)
+def test_direct_resolvers_reject_retired_sampling_params(resolve, tiling_section):
+    """Unmerged configs passed straight to a resolver never reach a legacy parser: the
+    retired key is refused whether or not a current masks section sits next to it."""
+    cfg = OmegaConf.create(
+        {
+            "tiling": {
+                "params": dict(default_config.tiling.params),
+                "independent_sampling": False,
+                "backend": "auto",
+                **tiling_section,
+            }
+        }
+    )
+
+    with pytest.raises(ValueError, match=r"tiling\.sampling_params.*tiling\.masks"):
+        resolve(cfg)
+
+
+def test_masks_section_carries_colors_and_per_label_coverage():
+    """The masks schema (the only sampling schema) keeps colors and per-label coverage, and
+    samples exactly the labels with a non-null coverage threshold."""
+    cfg = OmegaConf.create(
+        {
+            "tiling": {
+                "masks": {
+                    "pixel_mapping": [{"background": 0}, {"tumor": 2}, {"stroma": [3, 4]}],
+                    "colors": [
+                        {"background": None},
+                        {"tumor": [255, 0, 0]},
+                        {"stroma": [0, 0, 255]},
+                    ],
+                    "min_coverage": [{"background": None}, {"tumor": 0.5}, {"stroma": 0.25}],
+                }
+            }
+        }
+    )
+
+    spec = resolve_sampling_spec(cfg, tiling=_tiling({}))
+
+    assert dict(spec.pixel_mapping) == {"background": 0, "tumor": 2, "stroma": [3, 4]}
+    assert dict(spec.color_mapping) == {
+        "background": None,
+        "tumor": [255, 0, 0],
+        "stroma": [0, 0, 255],
+    }
+    assert dict(spec.tissue_percentage) == {
+        "background": None,
+        "tumor": 0.5,
+        "stroma": 0.25,
+    }
+    assert spec.active_annotations == ("tumor", "stroma")
+
+
+def test_config_without_masks_section_samples_default_tissue():
+    """An adapter that declares no masks section gets binary tissue sampling at the
+    resolved tissue threshold."""
+    cfg = SimpleNamespace(tiling=SimpleNamespace())
+
+    spec = resolve_sampling_spec(cfg, tiling=_tiling({"tissue": 0.2}))
+
+    assert dict(spec.pixel_mapping) == {"background": 0, "tissue": 1}
+    assert spec.active_annotations == ("tissue",)
+    assert spec.tissue_percentage["tissue"] == 0.2
