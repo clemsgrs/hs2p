@@ -67,7 +67,7 @@ def _serve_mask(monkeypatch, reader: _MaskPyramid) -> list[str]:
     monkeypatch.setitem(
         reader_mod._BACKENDS,
         "openslide",
-        reader_mod._BackendSpec("openslide", _open, lambda path: True),
+        reader_mod._BackendSpec(_open, lambda path: True),
     )
     return opened
 
