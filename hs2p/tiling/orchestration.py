@@ -574,6 +574,7 @@ class _PendingPreview:
     base_artifact: TilingArtifacts
     mask_preview_path: Path | None
     future: Any
+    selection_strategy: str | None
 
 
 @dataclass(frozen=True)
@@ -676,26 +677,58 @@ def _build_success_artifact(
     )
 
 
+_ANNOTATION_SAMPLING_STRATEGIES = frozenset(
+    {
+        CoordinateSelectionStrategy.JOINT_SAMPLING,
+        CoordinateSelectionStrategy.INDEPENDENT_SAMPLING,
+    }
+)
+
+
+def _selection_strategy_for_slide(
+    *,
+    whole_slide: SlideSpec,
+    sampling: SamplingSpec | None,
+    selection_strategy: str | None,
+) -> str | None:
+    """The coordinate selection strategy ``tile_slides`` applies to ``whole_slide``."""
+    if sampling is not None:
+        return selection_strategy or CoordinateSelectionStrategy.JOINT_SAMPLING
+    if whole_slide.mask_path is not None:
+        return CoordinateSelectionStrategy.MERGED_DEFAULT_TILING
+    return None
+
+
+def _process_row_annotation(
+    *,
+    annotation: str | None,
+    selection_strategy: str | None,
+) -> str:
+    """Label a success row from the selection strategy that produced its artifact.
+
+    ``output_mode`` alone cannot tell the two ``annotation=None`` artifacts apart: default
+    tissue tiling over a source mask is also ``output_mode='merged'``, yet it stays a tissue
+    row. Only annotation sampling yields the ``'merged'`` union of annotation classes.
+    """
+    if annotation is not None:
+        return annotation
+    if selection_strategy in _ANNOTATION_SAMPLING_STRATEGIES:
+        return "merged"
+    return "tissue"
+
+
 def _build_success_process_row(
     *,
     whole_slide: SlideSpec,
     artifact: TilingArtifacts,
+    selection_strategy: str | None,
 ) -> dict[str, Any]:
-    # A per-slide artifact with no annotation is binary tissue tiling, EXCEPT the merged
-    # MERGED annotation result (also annotation=None, but a union of annotation classes).
-    # Record output_mode and label the merged row "merged" so it is not mistaken for tissue.
-    if (
-        artifact.annotation is None
-        and artifact.output_mode == CoordinateOutputMode.MERGED
-    ):
-        annotation_label = "merged"
-    elif artifact.annotation is not None:
-        annotation_label = artifact.annotation
-    else:
-        annotation_label = "tissue"
     return {
         "sample_id": whole_slide.sample_id,
-        "annotation": annotation_label,
+        "annotation": _process_row_annotation(
+            annotation=artifact.annotation,
+            selection_strategy=selection_strategy,
+        ),
         "output_mode": artifact.output_mode,
         "image_path": str(whole_slide.image_path),
         "mask_path": (
@@ -828,6 +861,7 @@ def _finalize_pending_tiling_preview(
     row = _build_success_process_row(
         whole_slide=pending.whole_slide,
         artifact=artifact,
+        selection_strategy=pending.selection_strategy,
     )
     return artifact, row
 
@@ -956,19 +990,9 @@ def _compute_and_save_tiling_artifacts_from_request(
                 num_workers=request.num_workers,
                 gpu_decode=request.gpu_decode,
             )
-        artifact = save_tiling_result(result, output_dir=request.output_dir, annotation=None)
-        artifact = TilingArtifacts(
-            sample_id=artifact.sample_id,
-            coordinates_npz_path=artifact.coordinates_npz_path,
-            coordinates_meta_path=artifact.coordinates_meta_path,
-            num_tiles=artifact.num_tiles,
+        artifact = replace(
+            save_tiling_result(result, output_dir=request.output_dir, annotation=None),
             tiles_tar_path=tiles_tar_path,
-            mask_preview_path=artifact.mask_preview_path,
-            tiling_preview_path=artifact.tiling_preview_path,
-            backend=artifact.backend,
-            requested_backend=artifact.requested_backend,
-            mask_backend=artifact.mask_backend,
-            requested_mask_backend=artifact.requested_mask_backend,
         )
         mask_preview_path = (
             request.mask_preview_path
@@ -1652,6 +1676,13 @@ def tile_slides(
 
     emit_progress("tiling.started", total=total_slides)
 
+    def _row_selection_strategy(whole_slide: SlideSpec) -> str | None:
+        return _selection_strategy_for_slide(
+            whole_slide=whole_slide,
+            sampling=sampling,
+            selection_strategy=selection_strategy,
+        )
+
     def _finalize_all_pending_previews() -> None:
         if not pending_previews:
             return
@@ -1764,6 +1795,7 @@ def tile_slides(
                     base_artifact=sampling_artifact,
                     mask_preview_path=sampling_artifact.mask_preview_path,
                     future=future,
+                    selection_strategy=_row_selection_strategy(response.whole_slide),
                 ))
             return
         if (
@@ -1792,6 +1824,7 @@ def tile_slides(
                 base_artifact=base_artifact,
                 mask_preview_path=response.mask_preview_path,
                 future=future,
+                selection_strategy=_row_selection_strategy(response.whole_slide),
             ))
             return
 
@@ -1805,6 +1838,7 @@ def tile_slides(
             _build_success_process_row(
                 whole_slide=response.whole_slide,
                 artifact=artifact,
+                selection_strategy=_row_selection_strategy(response.whole_slide),
             )
         )
         # Annotation sampling emits one extra artifact per additional active annotation. Each
@@ -1823,6 +1857,7 @@ def tile_slides(
                 _build_success_process_row(
                     whole_slide=response.whole_slide,
                     artifact=extra_artifact,
+                    selection_strategy=_row_selection_strategy(response.whole_slide),
                 )
             )
 
@@ -1864,6 +1899,7 @@ def tile_slides(
                     _build_success_process_row(
                         whole_slide=planned.whole_slide,
                         artifact=planned.artifact,
+                        selection_strategy=_row_selection_strategy(planned.whole_slide),
                     )
                 )
                 continue

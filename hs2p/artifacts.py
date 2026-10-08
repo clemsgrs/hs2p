@@ -107,6 +107,29 @@ def _annotation_tiles_dir(output_dir: Path, annotation: str | None) -> Path:
     return base / annotation
 
 
+def _artifacts_from_result(
+    result: TilingResult,
+    *,
+    coordinates_npz_path: Path | None,
+    coordinates_meta_path: Path,
+    annotation: str | None,
+) -> "TilingArtifacts":
+    """The single mapping from a persisted :class:`TilingResult` to its artifacts record,
+    shared by save and validate/reuse so both carry the same result metadata."""
+    return TilingArtifacts(
+        sample_id=result.sample_id,
+        coordinates_npz_path=coordinates_npz_path,
+        coordinates_meta_path=coordinates_meta_path,
+        num_tiles=len(result.x),
+        backend=result.backend,
+        requested_backend=result.requested_backend,
+        mask_backend=result.mask_backend,
+        requested_mask_backend=result.requested_mask_backend,
+        annotation=annotation,
+        output_mode=result.output_mode,
+    )
+
+
 def save_tiling_result(
     result: TilingResult,
     output_dir: Path,
@@ -128,17 +151,11 @@ def save_tiling_result(
         output_dir=tiles_dir,
         sample_id=result.sample_id,
     )
-    return TilingArtifacts(
-        sample_id=result.sample_id,
+    return _artifacts_from_result(
+        result,
         coordinates_npz_path=artifact_paths["npz"],
         coordinates_meta_path=artifact_paths["meta"],
-        num_tiles=len(result.x),
-        backend=result.backend,
-        requested_backend=result.requested_backend,
-        mask_backend=result.mask_backend,
-        requested_mask_backend=result.requested_mask_backend,
         annotation=annotation,
-        output_mode=result.output_mode,
     )
 
 
@@ -332,15 +349,11 @@ def validate_tiling_artifacts(
         raise ValueError("precomputed tiles output_mode mismatch")
     if result.annotation != compatibility.annotation:
         raise ValueError("precomputed tiles annotation mismatch")
-    return TilingArtifacts(
-        sample_id=result.sample_id,
+    return _artifacts_from_result(
+        result,
         coordinates_npz_path=coordinates_npz_path,
         coordinates_meta_path=coordinates_meta_path,
-        num_tiles=len(result.x),
-        backend=result.backend,
-        requested_backend=result.requested_backend,
-        mask_backend=result.mask_backend,
-        requested_mask_backend=result.requested_mask_backend,
+        annotation=result.annotation,
     )
 
 

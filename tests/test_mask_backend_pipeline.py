@@ -19,6 +19,7 @@ from hs2p.api import (
     validate_tiling_artifacts,
 )
 from hs2p.tiling.result import TileGeometry, TilingResult
+from hs2p.wsi.types import CoordinateSelectionStrategy
 
 
 def _tiles() -> TileGeometry:
@@ -110,6 +111,7 @@ def test_success_process_row_records_mask_backends_symmetrically():
             mask_path=Path("slide-1-mask.tif"),
         ),
         artifact=artifact,
+        selection_strategy=CoordinateSelectionStrategy.MERGED_DEFAULT_TILING,
     )
     assert row["requested_backend"] == "auto"
     assert row["backend"] == "cucim"

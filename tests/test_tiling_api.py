@@ -4126,6 +4126,7 @@ def test_build_success_process_row_zero_tiles_has_nan_npz_path(
     row = orchestration_mod._build_success_process_row(
         whole_slide=whole_slide,
         artifact=artifacts,
+        selection_strategy=None,
     )
 
     assert row["requested_backend"] == "asap"
