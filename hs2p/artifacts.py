@@ -9,11 +9,8 @@ import numpy as np
 import pandas as pd
 
 from hs2p.configs import FilterConfig, SegmentationConfig, TilingConfig
-from hs2p.preprocessing import (
-    TilingResult,
-    _load_tiling_result_from_paths,
-    _save_tiling_result,
-)
+from hs2p.tiling.io import _load_tiling_result_from_paths, _save_tiling_result
+from hs2p.tiling.result import TilingResult
 from hs2p.wsi.geometry import resolve_tile_stride
 from hs2p.fileops import (
     is_flattened_annotation,

@@ -79,12 +79,3 @@ def run_with_filtered_stderr(
 ) -> T:
     """Run ``func`` while capturing fd 2 and dropping known-noisy lines."""
     return _run_with_filtered_fds(func, (2,), suppress_patterns)
-
-
-def run_with_filtered_stdio(
-    func: Callable[[], T],
-    *,
-    suppress_patterns: tuple[str, ...] = CUCIM_NO_GPU_STDERR_PATTERNS,
-) -> T:
-    """Run ``func`` while filtering known-native noise from both fd 1 and fd 2."""
-    return _run_with_filtered_fds(func, (1, 2), suppress_patterns)

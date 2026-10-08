@@ -20,6 +20,7 @@ from hs2p.configs.resolvers import require_tissue_fraction, validate_sampling_sp
 from hs2p.mask import Mask
 from hs2p.progress import emit_progress, emit_progress_log
 from hs2p.tiling.result import ResolvedTissueMask, TilingResult
+from hs2p.tile_qc import needs_pixel_qc
 from hs2p.tiling.single import (
     MaskPreviewRequest,
     build_tiling_result_from_mask,
@@ -28,7 +29,6 @@ from hs2p.tiling.single import (
 )
 from hs2p.tiling.tar import (
     _load_jpeg_backend,
-    _needs_pixel_filtering,
     extract_tiles_to_tar,
 )
 from hs2p.fileops import (
@@ -921,7 +921,7 @@ def _compute_and_save_tiling_artifacts_from_request(
     try:
         if request.sampling is not None:
             return _compute_and_save_per_annotation(request)
-        defer_pixel_filtering = request.save_tiles and _needs_pixel_filtering(request.filtering)
+        defer_pixel_filtering = request.save_tiles and needs_pixel_qc(request.filtering)
         effective_filtering = (
             replace(
                 request.filtering,
@@ -952,7 +952,7 @@ def _compute_and_save_tiling_artifacts_from_request(
                 result,
                 output_dir=request.output_dir,
                 jpeg_backend=request.jpeg_backend,
-                filter_params=request.filtering if _needs_pixel_filtering(request.filtering) else None,
+                filter_params=request.filtering if needs_pixel_qc(request.filtering) else None,
                 num_workers=request.num_workers,
                 gpu_decode=request.gpu_decode,
             )

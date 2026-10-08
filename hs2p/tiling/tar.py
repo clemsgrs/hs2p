@@ -51,10 +51,6 @@ def _format_tar_member_name(tile_index: int) -> str:
     return f"{int(tile_index):06d}.jpg"
 
 
-def _needs_pixel_filtering(filtering) -> bool:
-    return needs_pixel_qc(filtering)
-
-
 def _apply_qc_filtering_to_result(
     *,
     result: TilingResult,

@@ -13,12 +13,7 @@ from hs2p.configs import FilterConfig, PreviewConfig, SegmentationConfig, Tiling
 from hs2p.tiling.coverage import summarize_annotation_coverage
 from hs2p.tiling.mask import resolve_annotation_masks
 from hs2p.tiling.result import ResolvedAnnotationMasks
-from hs2p.tiling.tar import (
-    _annotation_tar_stem,
-    _apply_qc_filtering_to_result,
-    _needs_pixel_filtering,
-    extract_tiles_to_tar,
-)
+from hs2p.tiling.tar import extract_tiles_to_tar
 from hs2p.tiling.orchestration import (
     BatchPartialFailureWarning,
     tile_slide,

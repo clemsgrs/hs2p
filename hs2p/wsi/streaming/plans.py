@@ -1,6 +1,6 @@
 
 from dataclasses import dataclass
-from typing import Any, Iterable, Sequence
+from typing import Any, Sequence
 
 import numpy as np
 
@@ -197,15 +197,6 @@ def iter_grouped_read_plans(
 
     for block_size in (*grouped_sizes, 1):
         yield from grouped_plans[block_size]
-
-
-def group_read_plans_by_size(
-    read_plans: Iterable[GroupedReadPlan],
-) -> dict[int, list[GroupedReadPlan]]:
-    grouped: dict[int, list[GroupedReadPlan]] = {}
-    for plan in read_plans:
-        grouped.setdefault(int(plan.read_size_px), []).append(plan)
-    return grouped
 
 
 def build_supertile_index(result: Any) -> SupertileIndex:
