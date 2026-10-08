@@ -21,7 +21,9 @@ from pathlib import Path
 
 import pytest
 
-_STATE: dict = {"rootdir": None, "origin_checks": [], "collected": [], "collect_errors": [], "results": {}}
+_STATE: dict = {
+    "rootdir": None, "origin_checks": [], "collected": [], "collect_errors": [], "results": {}, "items": {},
+}  # fmt: skip
 
 
 def _expected() -> Path:
@@ -149,7 +151,9 @@ def pytest_collectreport(report):
 def pytest_collection_finish(session):
     for item in session.items:
         path = str(Path(item.path).resolve())
-        _STATE["collected"].append({"nodeid": _nodeid(item.nodeid, path), "path": path})
+        entry = {"nodeid": _nodeid(item.nodeid, path), "path": path}
+        _STATE["collected"].append(entry)
+        _STATE["items"][item.nodeid] = entry
     check = _check("collection_finish")
     if not check["ok"]:
         _write_report(4)
@@ -162,8 +166,11 @@ def _nodeid(nodeid: str, path: str | None) -> str:
 
 
 def pytest_runtest_logreport(report):
-    path = str(Path(report.fspath).resolve()) if report.fspath else None
-    nodeid = _nodeid(report.nodeid, path)
+    # Record under the collected case's id and path: a report's own fspath is empty for
+    # files outside the rootdir (the staged probes), so it cannot be normalised by itself.
+    item = _STATE["items"].get(report.nodeid)
+    path = item["path"] if item else (str(Path(report.fspath).resolve()) if report.fspath else None)
+    nodeid = item["nodeid"] if item else _nodeid(report.nodeid, path)
     entry = _STATE["results"].setdefault(nodeid, {"nodeid": nodeid, "path": path, "outcome": "passed", "reason": ""})
     if report.failed:
         entry["outcome"] = "failed"

@@ -279,6 +279,17 @@ def test_policy_rejects_a_required_suite_that_collected_nothing():
     assert problems == ["/ds/tests/test_b.py: zero collected required cases"]
 
 
+def test_policy_rejects_collected_cases_that_never_ran():
+    # e.g. an inherited --collect-only: pytest exits 0 with every case collected and none run.
+    run = _load("run")
+    collected = [{"nodeid": "/ds/tests/test_a.py::t1", "path": "/ds/tests/test_a.py"}]
+    report = _session([], collected=collected)
+
+    problems = run.session_problems(report, required_files=["/ds/tests/test_a.py"], allowed_skips=[])
+
+    assert problems == ["/ds/tests/test_a.py::t1: collected but never ran"]
+
+
 def test_policy_rejects_a_missing_session_report():
     run = _load("run")
 
@@ -305,7 +316,14 @@ def test_policy_permits_only_the_recorded_skip_exclusions():
 # --------------------------------------------------------------------------- origin guard
 
 
-def _guarded_pytest(tmp_path: Path, *, conftest: str, conftest_dir: str = "tests") -> tuple[subprocess.CompletedProcess, dict]:
+def _guarded_pytest(
+    tmp_path: Path,
+    *,
+    conftest: str,
+    conftest_dir: str = "tests",
+    extra_env: dict[str, str] | None = None,
+    outside_rootdir: dict[str, str] | None = None,
+) -> tuple[subprocess.CompletedProcess, dict]:
     candidate = tmp_path / "candidate"
     (candidate / "hs2p").mkdir(parents=True)
     (candidate / "hs2p" / "__init__.py").write_text("ORIGIN = 'candidate'\n")
@@ -322,9 +340,18 @@ def _guarded_pytest(tmp_path: Path, *, conftest: str, conftest_dir: str = "tests
         "PYTHONPATH": os.pathsep.join([str(CONTRACTS_DIR / "plugin"), str(candidate)]),
         "HS2P_EXPECTED_ORIGIN": str(candidate / "hs2p"),
         "HS2P_CONTRACT_REPORT": str(report_path),
+        **(extra_env or {}),
     }
+    staged = tmp_path / "staged"
+    staged.mkdir()
+    for name, source in (outside_rootdir or {}).items():
+        (staged / name).write_text(source)
     proc = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-o", "addopts=", "-p", "hs2p_contract_guard", "tests"],
+        [
+            sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-o", "addopts=",
+            "-p", "hs2p_contract_guard", "--rootdir", str(project), "tests",
+            *(str(staged / name) for name in outside_rootdir or {}),
+        ],  # fmt: skip
         cwd=project,
         env=env,
         capture_output=True,
@@ -360,6 +387,49 @@ def test_guard_fails_the_session_when_a_conftest_puts_another_hs2p_first(tmp_pat
     assert failing and failing[0]["checkpoint"] == first_failing_checkpoint
     assert str(tmp_path / "shadow") in failing[0]["resolves_to"]
     assert report["results"] == []
+
+
+def test_guard_reports_outcomes_under_the_same_ids_as_the_collected_cases(tmp_path):
+    # hs2p's probes are staged outside the downstream rootdir; their results must still be
+    # matched to their collected cases, or the runner cannot tell which cases ran.
+    proc, report = _guarded_pytest(
+        tmp_path, conftest="", outside_rootdir={"test_probe.py": "def test_probe():\n    import hs2p\n"}
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert {c["nodeid"] for c in report["collected"]} == {r["nodeid"] for r in report["results"]}
+    probe = next(r for r in report["results"] if "test_probe" in r["nodeid"])
+    assert probe["path"] == str((tmp_path / "staged" / "test_probe.py").resolve())
+
+
+def test_runner_drops_inherited_pytest_options_from_contract_sessions(tmp_path):
+    run = _load("run")
+    inherited = {
+        "PATH": "/usr/bin",
+        "HOME": "/home/me",
+        "PYTEST_ADDOPTS": "--collect-only -k nothing",
+        "PYTEST_PLUGINS": "some_plugin",
+        "PYTHONPATH": "/elsewhere",
+    }
+
+    env = run.contract_session_env(inherited, hs2p=tmp_path / "hs2p", project_out=tmp_path / "out")
+
+    assert not any(key.startswith("PYTEST_") for key in env)
+    assert env["PYTHONPATH"] == str(run.PLUGIN_DIR)
+    assert env["PATH"] == "/usr/bin" and env["HOME"] == "/home/me"
+    assert env["HS2P_EXPECTED_ORIGIN"] == str(tmp_path / "hs2p" / "hs2p")
+    assert env["HS2P_CONTRACT_REPORT"] == str(tmp_path / "out" / "session.json")
+
+
+def test_an_inherited_collect_only_session_is_not_accepted_as_evidence(tmp_path):
+    run = _load("run")
+    proc, report = _guarded_pytest(tmp_path, conftest="", extra_env={"PYTEST_ADDOPTS": "--collect-only"})
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    test_file = str((tmp_path / "project" / "tests" / "test_uses_hs2p.py").resolve())
+    problems = run.session_problems(report, required_files=[test_file], allowed_skips=[])
+
+    assert problems == ["tests/test_uses_hs2p.py::test_import: collected but never ran"]
 
 
 def test_guard_fails_when_another_projects_tests_package_shadows_the_downstream_tests(tmp_path):
@@ -412,6 +482,65 @@ def test_probes_are_staged_outside_any_python_package(tmp_path):
     (tmp_path / "pkg" / "__init__.py").write_text("")
     with pytest.raises(RuntimeError, match="__init__.py"):
         run.stage_probes(["probes/test_soma_dynamic_contracts.py"], tmp_path / "pkg" / "staged")
+
+
+# --------------------------------------------------------------------------- evidence directory
+
+
+def _checkout(path: Path) -> Path:
+    (path / "hs2p").mkdir(parents=True)
+    (path / "hs2p" / "__init__.py").write_text("")
+    (path / ".git").mkdir()
+    (path / "work.txt").write_text("uncommitted")
+    return path
+
+
+@pytest.mark.parametrize("target", ["candidate", "ancestor-of-candidate", "work-dir", "ancestor-of-work-dir"])
+def test_evidence_dir_refuses_the_candidate_the_work_dir_and_their_ancestors(tmp_path, target):
+    run = _load("run")
+    candidate = _checkout(tmp_path / "parent" / "hs2p")
+    work = tmp_path / "cache" / "work"
+    (work / "env").mkdir(parents=True)
+    out = {
+        "candidate": candidate,
+        "ancestor-of-candidate": tmp_path / "parent",
+        "work-dir": work,
+        "ancestor-of-work-dir": tmp_path / "cache",
+    }[target]
+    # Even a stray ownership marker must not make a protected directory deletable.
+    (out / run.EVIDENCE_MARKER).write_text("")
+
+    with pytest.raises(SystemExit, match="refusing"):
+        run.prepare_evidence_dir(out, protected=[candidate, work])
+
+    assert (candidate / "work.txt").read_text() == "uncommitted"
+    assert (candidate / ".git").is_dir() and (work / "env").is_dir()
+
+
+def test_evidence_dir_refuses_a_non_empty_directory_the_runner_did_not_create(tmp_path):
+    run = _load("run")
+    out = tmp_path / "results"
+    out.mkdir()
+    (out / "notes.txt").write_text("keep me")
+
+    with pytest.raises(SystemExit, match="not a downstream-contracts evidence directory"):
+        run.prepare_evidence_dir(out, protected=[])
+
+    assert (out / "notes.txt").read_text() == "keep me"
+
+
+def test_evidence_dir_is_created_or_emptied_and_marked_as_runner_owned(tmp_path):
+    run = _load("run")
+    fresh, empty, previous = tmp_path / "fresh", tmp_path / "empty", tmp_path / "previous"
+    empty.mkdir()
+    run.prepare_evidence_dir(previous, protected=[])
+    (previous / "soma").mkdir()
+    (previous / "soma" / "session.json").write_text("{}")
+
+    for out in (fresh, empty, previous):
+        run.prepare_evidence_dir(out, protected=[])
+
+        assert sorted(p.name for p in out.iterdir()) == [run.EVIDENCE_MARKER]
 
 
 # --------------------------------------------------------------------------- manifest and CI wiring

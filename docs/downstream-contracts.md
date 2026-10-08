@@ -27,7 +27,7 @@ python scripts/downstream_contracts/run.py --hs2p . --recreate-env              
 
 - The runner creates a virtualenv under `--work-dir` (default `~/.cache/hs2p-downstream-contracts`) and reuses it while the `[environment]` table and the Python version stay the same. Into it go the CPU torch wheels from `torch_index_url`, the listed `requirements` (including `openslide-bin`, the native OpenSlide library that `openslide-python` ≥ 1.4 loads) and the downstream packages, installed without their GPU/model dependencies. The candidate hs2p is installed **editable, last**, so nothing installed later can replace it. No model weights are downloaded.
 - Each downstream checkout is a clean, detached checkout of the exact SHA. Each one sits in its own parent directory, because soma's `conftest.py` puts any sibling `slide2vec`/`hs2p` checkout on `sys.path`.
-- Each project runs in its own pytest process.
+- Each project runs in its own pytest process. Inherited `PYTEST_*` variables (such as `PYTEST_ADDOPTS`) are dropped, so only the runner's command line decides what runs, and a collected case that did not run is a failure.
 - The exit status is `0` only if every check passes.
 
 ## What is checked
@@ -45,7 +45,7 @@ Import resolution proves that names exist. It says nothing about signatures, ret
 
 ## Evidence
 
-Everything is written to `--out` (default `<work-dir>/evidence`). In CI it is uploaded as the `downstream-contracts-evidence` artifact, and `summary.md` becomes the job summary.
+Everything is written to `--out` (default `<work-dir>/evidence`). The runner empties that directory first, so it must be new, empty or the evidence of an earlier run (marked by `.hs2p-downstream-contracts-evidence`). It may not be, or contain, the candidate checkout or the work dir. In CI it is uploaded as the `downstream-contracts-evidence` artifact, and `summary.md` becomes the job summary.
 
 | File | Content |
 | --- | --- |
@@ -64,6 +64,7 @@ Everything is written to `--out` (default `<work-dir>/evidence`). In CI it is up
 | `<test>: failed` | A contract suite or probe assertion failed. | Read `<project>/pytest.log`. If the change is intended, adopt it downstream first. |
 | `unexpected skip` | A required case did not run. This is usually a missing dependency. | Fix the environment in `contracts.toml`. A skip is never compatibility evidence. |
 | `zero collected required cases` / `collection error` | A suite or probe file did not import, or was renamed. | Check the pin, and the probe if the downstream code was refactored. |
+| `collected but never ran` | A case was collected but produced no outcome, for example because pytest stopped early. | Read `<project>/pytest.log` for why the session ended. |
 | `hs2p import origin mismatch` | The tests ran against an hs2p other than the candidate, or another checkout's `tests` package shadowed the downstream one. | Look at `sys_path` in `session.json` to see which entry won. |
 
 ## Updating pins

@@ -32,6 +32,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,7 @@ PLUGIN_DIR = HERE / "plugin"
 IMPORT_SCAN = HERE / "import_scan.py"
 ENV_SCHEMA = 1
 ENV_MARKER = "hs2p-contracts-env.json"
+EVIDENCE_MARKER = ".hs2p-downstream-contracts-evidence"
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
@@ -126,6 +128,10 @@ def session_problems(
             problems.append(f"{result['nodeid']}: unexpected skip ({result['outcome']}: {result['reason']})")
         elif result["outcome"] == "xpassed":
             problems.append(f"{result['nodeid']}: unexpected xpass")
+    ran = {result["nodeid"] for result in report["results"]}
+    for item in report["collected"]:
+        if item["nodeid"] not in ran:
+            problems.append(f"{item['nodeid']}: collected but never ran")
     collected = [item["path"] for item in report["collected"]]
     for required in required_files:
         if collected.count(required) == 0:
@@ -133,6 +139,34 @@ def session_problems(
     if report["exitstatus"] != 0 and not problems:
         problems.append(f"pytest exit status {report['exitstatus']}")
     return problems
+
+
+# --------------------------------------------------------------------------- evidence directory
+
+
+def prepare_evidence_dir(out: Path, *, protected: list[Path]) -> None:
+    """Create ``out`` empty and mark it as runner-owned, or refuse to touch it.
+
+    The previous contents are deleted only when ``out`` is not, and does not contain, a
+    protected directory (the candidate checkout, the work dir) and is either empty or a
+    directory an earlier run marked as its own. Anything else is left untouched.
+    """
+    out = out.resolve()
+    for path in protected:
+        path = path.resolve()
+        if path == out or out in path.parents:
+            raise SystemExit(f"refusing to use {out} as --out: it holds {path}, which the runner must not delete")
+    if out.exists():
+        if not out.is_dir():
+            raise SystemExit(f"refusing to use {out} as --out: it is not a directory")
+        if any(out.iterdir()) and not (out / EVIDENCE_MARKER).is_file():
+            raise SystemExit(
+                f"refusing to empty {out}: it is not a downstream-contracts evidence directory "
+                f"(no {EVIDENCE_MARKER}); pass an empty or new --out"
+            )
+        shutil.rmtree(out)
+    out.mkdir(parents=True)
+    (out / EVIDENCE_MARKER).write_text("Created by scripts/downstream_contracts/run.py; emptied on every run.\n")
 
 
 # --------------------------------------------------------------------------- environment
@@ -284,6 +318,22 @@ def stage_probes(probes: list[str], dest: Path) -> list[str]:
     return staged
 
 
+def contract_session_env(inherited: Mapping[str, str], *, hs2p: Path, project_out: Path) -> dict[str, str]:
+    """Environment for a downstream pytest process: the caller's, minus anything that changes
+    what Python imports or what pytest runs (``PYTEST_ADDOPTS`` could add ``--collect-only``
+    or ``-k``), so the runner's command line alone decides the session."""
+    dropped = {"PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP"}
+    return {
+        **{k: v for k, v in inherited.items() if k not in dropped and not k.startswith("PYTEST_")},
+        "PYTHONPATH": str(PLUGIN_DIR),
+        "HS2P_EXPECTED_ORIGIN": str(hs2p / "hs2p"),
+        "HS2P_CONTRACT_REPORT": str(project_out / "session.json"),
+        "MPLBACKEND": "Agg",
+        "MPLCONFIGDIR": str(project_out / "mpl"),
+        "CUDA_VISIBLE_DEVICES": "",
+    }
+
+
 def run_project(
     project: dict[str, Any], *, repo: Path, envpy: Path, hs2p: Path, out: Path, log: Log
 ) -> dict[str, Any]:
@@ -317,15 +367,7 @@ def run_project(
     probes = stage_probes(project.get("probes", []), project_out / "probes")
     session_path = project_out / "session.json"
     session_path.unlink(missing_ok=True)
-    env = {
-        **{k: v for k, v in os.environ.items() if k not in {"PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP"}},
-        "PYTHONPATH": str(PLUGIN_DIR),
-        "HS2P_EXPECTED_ORIGIN": str(hs2p / "hs2p"),
-        "HS2P_CONTRACT_REPORT": str(session_path),
-        "MPLBACKEND": "Agg",
-        "MPLCONFIGDIR": str(project_out / "mpl"),
-        "CUDA_VISIBLE_DEVICES": "",
-    }
+    env = contract_session_env(os.environ, hs2p=hs2p, project_out=project_out)
     pytest_cmd = [
         str(envpy), "-m", "pytest", "-p", "no:cacheprovider", "-p", "hs2p_contract_guard",
         "-o", "addopts=", "-c", str(repo / "pyproject.toml"), "--rootdir", str(repo),
@@ -407,8 +449,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"{hs2p} is not an hs2p checkout")
     work = args.work_dir.resolve()
     out = (args.out or work / "evidence").resolve()
-    shutil.rmtree(out, ignore_errors=True)
-    out.mkdir(parents=True)
+    prepare_evidence_dir(out, protected=[hs2p, work, HERE.parents[1]])
     log = Log(out / "setup-commands.log")
     projects = resolve_projects(manifest, args)
 
