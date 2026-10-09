@@ -118,6 +118,17 @@
   `sampling.finished`. Nothing emits them: annotation sampling reports through the
   `tissue.*`, `tiling.*` and `preview.*` events.
 
+### Tiling artifacts keep their saved metadata
+
+- `tile_slides` returned `TilingArtifacts` with `output_mode=None` for source-mask tissue
+  tiling, although the saved metadata records `output_mode: merged`: the batch worker
+  rebuilt the artifact field by field to attach the TAR path, and resume and
+  `read_coordinates_from` rebuilt it without `output_mode` or `annotation`. Fresh,
+  resumed and reused artifacts now carry the saved `output_mode` and `annotation`, and
+  `process_list.csv` records `output_mode` for those rows. Row labels come from the
+  selection strategy rather than `output_mode`, so source-mask tissue rows stay
+  `tissue` and only merged annotation sampling is labelled `merged`.
+
 ## 5.0.0
 
 hs2p 5.0 is a breaking release. Source masks are now first-class `hs2p.Mask` objects
