@@ -38,6 +38,29 @@
   from segmentation still rejects a changed threshold. A mask-based sidecar written by an
   earlier version holds ints and is still compared, until it is regenerated.
 
+### Unknown configuration keys are rejected
+
+- A config key that the [default config](../hs2p/configs/default.yaml) does not define
+  now fails with a `ValueError` instead of being ignored. A misspelled key such as
+  `tiling.params.spacng: 0.5` used to be merged onto the defaults and never read, so the
+  run quietly used the default value. The error lists every unknown key at once, each by
+  its full path, with the closest valid key suggested:
+  `Unknown config key tiling.params.spacng (did you mean tiling.params.requested_spacing_um?)`.
+  Keys nested under a single-value field, such as `save_tiles: {enabled: false}`, are
+  unknown too.
+- File and CLI loading check the merged config, command-line overrides included, before
+  any slide is opened. `resolve_tiling_config`, `resolve_sampling_spec`,
+  `resolve_sampling_request` and `resolve_preview_config` check the sections they read,
+  whether the config is a `DictConfig`, a `SimpleNamespace` or a dataclass.
+  `resolve_segmentation_config` and `resolve_filter_config` report unknown keys with the
+  same message instead of a raw `TypeError`.
+- Missing keys are still allowed, so partial configs keep their defaults. Label names
+  under `tiling.masks.pixel_mapping`, `colors` and `min_coverage` stay free, and keys
+  under `wandb` are not checked. The retired `tiling.sampling_params` keeps its specific
+  migration error.
+- To fix a rejected config, delete the key or correct its spelling. There is no option
+  to turn the check off.
+
 ### `tiling.sampling_params` is rejected
 
 - A config that still declares the retired `tiling.sampling_params` section now fails

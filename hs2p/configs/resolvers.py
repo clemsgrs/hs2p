@@ -13,25 +13,40 @@ from hs2p.wsi.types import (
     pixel_values,
 )
 
+from .keys import reject_unknown_config_keys
 from .models import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig
 
 
 def resolve_tiling_config(cfg: Any) -> TilingConfig:
-    _reject_retired_sampling_params(cfg.tiling)
+    reject_unknown_config_keys(cfg.tiling, path="tiling")
+    params = _checked_section(cfg.tiling.params, path="tiling.params")
+    masks = _checked_section(cfg.tiling.masks, path="tiling.masks")
     min_coverage = dict(
-        _merge_sampling_mapping(cfg.tiling.masks.min_coverage, field_name="min_coverage")
-        or {}
+        _merge_sampling_mapping(masks.min_coverage, field_name="min_coverage") or {}
     )
     return TilingConfig(
-        requested_spacing_um=cfg.tiling.params.requested_spacing_um,
-        requested_tile_size_px=cfg.tiling.params.requested_tile_size_px,
-        tolerance=cfg.tiling.params.tolerance,
-        overlap=cfg.tiling.params.overlap,
+        requested_spacing_um=params.requested_spacing_um,
+        requested_tile_size_px=params.requested_tile_size_px,
+        tolerance=params.tolerance,
+        overlap=params.overlap,
         min_coverage=min_coverage,
         independent_sampling=bool(cfg.tiling.independent_sampling),
         backend=cfg.tiling.backend,
         mask_backend=getattr(cfg.tiling, "mask_backend", "auto"),
     )
+
+
+def _checked_section(section: Any, *, path: str) -> Any:
+    """Check a section as the resolver read it, and return it.
+
+    The check on the whole ``tiling`` section sees an interpolated section
+    (``params: ${...}`` in an unresolved ``DictConfig``) only as its ``${...}`` string.
+    Reading the section dereferences that interpolation anyway, so checking what was read
+    catches unknown keys it brings in without evaluating anything the resolver does not.
+    """
+    if section is not None:
+        reject_unknown_config_keys(section, path=path)
+    return section
 
 
 def require_tissue_fraction(tiling: TilingConfig) -> float:
@@ -52,15 +67,18 @@ def require_tissue_fraction(tiling: TilingConfig) -> float:
 
 
 def resolve_segmentation_config(cfg: Any) -> SegmentationConfig:
+    reject_unknown_config_keys(cfg.tiling.seg_params, path="tiling.seg_params")
     return SegmentationConfig(**dict(cfg.tiling.seg_params))
 
 
 def resolve_filter_config(cfg: Any) -> FilterConfig:
+    reject_unknown_config_keys(cfg.tiling.filter_params, path="tiling.filter_params")
     return FilterConfig(**dict(cfg.tiling.filter_params))
 
 
 def resolve_preview_config(cfg: Any) -> PreviewConfig:
     preview_cfg = cfg.tiling.preview
+    reject_unknown_config_keys(preview_cfg, path="tiling.preview")
     return PreviewConfig(
         save_mask_preview=bool(preview_cfg.save_mask_preview),
         save_tiling_preview=bool(preview_cfg.save_tiling_preview),
@@ -277,30 +295,13 @@ def resolve_sampling_spec(
     *,
     tiling: TilingConfig,
 ) -> SamplingSpec:
-    _reject_retired_sampling_params(cfg.tiling)
-    masks_cfg = getattr(cfg.tiling, "masks", None)
+    reject_unknown_config_keys(cfg.tiling, path="tiling")
+    masks_cfg = _checked_section(
+        getattr(cfg.tiling, "masks", None), path="tiling.masks"
+    )
     if masks_cfg is None:
         return build_default_sampling_spec(tiling)
     return _resolve_sampling_spec_from_masks(masks_cfg)
-
-
-def _reject_retired_sampling_params(tiling_cfg: Any) -> None:
-    """Refuse the retired ``tiling.sampling_params`` schema instead of ignoring it.
-
-    File/CLI loading merges the default ``tiling.masks`` section first, so a legacy
-    ``sampling_params`` block would otherwise be silently dropped in favour of default
-    binary tissue tiling.
-    """
-    if isinstance(tiling_cfg, Mapping):
-        present = "sampling_params" in tiling_cfg
-    else:
-        present = hasattr(tiling_cfg, "sampling_params")
-    if present:
-        raise ValueError(
-            "tiling.sampling_params is no longer supported; move it to tiling.masks: "
-            "pixel_mapping stays pixel_mapping, color_mapping becomes colors, and "
-            "tissue_percentage becomes min_coverage."
-        )
 
 
 def _drop_null_labels(
