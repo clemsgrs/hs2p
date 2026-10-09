@@ -15,6 +15,7 @@ from hs2p.wsi.types import (
 
 from .keys import reject_unknown_config_keys
 from .models import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig
+from .values import check_config_values, construct_config
 
 
 def resolve_tiling_config(cfg: Any) -> TilingConfig:
@@ -24,15 +25,18 @@ def resolve_tiling_config(cfg: Any) -> TilingConfig:
     min_coverage = dict(
         _merge_sampling_mapping(masks.min_coverage, field_name="min_coverage") or {}
     )
-    return TilingConfig(
-        requested_spacing_um=params.requested_spacing_um,
-        requested_tile_size_px=params.requested_tile_size_px,
-        tolerance=params.tolerance,
-        overlap=params.overlap,
-        min_coverage=min_coverage,
-        independent_sampling=bool(cfg.tiling.independent_sampling),
-        backend=cfg.tiling.backend,
-        mask_backend=getattr(cfg.tiling, "mask_backend", "auto"),
+    return construct_config(
+        TilingConfig,
+        {
+            "tiling.params.requested_spacing_um": params.requested_spacing_um,
+            "tiling.params.requested_tile_size_px": params.requested_tile_size_px,
+            "tiling.params.tolerance": params.tolerance,
+            "tiling.params.overlap": params.overlap,
+            "tiling.masks.min_coverage": min_coverage,
+            "tiling.independent_sampling": cfg.tiling.independent_sampling,
+            "tiling.backend": cfg.tiling.backend,
+            "tiling.mask_backend": getattr(cfg.tiling, "mask_backend", "auto"),
+        },
     )
 
 
@@ -68,23 +72,38 @@ def require_tissue_fraction(tiling: TilingConfig) -> float:
 
 def resolve_segmentation_config(cfg: Any) -> SegmentationConfig:
     reject_unknown_config_keys(cfg.tiling.seg_params, path="tiling.seg_params")
-    return SegmentationConfig(**dict(cfg.tiling.seg_params))
+    return construct_config(
+        SegmentationConfig,
+        {
+            f"tiling.seg_params.{key}": value
+            for key, value in dict(cfg.tiling.seg_params).items()
+        },
+    )
 
 
 def resolve_filter_config(cfg: Any) -> FilterConfig:
     reject_unknown_config_keys(cfg.tiling.filter_params, path="tiling.filter_params")
-    return FilterConfig(**dict(cfg.tiling.filter_params))
+    return construct_config(
+        FilterConfig,
+        {
+            f"tiling.filter_params.{key}": value
+            for key, value in dict(cfg.tiling.filter_params).items()
+        },
+    )
 
 
 def resolve_preview_config(cfg: Any) -> PreviewConfig:
     preview_cfg = cfg.tiling.preview
     reject_unknown_config_keys(preview_cfg, path="tiling.preview")
-    return PreviewConfig(
-        save_mask_preview=bool(preview_cfg.save_mask_preview),
-        save_tiling_preview=bool(preview_cfg.save_tiling_preview),
-        downsample=int(preview_cfg.downsample),
-        tissue_contour_color=tuple(int(v) for v in preview_cfg.tissue_contour_color),
-        mask_overlay_alpha=float(preview_cfg.mask_overlay_alpha),
+    return construct_config(
+        PreviewConfig,
+        {
+            "tiling.preview.save_mask_preview": preview_cfg.save_mask_preview,
+            "tiling.preview.save_tiling_preview": preview_cfg.save_tiling_preview,
+            "tiling.preview.downsample": preview_cfg.downsample,
+            "tiling.preview.tissue_contour_color": preview_cfg.tissue_contour_color,
+            "tiling.preview.mask_overlay_alpha": preview_cfg.mask_overlay_alpha,
+        },
     )
 
 
@@ -97,7 +116,14 @@ def resolve_read_coordinates_from(cfg: Any) -> Path | None:
 
 def resolve_sampling_strategy(cfg: Any) -> str:
     """Derive selection strategy from tiling.independent_sampling."""
-    independent = bool(getattr(cfg.tiling, "independent_sampling", False))
+    independent = check_config_values(
+        TilingConfig,
+        {
+            "tiling.independent_sampling": getattr(
+                cfg.tiling, "independent_sampling", False
+            )
+        },
+    )["independent_sampling"]
     if independent:
         return CoordinateSelectionStrategy.INDEPENDENT_SAMPLING
     return CoordinateSelectionStrategy.JOINT_SAMPLING
