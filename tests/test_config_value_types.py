@@ -25,6 +25,7 @@ from hs2p.configs import (
     TilingConfig,
     default_config,
 )
+from hs2p.configs.loader import DEFAULT_JPEG_BACKEND
 from hs2p.configs.resolvers import (
     resolve_preview_config,
     resolve_sampling_strategy,
@@ -199,7 +200,7 @@ def _tiling(**overrides) -> TilingConfig:
         pytest.param(
             lambda: FilterConfig(blur_threshold=np.bool_(False)),
             "Config value FilterConfig.blur_threshold must be a float, "
-            f"got {type(np.bool_(False)).__name__} False",
+            f"got {type(np.bool_(False)).__name__} {np.bool_(False)!r}",
             id="numpy-bool-for-float",
         ),
         pytest.param(
@@ -395,6 +396,47 @@ def test_file_loading_rejects_wrong_typed_run_settings(tmp_path):
     with pytest.raises(
         ValueError,
         match=r"^Config value speed\.num_workers must be an int, got str 'four'$",
+    ):
+        get_cfg_from_file(config_path)
+
+
+def test_cli_keeps_the_jpeg_default_when_an_interpolated_speed_section_omits_it(
+    monkeypatch, tmp_path
+):
+    """An interpolated ``speed`` mapping replaces the default section, so its absent
+    ``jpeg_backend`` is not a wrong-typed value: the CLI falls back to the default."""
+    received = {}
+
+    def _record(whole_slides, **kwargs):
+        received.update(kwargs)
+        (kwargs["output_dir"] / "process_list.csv").write_text("")
+        return []
+
+    monkeypatch.setattr(tiling_mod, "tile_slides", _record)
+    config_path = _write_inputs(
+        tmp_path, "speed: ${wandb.speed}\nwandb:\n  speed:\n    num_workers: 2\n"
+    )
+
+    tiling_mod.entrypoint(
+        [
+            str(config_path),
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--skip-datetime",
+            "--skip-logging",
+        ]
+    )
+
+    assert received["num_workers"] == 2
+    assert received["jpeg_backend"] == DEFAULT_JPEG_BACKEND
+
+
+def test_file_loading_rejects_an_explicit_null_run_setting(tmp_path):
+    config_path = _write_inputs(tmp_path, "speed:\n  jpeg_backend: null\n")
+
+    with pytest.raises(
+        ValueError,
+        match=r"^Config value speed\.jpeg_backend must be a str, got NoneType None$",
     ):
         get_cfg_from_file(config_path)
 
