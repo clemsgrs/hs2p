@@ -1,8 +1,7 @@
-from types import SimpleNamespace
-
 import cv2
 import numpy as np
 
+from hs2p.configs import FilterConfig
 from hs2p.tile_qc import (
     apply_tile_qc,
     compute_blur_score,
@@ -26,7 +25,7 @@ def _filter_params(**overrides):
         "qc_spacing_um": 2.0,
     }
     base.update(overrides)
-    return SimpleNamespace(**base)
+    return FilterConfig(**base)
 
 
 def test_filter_grayspace_rejects_gray_tile():

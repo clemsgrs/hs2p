@@ -1,11 +1,16 @@
 
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Callable, Iterable
+from typing import TYPE_CHECKING, Callable, Iterable
 
 import cv2
 import numpy as np
 
 from hs2p.wsi.geometry import project_discrete_grid_origins, select_level
+
+if TYPE_CHECKING:
+    from hs2p.configs.models import FilterConfig
 
 
 @dataclass(frozen=True)
@@ -93,42 +98,42 @@ def apply_tile_qc(
     tile: np.ndarray,
     *,
     valid_mask: np.ndarray | None,
-    filter_params,
+    filter_params: FilterConfig,
 ) -> bool:
-    if getattr(filter_params, "filter_white", False) and not filter_whitespace(
+    if filter_params.filter_white and not filter_whitespace(
         tile,
         threshold=int(filter_params.white_threshold),
         max_fraction=float(filter_params.fraction_threshold),
         valid_mask=valid_mask,
     ):
         return False
-    if getattr(filter_params, "filter_black", False) and not filter_blackspace(
+    if filter_params.filter_black and not filter_blackspace(
         tile,
         threshold=int(filter_params.black_threshold),
         max_fraction=float(filter_params.fraction_threshold),
         valid_mask=valid_mask,
     ):
         return False
-    if getattr(filter_params, "filter_grayspace", False) and not filter_grayspace(
+    if filter_params.filter_grayspace and not filter_grayspace(
         tile,
         saturation_threshold=float(filter_params.grayspace_saturation_threshold),
         max_fraction=float(filter_params.grayspace_fraction_threshold),
         valid_mask=valid_mask,
     ):
         return False
-    if getattr(filter_params, "filter_blur", False):
+    if filter_params.filter_blur:
         blur_score = compute_blur_score(tile, valid_mask=valid_mask)
         if blur_score < float(filter_params.blur_threshold):
             return False
     return True
 
 
-def needs_pixel_qc(filter_params) -> bool:
+def needs_pixel_qc(filter_params: FilterConfig) -> bool:
     return bool(
-        getattr(filter_params, "filter_white", False)
-        or getattr(filter_params, "filter_black", False)
-        or getattr(filter_params, "filter_grayspace", False)
-        or getattr(filter_params, "filter_blur", False)
+        filter_params.filter_white
+        or filter_params.filter_black
+        or filter_params.filter_grayspace
+        or filter_params.filter_blur
     )
 
 
@@ -211,7 +216,7 @@ def filter_coordinate_tiles(
     requested_spacing_um: float,
     base_spacing_um: float,
     tolerance: float,
-    filter_params,
+    filter_params: FilterConfig,
     read_window: Callable[[int, int, int, int, int], np.ndarray],
     batch_read_windows: Callable[
         [list[tuple[int, int]], tuple[int, int], int, int], Iterable[np.ndarray]
