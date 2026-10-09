@@ -14,6 +14,7 @@ import numpy as np
 from PIL import Image
 
 from hs2p.configs.loader import DEFAULT_JPEG_BACKEND
+from hs2p.configs.models import FilterConfig
 from hs2p.tiling.result import TilingResult
 from hs2p.tile_qc import filter_coordinate_tiles, needs_pixel_qc
 from hs2p.fileops import (
@@ -54,7 +55,7 @@ def _format_tar_member_name(tile_index: int) -> str:
 def _apply_qc_filtering_to_result(
     *,
     result: TilingResult,
-    filter_params,
+    filter_params: FilterConfig,
     num_workers: int,
     gpu_decode: bool = False,
 ) -> TilingResult:
@@ -125,7 +126,7 @@ def extract_tiles_to_tar(
     jpeg_backend: str = DEFAULT_JPEG_BACKEND,
     supertile_sizes: Sequence[int] | None = None,
     tiles_dir: Path | None = None,
-    filter_params: Any | None = None,
+    filter_params: FilterConfig | None = None,
     num_workers: int = 4,
     gpu_decode: bool = False,
     phase_recorder: Any | None = None,
