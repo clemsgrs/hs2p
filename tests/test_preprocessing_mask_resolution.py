@@ -2,8 +2,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 import hs2p.preprocessing as preprocessing_mod
+from hs2p.configs import SegmentationConfig
 import hs2p.tiling.mask as tiling_mask_mod
 
 
@@ -68,8 +70,7 @@ def test_resolve_tissue_mask_uses_sam2_thumbnail_spacing(monkeypatch):
 
     def _fake_segment_tissue_image(image, *, config):
         captured["shape"] = image.shape
-        captured["method"] = config.method
-        captured["downsample"] = config.downsample
+        captured["config"] = config
         return np.ones(image.shape[:2], dtype=np.uint8)
 
     monkeypatch.setattr(
@@ -80,20 +81,46 @@ def test_resolve_tissue_mask_uses_sam2_thumbnail_spacing(monkeypatch):
 
     resolved = preprocessing_mod.resolve_tissue_mask(
         slide=slide,
-        tissue_method="sam2",
-        seg_downsample=64,
+        segmentation=SegmentationConfig(
+            method="sam2",
+            downsample=64,
+            sthresh=15,
+            sam2_checkpoint_path="sam2.pt",
+            sam2_config_path="sam2.yaml",
+            sam2_device="cuda",
+        ),
     )
 
     assert calls == [(1, (16, 16))]
     assert captured["shape"] == (8, 8, 3)
-    assert captured["method"] == "sam2"
-    assert captured["downsample"] == 32
+    # The caller's whole config reaches segmentation; only the downsample is the one the
+    # SAM2 thumbnail actually used.
+    assert captured["config"] == SegmentationConfig(
+        method="sam2",
+        downsample=32,
+        sthresh=15,
+        sam2_checkpoint_path="sam2.pt",
+        sam2_config_path="sam2.yaml",
+        sam2_device="cuda",
+    )
     assert resolved.tissue_method == "sam2"
     assert resolved.requested_seg_downsample == 64
     assert resolved.seg_level == 1
     assert resolved.seg_spacing_um == 8.0
     assert resolved.seg_downsample == 32
     assert resolved.tissue_mask.shape == (8, 8)
+
+
+def test_resolve_tissue_mask_without_a_mask_requires_segmentation():
+    with pytest.raises(ValueError, match="segmentation"):
+        preprocessing_mod.resolve_tissue_mask(slide=_make_slide())
+
+
+def test_resolve_tissue_mask_no_longer_takes_loose_segmentation_keywords():
+    with pytest.raises(TypeError):
+        preprocessing_mod.resolve_tissue_mask(
+            slide=_make_slide(), tissue_method="hsv", sthresh=8
+        )
 
 
 def test_build_tiling_result_from_mask_omits_sam2_identity_for_hsv():

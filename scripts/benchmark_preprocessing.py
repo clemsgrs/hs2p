@@ -68,7 +68,11 @@ def build_case(name: str):
             with patch("hs2p.mask.open_slide", return_value=reader), open_tissue_mask(
                 "benchmark-mask.tif", pixel_mapping={"tissue": 7}, backend="openslide",
             ) as mask:
-                result = resolve_tissue_mask(slide=slide, mask=mask, seg_downsample=1)
+                result = resolve_tissue_mask(
+                    slide=slide,
+                    segmentation=SegmentationConfig(method="precomputed_mask", downsample=1),
+                    mask=mask,
+                )
             return (result.tissue_mask,)
 
         return run

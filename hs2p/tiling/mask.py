@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import AbstractContextManager, nullcontext
+from dataclasses import replace
 from pathlib import Path
 
 import cv2
@@ -152,26 +153,29 @@ def prepare_sam2_thumbnail(
 def resolve_tissue_mask(
     *,
     slide,
+    segmentation: SegmentationConfig | None = None,
     sample_id: str | None = None,
-    tissue_method: str | None = None,
     mask: Mask | None = None,
-    sthresh: int = 8,
-    sthresh_up: int = 255,
-    mthresh: int = 7,
-    close: int = 4,
-    seg_downsample: int = 64,
-    sam2_checkpoint_path: str | Path | None = None,
-    sam2_config_path: str | Path | None = None,
-    sam2_device: str = "cpu",
     requested_mask_backend: str | None = None,
 ) -> ResolvedTissueMask:
     """Resolve the slide's tissue mask: from ``mask`` (an open tissue
     :class:`~hs2p.mask.Mask`, whose lifetime the caller owns) when given, otherwise by
-    segmenting with ``tissue_method``.
+    segmenting with ``segmentation``, which is then required.
 
+    ``segmentation.downsample`` picks the grid either way; a precomputed mask without
+    ``segmentation`` is read on :class:`SegmentationConfig`'s default grid.
     ``requested_mask_backend`` is caller-owned provenance; the mask only knows the concrete
     backend it opened, which is recorded as the request when none is supplied.
     """
+    if mask is None and segmentation is None:
+        raise ValueError(
+            "segmentation is required when no precomputed tissue mask is provided"
+        )
+    seg_downsample = (
+        segmentation.downsample
+        if segmentation is not None
+        else SegmentationConfig(method="precomputed_mask").downsample
+    )
     if mask is not None:
         normalized_downsamples = _normalize_level_downsamples(slide.level_downsamples)
         seg_level = select_level_for_downsample(
@@ -216,12 +220,7 @@ def resolve_tissue_mask(
             ),
         )
 
-    if not tissue_method:
-        raise ValueError(
-            "tissue_method is required when no precomputed tissue mask is provided"
-        )
-
-    if str(tissue_method).lower() == "sam2":
+    if str(segmentation.method).lower() == "sam2":
         thumbnail = prepare_sam2_thumbnail(slide=slide)
         seg_image = thumbnail.image
         seg_level = thumbnail.seg_level
@@ -237,21 +236,8 @@ def resolve_tissue_mask(
         seg_image = np.asarray(slide.read_region((0, 0), seg_level, seg_size))
     effective_downsample = max(1, int(round(seg_spacing_um / float(slide.spacing))))
 
-    segmentation_config = SegmentationConfig(
-        method=tissue_method,
-        downsample=effective_downsample,
-        sthresh=sthresh,
-        sthresh_up=sthresh_up,
-        mthresh=mthresh,
-        close=close,
-        sam2_checkpoint_path=(
-            Path(sam2_checkpoint_path) if sam2_checkpoint_path is not None else None
-        ),
-        sam2_config_path=(
-            Path(sam2_config_path) if sam2_config_path is not None else None
-        ),
-        sam2_device=sam2_device,
-    )
+    # The caller's config segments as given, on the downsample actually read.
+    segmentation_config = replace(segmentation, downsample=effective_downsample)
     mask = segment_tissue_image(
         seg_image,
         config=segmentation_config,

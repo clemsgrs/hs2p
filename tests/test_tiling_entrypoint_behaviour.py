@@ -103,11 +103,12 @@ SCALAR_FILTERING = {
 CONFIG_FILTERING = {**SCALAR_FILTERING, "a_h": 2}
 WHITE_QC = {"filter_white": True, "white_threshold": 230, "fraction_threshold": 0.8}
 
-DEFAULT_SEG_THRESHOLDS = {"sthresh": 8, "sthresh_up": 255, "mthresh": 7, "close": 4}
 CUSTOM_SEGMENTATION = SegmentationConfig(
     method="hsv", downsample=64, sthresh=20, sthresh_up=250, mthresh=5, close=2
 )
-CUSTOM_SEG_THRESHOLDS = {"sthresh": 20, "sthresh_up": 250, "mthresh": 5, "close": 2}
+# A precomputed tissue mask or an annotation mask is never segmented, so its result
+# records no segmentation thresholds, whatever the entrypoint was given.
+UNAPPLIED_SEG_THRESHOLDS = {"sthresh": None, "sthresh_up": None, "mthresh": None, "close": None}
 
 AUTO_PROVENANCE = {
     "backend": "pil",
@@ -207,7 +208,7 @@ def _provenance(meta: dict) -> dict:
 
 
 def _seg_thresholds(meta: dict) -> dict:
-    return {key: meta["segmentation"][key] for key in DEFAULT_SEG_THRESHOLDS}
+    return {key: meta["segmentation"][key] for key in UNAPPLIED_SEG_THRESHOLDS}
 
 
 # ---------------------------------------------------- tissue tiling, scalar entrypoints
@@ -261,7 +262,7 @@ def test_preprocess_slide_defaults_gate_tissue_at_a_tenth_and_record_a_h_zero(tm
     assert meta["filtering"] == SCALAR_FILTERING
     assert meta["segmentation"]["tissue_method"] == "precomputed_mask"
     assert meta["segmentation"]["ref_tile_size_px"] == 16
-    assert _seg_thresholds(meta) == DEFAULT_SEG_THRESHOLDS
+    assert _seg_thresholds(meta) == UNAPPLIED_SEG_THRESHOLDS
     assert _provenance(meta) == AUTO_PROVENANCE
     assert meta["artifact"] == {
         **meta["artifact"],
@@ -281,7 +282,7 @@ def test_build_tiling_result_from_mask_defaults_gate_tissue_at_half_and_record_a
     assert origins == TISSUE_AT_HALF
     assert meta["tiling"]["min_tissue_fraction"] == 0.5
     assert meta["filtering"] == SCALAR_FILTERING
-    assert _seg_thresholds(meta) == DEFAULT_SEG_THRESHOLDS
+    assert _seg_thresholds(meta) == UNAPPLIED_SEG_THRESHOLDS
     assert _provenance(meta) == {
         "backend": "pil",
         "requested_backend": "pil",
@@ -325,7 +326,8 @@ def test_scalar_tissue_entrypoints_apply_and_record_explicit_settings(
     assert origins == sorted(set(TISSUE_AT_TENTH + ISLAND) - {WHITE_TILE})
     assert meta["tiling"]["min_tissue_fraction"] == 0.1
     assert meta["filtering"] == {**SCALAR_FILTERING, "a_t": 0, "a_h": 3, **WHITE_QC}
-    assert _seg_thresholds(meta) == CUSTOM_SEG_THRESHOLDS
+    # The explicit thresholds never reached a segmentation: the mask was precomputed.
+    assert _seg_thresholds(meta) == UNAPPLIED_SEG_THRESHOLDS
 
 
 # ------------------------------------------------- tissue tiling, config-driven workflows
@@ -343,7 +345,7 @@ def test_tile_slide_uses_configured_coverage_and_filter_config_defaults(tmp_path
     assert meta["tiling"]["min_tissue_fraction"] == 0.01
     assert meta["filtering"] == CONFIG_FILTERING
     assert meta["segmentation"]["tissue_method"] == "precomputed_mask"
-    assert _seg_thresholds(meta) == DEFAULT_SEG_THRESHOLDS
+    assert _seg_thresholds(meta) == UNAPPLIED_SEG_THRESHOLDS
     assert _provenance(meta) == AUTO_PROVENANCE
     assert meta["artifact"]["selection_strategy"] == (
         CoordinateSelectionStrategy.MERGED_DEFAULT_TILING
@@ -363,7 +365,7 @@ def test_tile_slide_applies_and_records_configured_segmentation_and_filtering(tm
 
     assert origins == sorted(set(TISSUE_AT_ONE_PERCENT + ISLAND) - {WHITE_TILE})
     assert meta["filtering"] == {**CONFIG_FILTERING, "a_t": 0, "a_h": 5, **WHITE_QC}
-    assert _seg_thresholds(meta) == CUSTOM_SEG_THRESHOLDS
+    assert _seg_thresholds(meta) == UNAPPLIED_SEG_THRESHOLDS
     assert _provenance(meta) == {
         "backend": "pil",
         "requested_backend": "pil",
@@ -390,7 +392,7 @@ def test_tile_slides_persists_the_configured_tissue_tiling(tmp_path, save_tiles)
     assert origins == sorted(set(TISSUE_AT_ONE_PERCENT) - {WHITE_TILE})
     assert meta["tiling"]["min_tissue_fraction"] == 0.01
     assert meta["filtering"] == {**CONFIG_FILTERING, **WHITE_QC}
-    assert _seg_thresholds(meta) == CUSTOM_SEG_THRESHOLDS
+    assert _seg_thresholds(meta) == UNAPPLIED_SEG_THRESHOLDS
     assert _provenance(meta) == AUTO_PROVENANCE
 
 
@@ -533,9 +535,9 @@ def test_annotation_sampling_places_each_label_on_its_strategy_grid(
         assert result.tissue_fractions.tolist() == [expected_fraction] * len(expected)
         assert meta["tiling"]["min_tissue_fraction"] == 0.5
         assert meta["filtering"] == expected_filtering
-        # Annotation sampling records the scalar-default segmentation thresholds whatever
-        # segmentation config the workflow carries.
-        assert _seg_thresholds(meta) == DEFAULT_SEG_THRESHOLDS
+        # Annotation sampling never segments, so it records no segmentation thresholds
+        # whatever segmentation config the workflow carries.
+        assert _seg_thresholds(meta) == UNAPPLIED_SEG_THRESHOLDS
         assert meta["segmentation"]["tissue_method"] == "precomputed_mask"
         assert meta["artifact"] == {
             **meta["artifact"],
@@ -630,7 +632,7 @@ def test_tile_slides_persists_one_artifact_per_sampled_label(tmp_path, strategy)
     assert by_label["stroma"][0] == STRATEGY_STROMA[strategy]
     for annotation, (_, meta) in by_label.items():
         assert meta["filtering"] == {**CONFIG_FILTERING, **WHITE_QC}
-        assert _seg_thresholds(meta) == DEFAULT_SEG_THRESHOLDS
+        assert _seg_thresholds(meta) == UNAPPLIED_SEG_THRESHOLDS
         assert meta["tiling"]["min_tissue_fraction"] == 0.5
         assert _provenance(meta) == AUTO_PROVENANCE
         assert meta["artifact"]["annotation"] == annotation

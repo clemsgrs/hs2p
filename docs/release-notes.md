@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+### Segmentation settings travel as one config
+
+- Breaking: `resolve_tissue_mask(*, slide, segmentation=None, sample_id=None, mask=None,
+  requested_mask_backend=None)` takes one `SegmentationConfig` instead of the loose
+  `tissue_method`, `sthresh`, `sthresh_up`, `mthresh`, `close`, `seg_downsample`,
+  `sam2_checkpoint_path`, `sam2_config_path` and `sam2_device` keywords, which each kept
+  a hard-coded default that could drift from `default.yaml`. `segmentation` is required
+  without a `mask` (`ValueError` names it); with a `mask`, its `downsample` picks the read
+  grid and, when omitted, the `SegmentationConfig` default grid is used. No compatibility
+  shim keeps the old keywords.
+
+  ```python
+  # before
+  resolve_tissue_mask(slide=slide, tissue_method="hsv", sthresh=15, seg_downsample=32)
+  # after
+  resolve_tissue_mask(
+      slide=slide,
+      segmentation=SegmentationConfig(method="hsv", sthresh=15, downsample=32),
+  )
+  ```
+
+- Segmentation thresholds are recorded only when segmentation ran.
+  `TilingResult.seg_sthresh`, `seg_sthresh_up`, `seg_mthresh` and `seg_close` are now
+  `int | None` (same names and order, so callers passing ints are unaffected) and are
+  `None` for tissue tiling from a precomputed mask and for annotation sampling. The
+  `.coordinates.meta.json` sidecar keeps the `sthresh`, `sthresh_up`, `mthresh` and
+  `close` keys and writes `null` there. Annotation results used to claim the scalar
+  defaults (`sthresh: 8`, ...) whatever `seg_params` said, and mask-based results the
+  configured values, though neither was applied. Sidecars from earlier versions, which
+  hold ints, still load.
+- Resume and `read_coordinates_from` compare a threshold only when the artifact recorded
+  it. Editing `seg_params` and resuming a precomputed-mask run now reuses the tiled
+  slides instead of failing each with `precomputed tiles sthresh mismatch`; an artifact
+  from segmentation still rejects a changed threshold. A mask-based sidecar written by an
+  earlier version holds ints and is still compared, until it is regenerated.
+
 ### `tiling.sampling_params` is rejected
 
 - A config that still declares the retired `tiling.sampling_params` section now fails
