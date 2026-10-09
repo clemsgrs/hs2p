@@ -8,8 +8,9 @@ installed; the downstream production modules themselves are only parsed, never i
 
 What this proves: every ``import hs2p...`` / ``from hs2p... import name`` (aliases and
 function-local imports included) and every attribute read on a name bound to an hs2p
-module exists in the candidate. What it does not prove: signatures, returned fields, or
-behaviour; those are left to the contract suites and probes.
+module exists in the candidate. Names are resolved in the scope they are read in, so an
+alias bound in one function does not leak into another. What it does not prove:
+signatures, returned fields, or behaviour; those are left to the contract suites and probes.
 """
 
 from __future__ import annotations
@@ -68,54 +69,154 @@ def _attribute_chain(node: ast.Attribute) -> tuple[str, list[str]] | None:
     return current.id, list(reversed(parts))
 
 
+class _Scope:
+    """The names one Python scope binds, and which of them an hs2p import binds."""
+
+    def __init__(self, parent: _Scope | None, *, is_class: bool = False) -> None:
+        self.parent = parent
+        self.is_class = is_class
+        self.local: set[str] = set()
+        self.hs2p: dict[str, str] = {}  # local name -> dotted hs2p object it is bound to
+        self.global_names: set[str] = set()
+        self.nonlocal_names: set[str] = set()
+
+    def lookup(self, name: str) -> str | None:
+        """The hs2p object ``name`` refers to when read here (Python's scoping rules)."""
+        scope: _Scope | None = self
+        while scope is not None:
+            if name in scope.global_names:
+                while scope.parent is not None:
+                    scope = scope.parent
+                return scope.hs2p.get(name)
+            local = name in scope.local and name not in scope.nonlocal_names
+            if local and (scope is self or not scope.is_class):  # class bodies do not enclose
+                return scope.hs2p.get(name)
+            scope = scope.parent
+        return None
+
+
+class _ImportCollector(ast.NodeVisitor):
+    """Records hs2p imports, and the scope of each attribute read, while tracking bindings.
+
+    Bindings are flow-insensitive within a scope: a name an hs2p import binds anywhere in
+    a scope refers to that hs2p object everywhere in it.
+    """
+
+    def __init__(self, package: str, record: Any) -> None:
+        self.package = package
+        self.record = record
+        self.scope = _Scope(None)
+        self.reads: list[tuple[int, str, list[str], _Scope]] = []
+
+    def _visit_in(self, scope: _Scope, nodes: list[ast.AST]) -> None:
+        outer, self.scope = self.scope, scope
+        for node in nodes:
+            self.visit(node)
+        self.scope = outer
+
+    def _function(self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda, body: list[ast.AST]) -> None:
+        args = node.args
+        params = [*args.posonlyargs, *args.args, *args.kwonlyargs, *(a for a in (args.vararg, args.kwarg) if a)]
+        # Decorators, defaults and annotations are evaluated in the enclosing scope.
+        for outer in [
+            *getattr(node, "decorator_list", []),
+            *args.defaults,
+            *(d for d in args.kw_defaults if d is not None),
+            *(p.annotation for p in params if p.annotation is not None),
+            *([node.returns] if getattr(node, "returns", None) is not None else []),
+        ]:
+            self.visit(outer)
+        scope = _Scope(self.scope)
+        scope.local.update(p.arg for p in params)
+        self._visit_in(scope, body)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        self.scope.local.add(node.name)
+        self._function(node, node.body)
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        self._function(node, [node.body])
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self.scope.local.add(node.name)
+        for outer in [*node.decorator_list, *node.bases, *node.keywords]:
+            self.visit(outer)
+        self._visit_in(_Scope(self.scope, is_class=True), node.body)
+
+    def _comprehension(self, node: ast.AST) -> None:
+        self._visit_in(_Scope(self.scope), list(ast.iter_child_nodes(node)))
+
+    visit_ListComp = visit_SetComp = visit_DictComp = visit_GeneratorExp = _comprehension
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if not isinstance(node.ctx, ast.Load):
+            self.scope.local.add(node.id)
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        if node.name:
+            self.scope.local.add(node.name)
+        self.generic_visit(node)
+
+    def visit_Global(self, node: ast.Global) -> None:
+        self.scope.global_names.update(node.names)
+
+    def visit_Nonlocal(self, node: ast.Nonlocal) -> None:
+        self.scope.nonlocal_names.update(node.names)
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for item in node.names:
+            name = item.asname or item.name.split(".")[0]
+            self.scope.local.add(name)
+            if _is_target(item.name, self.package):
+                self.record(node.lineno, "import", item.name, None, item.asname)
+                self.scope.hs2p[name] = item.name if item.asname else name
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        target = not node.level and _is_target(node.module, self.package)
+        for item in node.names:
+            if target:
+                self.record(node.lineno, "from", node.module, item.name, item.asname)
+            if item.name == "*":
+                continue
+            self.scope.local.add(item.asname or item.name)
+            if target:
+                self.scope.hs2p[item.asname or item.name] = f"{node.module}.{item.name}"
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        # Outermost chain only (``hs2p.wsi.reader.open_slide``, not also ``hs2p.wsi``).
+        chain = _attribute_chain(node)
+        if chain is not None:
+            self.reads.append((node.lineno, chain[0], chain[1], self.scope))
+            return
+        base: ast.expr = node.value
+        while isinstance(base, ast.Attribute):
+            base = base.value
+        self.visit(base)
+
+
 def scan_file(path: Path, rel: str, *, package: str = "hs2p") -> list[dict[str, Any]]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=rel)
     guarded = _guarded_lines(tree)
     records: list[dict[str, Any]] = []
-    bindings: dict[str, str] = {}  # local name -> dotted hs2p object it is bound to
 
     def record(line: int, kind: str, module: str, name: str | None, alias: str | None) -> None:
         records.append(
             {"file": rel, "line": line, "kind": kind, "module": module, "name": name, "alias": alias, "guarded": line in guarded}
         )
 
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for item in node.names:
-                if not _is_target(item.name, package):
-                    continue
-                record(node.lineno, "import", item.name, None, item.asname)
-                if item.asname:
-                    bindings[item.asname] = item.name
-                else:
-                    top = item.name.split(".")[0]
-                    bindings[top] = top
-        elif isinstance(node, ast.ImportFrom):
-            if node.level or not _is_target(node.module, package):
-                continue
-            for item in node.names:
-                record(node.lineno, "from", node.module, item.name, item.asname)
-                if item.name != "*":
-                    bindings[item.asname or item.name] = f"{node.module}.{item.name}"
-
-    # Attribute reads on hs2p bindings (``hs2p_reader.open_slide``); outermost chain only.
+    collector = _ImportCollector(package, record)
+    collector.visit(tree)
+    # Attribute reads on hs2p bindings (``hs2p_reader.open_slide``), resolved in the scope
+    # they are read in, once every scope's bindings are known.
     seen: set[tuple[int, str, str]] = set()
-    inner: set[int] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Attribute) or id(node) in inner:
-            continue
-        current = node.value
-        while isinstance(current, ast.Attribute):
-            inner.add(id(current))
-            current = current.value
-        chain = _attribute_chain(node)
-        if chain is None or chain[0] not in bindings:
-            continue
-        base, parts = bindings[chain[0]], ".".join(chain[1])
-        key = (node.lineno, base, parts)
-        if key not in seen:
+    for line, name, parts, scope in collector.reads:
+        base = scope.lookup(name)
+        key = (line, base or "", ".".join(parts))
+        if base is not None and key not in seen:
             seen.add(key)
-            record(node.lineno, "attribute", base, parts, chain[0])
+            record(line, "attribute", base, ".".join(parts), name)
     records.sort(key=lambda r: (r["line"], r["kind"] != "import", r["kind"] == "attribute"))
     return records
 

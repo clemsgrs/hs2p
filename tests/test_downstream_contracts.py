@@ -160,6 +160,57 @@ def test_unresolved_symbols_modules_and_module_attributes_fail_the_scan(tmp_path
     assert guarded["guarded"] is True
 
 
+def test_attribute_reads_resolve_aliases_in_their_lexical_scope(tmp_path):
+    import_scan = _load("import_scan")
+    repo, sha = _downstream_repo(
+        tmp_path,
+        {
+            "pkg/__init__.py": "",
+            "pkg/scoped.py": """\
+                import hs2p.wsi.reader as reader
+
+
+                def progress_user():
+                    import hs2p.progress as api
+                    return api.activate_progress_reporter
+
+
+                def broken_user():
+                    import hs2p.progress as api
+                    return api.no_such_progress_helper
+
+
+                def reader_user():
+                    import hs2p.wsi.reader as api
+
+                    def nested():
+                        return api.open_slide, reader.resolve_backend
+
+                    return nested
+
+
+                def spec_user(reader):
+                    from hs2p import SlideSpec as api
+                    return api.anything, reader.anything
+                """,
+        },
+    )
+
+    inventory = import_scan.build_inventory(
+        repo, project="downstream", expected_revision=sha, production_paths=["pkg"], exclusions=[]
+    )
+
+    attributes = {
+        (r["line"], r["module"], r["name"], r["status"]) for r in inventory["records"] if r["kind"] == "attribute"
+    }
+    assert attributes == {
+        (6, "hs2p.progress", "activate_progress_reporter", "resolved"),
+        (11, "hs2p.progress", "no_such_progress_helper", "unresolved"),
+        (18, "hs2p.wsi.reader", "open_slide", "resolved"),
+        (18, "hs2p.wsi.reader", "resolve_backend", "resolved"),
+    }
+
+
 def test_explicit_exclusions_are_recorded_with_their_rationale_and_do_not_fail(tmp_path):
     exclusions = [
         {"module": "hs2p", "name": "NoSuchSymbolInHs2p", "reason": "removed upstream on purpose"},
@@ -230,7 +281,9 @@ def test_policy_accepts_a_fully_passing_session():
     run = _load("run")
     report = _session([_result("/ds/tests/test_a.py", "t1", "passed"), _result("/ds/tests/test_b.py", "t2", "passed")])
 
-    assert run.session_problems(report, required_files=["/ds/tests/test_a.py", "/ds/tests/test_b.py"], allowed_skips=[]) == []
+    assert run.session_problems(
+        report, returncode=0, required_files=["/ds/tests/test_a.py", "/ds/tests/test_b.py"], allowed_skips=[]
+    ) == []
 
 
 @pytest.mark.parametrize(
@@ -265,7 +318,9 @@ def test_policy_accepts_a_fully_passing_session():
 def test_policy_rejects_skips_failures_collection_errors_and_foreign_hs2p(report, expected):
     run = _load("run")
 
-    problems = run.session_problems(report, required_files=["/ds/tests/test_a.py"], allowed_skips=[])
+    problems = run.session_problems(
+        report, returncode=report["exitstatus"], required_files=["/ds/tests/test_a.py"], allowed_skips=[]
+    )
 
     assert any(expected in p for p in problems), problems
 
@@ -274,7 +329,9 @@ def test_policy_rejects_a_required_suite_that_collected_nothing():
     run = _load("run")
     report = _session([_result("/ds/tests/test_a.py", "t1", "passed")])
 
-    problems = run.session_problems(report, required_files=["/ds/tests/test_a.py", "/ds/tests/test_b.py"], allowed_skips=[])
+    problems = run.session_problems(
+        report, returncode=0, required_files=["/ds/tests/test_a.py", "/ds/tests/test_b.py"], allowed_skips=[]
+    )
 
     assert problems == ["/ds/tests/test_b.py: zero collected required cases"]
 
@@ -285,15 +342,24 @@ def test_policy_rejects_collected_cases_that_never_ran():
     collected = [{"nodeid": "/ds/tests/test_a.py::t1", "path": "/ds/tests/test_a.py"}]
     report = _session([], collected=collected)
 
-    problems = run.session_problems(report, required_files=["/ds/tests/test_a.py"], allowed_skips=[])
+    problems = run.session_problems(report, returncode=0, required_files=["/ds/tests/test_a.py"], allowed_skips=[])
 
     assert problems == ["/ds/tests/test_a.py::t1: collected but never ran"]
+
+
+def test_policy_rejects_a_failed_pytest_process_even_when_its_report_passed():
+    run = _load("run")
+    report = _session([_result("/ds/tests/test_a.py", "t1", "passed")])
+
+    problems = run.session_problems(report, returncode=1, required_files=["/ds/tests/test_a.py"], allowed_skips=[])
+
+    assert problems == ["pytest process exited 1"]
 
 
 def test_policy_rejects_a_missing_session_report():
     run = _load("run")
 
-    assert run.session_problems(None, required_files=["/ds/tests/test_a.py"], allowed_skips=[]) == [
+    assert run.session_problems(None, returncode=1, required_files=["/ds/tests/test_a.py"], allowed_skips=[]) == [
         "no session report: the hs2p contract guard plugin did not run"
     ]
 
@@ -306,6 +372,7 @@ def test_policy_permits_only_the_recorded_skip_exclusions():
 
     problems = run.session_problems(
         report,
+        returncode=0,
         required_files=["/ds/tests/test_a.py"],
         allowed_skips=[{"nodeid": "/ds/tests/test_a.py::t1", "reason": "GPU-only case"}],
     )
@@ -427,9 +494,24 @@ def test_an_inherited_collect_only_session_is_not_accepted_as_evidence(tmp_path)
 
     assert proc.returncode == 0, proc.stdout + proc.stderr
     test_file = str((tmp_path / "project" / "tests" / "test_uses_hs2p.py").resolve())
-    problems = run.session_problems(report, required_files=[test_file], allowed_skips=[])
+    problems = run.session_problems(report, returncode=proc.returncode, required_files=[test_file], allowed_skips=[])
 
     assert problems == ["tests/test_uses_hs2p.py::test_import: collected but never ran"]
+
+
+def test_a_session_that_fails_after_its_report_was_written_is_not_accepted_as_evidence(tmp_path):
+    # The guard writes its report at sessionfinish; a later failure (pytest_unconfigure,
+    # interpreter shutdown) only shows in the process exit status.
+    run = _load("run")
+    proc, report = _guarded_pytest(
+        tmp_path, conftest="def pytest_unconfigure(config):\n    raise RuntimeError('late failure')\n"
+    )
+
+    assert proc.returncode != 0 and report["exitstatus"] == 0, proc.stdout + proc.stderr
+    test_file = str((tmp_path / "project" / "tests" / "test_uses_hs2p.py").resolve())
+    problems = run.session_problems(report, returncode=proc.returncode, required_files=[test_file], allowed_skips=[])
+
+    assert problems == [f"pytest process exited {proc.returncode}"]
 
 
 def test_guard_fails_when_another_projects_tests_package_shadows_the_downstream_tests(tmp_path):

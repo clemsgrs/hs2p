@@ -34,7 +34,7 @@ python scripts/downstream_contracts/run.py --hs2p . --recreate-env              
 
 The runner does three things for each project:
 
-1. **Import surface.** It finds the tracked production sources (`production_paths`; tests, docs and scripts are excluded) at the pinned SHA. It parses every `import hs2p…` and `from hs2p… import name`, including aliases and imports inside functions, and every attribute read on a name bound to an hs2p module (`hs2p_reader.open_slide`). Each one is resolved against the candidate the way Python resolves imports: attribute first, then submodule. Downstream modules are parsed, never imported. The result is `<project>/import-inventory.json`, which lists the SHA, file, line, module and name of each record, plus its status.
+1. **Import surface.** It finds the tracked production sources (`production_paths`; tests, docs and scripts are excluded) at the pinned SHA. It parses every `import hs2p…` and `from hs2p… import name`, including aliases and imports inside functions, and every attribute read on a name bound to an hs2p module (`hs2p_reader.open_slide`), looked up in the scope where it is read. Each one is resolved against the candidate the way Python resolves imports: attribute first, then submodule. Downstream modules are parsed, never imported. The result is `<project>/import-inventory.json`, which lists the SHA, file, line, module and name of each record, plus its status.
 2. **Behaviour.** The selected suites run, followed by the probes:
    - **slide2vec suite** (`tests/test_hs2p5_integration.py`): exact-pixel grouped and single-tile reads, spacing-less masks, annotation grouping, previews and persisted artifacts.
    - **soma suites** (`tests/test_hs2p_4_tiling_cache.py`, `tests/test_supplied_coordinates.py`): the historical hs2p 4 tiling cache and supplied-coordinate artifact validation.
@@ -65,6 +65,7 @@ Everything is written to `--out` (default `<work-dir>/evidence`). The runner emp
 | `unexpected skip` | A required case did not run. This is usually a missing dependency. | Fix the environment in `contracts.toml`. A skip is never compatibility evidence. |
 | `zero collected required cases` / `collection error` | A suite or probe file did not import, or was renamed. | Check the pin, and the probe if the downstream code was refactored. |
 | `collected but never ran` | A case was collected but produced no outcome, for example because pytest stopped early. | Read `<project>/pytest.log` for why the session ended. |
+| `pytest process exited N` | Every case passed, but pytest failed after writing its report, for example in a `pytest_unconfigure` hook or at interpreter shutdown. | Read the end of `<project>/pytest.log`. |
 | `hs2p import origin mismatch` | The tests ran against an hs2p other than the candidate, or another checkout's `tests` package shadowed the downstream one. | Look at `sys_path` in `session.json` to see which entry won. |
 
 ## Updating pins

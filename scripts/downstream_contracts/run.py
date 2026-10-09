@@ -104,9 +104,18 @@ def resolve_projects(manifest: dict[str, Any], args: argparse.Namespace) -> list
 
 
 def session_problems(
-    report: dict[str, Any] | None, *, required_files: list[str], allowed_skips: list[dict[str, Any]]
+    report: dict[str, Any] | None,
+    *,
+    returncode: int,
+    required_files: list[str],
+    allowed_skips: list[dict[str, Any]],
 ) -> list[str]:
-    """Everything that makes one downstream pytest session unacceptable as evidence."""
+    """Everything that makes one downstream pytest session unacceptable as evidence.
+
+    ``returncode`` is the pytest process's own exit status: the guard writes ``report`` at
+    sessionfinish, so a later failure (``pytest_unconfigure``, interpreter shutdown) shows
+    only there.
+    """
     if report is None:
         return ["no session report: the hs2p contract guard plugin did not run"]
     problems: list[str] = []
@@ -138,6 +147,8 @@ def session_problems(
             problems.append(f"{required}: zero collected required cases")
     if report["exitstatus"] != 0 and not problems:
         problems.append(f"pytest exit status {report['exitstatus']}")
+    if returncode != 0 and not problems:
+        problems.append(f"pytest process exited {returncode}")
     return problems
 
 
@@ -379,10 +390,13 @@ def run_project(
     with open(log.path, "a") as handle:
         handle.write(f"$ cd {shlex.quote(str(repo))} && {shlex.join(pytest_cmd)}\n")
     with open(pytest_log, "w") as handle:
-        subprocess.run(pytest_cmd, cwd=repo, env=env, stdout=handle, stderr=subprocess.STDOUT)
+        pytest_run = subprocess.run(pytest_cmd, cwd=repo, env=env, stdout=handle, stderr=subprocess.STDOUT)
     session = json.loads(session_path.read_text()) if session_path.exists() else None
     test_problems = session_problems(
-        session, required_files=suites + probes, allowed_skips=project.get("allowed_skips", [])
+        session,
+        returncode=pytest_run.returncode,
+        required_files=suites + probes,
+        allowed_skips=project.get("allowed_skips", []),
     )
     if not _clean(repo) or _git_out(repo, "rev-parse", "HEAD") != project["revision"]:
         test_problems.append(f"{name} checkout changed during the run")
