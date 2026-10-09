@@ -23,14 +23,15 @@ class _FakeReader:
     level_count = 2
     level_dimensions = [(512, 512), (256, 256)]
 
-    def __init__(self, *, decodes: bool):
+    def __init__(self, *, decodes: bool, undecodable_levels: tuple[int, ...] = ()):
         self._decodes = decodes
+        self._undecodable_levels = undecodable_levels
         self.reads: list[tuple] = []
         self.closed = False
 
     def read_region(self, location, level, size):
         self.reads.append((location, level, size))
-        if not self._decodes:
+        if not self._decodes or level in self._undecodable_levels:
             raise RuntimeError("requested compression method is not configured")
         return np.zeros((size[1], size[0], 3), dtype=np.uint8)
 
@@ -543,15 +544,21 @@ def test_auto_mask_backend_decodes_a_single_channel_deflate_tiff(tmp_path, compr
     )
 
 
-def _fake_backends(monkeypatch, *, order, decodes):
+def _fake_backends(monkeypatch, *, order, decodes, undecodable_levels=None):
     """Register fake readers for ``order``; ``decodes(backend, path)`` says whether a
-    reader opened on ``path`` can decode it (every fake opens every path)."""
+    reader opened on ``path`` can decode it, and ``undecodable_levels(backend, path)``
+    names the levels it cannot decode even then (every fake opens every path)."""
     opened: dict[tuple[str, str], _FakeReader] = {}
 
     def _spec(backend):
         def _opener(path, *, spacing_override=None, require_spacing=True):
             del spacing_override, require_spacing
-            reader = _FakeReader(decodes=decodes(backend, str(path)))
+            reader = _FakeReader(
+                decodes=decodes(backend, str(path)),
+                undecodable_levels=(
+                    undecodable_levels(backend, str(path)) if undecodable_levels else ()
+                ),
+            )
             opened[(backend, str(path))] = reader
             return reader
 
@@ -577,9 +584,62 @@ def test_auto_skips_a_backend_that_opens_but_cannot_decode(monkeypatch):
     assert selection.reason == (
         "cuCIM could not decode the source; selected openslide for auto backend"
     )
-    # one small read at the coarsest level, and every probe reader is closed
+    # one small read per level, coarsest first, stopping at the first failure; every
+    # probe reader is closed
     cucim = opened[("cucim", "undecodable-mask.tif")]
     assert cucim.reads == [((0, 0), 1, (64, 64))]
+    openslide = opened[("openslide", "undecodable-mask.tif")]
+    assert openslide.reads == [((0, 0), 1, (64, 64)), ((0, 0), 0, (64, 64))]
+    assert all(reader.closed for reader in opened.values())
+
+
+def test_auto_skips_a_backend_that_decodes_the_coarsest_level_but_not_level_0(
+    monkeypatch,
+):
+    """#268: TIFF codecs are per directory, so a reader can decode the overview but lack
+    the full-resolution codec. The probe must decode every level, not the coarsest."""
+    opened = _fake_backends(
+        monkeypatch,
+        order=("cucim", "openslide"),
+        decodes=lambda backend, path: True,
+        undecodable_levels=lambda backend, path: (0,) if backend == "cucim" else (),
+    )
+
+    selection = reader_mod.resolve_backend("auto", wsi_path=Path("jp2k-level0.tif"))
+
+    assert selection.backend == "openslide"
+    assert selection.tried == ("cucim", "openslide")
+    assert selection.reason == (
+        "cuCIM could not decode the source; selected openslide for auto backend"
+    )
+    assert all(reader.closed for reader in opened.values())
+
+
+def test_auto_skips_a_backend_that_cannot_decode_level_0_of_the_companion(monkeypatch):
+    """The companion mask is probed on every level too, and every reader of the skipped
+    backend, the decodable source included, is closed."""
+    opened = _fake_backends(
+        monkeypatch,
+        order=("cucim", "openslide"),
+        decodes=lambda backend, path: True,
+        undecodable_levels=lambda backend, path: (
+            (0,) if backend == "cucim" and path == "mask.tif" else ()
+        ),
+    )
+
+    selection = reader_mod.resolve_backend(
+        "auto", wsi_path=Path("slide.svs"), mask_path=Path("mask.tif")
+    )
+
+    assert selection.backend == "openslide"
+    assert selection.reason == (
+        "cuCIM could not decode the source; selected openslide for auto backend"
+    )
+    every_level = [((0, 0), 1, (64, 64)), ((0, 0), 0, (64, 64))]
+    assert opened[("cucim", "slide.svs")].reads == every_level
+    assert opened[("cucim", "mask.tif")].reads == every_level
+    assert opened[("openslide", "mask.tif")].reads == every_level
+    assert len(opened) == 4
     assert all(reader.closed for reader in opened.values())
 
 

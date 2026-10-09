@@ -239,19 +239,21 @@ class _ProbeOutcome(Enum):
 _DECODE_PROBE_SIZE = 64
 
 
-def _decode_probe_region(reader: SlideReader) -> None:
-    """Decode one small region at the coarsest level.
+def _decode_probe_regions(reader: SlideReader) -> None:
+    """Decode one small region at ``(0, 0)`` on every level, coarsest first.
 
     Opening only parses the header: a reader can open a file whose codec it lacks (cuCIM
-    with single-channel deflate, #262), so the probe must decode pixels too.
+    with single-channel deflate, #262), so the probe must decode pixels too. A TIFF sets
+    its codec per directory, so each pyramid level can need a different one (#268); on a
+    tiled level the region is one tile, which exercises that level's codec.
     """
-    level = reader.level_count - 1
-    width, height = reader.level_dimensions[level]
-    reader.read_region(
-        (0, 0),
-        level,
-        (min(int(width), _DECODE_PROBE_SIZE), min(int(height), _DECODE_PROBE_SIZE)),
-    )
+    for level in reversed(range(reader.level_count)):
+        width, height = reader.level_dimensions[level]
+        reader.read_region(
+            (0, 0),
+            level,
+            (min(int(width), _DECODE_PROBE_SIZE), min(int(height), _DECODE_PROBE_SIZE)),
+        )
 
 
 @lru_cache(maxsize=256)
@@ -297,7 +299,7 @@ def _probe_backend(
         return _ProbeOutcome.CANNOT_OPEN
     try:
         for reader in readers:
-            _decode_probe_region(reader)
+            _decode_probe_regions(reader)
     except Exception:
         return _ProbeOutcome.CANNOT_DECODE
     finally:

@@ -115,7 +115,7 @@ Annotation sampling supports filled mask previews and a tiling-grid preview for 
 With `auto`, each path is resolved independently:
 
 - `.png`, `.jpg`, and `.jpeg` suffixes (case-insensitive) select PIL only. Corrupt, unsupported, or oversized flat rasters fail without trying another reader.
-- Other inputs probe `cucim → vips → openslide → asap` and stop at the first reader that opens the file and decodes a small region at its coarsest level. A reader that opens a file but cannot decode it is skipped, and the selection reason records it (for example, `cuCIM could not decode the source`). PIL is not part of this chain.
+- Other inputs probe `cucim → vips → openslide → asap` and stop at the first reader that opens the file and decodes a small region at the top-left of every pyramid level. A TIFF can use a different codec at each level (for example JPEG 2000 at full resolution with JPEG overviews), so a reader that opens a file but cannot decode one of its levels is skipped, and the selection reason records it (for example, `cuCIM could not decode the source`). PIL is not part of this chain.
 - A mask path is resolved with the same chain, but the probe does not require spacing metadata (a mask's spacing comes from its dimensions), and the TIFF header is read first: samples that are not 8-bit unsigned, non-palette select `tifffile` directly, with the reason recorded in the `mask_backend.selected` event and the resolved `mask_backend` provenance. A slide path never selects `tifffile`.
 
 Source masks need no spacing metadata: a flat PNG/JPEG or untagged TIFF mask is aligned to
@@ -130,7 +130,7 @@ time, with a message naming the offending directory and pointing at
 `tiling.mask_backend: tifffile`, which reads pyramidal TIFF masks losslessly. Re-exporting
 every level of the mask as 8-bit unsigned min-is-black samples is the alternative.
 
-Selection does not inspect mask labels or retry after a later decode failure. If a native reader opens a mask but cannot decode its pixels, explicitly set `tiling.mask_backend` to a reader that can decode it. Explicit reader choices are authoritative. Missing or incompatible mask backends fail with the mask path and backend in the error; a slide without a source mask does not check mask-reader availability.
+Selection does not inspect mask labels or retry after a later decode failure: a reader that decodes the probed region of every level but fails elsewhere, for example on one corrupt tile, stays selected. If a native reader cannot decode a mask's pixels, explicitly set `tiling.mask_backend` to a reader that can decode it. Explicit reader choices are authoritative. Missing or incompatible mask backends fail with the mask path and backend in the error; a slide without a source mask does not check mask-reader availability.
 
 Requested and resolved readers are saved separately as provenance. Resume compares resolved readers, including the mask reader when a source mask exists. Pin explicit readers to keep decoder choice stable across environments or backend-priority changes. See [artifact validation](artifacts.md#resume-and-validation) for compatibility rules, including older metadata without mask-backend fields.
 
