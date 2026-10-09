@@ -101,7 +101,7 @@ would have preserved two coordinate conventions for regional reads (mask-file pi
 reference pixels), two level-selection results, and the silently-stretching alignment that
 5.0 exists to remove. The wrappers could not be behaviour-preserving and correct at once, and
 every downstream caller would still have to be audited. A documented break with explicit
-replacements (see the [5.0 release notes](../release-notes.md)) is cheaper and safer.
+replacements (see the [5.0 release notes](https://github.com/clemsgrs/hs2p/blob/5.0.0/docs/release-notes.md#500)) is cheaper and safer.
 
 ### Non-goals (physical geometry)
 
