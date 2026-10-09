@@ -19,20 +19,34 @@ from .models import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfi
 
 def resolve_tiling_config(cfg: Any) -> TilingConfig:
     reject_unknown_config_keys(cfg.tiling, path="tiling")
+    params = _checked_section(cfg.tiling.params, path="tiling.params")
+    masks = _checked_section(cfg.tiling.masks, path="tiling.masks")
     min_coverage = dict(
-        _merge_sampling_mapping(cfg.tiling.masks.min_coverage, field_name="min_coverage")
-        or {}
+        _merge_sampling_mapping(masks.min_coverage, field_name="min_coverage") or {}
     )
     return TilingConfig(
-        requested_spacing_um=cfg.tiling.params.requested_spacing_um,
-        requested_tile_size_px=cfg.tiling.params.requested_tile_size_px,
-        tolerance=cfg.tiling.params.tolerance,
-        overlap=cfg.tiling.params.overlap,
+        requested_spacing_um=params.requested_spacing_um,
+        requested_tile_size_px=params.requested_tile_size_px,
+        tolerance=params.tolerance,
+        overlap=params.overlap,
         min_coverage=min_coverage,
         independent_sampling=bool(cfg.tiling.independent_sampling),
         backend=cfg.tiling.backend,
         mask_backend=getattr(cfg.tiling, "mask_backend", "auto"),
     )
+
+
+def _checked_section(section: Any, *, path: str) -> Any:
+    """Check a section as the resolver read it, and return it.
+
+    The check on the whole ``tiling`` section sees an interpolated section
+    (``params: ${...}`` in an unresolved ``DictConfig``) only as its ``${...}`` string.
+    Reading the section dereferences that interpolation anyway, so checking what was read
+    catches unknown keys it brings in without evaluating anything the resolver does not.
+    """
+    if section is not None:
+        reject_unknown_config_keys(section, path=path)
+    return section
 
 
 def require_tissue_fraction(tiling: TilingConfig) -> float:
@@ -282,7 +296,9 @@ def resolve_sampling_spec(
     tiling: TilingConfig,
 ) -> SamplingSpec:
     reject_unknown_config_keys(cfg.tiling, path="tiling")
-    masks_cfg = getattr(cfg.tiling, "masks", None)
+    masks_cfg = _checked_section(
+        getattr(cfg.tiling, "masks", None), path="tiling.masks"
+    )
     if masks_cfg is None:
         return build_default_sampling_spec(tiling)
     return _resolve_sampling_spec_from_masks(masks_cfg)

@@ -430,3 +430,60 @@ def test_dataclass_resolvers_report_unknown_keys_with_the_shared_message(
         f"Unknown config key tiling.{section}.{stray_key} "
         f"(did you mean tiling.{section}.{suggestion}?)"
     ) in str(excinfo.value)
+
+
+# A hand-built, unresolved DictConfig can bring a whole section in by interpolation. The raw
+# check sees only the ``${...}`` string, so the resolvers also check each section they
+# read once reading it has dereferenced the interpolation.
+
+
+def _unresolved_cfg_interpolating(section: str, stray_key: str):
+    tiling = OmegaConf.to_container(default_config.tiling, resolve=False)
+    source = {**tiling[section], stray_key: 2.0}
+    tiling[section] = f"${{wandb.{section}}}"
+    return OmegaConf.create({"tiling": tiling, "wandb": {section: source}})
+
+
+def test_resolve_tiling_config_rejects_unknown_keys_in_an_interpolated_section():
+    cfg = _unresolved_cfg_interpolating("params", "spacng")
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"Unknown config key tiling\.params\.spacng "
+            r"\(did you mean tiling\.params\.requested_spacing_um\?\)"
+        ),
+    ):
+        resolve_tiling_config(cfg)
+
+
+@pytest.mark.parametrize(
+    "resolve",
+    [
+        resolve_tiling_config,
+        lambda cfg: resolve_sampling_spec(cfg, tiling=_tiling_config()),
+        lambda cfg: resolve_sampling_request(cfg, tiling=_tiling_config()),
+    ],
+    ids=["resolve_tiling_config", "resolve_sampling_spec", "resolve_sampling_request"],
+)
+def test_resolvers_reject_unknown_keys_in_an_interpolated_masks_section(resolve):
+    cfg = _unresolved_cfg_interpolating("masks", "min_coverag")
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"Unknown config key tiling\.masks\.min_coverag "
+            r"\(did you mean tiling\.masks\.min_coverage\?\)"
+        ),
+    ):
+        resolve(cfg)
+
+
+def test_resolvers_leave_interpolated_sections_they_do_not_read_unevaluated():
+    tiling = OmegaConf.to_container(default_config.tiling, resolve=False)
+    tiling["seg_params"] = "${oc.env:HS2P_TEST_UNSET_VARIABLE}"
+    cfg = OmegaConf.create({"tiling": tiling})
+
+    tiling_config = resolve_tiling_config(cfg)
+
+    assert resolve_sampling_request(cfg, tiling=tiling_config) == (None, None, None)
