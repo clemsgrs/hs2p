@@ -164,7 +164,7 @@ def _build_tiling_result_from_mask(
     sample_id: str | None,
     tiling: TilingConfig,
     min_tissue_fraction: float,
-    segmentation: SegmentationConfig,
+    segmentation: SegmentationConfig | None,
     filtering: FilterConfig,
     num_workers: int,
     annotation: str | None = None,
@@ -178,9 +178,15 @@ def _build_tiling_result_from_mask(
     because every pass picks its own: the configured tissue threshold, one annotation's
     threshold, or ``0.0`` for the joint-sampling union. ``backend``/``requested_backend``
     are the slide reader that actually opened and the one asked for. ``segmentation``
-    supplies only the persisted thresholds and SAM2 paths; the mask's own
-    ``tissue_method`` decides whether the SAM2 paths are recorded.
+    supplies only the persisted thresholds and SAM2 paths, and is recorded only when it
+    produced ``resolved_mask``: a precomputed tissue mask records ``None`` thresholds
+    whatever ``segmentation`` says, and annotation sampling, which never segments, passes
+    ``None``. The mask's own ``tissue_method`` decides whether the SAM2 paths are recorded.
     """
+    # The resolved mask, not the caller's config, says whether segmentation ran.
+    applied = (
+        None if resolved_mask.tissue_method == "precomputed_mask" else segmentation
+    )
     normalized_downsamples = _normalize_level_downsamples(slide.level_downsamples)
     seg_level = resolved_mask.seg_level
     seg_spacing_um = resolved_mask.seg_spacing_um
@@ -241,7 +247,7 @@ def _build_tiling_result_from_mask(
         tile_size_lv0=tiles.tile_size_lv0,
         overlap=tiling.overlap,
     ).step_px_lv0
-    is_sam2 = str(resolved_mask.tissue_method).lower() == "sam2"
+    is_sam2 = applied is not None and str(resolved_mask.tissue_method).lower() == "sam2"
     return TilingResult(
         tiles=tiles,
         sample_id=sample_id,
@@ -256,12 +262,12 @@ def _build_tiling_result_from_mask(
         seg_downsample=resolved_mask.seg_downsample,
         seg_level=seg_level,
         seg_spacing_um=seg_spacing_um,
-        seg_sthresh=segmentation.sthresh,
-        seg_sthresh_up=segmentation.sthresh_up,
-        seg_mthresh=segmentation.mthresh,
-        seg_close=segmentation.close,
-        sam2_checkpoint_path=segmentation.sam2_checkpoint_path if is_sam2 else None,
-        sam2_config_path=segmentation.sam2_config_path if is_sam2 else None,
+        seg_sthresh=applied.sthresh if applied is not None else None,
+        seg_sthresh_up=applied.sthresh_up if applied is not None else None,
+        seg_mthresh=applied.mthresh if applied is not None else None,
+        seg_close=applied.close if applied is not None else None,
+        sam2_checkpoint_path=applied.sam2_checkpoint_path if is_sam2 else None,
+        sam2_config_path=applied.sam2_config_path if is_sam2 else None,
         ref_tile_size_px=filtering.ref_tile_size,
         a_t=filtering.a_t,
         a_h=filtering.a_h,
@@ -322,7 +328,6 @@ def _build_independent_annotation_results(
     spacing_at_level_0: float | None,
     sample_id: str | None,
     tiling: TilingConfig,
-    segmentation: SegmentationConfig,
     filtering: FilterConfig,
     num_workers: int,
 ) -> "dict[str, TilingResult]":
@@ -339,7 +344,7 @@ def _build_independent_annotation_results(
             sample_id=sample_id,
             tiling=tiling,
             min_tissue_fraction=threshold,
-            segmentation=segmentation,
+            segmentation=None,
             filtering=filtering,
             num_workers=num_workers,
             annotation=annotation,
@@ -363,7 +368,6 @@ def _build_joint_annotation_results(
     spacing_at_level_0: float | None,
     sample_id: str | None,
     tiling: TilingConfig,
-    segmentation: SegmentationConfig,
     filtering: FilterConfig,
     num_workers: int,
 ) -> "dict[str, TilingResult]":
@@ -402,7 +406,7 @@ def _build_joint_annotation_results(
         sample_id=sample_id,
         tiling=tiling,
         min_tissue_fraction=0.0,
-        segmentation=segmentation,
+        segmentation=None,
         filtering=filtering,
         num_workers=num_workers,
         annotation=None,
@@ -545,6 +549,9 @@ def build_per_annotation_tiling_results(
 
     INDEPENDENT_SAMPLING: one tiling pass per annotation using that annotation's binary mask.
     JOINT_SAMPLING: one pass on the union mask, then per-annotation post-filter by coverage.
+
+    The ``seg_*`` thresholds are accepted but unused: an annotation mask is never
+    segmented, so every result records ``None`` thresholds.
     """
     return _build_per_annotation_tiling_results(
         slide=slide,
@@ -563,16 +570,6 @@ def build_per_annotation_tiling_results(
             overlap=overlap,
             # Annotation sampling gates on the sampling spec's per-label thresholds.
             min_coverage={},
-        ),
-        segmentation=SegmentationConfig(
-            method=resolved_masks.tissue_method,
-            downsample=resolved_masks.requested_seg_downsample,
-            sthresh=seg_sthresh,
-            sthresh_up=seg_sthresh_up,
-            mthresh=seg_mthresh,
-            close=seg_close,
-            sam2_checkpoint_path=None,
-            sam2_config_path=None,
         ),
         filtering=FilterConfig(
             ref_tile_size=ref_tile_size_px,
@@ -607,7 +604,6 @@ def _build_per_annotation_tiling_results(
     spacing_at_level_0: float | None,
     sample_id: str | None,
     tiling: TilingConfig,
-    segmentation: SegmentationConfig,
     filtering: FilterConfig,
     num_workers: int,
     output_mode: str | None,
@@ -641,7 +637,6 @@ def _build_per_annotation_tiling_results(
         spacing_at_level_0=spacing_at_level_0,
         sample_id=sample_id,
         tiling=tiling,
-        segmentation=segmentation,
         filtering=filtering,
         num_workers=num_workers,
     )
@@ -802,15 +797,7 @@ def _preprocess_slide(
                 slide=slide,
                 sample_id=sample_id,
                 mask=mask,
-                tissue_method=segmentation.method,
-                sthresh=segmentation.sthresh,
-                sthresh_up=segmentation.sthresh_up,
-                mthresh=segmentation.mthresh,
-                close=segmentation.close,
-                seg_downsample=segmentation.downsample,
-                sam2_checkpoint_path=segmentation.sam2_checkpoint_path,
-                sam2_config_path=segmentation.sam2_config_path,
-                sam2_device=segmentation.sam2_device,
+                segmentation=segmentation,
                 requested_mask_backend=(
                     requested_mask_backend
                     if requested_mask_backend is not None
@@ -836,12 +823,6 @@ def _preprocess_slide(
         )
     finally:
         slide.close()
-
-
-# Annotation masks are not segmented, so annotation sampling has no segmentation thresholds
-# of its own; its results record the scalar API's defaults, whatever segmentation config a
-# workflow carries.
-_ANNOTATION_SEGMENTATION_THRESHOLDS = {"sthresh": 8, "sthresh_up": 255, "mthresh": 7, "close": 4}
 
 
 def preprocess_slide_per_annotation(
@@ -999,13 +980,6 @@ def _preprocess_slide_per_annotation(
             spacing_at_level_0=spacing_override,
             sample_id=sample_id,
             tiling=tiling,
-            segmentation=SegmentationConfig(
-                method=resolved_masks.tissue_method,
-                downsample=seg_downsample,
-                sam2_checkpoint_path=None,
-                sam2_config_path=None,
-                **_ANNOTATION_SEGMENTATION_THRESHOLDS,
-            ),
             filtering=filtering,
             num_workers=num_workers,
             output_mode=output_mode,

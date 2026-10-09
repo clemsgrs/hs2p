@@ -230,7 +230,21 @@ rounding, as when a TIFF tag and decimal metadata disagree, still returns the na
 
 The lower-level resolvers `resolve_tissue_mask` and `resolve_annotation_masks` consume
 an open `Mask` (declaring `TissueLabels` or `AnnotationLabels`, respectively) whose
-lifetime the caller owns. `hs2p.tiling.mask.open_tissue_mask(path, pixel_mapping=...)`
+lifetime the caller owns. `resolve_tissue_mask(*, slide, segmentation=None,
+sample_id=None, mask=None, requested_mask_backend=None)` segments the slide with
+`segmentation`, a `SegmentationConfig`, when no `mask` is given, and raises a
+`ValueError` naming `segmentation` if it is missing; with a `mask`, only
+`segmentation.downsample` matters (the read grid), and the `SegmentationConfig`
+default applies when it is omitted:
+
+```python
+resolve_tissue_mask(slide=slide, segmentation=SegmentationConfig(method="hsv", sthresh=15))
+resolve_tissue_mask(slide=slide, mask=mask)
+```
+
+A result tiled from a precomputed mask or by annotation sampling was never segmented, so
+its `seg_sthresh`, `seg_sthresh_up`, `seg_mthresh` and `seg_close` are `None`, written
+as `null` in its metadata. `hs2p.tiling.mask.open_tissue_mask(path, pixel_mapping=...)`
 and `open_annotation_mask(path, pixel_mapping=...)` build the labels from a configuration
 `pixel_mapping` and return the context-managed mask. Pass `requested_mask_backend` to a
 resolver to record what was asked for; otherwise the mask's concrete backend is recorded

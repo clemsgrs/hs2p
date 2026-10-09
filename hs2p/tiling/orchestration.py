@@ -1032,16 +1032,8 @@ def _resolve_mask_for_request(
                 resolved_mask = resolve_tissue_mask(
                     slide=slide,
                     sample_id=request.whole_slide.sample_id,
-                    tissue_method=effective_segmentation.method,
+                    segmentation=effective_segmentation,
                     mask=mask,
-                    sthresh=effective_segmentation.sthresh,
-                    sthresh_up=effective_segmentation.sthresh_up,
-                    mthresh=effective_segmentation.mthresh,
-                    close=effective_segmentation.close,
-                    seg_downsample=effective_segmentation.downsample,
-                    sam2_checkpoint_path=effective_segmentation.sam2_checkpoint_path,
-                    sam2_config_path=effective_segmentation.sam2_config_path,
-                    sam2_device=effective_segmentation.sam2_device,
                     requested_mask_backend=requested_mask_backend,
                 )
         finally:

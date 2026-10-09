@@ -96,6 +96,8 @@ When `is_within_tolerance` is true, `tile_size_lv0` and `step_px_lv0` reflect th
 - `sthresh_up`
 - `mthresh`
 - `close`
+  - the applied segmentation thresholds; all four are `null` when no segmentation ran
+    (tissue tiling from a precomputed mask, or annotation sampling)
 - `sam2_checkpoint_path`
 - `sam2_config_path`
   - path-based SAM2 segmentation identity; both are `null` for non-SAM2 artifacts

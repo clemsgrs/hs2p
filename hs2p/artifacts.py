@@ -262,14 +262,16 @@ def validate_tiling_artifacts(
         raise ValueError("precomputed tiles tolerance mismatch")
     if result.requested_seg_downsample != compatibility.segmentation.downsample:
         raise ValueError("precomputed tiles seg_downsample mismatch")
-    if result.seg_sthresh != compatibility.segmentation.sthresh:
-        raise ValueError("precomputed tiles sthresh mismatch")
-    if result.seg_sthresh_up != compatibility.segmentation.sthresh_up:
-        raise ValueError("precomputed tiles sthresh_up mismatch")
-    if result.seg_mthresh != compatibility.segmentation.mthresh:
-        raise ValueError("precomputed tiles mthresh mismatch")
-    if result.seg_close != compatibility.segmentation.close:
-        raise ValueError("precomputed tiles close mismatch")
+    # A threshold is compared only when the artifact recorded it: ``None`` means no
+    # segmentation ran (a precomputed mask), so no threshold shaped those tiles.
+    for name, recorded in (
+        ("sthresh", result.seg_sthresh),
+        ("sthresh_up", result.seg_sthresh_up),
+        ("mthresh", result.seg_mthresh),
+        ("close", result.seg_close),
+    ):
+        if recorded is not None and recorded != getattr(compatibility.segmentation, name):
+            raise ValueError(f"precomputed tiles {name} mismatch")
     if result.mask_path is None and result.tissue_method != compatibility.segmentation.method:
         raise ValueError("precomputed tiles tissue_method mismatch")
     if (

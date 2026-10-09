@@ -145,10 +145,12 @@ class TilingResult:
     seg_downsample: int
     seg_level: int
     seg_spacing_um: float
-    seg_sthresh: int
-    seg_sthresh_up: int
-    seg_mthresh: int
-    seg_close: int
+    # The applied segmentation thresholds; ``None`` when no segmentation ran (a
+    # precomputed tissue mask or annotation sampling).
+    seg_sthresh: int | None
+    seg_sthresh_up: int | None
+    seg_mthresh: int | None
+    seg_close: int | None
     # -- filtering --
     ref_tile_size_px: int
     a_t: float
