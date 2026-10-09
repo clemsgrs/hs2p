@@ -22,23 +22,30 @@ def write_config(*, cfg, output_dir, name="config.yaml", skip_logging: bool = Fa
 
 
 def get_cfg_from_file(config_file):
-    default_cfg = OmegaConf.create(default_config)
-    cfg = OmegaConf.load(config_file)
-    cfg = OmegaConf.merge(default_cfg, cfg)
-    reject_unknown_config_keys(cfg)
-    OmegaConf.resolve(cfg)
-    return cfg
+    return _load_validated(OmegaConf.load(config_file))
 
 
 def get_cfg_from_args(args):
     if args.output_dir is not None:
         args.output_dir = os.path.abspath(args.output_dir)
         args.opts += [f"output_dir={args.output_dir}"]
-    default_cfg = OmegaConf.create(default_config)
-    cfg = OmegaConf.load(args.config_file)
-    cfg = OmegaConf.merge(default_cfg, cfg, OmegaConf.from_cli(args.opts))
+    return _load_validated(
+        OmegaConf.load(args.config_file), OmegaConf.from_cli(args.opts)
+    )
+
+
+def _load_validated(*layers):
+    """Merge ``layers`` onto the defaults, rejecting unknown keys before and after
+    resolution.
+
+    The first check runs on the raw tree, so an unknown key is reported even when its
+    value is an interpolation that cannot resolve. The second catches keys that only
+    appear once a section-level interpolation (``speed: ${wandb.speed}``) resolves.
+    """
+    cfg = OmegaConf.merge(OmegaConf.create(default_config), *layers)
     reject_unknown_config_keys(cfg)
     OmegaConf.resolve(cfg)
+    reject_unknown_config_keys(cfg)
     return cfg
 
 

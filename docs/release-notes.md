@@ -46,6 +46,8 @@
   run quietly used the default value. The error lists every unknown key at once, each by
   its full path, with the closest valid key suggested:
   `Unknown config key tiling.params.spacng (did you mean tiling.params.requested_spacing_um?)`.
+  Keys nested under a single-value field, such as `save_tiles: {enabled: false}`, are
+  unknown too.
 - File and CLI loading check the merged config, command-line overrides included, before
   any slide is opened. `resolve_tiling_config`, `resolve_sampling_spec`,
   `resolve_sampling_request` and `resolve_preview_config` check the sections they read,

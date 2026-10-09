@@ -134,6 +134,62 @@ def test_key_checks_never_evaluate_interpolations(cli, tmp_path):
         cli(config_path)
 
 
+@pytest.mark.parametrize(
+    ("config_body", "unknown_path"),
+    [
+        ("save_tiles:\n  enabled: false\n", "save_tiles.enabled"),
+        (
+            "tiling:\n  independent_sampling:\n    enabled: true\n",
+            "tiling.independent_sampling.enabled",
+        ),
+    ],
+)
+def test_cli_rejects_nested_keys_beneath_a_scalar_field(
+    cli, tmp_path, config_body, unknown_path
+):
+    """A mapping under a scalar field is not a section: its keys are unknown, and the
+    nonempty mapping must not be read as a truthy flag."""
+    config_path = _write_inputs(tmp_path, config_body)
+
+    with pytest.raises(ValueError) as excinfo:
+        cli(config_path)
+
+    field_path = unknown_path.rsplit(".", 1)[0]
+    assert (
+        f"Unknown config key {unknown_path} ({field_path} takes a value, not nested keys)"
+        in str(excinfo.value)
+    )
+    assert not cli.output_dir.exists()
+
+
+_INTERPOLATED_SECTION = (
+    "speed: ${wandb.speed_config}\n"
+    "wandb:\n"
+    "  speed_config:\n"
+    "    num_workers: 8\n"
+    "    num_worker: 4\n"
+)
+
+
+def test_cli_rejects_unknown_keys_an_interpolation_brings_in(cli, tmp_path):
+    """Keys that only appear once a section-level interpolation resolves are checked too."""
+    config_path = _write_inputs(tmp_path, _INTERPOLATED_SECTION)
+
+    with pytest.raises(
+        ValueError,
+        match=r"Unknown config key speed\.num_worker \(did you mean speed\.num_workers\?\)",
+    ):
+        cli(config_path)
+    assert not cli.output_dir.exists()
+
+
+def test_file_loading_rejects_unknown_keys_an_interpolation_brings_in(tmp_path):
+    config_path = _write_inputs(tmp_path, _INTERPOLATED_SECTION)
+
+    with pytest.raises(ValueError, match=r"Unknown config key speed\.num_worker "):
+        get_cfg_from_file(config_path)
+
+
 def _load(config_path: Path, *overrides: str):
     """File + CLI loading, without setup()'s output-directory and logging side effects."""
     return get_cfg_from_args(

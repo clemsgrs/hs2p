@@ -61,11 +61,20 @@ def _schema_at(path: str) -> Any:
 
 def _unknown_keys(node: Any, *, path: str, schema: Any) -> list[tuple[str, str]]:
     """Collect ``(path, message)`` for every unknown key under ``node``."""
-    if not isinstance(schema, dict) or path in OPEN_MAPS or path in UNCHECKED_SECTIONS:
+    if path in OPEN_MAPS or path in UNCHECKED_SECTIONS:
         return []
     members = _members(node)
     if members is None:
         return []
+    if not isinstance(schema, dict):
+        # A scalar (or list) field given as a mapping: none of its keys exist.
+        return [
+            (
+                f"{path}.{key}",
+                f"Unknown config key {path}.{key} ({path} takes a value, not nested keys)",
+            )
+            for key in members
+        ]
     unknown: list[tuple[str, str]] = []
     for key, value in members.items():
         key = str(key)
