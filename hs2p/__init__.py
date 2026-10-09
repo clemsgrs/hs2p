@@ -23,4 +23,4 @@ from hs2p.preprocessing import (
     preprocess_slide,
 )
 
-__version__ = "5.1.0"
+__version__ = "6.0.0"
