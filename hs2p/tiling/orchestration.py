@@ -865,7 +865,7 @@ def _compute_and_save_per_annotation(request: _ComputeRequest) -> _ComputeRespon
     if request.mask_preview_path is not None:
         mask_preview = MaskPreviewRequest(
             mask_preview_path=request.mask_preview_path,
-            color_mapping=getattr(request.sampling, "color_mapping", None),
+            color_mapping=request.sampling.color_mapping,
             downsample=request.preview_downsample,
             alpha=request.mask_overlay_alpha,
         )
@@ -1170,7 +1170,7 @@ def _resolve_mask_worker_count(
     total_workers = max(1, int(num_workers))
     if segmentation is None or str(segmentation.method).lower() != "sam2":
         return total_workers
-    configured_workers = getattr(segmentation, "sam2_num_workers", None)
+    configured_workers = segmentation.sam2_num_workers
     if configured_workers is not None:
         return max(1, min(total_workers, int(configured_workers)))
     return total_workers
@@ -1735,14 +1735,14 @@ def tile_slides(
             # PER_ANNOTATION, the single merged result in MERGED), each over its own
             # mask backdrop, through the shared preview executor. Each artifact gets its own
             # manifest row, finalized once its preview future completes.
-            sampling_pixel_mapping = getattr(sampling, "pixel_mapping", None)
-            sampling_color_mapping = getattr(sampling, "color_mapping", None)
+            sampling_pixel_mapping = sampling.pixel_mapping
+            sampling_color_mapping = sampling.color_mapping
             mask_path = response.whole_slide.mask_path
             # The worker rebuilds the mask from these plain values: the path, the
             # backend preflight resolved for it, and the full label vocabulary.
             mask_backend = response.mask_backend
             for offset, sampling_artifact in enumerate(
-                (base_artifact, *getattr(response, "extra_artifacts", ()))
+                (base_artifact, *response.extra_artifacts)
             ):
                 if offset > 0:
                     _record_tiling_success(
@@ -1772,7 +1772,7 @@ def tile_slides(
             and preview.save_tiling_preview
             and base_artifact.num_tiles > 0
         ):
-            preview_result = getattr(response, "result", None)
+            preview_result = response.result
             if preview_result is not None:
                 future = preview_executor.submit(
                     write_tiling_preview,
@@ -1809,7 +1809,7 @@ def tile_slides(
         )
         # Annotation sampling emits one extra artifact per additional active annotation. Each
         # carries the same slide-level mask preview so every label row repeats it.
-        for extra in getattr(response, "extra_artifacts", ()):
+        for extra in response.extra_artifacts:
             extra_artifact = _build_success_artifact(
                 base_artifact=extra,
                 mask_preview_path=extra.mask_preview_path,

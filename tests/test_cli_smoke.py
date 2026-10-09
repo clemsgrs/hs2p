@@ -135,7 +135,23 @@ def test_tiling_main_smoke_uses_current_schema_and_manifest(
 
     monkeypatch.setattr(tiling_mod, "tile_slides", _fake_tile_slides)
 
-    tiling_mod.main(SimpleNamespace())
+    run_result = tiling_mod.main(
+        tiling_mod.parse_args([str(tmp_path / "config.yaml")])
+    )
+
+    assert run_result == tiling_mod._CliRunResult(
+        artifacts=[
+            TilingArtifacts(
+                sample_id="slide-1",
+                coordinates_npz_path=Path(cfg.output_dir) / "tiles" / "slide-1.coordinates.npz",
+                coordinates_meta_path=Path(cfg.output_dir)
+                / "tiles"
+                / "slide-1.coordinates.meta.json",
+                num_tiles=2,
+            )
+        ],
+        failed_slide_count=0,
+    )
 
     assert captured["whole_slides"] == [
         SlideSpec(
@@ -187,6 +203,7 @@ def test_cli_entrypoint_invokes_main(monkeypatch, tmp_path: Path):
 
     def _fake_main(args):
         captured["args"] = args
+        return tiling_mod._CliRunResult(artifacts=[], failed_slide_count=0)
 
     monkeypatch.setattr(tiling_mod, "main", _fake_main)
 
@@ -195,6 +212,17 @@ def test_cli_entrypoint_invokes_main(monkeypatch, tmp_path: Path):
     assert exit_code == 0
     assert captured["args"].config_file == str(config_path)
     assert captured["args"].opts == ["output_dir=/tmp/out"]
+
+
+@pytest.mark.parametrize("unexpected", [None, 0, [], {"failed_slide_count": 0}])
+def test_cli_entrypoint_rejects_a_main_result_that_is_not_a_run_result(
+    monkeypatch, tmp_path: Path, unexpected
+):
+    """An unexpected run result must surface as an error, never as exit status zero."""
+    monkeypatch.setattr(tiling_mod, "main", lambda args: unexpected)
+
+    with pytest.raises(TypeError, match="_CliRunResult"):
+        tiling_mod.entrypoint([str(tmp_path / "config.yaml")])
 
 
 def test_cli_entrypoint_exits_nonzero_after_partial_failure_manifest_is_persisted(

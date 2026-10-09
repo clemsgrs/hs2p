@@ -56,7 +56,7 @@ def parse_args(argv=None):
 
 def main(args):
     reporter = progress.create_cli_progress_reporter(
-        output_dir=getattr(args, "output_dir", None)
+        output_dir=args.output_dir
     )
     with progress.activate_progress_reporter(reporter):
         try:
@@ -164,9 +164,11 @@ def main(args):
 
 def entrypoint(argv=None):
     result = main(parse_args(argv))
-    if isinstance(result, _CliRunResult):
-        return int(result.failed_slide_count > 0)
-    return 0
+    if not isinstance(result, _CliRunResult):
+        raise TypeError(
+            f"main() must return a _CliRunResult, got {type(result).__name__}"
+        )
+    return int(result.failed_slide_count > 0)
 
 
 if __name__ == "__main__":

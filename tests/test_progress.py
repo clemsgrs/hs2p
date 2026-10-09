@@ -1,5 +1,4 @@
 from pathlib import Path
-from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -115,7 +114,7 @@ def test_tile_slides_emits_progress_for_reused_success_and_failure(
 
     def _fake_compute_and_save(request):
         if request.whole_slide.sample_id == "slide-b":
-            return SimpleNamespace(
+            return orchestration_mod._ComputeResponse(
                 input_index=request.input_index,
                 whole_slide=request.whole_slide,
                 ok=True,
@@ -125,20 +124,15 @@ def test_tile_slides_emits_progress_for_reused_success_and_failure(
                     coordinates_meta_path=run_dir / "tiles" / "slide-b.coordinates.meta.json",
                     num_tiles=1,
                 ),
-                mask_preview_path=None,
-                error=None,
-                traceback_text=None,
+                requested_backend=request.tiling.requested_backend,
+                backend=request.tiling.backend,
             )
-        return SimpleNamespace(
+        return orchestration_mod._ComputeResponse(
             input_index=request.input_index,
             whole_slide=request.whole_slide,
             ok=False,
-            artifact=None,
-            mask_preview_path=None,
-            requested_backend=None,
-            backend=None,
-            requested_mask_backend=None,
-            mask_backend=None,
+            requested_backend=request.tiling.requested_backend,
+            backend=request.tiling.backend,
             error="boom",
             traceback_text="traceback",
         )
