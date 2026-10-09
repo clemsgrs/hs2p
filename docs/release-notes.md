@@ -70,6 +70,35 @@
   selection reason records `cuCIM could not decode the source`. Explicit backends are
   still used as given, without a probe.
 
+### Configuration values of the wrong type are rejected
+
+- A config value whose type does not match its field now fails with a `ValueError`
+  instead of being converted or passed through. `tiling.independent_sampling: "no"` and
+  `tiling.preview.save_mask_preview: "no"` used to read as `True` (`bool("no")`),
+  `tiling.filter_params.filter_white: "false"` turned white filtering on, and a quoted
+  number or a float such as `requested_tile_size_px: 256.7` was carried into a numeric
+  field. The error lists every wrong-typed field of a section at once, in the same form
+  as the unknown-key error:
+  `Config value tiling.independent_sampling must be a bool, got str 'no'`.
+- To fix a rejected config, give the value its declared type: unquote it
+  (`filter_white: false`, `requested_spacing_um: 0.5`) and write whole numbers for
+  integer fields (`requested_tile_size_px: 256`). There is no option to turn the check
+  off.
+- The types come from the annotations of `TilingConfig`, `SegmentationConfig`,
+  `FilterConfig` and `PreviewConfig`, checked whenever one is constructed: by the
+  resolvers, whose errors name the config path, or directly in Python, whose errors name
+  the field (`Config value FilterConfig.a_t must be an int, got float 4.0`). A string is
+  never accepted for a bool or a number, a float never for an int, and a bool never for a
+  number. The only widenings are lossless: an integer for a float field (`overlap: 0`),
+  NumPy integer, floating and boolean scalars (stored as Python `int`, `float` and
+  `bool`), a
+  `str` or path-like object for a path, and a list for `tissue_contour_color` (stored as
+  a tuple). An interpolation that fills a single-value field with a mapping is rejected
+  too.
+- File and CLI loading also check `resume`, `save_tiles`, `seed`, `speed.num_workers`
+  and `speed.jpeg_backend`. `wandb` is not checked. Range checks, such as `overlap: 1.5`,
+  are unchanged.
+
 ### `tiling.sampling_params` is rejected
 
 - A config that still declares the retired `tiling.sampling_params` section now fails

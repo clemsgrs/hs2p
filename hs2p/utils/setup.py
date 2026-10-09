@@ -8,6 +8,8 @@ from omegaconf import OmegaConf
 from hs2p.utils import initialize_wandb, fix_random_seeds, get_sha, setup_logging
 from hs2p.configs import default_config
 from hs2p.configs.keys import reject_unknown_config_keys
+from hs2p.configs.models import RunSettings
+from hs2p.configs.values import check_config_values
 
 logger = logging.getLogger("hs2p")
 
@@ -34,18 +36,35 @@ def get_cfg_from_args(args):
     )
 
 
+#: Config paths of the scalars the CLI reads outside the typed configs; ``RunSettings``
+#: declares their types.
+_RUN_SETTING_PATHS = (
+    "resume",
+    "save_tiles",
+    "seed",
+    "speed.num_workers",
+    "speed.jpeg_backend",
+)
+
+
 def _load_validated(*layers):
     """Merge ``layers`` onto the defaults, rejecting unknown keys before and after
-    resolution.
+    resolution, and wrong-typed run settings after it.
 
-    The first check runs on the raw tree, so an unknown key is reported even when its
+    The first key check runs on the raw tree, so an unknown key is reported even when its
     value is an interpolation that cannot resolve. The second catches keys that only
-    appear once a section-level interpolation (``speed: ${wandb.speed}``) resolves.
+    appear once a section-level interpolation (``speed: ${wandb.speed}``) resolves. Value
+    types are checked on the resolved tree, where interpolations hold their values. The
+    typed configs' sections are checked when the resolvers construct them.
     """
     cfg = OmegaConf.merge(OmegaConf.create(default_config), *layers)
     reject_unknown_config_keys(cfg)
     OmegaConf.resolve(cfg)
     reject_unknown_config_keys(cfg)
+    check_config_values(
+        RunSettings,
+        {path: OmegaConf.select(cfg, path) for path in _RUN_SETTING_PATHS},
+    )
     return cfg
 
 

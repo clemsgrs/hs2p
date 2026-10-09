@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .loader import default_config
+from .values import normalize_config_fields
 
 AUTO_BACKEND = "auto"
 # Backend names accepted by configuration validation. Kept in lockstep with the runtime
@@ -13,17 +14,14 @@ VALID_BACKENDS: frozenset[str] = frozenset(
 )
 
 
-def _validate_backend_name(value: object, *, field: str) -> str:
-    """Reject null and unknown backend names for a config field.
+def _validate_backend_name(value: str, *, field: str) -> str:
+    """Reject unknown backend names for a config field.
 
     Both ``backend`` and ``mask_backend`` accept only ``auto`` plus the concrete
-    backends. ``None`` and unknown strings are configuration errors — including when a
-    :class:`TilingConfig` is constructed directly in Python.
+    backends. Unknown strings are configuration errors — including when a
+    :class:`TilingConfig` is constructed directly in Python. ``None`` and other non-string
+    values are rejected earlier, by the type check on the field's ``str`` annotation.
     """
-    if not isinstance(value, str):
-        raise TypeError(
-            f"tiling.{field} must be one of {sorted(VALID_BACKENDS)}, got {value!r}"
-        )
     if value not in VALID_BACKENDS:
         raise ValueError(
             f"tiling.{field} must be one of {sorted(VALID_BACKENDS)}, got {value!r}"
@@ -62,6 +60,7 @@ class TilingConfig:
     requested_mask_backend: str | None = None
 
     def __post_init__(self) -> None:
+        normalize_config_fields(self)
         _validate_backend_name(self.backend, field="backend")
         _validate_backend_name(self.mask_backend, field="mask_backend")
         if self.requested_backend is None:
@@ -104,10 +103,7 @@ class SegmentationConfig:
     )
 
     def __post_init__(self) -> None:
-        for field_name in ("sam2_checkpoint_path", "sam2_config_path"):
-            value = getattr(self, field_name)
-            if value is not None:
-                object.__setattr__(self, field_name, Path(value))
+        normalize_config_fields(self)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -133,6 +129,9 @@ class FilterConfig:
     blur_threshold: float = float(_DEFAULT_FILTERING.blur_threshold)
     qc_spacing_um: float = float(_DEFAULT_FILTERING.qc_spacing_um)
 
+    def __post_init__(self) -> None:
+        normalize_config_fields(self)
+
 
 @dataclass(frozen=True, kw_only=True)
 class PreviewConfig:
@@ -146,27 +145,24 @@ class PreviewConfig:
     )
     mask_overlay_alpha: float = float(_DEFAULT_PREVIEW.mask_overlay_alpha)
 
-    def __init__(
-        self,
-        *,
-        save_mask_preview: bool = False,
-        save_tiling_preview: bool = False,
-        downsample: int = int(_DEFAULT_PREVIEW.downsample),
-        tissue_contour_color: tuple[int, int, int] = tuple(
-            _DEFAULT_PREVIEW.tissue_contour_color
-        ),
-        mask_overlay_alpha: float = float(_DEFAULT_PREVIEW.mask_overlay_alpha),
-    ) -> None:
-        color = tuple(int(channel) for channel in tissue_contour_color)
-        if len(color) != 3 or any(channel < 0 or channel > 255 for channel in color):
+    def __post_init__(self) -> None:
+        normalize_config_fields(self)
+        if any(channel < 0 or channel > 255 for channel in self.tissue_contour_color):
             raise ValueError(
                 "tissue_contour_color must be a length-3 RGB tuple with values in [0, 255]"
             )
-        alpha = float(mask_overlay_alpha)
-        if not 0.0 <= alpha <= 1.0:
+        if not 0.0 <= self.mask_overlay_alpha <= 1.0:
             raise ValueError("mask_overlay_alpha must be between 0.0 and 1.0")
-        object.__setattr__(self, "save_mask_preview", bool(save_mask_preview))
-        object.__setattr__(self, "save_tiling_preview", bool(save_tiling_preview))
-        object.__setattr__(self, "downsample", int(downsample))
-        object.__setattr__(self, "tissue_contour_color", color)
-        object.__setattr__(self, "mask_overlay_alpha", alpha)
+
+
+@dataclass(frozen=True, kw_only=True)
+class RunSettings:
+    """Declared types of the top-level and ``speed`` scalars the CLI reads outside the
+    typed configs. Config loading checks those values against these annotations; the CLI
+    does not build this object."""
+
+    resume: bool
+    save_tiles: bool
+    seed: int
+    num_workers: int
+    jpeg_backend: str

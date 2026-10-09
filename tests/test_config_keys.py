@@ -286,7 +286,13 @@ def test_tracked_config_examples_load(tmp_path, block):
     config_path = tmp_path / "config.yaml"
     config_path.write_text(block)
 
-    get_cfg_from_file(config_path)
+    cfg = get_cfg_from_file(config_path)
+
+    # Their values also have the types the typed configs declare.
+    resolve_tiling_config(cfg)
+    resolve_segmentation_config(cfg)
+    resolve_filter_config(cfg)
+    resolve_preview_config(cfg)
 
 
 # Programmatic callers: the resolvers check the sections they read, whatever the adapter.
