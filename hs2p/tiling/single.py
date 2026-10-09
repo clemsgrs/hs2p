@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
 
+from hs2p.configs.models import FilterConfig, SegmentationConfig, TilingConfig
 from hs2p.configs.resolvers import validate_pixel_mapping, validate_sampling_spec
 from hs2p.mask import AnnotationLabels, Mask
 from hs2p.tiling.contours import _normalize_level_downsamples, detect_contours
@@ -104,6 +104,83 @@ def build_tiling_result_from_mask(
     selection_strategy: str | None = None,
     output_mode: str | None = None,
 ) -> TilingResult:
+    return _build_tiling_result_from_mask(
+        slide=slide,
+        resolved_mask=resolved_mask,
+        image_path=image_path,
+        backend=backend,
+        requested_backend=requested_backend,
+        spacing_at_level_0=spacing_at_level_0,
+        sample_id=sample_id,
+        tiling=TilingConfig(
+            requested_spacing_um=requested_spacing_um,
+            requested_tile_size_px=requested_tile_size_px,
+            tolerance=tolerance,
+            overlap=overlap,
+            min_coverage={"tissue": min_tissue_fraction},
+        ),
+        min_tissue_fraction=min_tissue_fraction,
+        segmentation=SegmentationConfig(
+            method=resolved_mask.tissue_method,
+            downsample=resolved_mask.requested_seg_downsample,
+            sthresh=seg_sthresh,
+            sthresh_up=seg_sthresh_up,
+            mthresh=seg_mthresh,
+            close=seg_close,
+            sam2_checkpoint_path=sam2_checkpoint_path,
+            sam2_config_path=sam2_config_path,
+        ),
+        filtering=FilterConfig(
+            ref_tile_size=ref_tile_size_px,
+            a_t=a_t,
+            a_h=a_h,
+            filter_white=filter_white,
+            filter_black=filter_black,
+            white_threshold=white_threshold,
+            black_threshold=black_threshold,
+            fraction_threshold=fraction_threshold,
+            filter_grayspace=filter_grayspace,
+            grayspace_saturation_threshold=grayspace_saturation_threshold,
+            grayspace_fraction_threshold=grayspace_fraction_threshold,
+            filter_blur=filter_blur,
+            blur_threshold=blur_threshold,
+            qc_spacing_um=qc_spacing_um,
+        ),
+        num_workers=num_workers,
+        annotation=annotation,
+        selection_strategy=selection_strategy,
+        output_mode=output_mode,
+    )
+
+
+def _build_tiling_result_from_mask(
+    *,
+    slide,
+    resolved_mask: ResolvedTissueMask,
+    image_path: str | Path,
+    backend: str,
+    requested_backend: str,
+    spacing_at_level_0: float | None,
+    sample_id: str | None,
+    tiling: TilingConfig,
+    min_tissue_fraction: float,
+    segmentation: SegmentationConfig,
+    filtering: FilterConfig,
+    num_workers: int,
+    annotation: str | None = None,
+    selection_strategy: str | None = None,
+    output_mode: str | None = None,
+) -> TilingResult:
+    """Tile ``slide`` over ``resolved_mask``: the typed core of
+    :func:`build_tiling_result_from_mask`.
+
+    ``tiling`` supplies the physical tile geometry. The coverage gate is passed on its own
+    because every pass picks its own: the configured tissue threshold, one annotation's
+    threshold, or ``0.0`` for the joint-sampling union. ``backend``/``requested_backend``
+    are the slide reader that actually opened and the one asked for. ``segmentation``
+    supplies only the persisted thresholds and SAM2 paths; the mask's own
+    ``tissue_method`` decides whether the SAM2 paths are recorded.
+    """
     normalized_downsamples = _normalize_level_downsamples(slide.level_downsamples)
     seg_level = resolved_mask.seg_level
     seg_spacing_um = resolved_mask.seg_spacing_um
@@ -111,50 +188,37 @@ def build_tiling_result_from_mask(
     contours = detect_contours(
         mask,
         slide_dimensions=slide.dimensions,
-        ref_tile_size_px=ref_tile_size_px,
-        requested_spacing_um=requested_spacing_um,
-        a_t=a_t,
+        ref_tile_size_px=filtering.ref_tile_size,
+        requested_spacing_um=tiling.requested_spacing_um,
+        a_t=filtering.a_t,
         base_spacing_um=float(slide.spacing),
         level_downsamples=normalized_downsamples,
-        tolerance=tolerance,
+        tolerance=tiling.tolerance,
     )
     tiles = generate_tiles(
         slide_dimensions=slide.dimensions,
         contours=contours,
-        requested_tile_size_px=requested_tile_size_px,
-        requested_spacing_um=requested_spacing_um,
+        requested_tile_size_px=tiling.requested_tile_size_px,
+        requested_spacing_um=tiling.requested_spacing_um,
         base_spacing_um=float(slide.spacing),
         level_downsamples=normalized_downsamples,
-        overlap=overlap,
+        overlap=tiling.overlap,
         min_tissue_fraction=min_tissue_fraction,
-        tolerance=tolerance,
+        tolerance=tiling.tolerance,
         num_workers=num_workers,
     )
-    filter_params = SimpleNamespace(
-        filter_white=filter_white,
-        filter_black=filter_black,
-        white_threshold=white_threshold,
-        black_threshold=black_threshold,
-        fraction_threshold=fraction_threshold,
-        filter_grayspace=filter_grayspace,
-        grayspace_saturation_threshold=grayspace_saturation_threshold,
-        grayspace_fraction_threshold=grayspace_fraction_threshold,
-        filter_blur=filter_blur,
-        blur_threshold=blur_threshold,
-        qc_spacing_um=qc_spacing_um,
-    )
-    if needs_pixel_qc(filter_params):
+    if needs_pixel_qc(filtering):
         coord_candidates = np.column_stack((tiles.x, tiles.y))
         keep_flags = filter_coordinate_tiles(
             coord_candidates=coord_candidates,
             keep_flags=np.ones(len(coord_candidates), dtype=np.uint8),
             level_dimensions=slide.level_dimensions,
             level_downsamples=slide.level_downsamples,
-            requested_tile_size_px=requested_tile_size_px,
-            requested_spacing_um=requested_spacing_um,
+            requested_tile_size_px=tiling.requested_tile_size_px,
+            requested_spacing_um=tiling.requested_spacing_um,
             base_spacing_um=float(slide.spacing),
-            tolerance=tolerance,
-            filter_params=filter_params,
+            tolerance=tiling.tolerance,
+            filter_params=filtering,
             read_window=lambda x, y, width, height, level: slide.read_region(
                 (x, y),
                 level,
@@ -175,7 +239,7 @@ def build_tiling_result_from_mask(
     step_px_lv0 = resolve_tile_stride(
         read_tile_size_px=tiles.read_tile_size_px,
         tile_size_lv0=tiles.tile_size_lv0,
-        overlap=overlap,
+        overlap=tiling.overlap,
     ).step_px_lv0
     is_sam2 = str(resolved_mask.tissue_method).lower() == "sam2"
     return TilingResult(
@@ -185,33 +249,33 @@ def build_tiling_result_from_mask(
         backend=backend,
         requested_backend=requested_backend,
         spacing_at_level_0=spacing_at_level_0,
-        tolerance=tolerance,
+        tolerance=tiling.tolerance,
         step_px_lv0=step_px_lv0,
         tissue_method=resolved_mask.tissue_method,
         requested_seg_downsample=resolved_mask.requested_seg_downsample,
         seg_downsample=resolved_mask.seg_downsample,
         seg_level=seg_level,
         seg_spacing_um=seg_spacing_um,
-        seg_sthresh=seg_sthresh,
-        seg_sthresh_up=seg_sthresh_up,
-        seg_mthresh=seg_mthresh,
-        seg_close=seg_close,
-        sam2_checkpoint_path=sam2_checkpoint_path if is_sam2 else None,
-        sam2_config_path=sam2_config_path if is_sam2 else None,
-        ref_tile_size_px=ref_tile_size_px,
-        a_t=a_t,
-        a_h=a_h,
-        filter_white=filter_white,
-        filter_black=filter_black,
-        white_threshold=white_threshold,
-        black_threshold=black_threshold,
-        fraction_threshold=fraction_threshold,
-        filter_grayspace=filter_grayspace,
-        grayspace_saturation_threshold=grayspace_saturation_threshold,
-        grayspace_fraction_threshold=grayspace_fraction_threshold,
-        filter_blur=filter_blur,
-        blur_threshold=blur_threshold,
-        qc_spacing_um=qc_spacing_um,
+        seg_sthresh=segmentation.sthresh,
+        seg_sthresh_up=segmentation.sthresh_up,
+        seg_mthresh=segmentation.mthresh,
+        seg_close=segmentation.close,
+        sam2_checkpoint_path=segmentation.sam2_checkpoint_path if is_sam2 else None,
+        sam2_config_path=segmentation.sam2_config_path if is_sam2 else None,
+        ref_tile_size_px=filtering.ref_tile_size,
+        a_t=filtering.a_t,
+        a_h=filtering.a_h,
+        filter_white=filtering.filter_white,
+        filter_black=filtering.filter_black,
+        white_threshold=filtering.white_threshold,
+        black_threshold=filtering.black_threshold,
+        fraction_threshold=filtering.fraction_threshold,
+        filter_grayspace=filtering.filter_grayspace,
+        grayspace_saturation_threshold=filtering.grayspace_saturation_threshold,
+        grayspace_fraction_threshold=filtering.grayspace_fraction_threshold,
+        filter_blur=filtering.filter_blur,
+        blur_threshold=filtering.blur_threshold,
+        qc_spacing_um=filtering.qc_spacing_um,
         mask_path=resolved_mask.mask_path,
         tissue_mask_tissue_value=resolved_mask.tissue_mask_tissue_value,
         mask_level=resolved_mask.mask_level,
@@ -257,34 +321,15 @@ def _build_independent_annotation_results(
     requested_backend: str,
     spacing_at_level_0: float | None,
     sample_id: str | None,
-    requested_tile_size_px: int,
-    requested_spacing_um: float,
-    overlap: float,
-    tolerance: float,
-    seg_sthresh: int,
-    seg_sthresh_up: int,
-    seg_mthresh: int,
-    seg_close: int,
-    ref_tile_size_px: int,
-    a_t: int,
-    a_h: int,
-    filter_white: bool,
-    filter_black: bool,
-    white_threshold: int,
-    black_threshold: int,
-    fraction_threshold: float,
-    filter_grayspace: bool,
-    grayspace_saturation_threshold: float,
-    grayspace_fraction_threshold: float,
-    filter_blur: bool,
-    blur_threshold: float,
-    qc_spacing_um: float,
+    tiling: TilingConfig,
+    segmentation: SegmentationConfig,
+    filtering: FilterConfig,
     num_workers: int,
 ) -> "dict[str, TilingResult]":
     results: dict[str, TilingResult] = {}
     for annotation in sampling_spec.active_annotations:
         threshold = float(sampling_spec.tissue_percentage.get(annotation) or 0.0)
-        result = build_tiling_result_from_mask(
+        result = _build_tiling_result_from_mask(
             slide=slide,
             resolved_mask=_annotation_to_resolved_tissue_mask(annotation, resolved_masks),
             image_path=image_path,
@@ -292,29 +337,10 @@ def _build_independent_annotation_results(
             requested_backend=requested_backend,
             spacing_at_level_0=spacing_at_level_0,
             sample_id=sample_id,
-            requested_tile_size_px=requested_tile_size_px,
-            requested_spacing_um=requested_spacing_um,
+            tiling=tiling,
             min_tissue_fraction=threshold,
-            overlap=overlap,
-            tolerance=tolerance,
-            seg_sthresh=seg_sthresh,
-            seg_sthresh_up=seg_sthresh_up,
-            seg_mthresh=seg_mthresh,
-            seg_close=seg_close,
-            ref_tile_size_px=ref_tile_size_px,
-            a_t=a_t,
-            a_h=a_h,
-            filter_white=filter_white,
-            filter_black=filter_black,
-            white_threshold=white_threshold,
-            black_threshold=black_threshold,
-            fraction_threshold=fraction_threshold,
-            filter_grayspace=filter_grayspace,
-            grayspace_saturation_threshold=grayspace_saturation_threshold,
-            grayspace_fraction_threshold=grayspace_fraction_threshold,
-            filter_blur=filter_blur,
-            blur_threshold=blur_threshold,
-            qc_spacing_um=qc_spacing_um,
+            segmentation=segmentation,
+            filtering=filtering,
             num_workers=num_workers,
             annotation=annotation,
             selection_strategy=selection_strategy,
@@ -336,28 +362,9 @@ def _build_joint_annotation_results(
     requested_backend: str,
     spacing_at_level_0: float | None,
     sample_id: str | None,
-    requested_tile_size_px: int,
-    requested_spacing_um: float,
-    overlap: float,
-    tolerance: float,
-    seg_sthresh: int,
-    seg_sthresh_up: int,
-    seg_mthresh: int,
-    seg_close: int,
-    ref_tile_size_px: int,
-    a_t: int,
-    a_h: int,
-    filter_white: bool,
-    filter_black: bool,
-    white_threshold: int,
-    black_threshold: int,
-    fraction_threshold: float,
-    filter_grayspace: bool,
-    grayspace_saturation_threshold: float,
-    grayspace_fraction_threshold: float,
-    filter_blur: bool,
-    blur_threshold: float,
-    qc_spacing_um: float,
+    tiling: TilingConfig,
+    segmentation: SegmentationConfig,
+    filtering: FilterConfig,
     num_workers: int,
 ) -> "dict[str, TilingResult]":
     # Union over the classes actually being sampled (active_annotations) — never the full
@@ -385,7 +392,7 @@ def _build_joint_annotation_results(
         requested_mask_backend=resolved_masks.requested_mask_backend,
     )
 
-    base_result = build_tiling_result_from_mask(
+    base_result = _build_tiling_result_from_mask(
         slide=slide,
         resolved_mask=union_resolved,
         image_path=image_path,
@@ -393,29 +400,10 @@ def _build_joint_annotation_results(
         requested_backend=requested_backend,
         spacing_at_level_0=spacing_at_level_0,
         sample_id=sample_id,
-        requested_tile_size_px=requested_tile_size_px,
-        requested_spacing_um=requested_spacing_um,
+        tiling=tiling,
         min_tissue_fraction=0.0,
-        overlap=overlap,
-        tolerance=tolerance,
-        seg_sthresh=seg_sthresh,
-        seg_sthresh_up=seg_sthresh_up,
-        seg_mthresh=seg_mthresh,
-        seg_close=seg_close,
-        ref_tile_size_px=ref_tile_size_px,
-        a_t=a_t,
-        a_h=a_h,
-        filter_white=filter_white,
-        filter_black=filter_black,
-        white_threshold=white_threshold,
-        black_threshold=black_threshold,
-        fraction_threshold=fraction_threshold,
-        filter_grayspace=filter_grayspace,
-        grayspace_saturation_threshold=grayspace_saturation_threshold,
-        grayspace_fraction_threshold=grayspace_fraction_threshold,
-        filter_blur=filter_blur,
-        blur_threshold=blur_threshold,
-        qc_spacing_um=qc_spacing_um,
+        segmentation=segmentation,
+        filtering=filtering,
         num_workers=num_workers,
         annotation=None,
         selection_strategy=selection_strategy,
@@ -558,6 +546,74 @@ def build_per_annotation_tiling_results(
     INDEPENDENT_SAMPLING: one tiling pass per annotation using that annotation's binary mask.
     JOINT_SAMPLING: one pass on the union mask, then per-annotation post-filter by coverage.
     """
+    return _build_per_annotation_tiling_results(
+        slide=slide,
+        resolved_masks=resolved_masks,
+        sampling_spec=sampling_spec,
+        selection_strategy=selection_strategy,
+        image_path=image_path,
+        backend=backend,
+        requested_backend=requested_backend,
+        spacing_at_level_0=spacing_at_level_0,
+        sample_id=sample_id,
+        tiling=TilingConfig(
+            requested_spacing_um=requested_spacing_um,
+            requested_tile_size_px=requested_tile_size_px,
+            tolerance=tolerance,
+            overlap=overlap,
+            # Annotation sampling gates on the sampling spec's per-label thresholds.
+            min_coverage={},
+        ),
+        segmentation=SegmentationConfig(
+            method=resolved_masks.tissue_method,
+            downsample=resolved_masks.requested_seg_downsample,
+            sthresh=seg_sthresh,
+            sthresh_up=seg_sthresh_up,
+            mthresh=seg_mthresh,
+            close=seg_close,
+            sam2_checkpoint_path=None,
+            sam2_config_path=None,
+        ),
+        filtering=FilterConfig(
+            ref_tile_size=ref_tile_size_px,
+            a_t=a_t,
+            a_h=a_h,
+            filter_white=filter_white,
+            filter_black=filter_black,
+            white_threshold=white_threshold,
+            black_threshold=black_threshold,
+            fraction_threshold=fraction_threshold,
+            filter_grayspace=filter_grayspace,
+            grayspace_saturation_threshold=grayspace_saturation_threshold,
+            grayspace_fraction_threshold=grayspace_fraction_threshold,
+            filter_blur=filter_blur,
+            blur_threshold=blur_threshold,
+            qc_spacing_um=qc_spacing_um,
+        ),
+        num_workers=num_workers,
+        output_mode=output_mode,
+    )
+
+
+def _build_per_annotation_tiling_results(
+    *,
+    slide,
+    resolved_masks: ResolvedAnnotationMasks,
+    sampling_spec: Any,
+    selection_strategy: str,
+    image_path: str | Path,
+    backend: str,
+    requested_backend: str,
+    spacing_at_level_0: float | None,
+    sample_id: str | None,
+    tiling: TilingConfig,
+    segmentation: SegmentationConfig,
+    filtering: FilterConfig,
+    num_workers: int,
+    output_mode: str | None,
+) -> "dict[str, TilingResult]":
+    """The typed core of :func:`build_per_annotation_tiling_results`. ``tiling`` supplies
+    the tile geometry; each label is gated by its ``sampling_spec`` threshold."""
     validate_sampling_spec(sampling_spec)
     validate_pixel_mapping(resolved_masks.pixel_mapping)
     if output_mode is None:
@@ -584,28 +640,9 @@ def build_per_annotation_tiling_results(
         requested_backend=requested_backend,
         spacing_at_level_0=spacing_at_level_0,
         sample_id=sample_id,
-        requested_tile_size_px=requested_tile_size_px,
-        requested_spacing_um=requested_spacing_um,
-        overlap=overlap,
-        tolerance=tolerance,
-        seg_sthresh=seg_sthresh,
-        seg_sthresh_up=seg_sthresh_up,
-        seg_mthresh=seg_mthresh,
-        seg_close=seg_close,
-        ref_tile_size_px=ref_tile_size_px,
-        a_t=a_t,
-        a_h=a_h,
-        filter_white=filter_white,
-        filter_black=filter_black,
-        white_threshold=white_threshold,
-        black_threshold=black_threshold,
-        fraction_threshold=fraction_threshold,
-        filter_grayspace=filter_grayspace,
-        grayspace_saturation_threshold=grayspace_saturation_threshold,
-        grayspace_fraction_threshold=grayspace_fraction_threshold,
-        filter_blur=filter_blur,
-        blur_threshold=blur_threshold,
-        qc_spacing_um=qc_spacing_um,
+        tiling=tiling,
+        segmentation=segmentation,
+        filtering=filtering,
         num_workers=num_workers,
     )
 
@@ -670,6 +707,85 @@ def preprocess_slide(
     selection_strategy: str | None = None,
     output_mode: str | None = None,
 ) -> TilingResult:
+    return _preprocess_slide(
+        image_path=image_path,
+        sample_id=sample_id,
+        tissue_mask_path=tissue_mask_path,
+        pixel_mapping=pixel_mapping,
+        backend=backend,
+        requested_backend=requested_backend,
+        mask_backend=mask_backend,
+        requested_mask_backend=requested_mask_backend,
+        spacing_override=spacing_override,
+        tiling=TilingConfig(
+            requested_spacing_um=requested_spacing_um,
+            requested_tile_size_px=requested_tile_size_px,
+            tolerance=tolerance,
+            overlap=overlap,
+            min_coverage={"tissue": min_tissue_fraction},
+        ),
+        min_tissue_fraction=min_tissue_fraction,
+        segmentation=SegmentationConfig(
+            method=tissue_method,
+            downsample=seg_downsample,
+            sthresh=sthresh,
+            sthresh_up=sthresh_up,
+            mthresh=mthresh,
+            close=close,
+            sam2_checkpoint_path=sam2_checkpoint_path,
+            sam2_config_path=sam2_config_path,
+            sam2_device=sam2_device,
+        ),
+        filtering=FilterConfig(
+            ref_tile_size=ref_tile_size_px,
+            a_t=a_t,
+            a_h=a_h,
+            filter_white=filter_white,
+            filter_black=filter_black,
+            white_threshold=white_threshold,
+            black_threshold=black_threshold,
+            fraction_threshold=fraction_threshold,
+            filter_grayspace=filter_grayspace,
+            grayspace_saturation_threshold=grayspace_saturation_threshold,
+            grayspace_fraction_threshold=grayspace_fraction_threshold,
+            filter_blur=filter_blur,
+            blur_threshold=blur_threshold,
+            qc_spacing_um=qc_spacing_um,
+        ),
+        num_workers=num_workers,
+        annotation=annotation,
+        selection_strategy=selection_strategy,
+        output_mode=output_mode,
+    )
+
+
+def _preprocess_slide(
+    *,
+    image_path: str | Path,
+    sample_id: str | None,
+    tissue_mask_path: str | Path | None,
+    pixel_mapping: PixelMapping | None,
+    backend: str,
+    requested_backend: str | None,
+    mask_backend: str | None,
+    requested_mask_backend: str | None,
+    spacing_override: float | None,
+    tiling: TilingConfig,
+    min_tissue_fraction: float,
+    segmentation: SegmentationConfig,
+    filtering: FilterConfig,
+    num_workers: int,
+    annotation: str | None = None,
+    selection_strategy: str | None = None,
+    output_mode: str | None = None,
+) -> TilingResult:
+    """Open the slide, resolve its tissue mask and tile it: the typed core of
+    :func:`preprocess_slide`.
+
+    The backends stay explicit rather than coming from ``tiling`` because the scalar API
+    accepts spellings (``None``, any case) that :class:`TilingConfig` rejects; ``None``
+    requests default to the backend they qualify.
+    """
     slide = open_slide(
         image_path,
         backend=backend,
@@ -686,54 +802,33 @@ def preprocess_slide(
                 slide=slide,
                 sample_id=sample_id,
                 mask=mask,
-                tissue_method=tissue_method,
-                sthresh=sthresh,
-                sthresh_up=sthresh_up,
-                mthresh=mthresh,
-                close=close,
-                seg_downsample=seg_downsample,
-                sam2_checkpoint_path=sam2_checkpoint_path,
-                sam2_config_path=sam2_config_path,
-                sam2_device=sam2_device,
+                tissue_method=segmentation.method,
+                sthresh=segmentation.sthresh,
+                sthresh_up=segmentation.sthresh_up,
+                mthresh=segmentation.mthresh,
+                close=segmentation.close,
+                seg_downsample=segmentation.downsample,
+                sam2_checkpoint_path=segmentation.sam2_checkpoint_path,
+                sam2_config_path=segmentation.sam2_config_path,
+                sam2_device=segmentation.sam2_device,
                 requested_mask_backend=(
                     requested_mask_backend
                     if requested_mask_backend is not None
                     else mask_backend
                 ),
             )
-        return build_tiling_result_from_mask(
+        return _build_tiling_result_from_mask(
             slide=slide,
             resolved_mask=resolved_mask,
             image_path=image_path,
             backend=slide.backend_name,
             requested_backend=requested_backend if requested_backend is not None else backend,
             spacing_at_level_0=spacing_override,
-            sam2_checkpoint_path=sam2_checkpoint_path,
-            sam2_config_path=sam2_config_path,
             sample_id=sample_id,
-            requested_tile_size_px=requested_tile_size_px,
-            requested_spacing_um=requested_spacing_um,
+            tiling=tiling,
             min_tissue_fraction=min_tissue_fraction,
-            overlap=overlap,
-            tolerance=tolerance,
-            seg_sthresh=sthresh,
-            seg_sthresh_up=sthresh_up,
-            seg_mthresh=mthresh,
-            seg_close=close,
-            ref_tile_size_px=ref_tile_size_px,
-            a_t=a_t,
-            a_h=a_h,
-            filter_white=filter_white,
-            filter_black=filter_black,
-            white_threshold=white_threshold,
-            black_threshold=black_threshold,
-            fraction_threshold=fraction_threshold,
-            filter_grayspace=filter_grayspace,
-            grayspace_saturation_threshold=grayspace_saturation_threshold,
-            grayspace_fraction_threshold=grayspace_fraction_threshold,
-            filter_blur=filter_blur,
-            blur_threshold=blur_threshold,
-            qc_spacing_um=qc_spacing_um,
+            segmentation=segmentation,
+            filtering=filtering,
             num_workers=num_workers,
             annotation=annotation,
             selection_strategy=selection_strategy,
@@ -741,6 +836,12 @@ def preprocess_slide(
         )
     finally:
         slide.close()
+
+
+# Annotation masks are not segmented, so annotation sampling has no segmentation thresholds
+# of its own; its results record the scalar API's defaults, whatever segmentation config a
+# workflow carries.
+_ANNOTATION_SEGMENTATION_THRESHOLDS = {"sthresh": 8, "sthresh_up": 255, "mthresh": 7, "close": 4}
 
 
 def preprocess_slide_per_annotation(
@@ -790,6 +891,72 @@ def preprocess_slide_per_annotation(
     When ``mask_preview`` is given, one filled multi-label overlay is rendered here — once per
     slide, from the just-resolved per-label binary masks — before any sampling.
     """
+    return _preprocess_slide_per_annotation(
+        image_path=image_path,
+        mask_path=mask_path,
+        pixel_mapping=pixel_mapping,
+        sampling_spec=sampling_spec,
+        selection_strategy=selection_strategy,
+        sample_id=sample_id,
+        backend=backend,
+        requested_backend=requested_backend,
+        mask_backend=mask_backend,
+        requested_mask_backend=requested_mask_backend,
+        spacing_override=spacing_override,
+        tiling=TilingConfig(
+            requested_spacing_um=requested_spacing_um,
+            requested_tile_size_px=requested_tile_size_px,
+            tolerance=tolerance,
+            overlap=overlap,
+            # Annotation sampling gates on the sampling spec's per-label thresholds.
+            min_coverage={},
+        ),
+        seg_downsample=seg_downsample,
+        filtering=FilterConfig(
+            ref_tile_size=ref_tile_size_px,
+            a_t=a_t,
+            a_h=a_h,
+            filter_white=filter_white,
+            filter_black=filter_black,
+            white_threshold=white_threshold,
+            black_threshold=black_threshold,
+            fraction_threshold=fraction_threshold,
+            filter_grayspace=filter_grayspace,
+            grayspace_saturation_threshold=grayspace_saturation_threshold,
+            grayspace_fraction_threshold=grayspace_fraction_threshold,
+            filter_blur=filter_blur,
+            blur_threshold=blur_threshold,
+            qc_spacing_um=qc_spacing_um,
+        ),
+        num_workers=num_workers,
+        output_mode=output_mode,
+        mask_preview=mask_preview,
+    )
+
+
+def _preprocess_slide_per_annotation(
+    *,
+    image_path: str | Path,
+    mask_path: str | Path,
+    pixel_mapping: PixelMapping,
+    sampling_spec: Any,
+    selection_strategy: str,
+    sample_id: str | None,
+    backend: str,
+    requested_backend: str | None,
+    mask_backend: str | None,
+    requested_mask_backend: str | None,
+    spacing_override: float | None,
+    tiling: TilingConfig,
+    seg_downsample: int,
+    filtering: FilterConfig,
+    num_workers: int,
+    output_mode: str | None,
+    mask_preview: MaskPreviewRequest | None = None,
+) -> "dict[str, TilingResult]":
+    """The typed core of :func:`preprocess_slide_per_annotation`. ``seg_downsample`` picks
+    the grid the annotation mask is resolved on; backends stay explicit as in
+    :func:`_preprocess_slide`."""
     validate_pixel_mapping(pixel_mapping)
     validate_sampling_spec(sampling_spec)
     slide = open_slide(image_path, backend=backend, spacing_override=spacing_override)
@@ -821,7 +988,7 @@ def preprocess_slide_per_annotation(
                 backend=slide.backend_name,
                 spacing_at_level_0=spacing_override,
             )
-        return build_per_annotation_tiling_results(
+        return _build_per_annotation_tiling_results(
             slide=slide,
             resolved_masks=resolved_masks,
             sampling_spec=sampling_spec,
@@ -831,24 +998,15 @@ def preprocess_slide_per_annotation(
             requested_backend=requested_backend if requested_backend is not None else backend,
             spacing_at_level_0=spacing_override,
             sample_id=sample_id,
-            requested_tile_size_px=requested_tile_size_px,
-            requested_spacing_um=requested_spacing_um,
-            overlap=overlap,
-            tolerance=tolerance,
-            ref_tile_size_px=ref_tile_size_px,
-            a_t=a_t,
-            a_h=a_h,
-            filter_white=filter_white,
-            filter_black=filter_black,
-            white_threshold=white_threshold,
-            black_threshold=black_threshold,
-            fraction_threshold=fraction_threshold,
-            filter_grayspace=filter_grayspace,
-            grayspace_saturation_threshold=grayspace_saturation_threshold,
-            grayspace_fraction_threshold=grayspace_fraction_threshold,
-            filter_blur=filter_blur,
-            blur_threshold=blur_threshold,
-            qc_spacing_um=qc_spacing_um,
+            tiling=tiling,
+            segmentation=SegmentationConfig(
+                method=resolved_masks.tissue_method,
+                downsample=seg_downsample,
+                sam2_checkpoint_path=None,
+                sam2_config_path=None,
+                **_ANNOTATION_SEGMENTATION_THRESHOLDS,
+            ),
+            filtering=filtering,
             num_workers=num_workers,
             output_mode=output_mode,
         )
