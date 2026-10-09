@@ -22,6 +22,15 @@ from hs2p.api import (
 )
 from hs2p.wsi.types import CoordinateOutputMode, CoordinateSelectionStrategy, SamplingSpec
 
+
+def _opens_if(condition: bool) -> "reader_mod._ProbeOutcome":
+    return (
+        reader_mod._ProbeOutcome.USABLE
+        if condition
+        else reader_mod._ProbeOutcome.CANNOT_OPEN
+    )
+
+
 # "tumor" owns two mask values; every value the mask may hold is declared.
 PIXEL_MAPPING = {"background": 0, "tumor": [1, 2], "stroma": 3}
 
@@ -221,9 +230,9 @@ def test_tile_slide_opens_the_annotation_mask_with_the_preflight_backend(
 
     def _only_openslide_opens(*, backend, **kwargs):
         probed.append(backend)
-        return backend == "openslide"
+        return _opens_if(backend == "openslide")
 
-    monkeypatch.setattr(reader_mod, "_backend_can_open_source", _only_openslide_opens)
+    monkeypatch.setattr(reader_mod, "_probe_backend", _only_openslide_opens)
 
     results = tile_slide(
         whole_slide, tiling=_tiling(mask_backend="auto"), sampling=_sampling()

@@ -1,6 +1,7 @@
 
 import warnings
 from dataclasses import dataclass
+from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Iterable, Protocol, runtime_checkable
@@ -227,22 +228,54 @@ def _normalize_path(path: Path | None) -> str | None:
     return str(Path(path))
 
 
+class _ProbeOutcome(Enum):
+    """Why ``auto`` accepted or skipped a backend; a failure's value ends its reason."""
+
+    USABLE = "usable"
+    CANNOT_OPEN = "could not open the source"
+    CANNOT_DECODE = "could not decode the source"
+
+
+_DECODE_PROBE_SIZE = 64
+
+
+def _decode_probe_region(reader: SlideReader) -> None:
+    """Decode one small region at the coarsest level.
+
+    Opening only parses the header: a reader can open a file whose codec it lacks (cuCIM
+    with single-channel deflate, #262), so the probe must decode pixels too.
+    """
+    level = reader.level_count - 1
+    width, height = reader.level_dimensions[level]
+    reader.read_region(
+        (0, 0),
+        level,
+        (min(int(width), _DECODE_PROBE_SIZE), min(int(height), _DECODE_PROBE_SIZE)),
+    )
+
+
 @lru_cache(maxsize=256)
-def _backend_can_open_source(
+def _probe_backend(
     *,
     source_path: str,
     companion_path: str | None,
     backend: str,
     spacing_override: float | None = None,
     require_spacing: bool = True,
-) -> bool:
+) -> _ProbeOutcome:
+    """Open and decode the source (and companion) with ``backend``.
+
+    The one probe both roles share: a slide and a mask pass the same open-then-decode
+    check, differing only in ``require_spacing``.
+    """
     spec = _BACKENDS.get(backend)
     if spec is None:
-        return False
+        return _ProbeOutcome.CANNOT_OPEN
     if not spec.supports_path(source_path):
-        return False
+        return _ProbeOutcome.CANNOT_OPEN
     if companion_path is not None and not spec.supports_path(companion_path):
-        return False
+        return _ProbeOutcome.CANNOT_OPEN
+    readers: list[SlideReader] = []
     try:
         with warnings.catch_warnings():
             warnings.filterwarnings(
@@ -250,18 +283,34 @@ def _backend_can_open_source(
                 message=r"^Slide spacing override conflict:",
                 category=UserWarning,
             )
-            source = spec.opener(
-                source_path,
-                spacing_override=spacing_override,
-                require_spacing=require_spacing,
+            readers.append(
+                spec.opener(
+                    source_path,
+                    spacing_override=spacing_override,
+                    require_spacing=require_spacing,
+                )
             )
-            source.close()
             if companion_path is not None:
-                companion = spec.opener(companion_path)
-                companion.close()
-        return True
+                readers.append(spec.opener(companion_path))
     except Exception:
-        return False
+        _close_all(readers)
+        return _ProbeOutcome.CANNOT_OPEN
+    try:
+        for reader in readers:
+            _decode_probe_region(reader)
+    except Exception:
+        return _ProbeOutcome.CANNOT_DECODE
+    finally:
+        _close_all(readers)
+    return _ProbeOutcome.USABLE
+
+
+def _close_all(readers: list[SlideReader]) -> None:
+    for reader in readers:
+        try:
+            reader.close()
+        except Exception:
+            pass
 
 
 def resolve_mask_backend(requested_backend: str, *, mask_path: Path) -> BackendSelection:
@@ -342,13 +391,14 @@ def resolve_backend(
             )
             continue
         tried.append(backend)
-        if _backend_can_open_source(
+        outcome = _probe_backend(
             source_path=normalized_wsi_path,
             companion_path=normalized_mask_path,
             backend=backend,
             spacing_override=spacing_override,
             require_spacing=require_spacing,
-        ):
+        )
+        if outcome is _ProbeOutcome.USABLE:
             reason = "; ".join(
                 reasons + [f"selected {display_name} for auto backend"]
             )
@@ -357,7 +407,7 @@ def resolve_backend(
                 reason=reason,
                 tried=tuple(tried),
             )
-        reasons.append(f"{display_name} could not open the source")
+        reasons.append(f"{display_name} {outcome.value}")
 
     raise RuntimeError(
         f"Unable to open {wsi_path} with any supported backend (tried: {', '.join(tried) or 'none'})"

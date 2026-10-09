@@ -18,6 +18,14 @@ from hs2p.preprocessing import preprocess_slide
 from tests.test_progress import RecordingReporter
 
 
+def _opens_if(condition: bool) -> "reader_mod._ProbeOutcome":
+    return (
+        reader_mod._ProbeOutcome.USABLE
+        if condition
+        else reader_mod._ProbeOutcome.CANNOT_OPEN
+    )
+
+
 class _MaskPyramid:
     """An in-memory mask source; ``levels`` are the arrays each level decodes to."""
 
@@ -162,9 +170,9 @@ def test_tile_slide_opens_the_mask_with_the_preflight_backend(monkeypatch, tmp_p
 
     def _only_openslide_opens(*, backend, **kwargs):
         probed.append(backend)
-        return backend == "openslide"
+        return _opens_if(backend == "openslide")
 
-    monkeypatch.setattr(reader_mod, "_backend_can_open_source", _only_openslide_opens)
+    monkeypatch.setattr(reader_mod, "_probe_backend", _only_openslide_opens)
 
     result = tile_slide(whole_slide, tiling=_tiling(mask_backend="auto"))
 
@@ -207,8 +215,8 @@ def test_preprocess_slide_omitting_the_mask_backend_requests_auto(monkeypatch, t
     _serve_mask(monkeypatch, reader)
     monkeypatch.setattr(
         reader_mod,
-        "_backend_can_open_source",
-        lambda *, backend, **kwargs: backend == "openslide",
+        "_probe_backend",
+        lambda *, backend, **kwargs: _opens_if(backend == "openslide"),
     )
 
     result = preprocess_slide(

@@ -13,7 +13,7 @@ def test_auto_routes_flat_raster_suffixes_only_to_pil(monkeypatch, suffix):
     def _unexpected_probe(**kwargs):
         raise AssertionError(f"auto probed a backend for flat input: {kwargs}")
 
-    monkeypatch.setattr(reader_mod, "_backend_can_open_source", _unexpected_probe)
+    monkeypatch.setattr(reader_mod, "_probe_backend", _unexpected_probe)
 
     selection = reader_mod.resolve_backend(
         "auto",
@@ -67,7 +67,7 @@ def test_auto_rejects_one_pixel_above_the_pil_ceiling_before_decode(
         raise AssertionError(f"auto probed an alternative backend: {kwargs}")
 
     monkeypatch.setattr(Image.Image, "load", _unexpected_decode)
-    monkeypatch.setattr(reader_mod, "_backend_can_open_source", _unexpected_probe)
+    monkeypatch.setattr(reader_mod, "_probe_backend", _unexpected_probe)
 
     with pytest.raises(ValueError) as caught:
         reader_mod.open_slide(

@@ -61,6 +61,15 @@
 - To fix a rejected config, delete the key or correct its spelling. There is no option
   to turn the check off.
 
+### `auto` skips backends that open a file but cannot decode it
+
+- The `auto` probe now decodes one small region at the coarsest level after opening a
+  slide or mask, instead of only opening it. cuCIM opens single-channel deflate TIFF
+  masks but has no decoder for them, so `auto` selected it and tiling failed at the
+  first mask read. Such a backend is now skipped for the next one in the chain, and the
+  selection reason records `cuCIM could not decode the source`. Explicit backends are
+  still used as given, without a probe.
+
 ### `tiling.sampling_params` is rejected
 
 - A config that still declares the retired `tiling.sampling_params` section now fails
