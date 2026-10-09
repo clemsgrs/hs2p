@@ -1,0 +1,62 @@
+# Downstream contract checks: the single source of truth shared by local runs and CI.
+#
+# Pinned revisions, the CPU dependency set, suite selection, skip policy and import-scan
+# exclusions all live here. scripts/downstream_contracts/run.py reads this file; the CI
+# workflow only calls that runner. Update pins through a reviewed PR (see
+# docs/downstream-contracts.md).
+
+[environment]
+# CPU-only torch stack; never the CUDA wheels, GPU extras or model weights.
+torch_index_url = "https://download.pytorch.org/whl/cpu"
+torch_requirements = ["torch==2.7.1", "torchvision==0.22.1"]
+# Runtime packages the selected suites and probes import, installed before the candidate.
+# openslide-bin ships the native OpenSlide library that openslide-python>=1.4 loads, so no
+# system package (or root) is needed.
+requirements = [
+    "pytest>=8.0",
+    "numpy<2",
+    "pandas",
+    "pillow",
+    "scipy>=1.11",
+    "scikit-image",
+    "scikit-learn",
+    "h5py",
+    "pyyaml",
+    "omegaconf",
+    "rich",
+    "matplotlib>=3.7",
+    "einops",
+    "timm>=1.0.3",
+    "huggingface-hub<1.0",
+    "safetensors",
+    "transformers",
+    "openslide-python>=1.4",
+    "openslide-bin",
+    "tifffile",
+    "imagecodecs",
+]
+# Extras of the candidate hs2p, installed editable after everything above.
+hs2p_extras = ["openslide", "tifffile"]
+
+[[projects]]
+name = "slide2vec"
+repository = "https://github.com/clemsgrs/slide2vec"
+revision = "d7aa60bf636c62b209f3331fbde554efdfd1524b"
+# Tracked production sources scanned for hs2p imports (tests, docs and scripts are not).
+production_paths = ["slide2vec"]
+suites = ["tests/test_hs2p5_integration.py"]
+# hs2p-owned probes of dynamic contracts that import resolution cannot prove.
+probes = ["probes/test_slide2vec_dynamic_contracts.py"]
+# Permitted exclusions: {nodeid = "...", reason = "..."} / {module, name?, file?, reason}.
+allowed_skips = []
+import_exclusions = []
+
+[[projects]]
+name = "soma"
+repository = "https://github.com/clemsgrs/soma"
+revision = "d1d3e6497e706c33c7e3ced63b6c9d706c921b47"
+production_paths = ["soma"]
+suites = ["tests/test_hs2p_4_tiling_cache.py", "tests/test_supplied_coordinates.py"]
+probes = ["probes/test_soma_dynamic_contracts.py"]
+allowed_skips = []
+import_exclusions = []

@@ -10,6 +10,7 @@ Start with the [installation and quick starts](../README.md) to tile your first 
 | [Tissue-mask generation](tissue-mask-generation.md) | Create reusable pyramidal tissue masks with the standalone script. |
 | [Benchmarks](benchmark.md) | Run throughput benchmarks and interpret the recorded results. |
 | [Release notes](release-notes.md) | Check behavior changes and artifact compatibility before upgrading. |
+| [Downstream contracts](downstream-contracts.md) | Check an hs2p change against the pinned slide2vec and soma contracts, and update the pins. |
 
 Architecture decisions explain the mask-reading and API contracts:
 

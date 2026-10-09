@@ -1,0 +1,79 @@
+name: Downstream contracts
+
+# Gates every hs2p change on the pinned slide2vec and soma contracts. This job only calls
+# scripts/downstream_contracts/run.py, the same runner contributors use locally; pins, the
+# CPU dependency set, suites and skip policy live in scripts/downstream_contracts/contracts.toml.
+# See docs/downstream-contracts.md.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      slide2vec_revision:
+        description: "Full slide2vec commit SHA to test instead of the pin (optional)"
+        required: false
+        default: ""
+      soma_revision:
+        description: "Full soma commit SHA to test instead of the pin (optional)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: downstream-contracts-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  downstream-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Compute environment cache key
+        id: env-key
+        run: echo "key=$(python scripts/downstream_contracts/run.py --print-env-key)" >> "$GITHUB_OUTPUT"
+
+      # The runner reuses an environment whose recorded key matches, so a restored cache
+      # skips the CPU torch/OpenSlide install; the candidate is always reinstalled.
+      - name: Restore CPU environment
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/hs2p-downstream-contracts/env
+          key: downstream-contracts-env-${{ runner.os }}-${{ steps.env-key.outputs.key }}
+
+      - name: Run downstream contract checks
+        env:
+          SLIDE2VEC_REV: ${{ inputs.slide2vec_revision }}
+          SOMA_REV: ${{ inputs.soma_revision }}
+        run: |
+          set -euo pipefail
+          args=(--hs2p "$GITHUB_WORKSPACE" --out "$RUNNER_TEMP/downstream-contracts")
+          if [ -n "${SLIDE2VEC_REV:-}" ]; then args+=(--slide2vec-rev "$SLIDE2VEC_REV"); fi
+          if [ -n "${SOMA_REV:-}" ]; then args+=(--soma-rev "$SOMA_REV"); fi
+          python scripts/downstream_contracts/run.py "${args[@]}"
+
+      - name: Publish summary
+        if: always()
+        run: |
+          summary="$RUNNER_TEMP/downstream-contracts/summary.md"
+          if [ -f "$summary" ]; then cat "$summary"; else echo "Runner stopped before the checks; see the job log and setup-commands.log."; fi >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: downstream-contracts-evidence
+          path: ${{ runner.temp }}/downstream-contracts
+          if-no-files-found: warn
+          retention-days: 30
