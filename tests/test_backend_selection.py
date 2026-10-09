@@ -11,6 +11,33 @@ import hs2p.wsi.backend as backend_mod
 import hs2p.wsi.reader as reader_mod
 
 
+def _opens_if(condition: bool) -> "reader_mod._ProbeOutcome":
+    return (
+        reader_mod._ProbeOutcome.USABLE
+        if condition
+        else reader_mod._ProbeOutcome.CANNOT_OPEN
+    )
+
+
+class _FakeReader:
+    level_count = 2
+    level_dimensions = [(512, 512), (256, 256)]
+
+    def __init__(self, *, decodes: bool):
+        self._decodes = decodes
+        self.reads: list[tuple] = []
+        self.closed = False
+
+    def read_region(self, location, level, size):
+        self.reads.append((location, level, size))
+        if not self._decodes:
+            raise RuntimeError("requested compression method is not configured")
+        return np.zeros((size[1], size[0], 3), dtype=np.uint8)
+
+    def close(self):
+        self.closed = True
+
+
 def _make_tiling_result(sample_id: str = "slide-1") -> preprocessing_mod.TilingResult:
     return preprocessing_mod.TilingResult(
         tiles=preprocessing_mod.TileGeometry(
@@ -105,10 +132,10 @@ def test_auto_mask_fallback_uses_shared_priority_independently(monkeypatch):
         del companion_path
         calls.append((source_path, backend, spacing_override))
         if source_path.endswith("slide.svs"):
-            return backend == "cucim"
-        return backend == "asap"
+            return _opens_if(backend == "cucim")
+        return _opens_if(backend == "asap")
 
-    monkeypatch.setattr(reader_mod, "_backend_can_open_source", _fake_can_open_source)
+    monkeypatch.setattr(reader_mod, "_probe_backend", _fake_can_open_source)
 
     resolved = backend_mod.resolve_backends(
         requested_slide_backend="auto",
@@ -136,10 +163,6 @@ def test_auto_open_uses_spacing_override_for_probe_and_warns_only_on_selected_op
 ):
     opened_with: list[float | None] = []
 
-    class _Reader:
-        def close(self):
-            return None
-
     def _fake_opener(
         path, *, spacing_override=None, gpu_decode=False, require_spacing=True
     ):
@@ -153,7 +176,7 @@ def test_auto_open_uses_spacing_override_for_probe_and_warns_only_on_selected_op
             "using the supplied level-0 spacing.",
             UserWarning,
         )
-        return _Reader()
+        return _FakeReader(decodes=True)
 
     monkeypatch.setattr(
         reader_mod,
@@ -165,7 +188,7 @@ def test_auto_open_uses_spacing_override_for_probe_and_warns_only_on_selected_op
             ),
         },
     )
-    reader_mod._backend_can_open_source.cache_clear()
+    reader_mod._probe_backend.cache_clear()
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -183,15 +206,11 @@ def test_auto_open_uses_spacing_override_for_probe_and_warns_only_on_selected_op
 
 
 def test_auto_openability_probe_honors_require_spacing(monkeypatch):
-    class _Reader:
-        def close(self):
-            return None
-
     def _fake_opener(path, *, spacing_override=None, require_spacing=True):
         del path, spacing_override
         if require_spacing:
             raise ValueError("missing native spacing")
-        return _Reader()
+        return _FakeReader(decodes=True)
 
     monkeypatch.setattr(
         reader_mod,
@@ -204,7 +223,7 @@ def test_auto_openability_probe_honors_require_spacing(monkeypatch):
         },
     )
     monkeypatch.setattr(reader_mod, "AUTO_BACKEND_ORDER", ("openslide",))
-    reader_mod._backend_can_open_source.cache_clear()
+    reader_mod._probe_backend.cache_clear()
 
     with pytest.raises(RuntimeError, match="Unable to open untagged-mask.tif"):
         reader_mod.resolve_backend("auto", wsi_path=Path("untagged-mask.tif"))
@@ -357,9 +376,9 @@ def test_mask_role_probe_never_requires_spacing_while_slide_role_does(monkeypatc
     ):
         del companion_path, spacing_override
         calls.append((source_path, backend, require_spacing))
-        return backend == "cucim"
+        return _opens_if(backend == "cucim")
 
-    monkeypatch.setattr(reader_mod, "_backend_can_open_source", _fake_can_open_source)
+    monkeypatch.setattr(reader_mod, "_probe_backend", _fake_can_open_source)
 
     resolved = reader_mod.resolve_backends(
         requested_slide_backend="auto",
@@ -384,7 +403,7 @@ def test_mask_role_auto_selects_tifffile_from_a_lossy_header(tmp_path, monkeypat
     tifffile.imwrite(mask_path, np.ones((8, 8), dtype=np.uint16), photometric="minisblack")
     monkeypatch.setattr(
         reader_mod,
-        "_backend_can_open_source",
+        "_probe_backend",
         lambda **kwargs: pytest.fail("the openability chain must not run"),
     )
 
@@ -433,9 +452,9 @@ def test_mask_role_auto_keeps_the_chain_for_an_8bit_header(tmp_path, monkeypatch
 
     def _fake_can_open_source(*, backend: str, **kwargs):
         probed.append(backend)
-        return backend == "openslide"
+        return _opens_if(backend == "openslide")
 
-    monkeypatch.setattr(reader_mod, "_backend_can_open_source", _fake_can_open_source)
+    monkeypatch.setattr(reader_mod, "_probe_backend", _fake_can_open_source)
 
     selection = reader_mod.resolve_mask_backend("auto", mask_path=mask_path)
 
@@ -451,3 +470,156 @@ def test_mask_role_explicit_backend_is_authoritative_over_the_header(tmp_path):
     selection = reader_mod.resolve_mask_backend("cucim", mask_path=mask_path)
 
     assert selection == reader_mod.BackendSelection(backend="cucim", reason=None, tried=("cucim",))
+
+
+def _native_reader_installed() -> bool:
+    import importlib.util
+
+    return any(
+        importlib.util.find_spec(module) is not None
+        for module in ("cucim", "openslide", "multiresolutionimageinterface")
+    )
+
+
+@pytest.mark.parametrize("compression", ["deflate", "adobe_deflate"])
+def test_auto_mask_backend_decodes_a_single_channel_deflate_tiff(tmp_path, compression):
+    """cuCIM opens a single-channel deflate TIFF but cannot decode it; ``auto`` must
+    select a backend that reads the mask, and tiling with it must succeed."""
+    tifffile = pytest.importorskip("tifffile")
+    if not _native_reader_installed():
+        pytest.skip("no native reader installed for the auto chain")
+    from PIL import Image
+
+    from hs2p import FilterConfig, SlideSpec, TilingConfig, tile_slide
+
+    slide_path = tmp_path / "slide.png"
+    Image.fromarray(np.full((64, 64, 3), 120, dtype=np.uint8)).save(slide_path)
+    mask_path = tmp_path / "mask-deflate.tif"
+    tifffile.imwrite(
+        mask_path,
+        np.ones((64, 64), dtype=np.uint8),
+        tile=(16, 16),
+        compression=compression,
+        photometric="minisblack",
+        resolution=(10000, 10000),
+        resolutionunit="CENTIMETER",
+    )
+
+    selection = reader_mod.resolve_mask_backend("auto", mask_path=mask_path)
+    with reader_mod.open_slide(
+        mask_path, selection.backend, require_spacing=False
+    ) as mask_reader:
+        region = mask_reader.read_region((0, 0), 0, (16, 16))
+    assert region.shape[:2] == (16, 16)
+
+    result = tile_slide(
+        SlideSpec(
+            sample_id="s",
+            image_path=slide_path,
+            mask_path=mask_path,
+            spacing_at_level_0=1.0,
+        ),
+        tiling=TilingConfig(
+            requested_spacing_um=1.0,
+            requested_tile_size_px=16,
+            tolerance=0.01,
+            overlap=0,
+            min_coverage={"tissue": 0.5},
+            backend="pil",
+            mask_backend="auto",
+        ),
+        filtering=FilterConfig(a_t=0, a_h=0),
+    )
+
+    assert result.mask_backend == selection.backend
+    assert sorted(zip(result.x.tolist(), result.y.tolist())) == sorted(
+        (x, y) for x in (0, 16, 32, 48) for y in (0, 16, 32, 48)
+    )
+
+
+def _fake_backends(monkeypatch, *, order, decodes):
+    """Register fake readers for ``order``; ``decodes(backend, path)`` says whether a
+    reader opened on ``path`` can decode it (every fake opens every path)."""
+    opened: dict[tuple[str, str], _FakeReader] = {}
+
+    def _spec(backend):
+        def _opener(path, *, spacing_override=None, require_spacing=True):
+            del spacing_override, require_spacing
+            reader = _FakeReader(decodes=decodes(backend, str(path)))
+            opened[(backend, str(path))] = reader
+            return reader
+
+        return reader_mod._BackendSpec(opener=_opener, supports_path=lambda path: True)
+
+    monkeypatch.setattr(reader_mod, "_BACKENDS", {name: _spec(name) for name in order})
+    monkeypatch.setattr(reader_mod, "AUTO_BACKEND_ORDER", tuple(order))
+    reader_mod._probe_backend.cache_clear()
+    return opened
+
+
+def test_auto_skips_a_backend_that_opens_but_cannot_decode(monkeypatch):
+    opened = _fake_backends(
+        monkeypatch,
+        order=("cucim", "openslide"),
+        decodes=lambda backend, path: backend != "cucim",
+    )
+
+    selection = reader_mod.resolve_backend("auto", wsi_path=Path("undecodable-mask.tif"))
+
+    assert selection.backend == "openslide"
+    assert selection.tried == ("cucim", "openslide")
+    assert selection.reason == (
+        "cuCIM could not decode the source; selected openslide for auto backend"
+    )
+    # one small read at the coarsest level, and every probe reader is closed
+    cucim = opened[("cucim", "undecodable-mask.tif")]
+    assert cucim.reads == [((0, 0), 1, (64, 64))]
+    assert all(reader.closed for reader in opened.values())
+
+
+def test_slide_and_mask_roles_share_the_decode_probe(tmp_path, monkeypatch):
+    """#178: one policy for both roles. cuCIM decodes the slide but not the mask, so the
+    slide keeps cuCIM while the mask falls through to the next backend that decodes."""
+    tifffile = pytest.importorskip("tifffile")
+    mask_path = tmp_path / "mask.tif"
+    # an 8-bit min-is-black header stays on the native chain (no tifffile routing)
+    tifffile.imwrite(mask_path, np.ones((8, 8), dtype=np.uint8), photometric="minisblack")
+    _fake_backends(
+        monkeypatch,
+        order=("cucim", "openslide"),
+        decodes=lambda backend, path: backend != "cucim" or path.endswith("slide.svs"),
+    )
+
+    resolved = reader_mod.resolve_backends(
+        requested_slide_backend="auto",
+        requested_mask_backend="auto",
+        wsi_path=Path("slide.svs"),
+        mask_path=mask_path,
+    )
+
+    assert resolved.slide == reader_mod.BackendSelection(
+        backend="cucim", reason="selected cuCIM for auto backend", tried=("cucim",)
+    )
+    assert resolved.mask == reader_mod.BackendSelection(
+        backend="openslide",
+        reason="cuCIM could not decode the source; selected openslide for auto backend",
+        tried=("cucim", "openslide"),
+    )
+
+
+def test_explicit_backends_are_authoritative_and_never_probed(monkeypatch):
+    monkeypatch.setattr(
+        reader_mod,
+        "_probe_backend",
+        lambda **kwargs: pytest.fail(f"an explicit backend was probed: {kwargs}"),
+    )
+
+    resolved = reader_mod.resolve_backends(
+        requested_slide_backend="cucim",
+        requested_mask_backend="cucim",
+        wsi_path=Path("slide.svs"),
+        mask_path=Path("undecodable-mask.tif"),
+    )
+
+    assert resolved.slide == reader_mod.BackendSelection(backend="cucim", tried=("cucim",))
+    assert resolved.mask == reader_mod.BackendSelection(backend="cucim", tried=("cucim",))

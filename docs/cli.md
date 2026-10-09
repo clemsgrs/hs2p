@@ -115,7 +115,7 @@ Annotation sampling supports filled mask previews and a tiling-grid preview for 
 With `auto`, each path is resolved independently:
 
 - `.png`, `.jpg`, and `.jpeg` suffixes (case-insensitive) select PIL only. Corrupt, unsupported, or oversized flat rasters fail without trying another reader.
-- Other inputs probe `cucim → vips → openslide → asap` and stop at the first reader that opens the file. PIL is not part of this chain.
+- Other inputs probe `cucim → vips → openslide → asap` and stop at the first reader that opens the file and decodes a small region at its coarsest level. A reader that opens a file but cannot decode it is skipped, and the selection reason records it (for example, `cuCIM could not decode the source`). PIL is not part of this chain.
 - A mask path is resolved with the same chain, but the probe does not require spacing metadata (a mask's spacing comes from its dimensions), and the TIFF header is read first: samples that are not 8-bit unsigned, non-palette select `tifffile` directly, with the reason recorded in the `mask_backend.selected` event and the resolved `mask_backend` provenance. A slide path never selects `tifffile`.
 
 Source masks need no spacing metadata: a flat PNG/JPEG or untagged TIFF mask is aligned to
