@@ -472,13 +472,19 @@ def test_mask_role_explicit_backend_is_authoritative_over_the_header(tmp_path):
     assert selection == reader_mod.BackendSelection(backend="cucim", reason=None, tried=("cucim",))
 
 
-def _native_reader_installed() -> bool:
-    import importlib.util
-
-    return any(
-        importlib.util.find_spec(module) is not None
-        for module in ("cucim", "openslide", "multiresolutionimageinterface")
-    )
+def _some_auto_backend_decodes(path) -> bool:
+    """Whether any installed reader in the ``auto`` chain decodes ``path`` when asked
+    for explicitly (explicit backends are not probed). Which readers decode a given
+    compression depends on the install (cuCIM builds, ASAP versions), so the test
+    checks the precondition directly instead of guessing from installed modules."""
+    for backend in reader_mod.AUTO_BACKEND_ORDER:
+        try:
+            with reader_mod.open_slide(path, backend, require_spacing=False) as reader:
+                reader.read_region((0, 0), 0, (16, 16))
+        except Exception:
+            continue
+        return True
+    return False
 
 
 @pytest.mark.parametrize("compression", ["deflate", "adobe_deflate"])
@@ -486,8 +492,6 @@ def test_auto_mask_backend_decodes_a_single_channel_deflate_tiff(tmp_path, compr
     """cuCIM opens a single-channel deflate TIFF but cannot decode it; ``auto`` must
     select a backend that reads the mask, and tiling with it must succeed."""
     tifffile = pytest.importorskip("tifffile")
-    if not _native_reader_installed():
-        pytest.skip("no native reader installed for the auto chain")
     from PIL import Image
 
     from hs2p import FilterConfig, SlideSpec, TilingConfig, tile_slide
@@ -504,6 +508,8 @@ def test_auto_mask_backend_decodes_a_single_channel_deflate_tiff(tmp_path, compr
         resolution=(10000, 10000),
         resolutionunit="CENTIMETER",
     )
+    if not _some_auto_backend_decodes(mask_path):
+        pytest.skip(f"no installed auto-chain reader decodes a {compression} mask")
 
     selection = reader_mod.resolve_mask_backend("auto", mask_path=mask_path)
     with reader_mod.open_slide(
