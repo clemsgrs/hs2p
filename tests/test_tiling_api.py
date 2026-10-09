@@ -433,7 +433,7 @@ def _patch_preprocess_slide(
             )
         return out
 
-    monkeypatch.setattr(orchestration_mod, "preprocess_slide", _fake_preprocess_slide)
+    monkeypatch.setattr(orchestration_mod, "_preprocess_slide", _fake_preprocess_slide)
     monkeypatch.setattr(orchestration_mod, "_resolve_mask_for_request", _fake_resolve_mask_for_request)
     monkeypatch.setattr(orchestration_mod, "_compute_tiling_result", _fake_compute_tiling_result)
 
@@ -515,8 +515,44 @@ def test_tile_slide_allows_masked_slides_without_segmentation_config(
         filtering=filter_config,
     )
 
-    assert captured["tissue_method"] == "precomputed_mask"
+    assert captured["segmentation"].method == "precomputed_mask"
     assert captured["tissue_mask_path"] == Path("slide-mask.png")
+
+
+def test_tile_slide_hands_its_configs_to_the_typed_core(
+    monkeypatch, tiling_config, segmentation_config, filter_config
+):
+    """``tile_slide`` already holds typed configs, so it calls the private core with them
+    rather than expanding them through the scalar ``preprocess_slide`` wrapper."""
+    captured = {}
+
+    _patch_preprocess_slide(
+        monkeypatch,
+        result=_build_preprocessing_result(
+            sample_id="slide-with-mask",
+            image_path="slide.svs",
+            mask_path="slide-mask.png",
+            selection_strategy=CoordinateSelectionStrategy.MERGED_DEFAULT_TILING,
+            output_mode=CoordinateOutputMode.MERGED,
+        ),
+        hook=captured.update,
+    )
+
+    tile_slide(
+        SlideSpec(
+            sample_id="slide-with-mask",
+            image_path=Path("slide.svs"),
+            mask_path=Path("slide-mask.png"),
+        ),
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+    )
+
+    assert captured["tiling"] == tiling_config
+    assert captured["segmentation"] is segmentation_config
+    assert captured["filtering"] is filter_config
+    assert captured["min_tissue_fraction"] == tiling_config.min_coverage["tissue"]
 
 
 def test_tile_slide_errors_when_tissue_coverage_missing(
@@ -2695,7 +2731,7 @@ def test_tile_slides_writes_process_list_and_can_reuse_precomputed_tiles(
             "tile extraction should not run when precomputed tiles are reused"
         )
 
-    monkeypatch.setattr(orchestration_mod, "preprocess_slide", _unexpected_preprocess)
+    monkeypatch.setattr(orchestration_mod, "_preprocess_slide", _unexpected_preprocess)
 
     artifacts = tile_slides(
         [SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs"))],
@@ -3065,7 +3101,7 @@ def test_tile_slides_resume_marks_stale_artifact_as_failed(
 
     monkeypatch.setattr(
         orchestration_mod,
-        "preprocess_slide",
+        "_preprocess_slide",
         lambda **_: (_ for _ in ()).throw(
             AssertionError("should not recompute stale resumed tiles")
         ),
@@ -3138,7 +3174,7 @@ def test_tile_slides_resume_preserves_extra_columns_and_existing_preview_paths(
 
     monkeypatch.setattr(
         orchestration_mod,
-        "preprocess_slide",
+        "_preprocess_slide",
         lambda **_: (_ for _ in ()).throw(
             AssertionError("resumed successful tiles should not be recomputed")
         ),
@@ -3210,7 +3246,7 @@ def test_tile_slides_resume_matches_numeric_and_na_like_sample_ids(
 
     monkeypatch.setattr(
         orchestration_mod,
-        "preprocess_slide",
+        "_preprocess_slide",
         lambda **_: (_ for _ in ()).throw(
             AssertionError(f"resumed slide {sample_id!r} must not be recomputed")
         ),

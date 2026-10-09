@@ -272,7 +272,7 @@ def test_tile_slide_uses_resolved_backend_for_hash_and_result(monkeypatch):
         return _make_tiling_result()
 
     monkeypatch.setattr(orchestration_mod, "resolve_backends", _cucim_auto_resolve_backends)
-    monkeypatch.setattr(orchestration_mod, "preprocess_slide", _fake_preprocess_slide)
+    monkeypatch.setattr(orchestration_mod, "_preprocess_slide", _fake_preprocess_slide)
 
     result = api_mod.tile_slide(
         api_mod.SlideSpec(sample_id="slide-1", image_path=Path("slide.svs")),
