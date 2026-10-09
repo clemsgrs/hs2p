@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from types import SimpleNamespace
 from typing import Any
 
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig, ListConfig, OmegaConf
 
 from .loader import default_config
 
@@ -63,6 +63,15 @@ def _unknown_keys(node: Any, *, path: str, schema: Any) -> list[tuple[str, str]]
     """Collect ``(path, message)`` for every unknown key under ``node``."""
     if path in OPEN_MAPS or path in UNCHECKED_SECTIONS:
         return []
+    if isinstance(node, ListConfig):
+        node = OmegaConf.to_container(node, resolve=False)
+    if isinstance(node, (list, tuple)):
+        # A list entry may be a mapping (a stray YAML ``- ``): check it against the field.
+        return [
+            unknown
+            for index, item in enumerate(node)
+            for unknown in _unknown_keys(item, path=f"{path}[{index}]", schema=schema)
+        ]
     members = _members(node)
     if members is None:
         return []

@@ -162,6 +162,39 @@ def test_cli_rejects_nested_keys_beneath_a_scalar_field(
     assert not cli.output_dir.exists()
 
 
+@pytest.mark.parametrize(
+    ("config_body", "unknown_path", "field_path"),
+    [
+        ("save_tiles:\n  - enabled: false\n", "save_tiles[0].enabled", "save_tiles[0]"),
+        (
+            "tiling:\n  independent_sampling:\n    - enabled: false\n",
+            "tiling.independent_sampling[0].enabled",
+            "tiling.independent_sampling[0]",
+        ),
+        (
+            "tiling:\n  preview:\n    tissue_contour_color:\n      - red: 37\n",
+            "tiling.preview.tissue_contour_color[0].red",
+            "tiling.preview.tissue_contour_color[0]",
+        ),
+    ],
+)
+def test_cli_rejects_nested_keys_inside_a_list(
+    cli, tmp_path, config_body, unknown_path, field_path
+):
+    """A stray YAML ``- `` must not hide a mapping from the check: its keys are unknown,
+    and the nonempty list must not be read as a truthy flag."""
+    config_path = _write_inputs(tmp_path, config_body)
+
+    with pytest.raises(ValueError) as excinfo:
+        cli(config_path)
+
+    assert (
+        f"Unknown config key {unknown_path} ({field_path} takes a value, not nested keys)"
+        in str(excinfo.value)
+    )
+    assert not cli.output_dir.exists()
+
+
 _INTERPOLATED_SECTION = (
     "speed: ${wandb.speed_config}\n"
     "wandb:\n"
