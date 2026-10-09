@@ -7,6 +7,7 @@ from omegaconf import OmegaConf
 
 from hs2p.utils import initialize_wandb, fix_random_seeds, get_sha, setup_logging
 from hs2p.configs import default_config
+from hs2p.configs.keys import reject_unknown_config_keys
 
 logger = logging.getLogger("hs2p")
 
@@ -24,6 +25,7 @@ def get_cfg_from_file(config_file):
     default_cfg = OmegaConf.create(default_config)
     cfg = OmegaConf.load(config_file)
     cfg = OmegaConf.merge(default_cfg, cfg)
+    reject_unknown_config_keys(cfg)
     OmegaConf.resolve(cfg)
     return cfg
 
@@ -35,6 +37,7 @@ def get_cfg_from_args(args):
     default_cfg = OmegaConf.create(default_config)
     cfg = OmegaConf.load(args.config_file)
     cfg = OmegaConf.merge(default_cfg, cfg, OmegaConf.from_cli(args.opts))
+    reject_unknown_config_keys(cfg)
     OmegaConf.resolve(cfg)
     return cfg
 
