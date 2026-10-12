@@ -11,6 +11,7 @@ from hs2p.fileops import read_csv_keyed_by_sample_id
 from hs2p.configs.loader import DEFAULT_JPEG_BACKEND
 from hs2p.configs.resolvers import (
     resolve_filter_config,
+    resolve_mask_sampling_config,
     resolve_preview_config,
     resolve_read_coordinates_from,
     resolve_sampling_request,
@@ -68,8 +69,9 @@ def main(args):
             filtering = resolve_filter_config(cfg)
             preview = resolve_preview_config(cfg)
             read_coordinates_from = resolve_read_coordinates_from(cfg)
+            masks = resolve_mask_sampling_config(cfg)
             sampling, selection_strategy, output_mode = resolve_sampling_request(
-                cfg, tiling=tiling
+                masks=masks
             )
             jpeg_backend = str(
                 getattr(cfg.speed, "jpeg_backend", DEFAULT_JPEG_BACKEND)
@@ -90,6 +92,7 @@ def main(args):
             )
             tile_kwargs = dict(
                 tiling=tiling,
+                masks=masks,
                 segmentation=segmentation,
                 filtering=filtering,
                 preview=preview,
@@ -129,9 +132,6 @@ def main(args):
                     resume=False,
                     read_coordinates_from=None,
                     save_tiles=False,
-                    sampling=sampling,
-                    selection_strategy=selection_strategy,
-                    output_mode=output_mode,
                 )
             artifacts = tile_slides(whole_slides, **tile_kwargs)
             process_list_path = output_dir / "process_list.csv"

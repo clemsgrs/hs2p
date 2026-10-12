@@ -16,10 +16,16 @@ from PIL import Image
 import hs2p.mask as maskmod
 import hs2p.tiling.orchestration as orchmod
 import hs2p.wsi.visualization as visualization_mod
-from hs2p.api import PreviewConfig, SlideSpec, TilingArtifacts, TilingConfig, tile_slides
+from hs2p.api import (
+    MaskSamplingConfig,
+    PreviewConfig,
+    SlideSpec,
+    TilingArtifacts,
+    TilingConfig,
+    tile_slides,
+)
 from hs2p.mask import AlignedMask, AnnotationLabels, Mask
 from hs2p.wsi.preview import build_palette, draw_grid_from_coordinates
-from hs2p.wsi.types import CoordinateOutputMode, CoordinateSelectionStrategy, SamplingSpec
 
 PIXEL_MAPPING = {"background": 0, "tumor": 1, "stroma": 2}
 COLOR_MAPPING = {"background": None, "tumor": [255, 0, 0], "stroma": [0, 0, 255]}
@@ -372,17 +378,18 @@ def _write_fixture_slide(tmp_path: Path) -> SlideSpec:
     return SlideSpec(sample_id="slide-1", image_path=image_path, mask_path=mask_path)
 
 
-def _sampling() -> SamplingSpec:
-    return SamplingSpec(
+def _masks(strategy: str = "joint") -> MaskSamplingConfig:
+    return MaskSamplingConfig(
         pixel_mapping={"background": 0, "tumor": 1, "stroma": 2, "necrosis": 3},
-        color_mapping={
+        colors={
             "background": None,
             "tumor": [255, 0, 0],
             "stroma": [0, 0, 255],
             "necrosis": [0, 255, 0],
         },
-        tissue_percentage={"background": None, "tumor": 0.5, "stroma": 0.5, "necrosis": 0.5},
-        active_annotations=("tumor", "stroma", "necrosis"),
+        min_coverage={"tumor": 0.5, "stroma": 0.5, "necrosis": 0.5},
+        output_mode="per_annotation",
+        strategy=strategy,
     )
 
 
@@ -400,16 +407,13 @@ def test_tile_slides_renders_per_annotation_previews_of_a_multi_label_mask(
             requested_tile_size_px=64,
             tolerance=0.05,
             overlap=0.0,
-            min_coverage={"tissue": 0.5},
             backend="openslide",
             mask_backend="pil",
         ),
+        masks=_masks("independent"),
         preview=PreviewConfig(save_tiling_preview=True, downsample=1),
         output_dir=output_dir,
         num_workers=num_workers,
-        sampling=_sampling(),
-        selection_strategy=CoordinateSelectionStrategy.INDEPENDENT_SAMPLING,
-        output_mode=CoordinateOutputMode.PER_ANNOTATION,
     )
 
     previews = {artifact.annotation: artifact.tiling_preview_path for artifact in artifacts}
@@ -448,15 +452,13 @@ def test_tile_slides_submits_only_plain_values_to_the_preview_executor(
             requested_tile_size_px=64,
             tolerance=0.05,
             overlap=0.0,
-            min_coverage={"tissue": 0.5},
             backend="openslide",
             mask_backend="auto",
         ),
+        masks=_masks(),
         preview=PreviewConfig(save_tiling_preview=True, downsample=1),
         output_dir=tmp_path / "out",
         num_workers=2,
-        sampling=_sampling(),
-        output_mode=CoordinateOutputMode.PER_ANNOTATION,
     )
 
     assert len(submitted) == 3
@@ -464,6 +466,6 @@ def test_tile_slides_submits_only_plain_values_to_the_preview_executor(
         assert kwargs["mask_path"] == whole_slide.mask_path
         # The resolved concrete backend and the full vocabulary, not the restricted one.
         assert kwargs["mask_backend"] == "pil"
-        assert kwargs["pixel_mapping"] == _sampling().pixel_mapping
+        assert kwargs["pixel_mapping"] == _masks().pixel_mapping
         assert not any(isinstance(v, (Mask, AlignedMask)) for v in kwargs.values())
         pickle.dumps(kwargs)

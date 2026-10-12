@@ -13,7 +13,7 @@ from pathlib import Path
 import hs2p
 import numpy as np
 import openslide
-from hs2p import SlideSpec, TilingConfig, tile_slides
+from hs2p import MaskSamplingConfig, SlideSpec, TilingConfig, tile_slides
 from PIL import Image
 from slide2vec import progress as slide2vec_progress
 
@@ -56,7 +56,9 @@ def test_hs2p_tiling_progress_is_forwarded_into_the_active_slide2vec_reporter(tm
                 requested_tile_size_px=32,
                 tolerance=0.05,
                 overlap=0.0,
-                min_coverage={"tissue": 0.0},
+            ),
+            masks=MaskSamplingConfig(
+                pixel_mapping={"background": 0, "tissue": 1}, min_coverage={"tissue": 0.0}
             ),
             output_dir=tmp_path / "out",
         )

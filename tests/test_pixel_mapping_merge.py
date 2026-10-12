@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 from omegaconf import OmegaConf
 
-from hs2p.configs.resolvers import resolve_sampling_spec, validate_pixel_mapping
+from hs2p.configs.resolvers import resolve_mask_sampling_config, validate_pixel_mapping
 from hs2p.wsi.masks import compose_overlay_mask_from_annotations
 from hs2p.wsi.preview import build_overlay_alpha, build_palette
 from hs2p.wsi.visualization import _combine_label_masks
@@ -33,22 +33,19 @@ def _cfg(pixel_mapping, min_coverage):
     )
 
 
-def test_config_list_value_resolves_to_plain_list_of_ints():
-    spec = resolve_sampling_spec(
-        _cfg({"background": 0, "tumor": [1, 2], "stroma": 3}, {"tumor": 0.5}),
-        tiling=None,
+def test_config_list_value_resolves_to_a_tuple_of_ints():
+    masks = resolve_mask_sampling_config(
+        _cfg({"background": 0, "tumor": [1, 2], "stroma": 3}, {"tumor": 0.5})
     )
-    assert spec.pixel_mapping == {"background": 0, "tumor": [1, 2], "stroma": 3}
-    assert type(spec.pixel_mapping["tumor"]) is list
-    assert [type(v) for v in spec.pixel_mapping["tumor"]] == [int, int]
+    assert masks.pixel_mapping == {"background": (0,), "tumor": (1, 2), "stroma": (3,)}
+    assert [type(v) for v in masks.pixel_mapping["tumor"]] == [int, int]
 
 
 def test_config_null_still_drops_a_label_next_to_list_values():
-    spec = resolve_sampling_spec(
-        _cfg({"background": 0, "tissue": None, "tumor": [1, 2]}, {"tumor": 0.5}),
-        tiling=None,
+    masks = resolve_mask_sampling_config(
+        _cfg({"background": 0, "tissue": None, "tumor": [1, 2]}, {"tumor": 0.5})
     )
-    assert spec.pixel_mapping == {"background": 0, "tumor": [1, 2]}
+    assert masks.pixel_mapping == {"background": (0,), "tumor": (1, 2)}
 
 
 def test_palette_colors_every_listed_value():

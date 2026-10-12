@@ -12,7 +12,6 @@ tiling:
   read_coordinates_from: # path to reusable {sample_id}.coordinates.* artifacts; skips coordinate computation only, while requested TAR/preview outputs still run
   backend: "auto" # slide reader; auto uses PIL for PNG/JPEG, otherwise cuCIM -> VIPS -> OpenSlide -> ASAP
   mask_backend: "auto" # source-mask reader; resolved independently with the same format-aware auto policy
-  independent_sampling: false # whether to tile each annotation independently (true) or jointly over the union mask (false)
   params:
     requested_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel
     tolerance: 0.05 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)
@@ -56,9 +55,10 @@ tiling:
     tissue_contour_color: [37, 94, 59] # RGB color used for outer tissue contours in batch mask previews
     mask_overlay_alpha: 0.5 # opacity used by the filled annotation-mask overlay path; contour previews ignore this
   masks:
-    # output_mode applies only to annotation sampling (a changed label vocabulary or
-    # sampled set): per_annotation writes coordinates per class; merged writes their union.
+    # output_mode and strategy apply only to annotation sampling (a changed label vocabulary
+    # or sampled set): per_annotation writes coordinates per class; merged writes their union.
     output_mode: per_annotation
+    strategy: joint # joint builds candidates over the union of the sampled classes and keeps them by class coverage; independent tiles each class on its own mask
     pixel_mapping: # map annotated categories to their corresponding pixel values; a list (e.g. tumor: [1, 2]) merges several values into one category
       background: 0
       tissue: 1

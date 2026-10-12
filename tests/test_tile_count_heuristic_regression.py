@@ -20,12 +20,13 @@ This fixture-level check distills a dataset-scale study (40 LEOPARD slides @
 224 px / 0.5 mpp): Pearson r=0.9996, slope 1.04, median actual/approx 1.04.
 """
 
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from hs2p import SlideSpec, tile_slide
+from hs2p import DEFAULT_MASK_SAMPLING, SlideSpec, tile_slide
 from hs2p.configs import SegmentationConfig, TilingConfig
 from hs2p.wsi.reader import open_slide
 
@@ -73,8 +74,8 @@ def test_tile_count_matches_physical_area_heuristic(
                 requested_tile_size_px=TILE_SIZE_PX,
                 tolerance=0.07,
                 overlap=overlap,
-                min_coverage={"tissue": TISSUE_THRESHOLD},
             ),
+            masks=replace(DEFAULT_MASK_SAMPLING, min_coverage={"tissue": TISSUE_THRESHOLD}),
             segmentation=SegmentationConfig(method="precomputed_mask"),
             num_workers=1,
         )

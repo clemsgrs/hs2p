@@ -18,9 +18,9 @@ import hs2p.__main__ as tiling_mod
 from hs2p.configs import default_config
 from hs2p.configs.resolvers import (
     resolve_filter_config,
+    resolve_mask_sampling_config,
     resolve_preview_config,
     resolve_sampling_request,
-    resolve_sampling_spec,
     resolve_segmentation_config,
     resolve_tiling_config,
 )
@@ -139,8 +139,8 @@ def test_key_checks_never_evaluate_interpolations(cli, tmp_path):
     [
         ("save_tiles:\n  enabled: false\n", "save_tiles.enabled"),
         (
-            "tiling:\n  independent_sampling:\n    enabled: true\n",
-            "tiling.independent_sampling.enabled",
+            "tiling:\n  backend:\n    enabled: true\n",
+            "tiling.backend.enabled",
         ),
     ],
 )
@@ -167,9 +167,9 @@ def test_cli_rejects_nested_keys_beneath_a_scalar_field(
     [
         ("save_tiles:\n  - enabled: false\n", "save_tiles[0].enabled", "save_tiles[0]"),
         (
-            "tiling:\n  independent_sampling:\n    - enabled: false\n",
-            "tiling.independent_sampling[0].enabled",
-            "tiling.independent_sampling[0]",
+            "tiling:\n  backend:\n    - enabled: false\n",
+            "tiling.backend[0].enabled",
+            "tiling.backend[0]",
         ),
         (
             "tiling:\n  preview:\n    tissue_contour_color:\n      - red: 37\n",
@@ -290,6 +290,7 @@ def test_tracked_config_examples_load(tmp_path, block):
 
     # Their values also have the types the typed configs declare.
     resolve_tiling_config(cfg)
+    resolve_mask_sampling_config(cfg)
     resolve_segmentation_config(cfg)
     resolve_filter_config(cfg)
     resolve_preview_config(cfg)
@@ -315,7 +316,6 @@ def _slide2vec_adapter(**tiling_extra):
                 tolerance=0.05,
                 overlap=0.0,
             ),
-            independent_sampling=False,
             backend="auto",
             mask_backend="auto",
             **tiling_extra,
@@ -329,7 +329,8 @@ def test_resolve_tiling_config_accepts_a_partial_slide2vec_shaped_adapter():
     tiling = resolve_tiling_config(adapter)
 
     assert tiling.requested_tile_size_px == 224
-    assert resolve_sampling_request(adapter, tiling=tiling) == (None, None, None)
+    masks = resolve_mask_sampling_config(adapter)
+    assert resolve_sampling_request(masks=masks) == (None, None, None)
 
 
 def test_resolve_tiling_config_rejects_unknown_member_on_a_simplenamespace_adapter():
@@ -365,22 +366,18 @@ def _soma_adapter(masks):
     return SimpleNamespace(tiling=SimpleNamespace(masks=masks))
 
 
-def _tiling_config():
-    return resolve_tiling_config(_slide2vec_adapter())
-
-
-def test_resolve_sampling_spec_accepts_a_soma_shaped_dataclass_adapter():
+def test_resolve_mask_sampling_config_accepts_a_soma_shaped_dataclass_adapter():
     masks = _SomaShapedMasks(
         pixel_mapping={"background": 0, "tumor": [1, 2]},
         min_coverage={"tumor": 0.5},
     )
 
-    spec = resolve_sampling_spec(_soma_adapter(masks), tiling=_tiling_config())
+    resolved = resolve_mask_sampling_config(_soma_adapter(masks))
 
-    assert spec.active_annotations == ("tumor",)
+    assert resolved.min_coverage == {"tumor": 0.5}
 
 
-def test_resolve_sampling_spec_rejects_unknown_member_on_a_dataclass_adapter():
+def test_resolve_mask_sampling_config_rejects_unknown_member_on_a_dataclass_adapter():
     masks = _MasksWithStrayField(
         pixel_mapping={"background": 0, "tumor": 1},
         min_coverage={"tumor": 0.5},
@@ -388,7 +385,7 @@ def test_resolve_sampling_spec_rejects_unknown_member_on_a_dataclass_adapter():
     )
 
     with pytest.raises(ValueError) as excinfo:
-        resolve_sampling_spec(_soma_adapter(masks), tiling=_tiling_config())
+        resolve_mask_sampling_config(_soma_adapter(masks))
 
     assert (
         "Unknown config key tiling.masks.min_coverag "
@@ -463,16 +460,7 @@ def test_resolve_tiling_config_rejects_unknown_keys_in_an_interpolated_section()
         resolve_tiling_config(cfg)
 
 
-@pytest.mark.parametrize(
-    "resolve",
-    [
-        resolve_tiling_config,
-        lambda cfg: resolve_sampling_spec(cfg, tiling=_tiling_config()),
-        lambda cfg: resolve_sampling_request(cfg, tiling=_tiling_config()),
-    ],
-    ids=["resolve_tiling_config", "resolve_sampling_spec", "resolve_sampling_request"],
-)
-def test_resolvers_reject_unknown_keys_in_an_interpolated_masks_section(resolve):
+def test_resolve_mask_sampling_config_rejects_unknown_keys_in_an_interpolated_masks_section():
     cfg = _unresolved_cfg_interpolating("masks", "min_coverag")
 
     with pytest.raises(
@@ -482,7 +470,7 @@ def test_resolvers_reject_unknown_keys_in_an_interpolated_masks_section(resolve)
             r"\(did you mean tiling\.masks\.min_coverage\?\)"
         ),
     ):
-        resolve(cfg)
+        resolve_mask_sampling_config(cfg)
 
 
 def test_resolvers_leave_interpolated_sections_they_do_not_read_unevaluated():
@@ -490,6 +478,7 @@ def test_resolvers_leave_interpolated_sections_they_do_not_read_unevaluated():
     tiling["seg_params"] = "${oc.env:HS2P_TEST_UNSET_VARIABLE}"
     cfg = OmegaConf.create({"tiling": tiling})
 
-    tiling_config = resolve_tiling_config(cfg)
+    resolve_tiling_config(cfg)
 
-    assert resolve_sampling_request(cfg, tiling=tiling_config) == (None, None, None)
+    masks = resolve_mask_sampling_config(cfg)
+    assert resolve_sampling_request(masks=masks) == (None, None, None)

@@ -14,9 +14,19 @@ import cv2
 import numpy as np
 import pandas as pd
 
-from hs2p.configs import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig
+from hs2p.configs import (
+    DEFAULT_MASK_SAMPLING,
+    FilterConfig,
+    MaskSamplingConfig,
+    PreviewConfig,
+    SegmentationConfig,
+    TilingConfig,
+)
 from hs2p.configs.loader import DEFAULT_JPEG_BACKEND
-from hs2p.configs.resolvers import require_tissue_fraction, validate_sampling_spec
+from hs2p.configs.resolvers import (
+    require_tissue_fraction,
+    resolve_sampling_request,
+)
 from hs2p.mask import Mask
 from hs2p.progress import emit_progress, emit_progress_log
 from hs2p.tiling.result import ResolvedTissueMask, TilingResult
@@ -210,6 +220,7 @@ def _compute_tiling_result(
     whole_slide: SlideSpec,
     *,
     tiling: TilingConfig,
+    masks: MaskSamplingConfig,
     segmentation: SegmentationConfig | None,
     filtering: FilterConfig,
     mask_preview_path: Path | None,
@@ -236,7 +247,7 @@ def _compute_tiling_result(
             requested_mask_backend=tiling.requested_mask_backend,
             spacing_override=whole_slide.spacing_at_level_0,
             tiling=tiling,
-            min_tissue_fraction=require_tissue_fraction(tiling),
+            min_tissue_fraction=require_tissue_fraction(masks),
             segmentation=effective_segmentation,
             filtering=filtering,
             num_workers=num_workers,
@@ -264,7 +275,7 @@ def _compute_tiling_result(
             spacing_at_level_0=whole_slide.spacing_at_level_0,
             sample_id=whole_slide.sample_id,
             tiling=tiling,
-            min_tissue_fraction=require_tissue_fraction(tiling),
+            min_tissue_fraction=require_tissue_fraction(masks),
             segmentation=effective_segmentation,
             filtering=filtering,
             num_workers=num_workers,
@@ -339,15 +350,16 @@ def tile_slide(
     segmentation: SegmentationConfig | None = None,
     filtering: FilterConfig = FilterConfig(),
     num_workers: int = 1,
-    sampling: SamplingSpec | None = None,
-    selection_strategy: str | None = None,
-    output_mode: str | None = None,
+    masks: MaskSamplingConfig = DEFAULT_MASK_SAMPLING,
 ) -> "TilingResult | dict[str, TilingResult]":
-    """Tile a single slide. With ``sampling`` provided, performs annotation-aware sampling
-    and returns one :class:`TilingResult` per active annotation (``{annotation: result}``);
-    otherwise tiles tissue and returns a single :class:`TilingResult`."""
-    if sampling is not None:
-        validate_sampling_spec(sampling)
+    """Tile a single slide.
+
+    ``masks`` declares the mask vocabulary. The shipped binary ``{background, tissue}``
+    block tiles tissue at ``masks.min_coverage["tissue"]`` and returns a single
+    :class:`TilingResult`; any other vocabulary or sampled set performs annotation-aware
+    sampling and returns one :class:`TilingResult` per sampled annotation
+    (``{annotation: result}``, or ``{None: result}`` for merged output)."""
+    sampling, selection_strategy, output_mode = resolve_sampling_request(masks=masks)
     effective_tiling = _resolve_effective_backends(whole_slide, tiling)
     effective_segmentation = _resolve_effective_segmentation(
         whole_slide=whole_slide,
@@ -375,7 +387,7 @@ def tile_slide(
         requested_mask_backend=effective_tiling.requested_mask_backend,
         spacing_override=whole_slide.spacing_at_level_0,
         tiling=effective_tiling,
-        min_tissue_fraction=require_tissue_fraction(effective_tiling),
+        min_tissue_fraction=require_tissue_fraction(masks),
         segmentation=effective_segmentation,
         filtering=filtering,
         num_workers=num_workers,
@@ -516,6 +528,7 @@ class _ComputeRequest:
     input_index: int
     whole_slide: SlideSpec
     tiling: TilingConfig
+    masks: MaskSamplingConfig
     segmentation: SegmentationConfig | None
     resolved_mask: ResolvedTissueMask | None
     filtering: FilterConfig
@@ -888,6 +901,7 @@ def _compute_and_save_tiling_artifacts_from_request(
         result = _compute_tiling_result(
             request.whole_slide,
             tiling=effective_tiling,
+            masks=request.masks,
             segmentation=request.segmentation,
             filtering=effective_filtering,
             mask_preview_path=request.mask_preview_path,
@@ -1229,15 +1243,15 @@ def tile_slides(
     save_tiles: bool = False,
     jpeg_backend: str = DEFAULT_JPEG_BACKEND,
     gpu_decode: bool = False,
-    sampling: SamplingSpec | None = None,
-    selection_strategy: str | None = None,
-    output_mode: str | None = None,
+    masks: MaskSamplingConfig = DEFAULT_MASK_SAMPLING,
 ) -> list[TilingArtifacts]:
+    """Tile a batch of slides and write their artifacts under ``output_dir``.
+
+    ``masks`` decides binary tissue tiling versus annotation sampling exactly as in
+    :func:`tile_slide`."""
     output_dir = Path(output_dir)
+    sampling, selection_strategy, output_mode = resolve_sampling_request(masks=masks)
     if sampling is not None:
-        validate_sampling_spec(sampling)
-        if not sampling.active_annotations:
-            raise ValueError("annotation sampling requires a non-empty sampling.active_annotations")
         unsupported = [
             name
             for name, active in (
@@ -1316,6 +1330,7 @@ def tile_slides(
             if key not in compatibility_specs:
                 compatibility_specs[key] = CompatibilitySpec(
                     tiling=effective_tiling,
+                    masks=masks,
                     segmentation=_resolve_effective_segmentation(
                         whole_slide=whole_slide,
                         segmentation=segmentation,
@@ -1372,6 +1387,7 @@ def tile_slides(
                 input_index=len(planned_work),
                 whole_slide=whole_slide,
                 tiling=effective_tiling,
+                masks=masks,
                 segmentation=segmentation,
                 resolved_mask=None,
                 filtering=filtering,

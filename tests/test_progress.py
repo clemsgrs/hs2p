@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -7,6 +8,7 @@ import pytest
 import hs2p.tiling.orchestration as orchestration_mod
 import hs2p.preprocessing as preprocessing_mod
 from hs2p.api import (
+    DEFAULT_MASK_SAMPLING,
     BatchPartialFailureWarning,
     SlideSpec,
     TilingArtifacts,
@@ -37,8 +39,10 @@ def _tiling_config() -> TilingConfig:
         requested_tile_size_px=256,
         tolerance=0.05,
         overlap=0.0,
-        min_coverage={"tissue": 0.1},
     )
+
+
+_MASKS = replace(DEFAULT_MASK_SAMPLING, min_coverage={"tissue": 0.1})
 
 
 def _segmentation_config() -> SegmentationConfig:
@@ -166,6 +170,7 @@ def test_tile_slides_emits_progress_for_reused_success_and_failure(
             tile_slides(
                 [slide_a, slide_b, slide_c],
                 tiling=_tiling_config(),
+                masks=_MASKS,
                 segmentation=_segmentation_config(),
                 filtering=_filter_config(),
                 output_dir=run_dir,

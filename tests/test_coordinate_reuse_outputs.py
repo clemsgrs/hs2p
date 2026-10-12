@@ -1,5 +1,6 @@
 import csv
 import tarfile
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -14,6 +15,7 @@ import hs2p.wsi.streaming.stream as stream
 import hs2p.wsi.wsi as wsi
 from fake_wsi_backend import FakeReaderFactory, make_mask_spec, make_slide_spec
 from hs2p.api import (
+    DEFAULT_MASK_SAMPLING,
     FilterConfig,
     PreviewConfig,
     SegmentationConfig,
@@ -85,9 +87,11 @@ def _tiling_config() -> TilingConfig:
         requested_tile_size_px=16,
         tolerance=0.05,
         overlap=0.0,
-        min_coverage={"tissue": 0.5},
         backend="asap",
     )
+
+
+_MASKS = replace(DEFAULT_MASK_SAMPLING, min_coverage={"tissue": 0.5})
 
 
 def _segmentation_config() -> SegmentationConfig:
@@ -144,6 +148,7 @@ def test_reused_coordinates_materialize_requested_tar_manifest_and_preview(
     artifacts = tile_slides(
         [slide],
         tiling=_tiling_config(),
+        masks=_MASKS,
         segmentation=_segmentation_config(),
         filtering=_filter_config(),
         preview=PreviewConfig(save_tiling_preview=True, downsample=2),
@@ -237,6 +242,7 @@ def test_reused_coordinate_previews_use_configured_process_capacity(
     artifacts = tile_slides(
         [first_slide, second_slide],
         tiling=_tiling_config(),
+        masks=_MASKS,
         segmentation=_segmentation_config(),
         filtering=_filter_config(),
         preview=PreviewConfig(save_tiling_preview=True, downsample=2),
@@ -278,6 +284,7 @@ def test_reused_output_failure_preserves_batch_failure_contract(
         artifacts = tile_slides(
             [slide],
             tiling=_tiling_config(),
+            masks=_MASKS,
             segmentation=_segmentation_config(),
             filtering=_filter_config(),
             output_dir=output_dir,

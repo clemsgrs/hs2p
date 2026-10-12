@@ -7,9 +7,11 @@ batch and save its artifacts. Both are available from `hs2p`. Install an
 ## Tile, save, and reload one slide
 
 ```python
+from dataclasses import replace
 from pathlib import Path
 
 from hs2p import (
+    DEFAULT_MASK_SAMPLING,
     FilterConfig,
     SegmentationConfig,
     SlideSpec,
@@ -27,8 +29,8 @@ result = tile_slide(
         requested_tile_size_px=224,
         tolerance=0.07,
         overlap=0.0,
-        min_coverage={"tissue": 0.1},
     ),
+    masks=replace(DEFAULT_MASK_SAMPLING, min_coverage={"tissue": 0.1}),
     segmentation=SegmentationConfig(method="hsv", downsample=64),
     filtering=FilterConfig(ref_tile_size=224, a_t=4, a_h=2),
 )
@@ -42,7 +44,8 @@ loaded = load_tiling_result(
 
 Every public constructor is keyword-only
 ([ADR 0003](adr/0003-keyword-only-constructors.md)). `min_coverage={"tissue": 0.1}` requires at least 10%
-tissue coverage per tile. See the [artifact reference](artifacts.md) for saved paths,
+tissue coverage per tile; without `masks`, the shipped threshold of 1% applies (see
+[Mask vocabulary](#mask-vocabulary)). See the [artifact reference](artifacts.md) for saved paths,
 coordinate units, and metadata.
 
 To use a precomputed tissue mask, set `SlideSpec.mask_path`. Its background label is
@@ -80,7 +83,6 @@ artifacts = tile_slides(
         requested_tile_size_px=224,
         tolerance=0.07,
         overlap=0.0,
-        min_coverage={"tissue": 0.1},
     ),
     segmentation=SegmentationConfig(method="hsv", downsample=64),
     preview=PreviewConfig(save_mask_preview=True, save_tiling_preview=True, downsample=32),
@@ -101,18 +103,51 @@ currently requested TARs and tiling previews. Mask previews are not regenerated
 from reused coordinates. Validation and recovery behavior is
 described in [Resume and validation](artifacts.md#resume-and-validation).
 
-Annotation-aware sampling is available through the `sampling` argument on both
-functions (`SamplingSpec` from `hs2p.wsi`). With per-annotation output, `tile_slide()`
-returns a dictionary of `TilingResult` objects keyed by annotation. Batch sampling
-currently rejects `resume`, `read_coordinates_from`, and `save_tiles`. See the
-[CLI guide](cli.md) for annotation selection and output modes.
+## Mask vocabulary
+
+`MaskSamplingConfig` declares what a mask's values mean and which labels are tiled. Both
+`tile_slide()` and `tile_slides()` take it as `masks=`; it is the typed form of the
+config's `tiling.masks` block.
+
+```python
+@dataclass(frozen=True, kw_only=True)
+class MaskSamplingConfig:
+    pixel_mapping: Mapping[str, tuple[int, ...]]  # label -> raw mask values
+    min_coverage: Mapping[str, float]  # sampled labels -> minimum tile coverage
+    colors: Mapping[str, tuple[int, int, int] | None] | None = None  # preview colors
+    output_mode: Literal["merged", "per_annotation"] = "per_annotation"
+    strategy: Literal["joint", "independent"] = "joint"
+```
+
+Construction validates the vocabulary: label values lie in `[0, 255]` and belong to one
+label, coverages lie in `[0, 1]` and name declared labels, and `colors`, when given,
+covers every label. A scalar label value is stored as a one-value tuple.
+
+`DEFAULT_MASK_SAMPLING` is the shipped block: `{background: 0, tissue: 1}` with only
+`tissue` sampled at `0.01`. That vocabulary and sampled set mean binary tissue tiling, and
+`min_coverage["tissue"]` is its tissue threshold. Any other vocabulary or sampled set
+samples annotations:
+
+```python
+masks = MaskSamplingConfig(
+    pixel_mapping={"background": 0, "tumor": [1, 2], "stroma": 3},
+    min_coverage={"tumor": 0.5},
+    output_mode="merged",
+)
+```
+
+With per-annotation output, `tile_slide()` returns a dictionary of `TilingResult` objects
+keyed by annotation; merged output returns `{None: result}`. Batch sampling currently
+rejects `resume`, `read_coordinates_from`, and `save_tiles`. See the
+[CLI guide](cli.md#annotation-sampling) for label selection and output modes.
 
 ## Results and configuration
 
 | Type | Purpose |
 | --- | --- |
 | `SlideSpec` | Slide identity, optional mask, and optional level-0 spacing override. |
-| `TilingConfig` | Reader selection, requested spacing and tile size, overlap, tolerance, and minimum coverage. |
+| `TilingConfig` | Reader selection, requested spacing and tile size, overlap, and tolerance. |
+| `MaskSamplingConfig` | Mask label vocabulary, per-label minimum coverage, preview colors, output mode, and sampling strategy. |
 | `SegmentationConfig` | Tissue-segmentation method and settings. |
 | `FilterConfig` | Contour filtering and optional white-space, black-space, grayspace, and blur QC. |
 | `PreviewConfig` | Batch preview toggles, downsample, and mask styling. |

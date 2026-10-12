@@ -7,7 +7,9 @@ import numpy as np
 import pytest
 
 from hs2p.api import (
+    DEFAULT_MASK_SAMPLING,
     CompatibilitySpec,
+    MaskSamplingConfig,
     FilterConfig,
     PreviewConfig,
     SegmentationConfig,
@@ -80,12 +82,16 @@ _TILING_CONFIG = TilingConfig(
     requested_tile_size_px=224,
     tolerance=0.07,
     overlap=0.0,
-    min_coverage={"tissue": 0.1},
     backend="asap",
 )
 
 CONSTRUCTOR_CASES = [
     pytest.param(SegmentationConfig, dict(method="hsv"), id="SegmentationConfig"),
+    pytest.param(
+        MaskSamplingConfig,
+        dict(pixel_mapping={"tumor": (1,)}, min_coverage={"tumor": 0.5}),
+        id="MaskSamplingConfig",
+    ),
     pytest.param(FilterConfig, dict(ref_tile_size=224), id="FilterConfig"),
     pytest.param(PreviewConfig, dict(save_mask_preview=True), id="PreviewConfig"),
     pytest.param(
@@ -105,6 +111,7 @@ CONSTRUCTOR_CASES = [
         CompatibilitySpec,
         dict(
             tiling=_TILING_CONFIG,
+            masks=DEFAULT_MASK_SAMPLING,
             segmentation=SegmentationConfig(method="hsv"),
             filtering=FilterConfig(),
         ),

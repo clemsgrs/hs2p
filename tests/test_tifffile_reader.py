@@ -1,8 +1,10 @@
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+from hs2p import DEFAULT_MASK_SAMPLING
 from hs2p.configs.models import VALID_BACKENDS
 from hs2p.mask import Mask, TissueLabels
 from hs2p.wsi.backends.tifffile import PADDING_VALUE, TifffileReader, supports_tifffile_path
@@ -218,10 +220,12 @@ def _sixteen_tile_config(mask_backend):
         requested_tile_size_px=16,
         tolerance=0.01,
         overlap=0,
-        min_coverage={"tissue": 0.5},
         backend="pil",
         mask_backend=mask_backend,
     )
+
+
+_MASKS = replace(DEFAULT_MASK_SAMPLING, min_coverage={"tissue": 0.5})
 
 
 EXPECTED_SIXTEEN = sorted([(x, y) for x in (0, 16, 32, 48) for y in (0, 16, 32, 48)])
@@ -246,6 +250,7 @@ def test_tile_slide_auto_reads_a_uint16_mask_through_tifffile(tmp_path, monkeypa
     result = tile_slide(
         SlideSpec(sample_id="s", image_path=slide_path, mask_path=mask_path, spacing_at_level_0=1.0),
         tiling=_sixteen_tile_config("auto"),
+        masks=_MASKS,
         filtering=FilterConfig(a_t=0, a_h=0),
     )
 
@@ -276,6 +281,7 @@ def test_tile_slide_auto_opens_an_untagged_8bit_mask_with_a_native_reader(tmp_pa
     result = tile_slide(
         SlideSpec(sample_id="s", image_path=slide_path, mask_path=mask_path, spacing_at_level_0=1.0),
         tiling=_sixteen_tile_config("auto"),
+        masks=_MASKS,
         filtering=FilterConfig(a_t=0, a_h=0),
     )
 
@@ -373,6 +379,7 @@ def test_tile_slide_auto_routes_a_min_is_white_mask_to_tifffile(tmp_path, monkey
                 sample_id="s", image_path=slide_path, mask_path=mask_path, spacing_at_level_0=1.0
             ),
             tiling=_sixteen_tile_config("auto"),
+            masks=_MASKS,
             filtering=FilterConfig(a_t=0, a_h=0),
         )
         return result, sorted(zip(result.x.tolist(), result.y.tolist()))
@@ -412,6 +419,7 @@ def test_tile_slide_auto_routes_a_mixed_width_pyramid_to_tifffile(tmp_path):
     result = tile_slide(
         SlideSpec(sample_id="s", image_path=slide_path, mask_path=mask_path, spacing_at_level_0=1.0),
         tiling=_sixteen_tile_config("auto"),
+        masks=_MASKS,
         filtering=FilterConfig(a_t=0, a_h=0),
     )
 

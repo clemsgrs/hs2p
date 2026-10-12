@@ -20,6 +20,7 @@ from omegaconf import OmegaConf
 import hs2p.__main__ as tiling_mod
 from hs2p.configs import (
     FilterConfig,
+    MaskSamplingConfig,
     PreviewConfig,
     SegmentationConfig,
     TilingConfig,
@@ -27,8 +28,9 @@ from hs2p.configs import (
 )
 from hs2p.configs.loader import DEFAULT_JPEG_BACKEND
 from hs2p.configs.resolvers import (
+    resolve_filter_config,
+    resolve_mask_sampling_config,
     resolve_preview_config,
-    resolve_sampling_strategy,
     resolve_tiling_config,
 )
 from hs2p.utils.setup import get_cfg_from_file
@@ -69,17 +71,16 @@ def cli(monkeypatch, tmp_path: Path):
     return run
 
 
-def test_cli_rejects_a_string_for_a_bool_tiling_field(cli, tmp_path):
-    """``bool("no")`` is ``True``: a quoted ``"no"`` used to turn independent sampling on."""
-    config_path = _write_inputs(tmp_path, 'tiling:\n  independent_sampling: "no"\n')
+def test_cli_rejects_an_unknown_masks_strategy(cli, tmp_path):
+    config_path = _write_inputs(tmp_path, 'tiling:\n  masks:\n    strategy: "no"\n')
 
     with pytest.raises(ValueError) as excinfo:
         cli(config_path)
 
     assert (
-        "Config value tiling.independent_sampling must be a bool, got str 'no'"
-        in str(excinfo.value)
-    )
+        "Config value tiling.masks.strategy must be one of 'joint', 'independent', "
+        "got str 'no'"
+    ) in str(excinfo.value)
 
 
 @pytest.mark.parametrize(
@@ -141,7 +142,6 @@ def test_one_error_lists_every_wrong_typed_field_of_a_section(cli, tmp_path):
     config_path = _write_inputs(
         tmp_path,
         "tiling:\n"
-        '  independent_sampling: "no"\n'
         "  params:\n"
         '    requested_spacing_um: "0.5"\n'
         "    tolerance: true\n",
@@ -155,7 +155,6 @@ def test_one_error_lists_every_wrong_typed_field_of_a_section(cli, tmp_path):
         "Config value tiling.params.requested_tile_size_px must be an int, "
         "got float 256.7",
         "Config value tiling.params.tolerance must be a float, got bool True",
-        "Config value tiling.independent_sampling must be a bool, got str 'no'",
     ]
 
 
@@ -169,7 +168,6 @@ def _tiling(**overrides) -> TilingConfig:
         requested_tile_size_px=224,
         tolerance=0.05,
         overlap=0.0,
-        min_coverage={"tissue": 0.1},
     )
     return TilingConfig(**{**values, **overrides})
 
@@ -178,8 +176,8 @@ def _tiling(**overrides) -> TilingConfig:
     ("build", "expected"),
     [
         pytest.param(
-            lambda: _tiling(independent_sampling="no"),
-            "Config value TilingConfig.independent_sampling must be a bool, got str 'no'",
+            lambda: PreviewConfig(save_mask_preview="no"),
+            "Config value PreviewConfig.save_mask_preview must be a bool, got str 'no'",
             id="str-for-bool",
         ),
         pytest.param(
@@ -244,9 +242,17 @@ def _tiling(**overrides) -> TilingConfig:
             id="str-for-tuple",
         ),
         pytest.param(
-            lambda: _tiling(min_coverage=0.1),
-            "Config value TilingConfig.min_coverage must be a mapping, got float 0.1",
+            lambda: MaskSamplingConfig(pixel_mapping={"tumor": 1}, min_coverage=0.1),
+            "Config value MaskSamplingConfig.min_coverage must be a mapping, got float 0.1",
             id="float-for-mapping",
+        ),
+        pytest.param(
+            lambda: MaskSamplingConfig(
+                pixel_mapping={"tumor": 1}, min_coverage={}, strategy="independent_sampling"
+            ),
+            "Config value MaskSamplingConfig.strategy must be one of 'joint', "
+            "'independent', got str 'independent_sampling'",
+            id="unknown-literal",
         ),
     ],
 )
@@ -263,7 +269,6 @@ def test_direct_construction_widens_numbers_losslessly():
         requested_tile_size_px=np.int64(224),
         tolerance=np.float64(0.05),
         overlap=0,
-        independent_sampling=np.bool_(True),
     )
 
     assert tiling.requested_spacing_um == 0.5
@@ -273,7 +278,6 @@ def test_direct_construction_widens_numbers_losslessly():
     assert type(tiling.tolerance) is float
     assert tiling.overlap == 0.0
     assert type(tiling.overlap) is float
-    assert tiling.independent_sampling is True
 
 
 class _PathLike(os.PathLike):
@@ -312,14 +316,15 @@ def test_cli_rejects_an_interpolation_that_fills_a_bool_with_a_mapping(cli, tmp_
     read as ``False``."""
     config_path = _write_inputs(
         tmp_path,
-        "tiling:\n  independent_sampling: ${wandb.flags}\nwandb:\n  flags: {}\n",
+        "tiling:\n  filter_params:\n    filter_white: ${wandb.flags}\n"
+        "wandb:\n  flags: {}\n",
     )
 
     with pytest.raises(ValueError) as excinfo:
         cli(config_path)
 
     assert (
-        "Config value tiling.independent_sampling must be a bool, got DictConfig {}"
+        "Config value tiling.filter_params.filter_white must be a bool, got DictConfig {}"
         in str(excinfo.value)
     )
 
@@ -327,10 +332,10 @@ def test_cli_rejects_an_interpolation_that_fills_a_bool_with_a_mapping(cli, tmp_
 @pytest.mark.parametrize(
     ("resolve", "path"),
     [
-        (resolve_tiling_config, "tiling.independent_sampling"),
+        (resolve_filter_config, "tiling.filter_params.filter_white"),
         (resolve_preview_config, "tiling.preview.save_mask_preview"),
     ],
-    ids=["resolve_tiling_config", "resolve_preview_config"],
+    ids=["resolve_filter_config", "resolve_preview_config"],
 )
 def test_resolvers_reject_an_interpolation_that_fills_a_bool_with_a_mapping(
     resolve, path
@@ -354,14 +359,23 @@ def test_resolvers_reject_an_interpolation_that_fills_a_bool_with_a_mapping(
     )
 
 
-def test_sampling_strategy_rejects_a_string_for_independent_sampling():
-    cfg = SimpleNamespace(tiling=SimpleNamespace(independent_sampling="no"))
+def test_mask_sampling_resolver_rejects_a_bool_for_the_strategy():
+    cfg = SimpleNamespace(
+        tiling=SimpleNamespace(
+            masks=SimpleNamespace(
+                pixel_mapping={"tumor": 1}, min_coverage={"tumor": 0.5}, strategy=True
+            )
+        )
+    )
 
     with pytest.raises(
         ValueError,
-        match=r"^Config value tiling\.independent_sampling must be a bool, got str 'no'$",
+        match=(
+            r"^Config value tiling\.masks\.strategy must be one of 'joint', "
+            r"'independent', got bool True$"
+        ),
     ):
-        resolve_sampling_strategy(cfg)
+        resolve_mask_sampling_config(cfg)
 
 
 # Top-level and ``speed`` scalars that the CLI reads outside the typed configs are checked at
@@ -495,8 +509,6 @@ def test_resolvers_accept_numpy_scalars_and_integers_from_programmatic_adapters(
                 tolerance=0,
                 overlap=np.float32(0.25),
             ),
-            masks=SimpleNamespace(min_coverage={"background": None, "tissue": 0.01}),
-            independent_sampling=np.bool_(False),
             backend="auto",
             mask_backend="auto",
             preview=SimpleNamespace(
@@ -514,7 +526,6 @@ def test_resolvers_accept_numpy_scalars_and_integers_from_programmatic_adapters(
 
     assert (tiling.requested_spacing_um, tiling.requested_tile_size_px) == (0.5, 224)
     assert (tiling.tolerance, tiling.overlap) == (0.0, 0.25)
-    assert tiling.independent_sampling is False
     assert preview == PreviewConfig(
         save_mask_preview=True,
         save_tiling_preview=False,
@@ -532,8 +543,8 @@ _REQUIRED = {
         requested_tile_size_px=224,
         tolerance=0.05,
         overlap=0.0,
-        min_coverage={"tissue": 0.1},
     ),
+    MaskSamplingConfig: dict(pixel_mapping={"tumor": 1}, min_coverage={}),
     SegmentationConfig: dict(method="hsv"),
     FilterConfig: {},
     PreviewConfig: {},

@@ -62,7 +62,7 @@ The override must be finite and positive. It supplies missing metadata or replac
 
 ## Annotation sampling
 
-The default label vocabulary is `{background: 0, tissue: 1}`, with only `tissue` selected. Changing the label vocabulary or sampled set activates annotation sampling when at least one class has a non-null coverage threshold. Changing only the tissue threshold keeps binary tissue tiling.
+The default label vocabulary is `{background: 0, tissue: 1}`, with only `tissue` selected. Changing the label vocabulary or sampled set activates annotation sampling when at least one class has a non-null coverage threshold. Changing only the tissue threshold keeps binary tissue tiling. The `tiling.masks` block resolves to the [`MaskSamplingConfig`](api.md#mask-vocabulary) that the Python API takes.
 
 For a mask containing background `0`, tumor `1`, and stroma `2`, add this to the first-run config:
 
@@ -89,11 +89,11 @@ This selects tumor tiles with at least 50% coverage. Stroma is declared so the r
 
 - `pixel_mapping` must declare every raster label, with distinct integer values in `[0, 255]`, even if the raster uses a wider integer type. Undeclared pixel values fail validation. Names become directory components: do not use path separators, `.` or `..`; `merged` is reserved for merged output.
 - A label may list several raster values, e.g. `tumor: [1, 2]`. They are sampled as one class whose coverage is their sum, so `min_coverage.tumor: 0.5` keeps a tile that is 30% value `1` and 30% value `2`; separate labels under `output_mode: merged` would drop it, since each threshold is tested alone. A value may appear under one label only. Previews draw the whole class in the label's color.
-- `min_coverage` selects classes through non-null thresholds. Coverage reports (`frac` and `est_tiles`) are relative to the selected classes. Declare unannotated pixels in `pixel_mapping` and leave their threshold null to exclude them.
+- `min_coverage` selects classes through non-null thresholds, each a fraction in `[0, 1]`. Coverage reports (`frac` and `est_tiles`) are relative to the selected classes. Declare unannotated pixels in `pixel_mapping` and leave their threshold null to exclude them.
 - Configs are deep-merged with the defaults. `min_coverage.tissue: null` stops sampling tissue; `pixel_mapping.tissue: null` removes that label and its companion settings, allowing another class to use value `1`.
 - `colors` must cover the remaining labels when supplied. Use RGB triplets or null to omit an overlay for a class; set `colors: null` to omit the mapping.
 
-`output_mode: per_annotation` writes separate coordinate artifacts for selected classes. `output_mode: merged` writes their union as one per-slide artifact. By default, joint sampling builds candidates over the union mask and filters them by class coverage. Set `tiling.independent_sampling: true` to generate candidates separately for each class.
+`output_mode: per_annotation` writes separate coordinate artifacts for selected classes. `output_mode: merged` writes their union as one per-slide artifact. By default (`strategy: joint`), sampling builds candidates over the union mask and filters them by class coverage. Set `tiling.masks.strategy: independent` to generate candidates separately for each class. The former `tiling.independent_sampling` key is rejected with this replacement.
 
 Annotation sampling supports filled mask previews and a tiling-grid preview for each non-empty coordinate output. `resume`, `tiling.read_coordinates_from`, and `save_tiles` are not supported for this workflow; enabling them raises an error. See the [artifact reference](artifacts.md) for output paths and the common batch manifest.
 

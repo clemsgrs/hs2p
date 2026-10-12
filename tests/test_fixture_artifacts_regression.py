@@ -1,10 +1,12 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 from hs2p.api import (
+    DEFAULT_MASK_SAMPLING,
     FilterConfig,
     SegmentationConfig,
     SlideSpec,
@@ -41,7 +43,6 @@ def _build_tiling_configs(
         requested_tile_size_px=224,
         tolerance=0.07,
         overlap=0.0,
-        min_coverage={"tissue": tissue_pct},
         backend=backend,
         mask_backend=GOLDEN_MASK_BACKEND,
     )
@@ -84,6 +85,7 @@ def _run_and_save_tiles(
         segmentation=segmentation,
         filtering=filtering,
         num_workers=1,
+        masks=replace(DEFAULT_MASK_SAMPLING, min_coverage={"tissue": tissue_pct}),
     )
     artifacts = save_tiling_result(result, output_dir=output_dir)
     generated = np.load(artifacts.coordinates_npz_path, allow_pickle=False)

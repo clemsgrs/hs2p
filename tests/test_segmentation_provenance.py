@@ -10,6 +10,7 @@ segmentation threshold shaped its tiles.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -18,8 +19,10 @@ import pytest
 from PIL import Image
 
 from hs2p.api import (
+    DEFAULT_MASK_SAMPLING,
     BatchPartialFailureWarning,
     FilterConfig,
+    MaskSamplingConfig,
     SegmentationConfig,
     SlideSpec,
     TilingConfig,
@@ -29,7 +32,6 @@ from hs2p.api import (
 from hs2p.wsi.types import (
     CoordinateOutputMode,
     CoordinateSelectionStrategy,
-    SamplingSpec,
 )
 
 SPACING_UM = 0.5
@@ -72,10 +74,12 @@ def _tiling() -> TilingConfig:
         requested_tile_size_px=TILE_PX,
         tolerance=0.05,
         overlap=0.0,
-        min_coverage={"tissue": 0.5},
         backend="pil",
         mask_backend="pil",
     )
+
+
+_MASKS = replace(DEFAULT_MASK_SAMPLING, min_coverage={"tissue": 0.5})
 
 
 def _segmentation(*, sthresh: int) -> SegmentationConfig:
@@ -86,6 +90,7 @@ def _tile(slide: SlideSpec, output_dir: Path, *, sthresh: int, resume: bool = Fa
     return tile_slides(
         [slide],
         tiling=_tiling(),
+        masks=_MASKS,
         segmentation=_segmentation(sthresh=sthresh),
         filtering=FilterConfig(a_t=0, a_h=0),
         output_dir=output_dir,
@@ -202,12 +207,18 @@ def _write_annotation_mask(tmp_path: Path) -> Path:
     return path
 
 
-def _sampling() -> SamplingSpec:
-    return SamplingSpec(
+_STRATEGY_NAMES = {
+    CoordinateSelectionStrategy.JOINT_SAMPLING: "joint",
+    CoordinateSelectionStrategy.INDEPENDENT_SAMPLING: "independent",
+}
+
+
+def _annotation_masks(strategy: str, output_mode: str) -> MaskSamplingConfig:
+    return MaskSamplingConfig(
         pixel_mapping={"background": 0, "tumor": 1, "stroma": 2},
-        color_mapping=None,
-        tissue_percentage={"background": None, "tumor": 0.5, "stroma": 0.5},
-        active_annotations=("tumor", "stroma"),
+        min_coverage={"tumor": 0.5, "stroma": 0.5},
+        output_mode=output_mode,
+        strategy=_STRATEGY_NAMES[strategy],
     )
 
 
@@ -234,9 +245,7 @@ def test_annotation_sampling_metadata_records_null_thresholds_whatever_seg_param
         ),
         filtering=FilterConfig(a_t=0, a_h=0),
         output_dir=tmp_path / "out",
-        sampling=_sampling(),
-        selection_strategy=strategy,
-        output_mode=output_mode,
+        masks=_annotation_masks(strategy, output_mode),
     )
 
     assert artifacts

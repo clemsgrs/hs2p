@@ -22,7 +22,14 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from hs2p.api import FilterConfig, SegmentationConfig, SlideSpec, TilingConfig, tile_slide  # noqa: E402
+from hs2p.api import (  # noqa: E402
+    FilterConfig,
+    MaskSamplingConfig,
+    SegmentationConfig,
+    SlideSpec,
+    TilingConfig,
+    tile_slide,
+)
 from hs2p.tiling.generate import generate_tiles  # noqa: E402
 from hs2p.tiling.mask import open_tissue_mask, resolve_tissue_mask  # noqa: E402
 from hs2p.tiling.result import ContourResult  # noqa: E402
@@ -82,7 +89,9 @@ def build_case(name: str):
                 SlideSpec(sample_id="test-wsi", image_path=ROOT / "tests/fixtures/input/test-wsi.tif",
                           mask_path=ROOT / "tests/fixtures/input/test-mask.tif"),
                 tiling=TilingConfig(requested_spacing_um=0.5, requested_tile_size_px=224,
-                                    tolerance=0.07, overlap=0.0, min_coverage={"tissue": 0.1}, backend="openslide", mask_backend="openslide"),
+                                    tolerance=0.07, overlap=0.0, backend="openslide", mask_backend="openslide"),
+                masks=MaskSamplingConfig(pixel_mapping={"background": 0, "tissue": 1},
+                                         min_coverage={"tissue": 0.1}),
                 segmentation=SegmentationConfig(method="hsv", downsample=64),
                 filtering=FilterConfig(ref_tile_size=224, a_t=4, a_h=2), num_workers=1,
             )
