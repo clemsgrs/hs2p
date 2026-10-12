@@ -1,6 +1,8 @@
 from hs2p.api import (
+    DEFAULT_MASK_SAMPLING,
     BatchPartialFailureWarning,
     FilterConfig,
+    MaskSamplingConfig,
     PreviewConfig,
     SegmentationConfig,
     SlideSpec,

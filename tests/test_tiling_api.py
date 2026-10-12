@@ -14,7 +14,9 @@ from omegaconf import OmegaConf
 import hs2p
 import hs2p.preprocessing as preprocessing_mod
 from hs2p.api import (
+    DEFAULT_MASK_SAMPLING,
     CompatibilitySpec,
+    MaskSamplingConfig,
     FilterConfig,
     PreviewConfig,
     CoordinateOutputMode,
@@ -48,6 +50,15 @@ import hs2p.tiling.orchestration as orchestration_mod
 import hs2p.tiling.io as tiling_io_mod
 
 
+def _tissue_masks(threshold: float) -> MaskSamplingConfig:
+    """The shipped binary vocabulary at a given tissue-coverage threshold."""
+    return replace(DEFAULT_MASK_SAMPLING, min_coverage={"tissue": threshold})
+
+
+# The tissue threshold the fake preprocessing results below are written with.
+_MASKS = _tissue_masks(0.2)
+
+
 @pytest.fixture
 def tiling_config() -> TilingConfig:
     return TilingConfig(
@@ -55,7 +66,6 @@ def tiling_config() -> TilingConfig:
         requested_tile_size_px=224,
         tolerance=0.07,
         overlap=0.1,
-        min_coverage={"tissue": 0.2},
         backend="asap",
         mask_backend="asap",
     )
@@ -272,12 +282,14 @@ def _artifact_compatibility(
     tiling_config: TilingConfig,
     segmentation_config: SegmentationConfig,
     filter_config: FilterConfig,
+    masks: MaskSamplingConfig = _MASKS,
     selection_strategy: str | None = None,
     output_mode: str | None = None,
     annotation: str | None = None,
 ) -> CompatibilitySpec:
     return CompatibilitySpec(
         tiling=tiling_config,
+        masks=masks,
         segmentation=segmentation_config,
         filtering=filter_config,
         selection_strategy=selection_strategy,
@@ -317,7 +329,7 @@ def _patch_preprocess_slide(
             "spacing_override": request.whole_slide.spacing_at_level_0,
             "requested_tile_size_px": request.tiling.requested_tile_size_px,
             "requested_spacing_um": request.tiling.requested_spacing_um,
-            "min_tissue_fraction": (request.tiling.min_coverage.get("tissue") or 0.0),
+            "min_tissue_fraction": (request.masks.min_coverage.get("tissue") or 0.0),
             "overlap": request.tiling.overlap,
             "tolerance": request.tiling.tolerance,
             "seg_downsample": (
@@ -395,6 +407,7 @@ def _patch_preprocess_slide(
         whole_slide,
         *,
         tiling,
+        masks,
         segmentation,
         resolved_mask=None,
         filtering,
@@ -408,6 +421,7 @@ def _patch_preprocess_slide(
             SimpleNamespace(
                 whole_slide=whole_slide,
                 tiling=tiling,
+                masks=masks,
                 segmentation=segmentation,
                 filtering=filtering,
                 num_workers=num_workers,
@@ -476,6 +490,7 @@ def test_tile_slide_passes_default_sampling_semantics_for_masked_slides(
             mask_path=Path("slide-mask.png"),
         ),
         tiling=tiling_config,
+        masks=_MASKS,
         segmentation=segmentation_config,
         filtering=filter_config,
     )
@@ -512,6 +527,7 @@ def test_tile_slide_allows_masked_slides_without_segmentation_config(
             mask_path=Path("slide-mask.png"),
         ),
         tiling=tiling_config,
+        masks=_MASKS,
         filtering=filter_config,
     )
 
@@ -547,16 +563,50 @@ def test_tile_slide_hands_its_configs_to_the_typed_core(
         tiling=tiling_config,
         segmentation=segmentation_config,
         filtering=filter_config,
+        masks=_MASKS,
     )
 
     assert captured["tiling"] == tiling_config
     assert captured["segmentation"] is segmentation_config
     assert captured["filtering"] is filter_config
-    assert captured["min_tissue_fraction"] == tiling_config.min_coverage["tissue"]
+    assert captured["min_tissue_fraction"] == 0.2
+
+
+def test_tile_slide_defaults_to_the_shipped_tissue_threshold(
+    monkeypatch, tiling_config, segmentation_config, filter_config
+):
+    captured = {}
+    _patch_preprocess_slide(
+        monkeypatch,
+        result=_build_preprocessing_result(
+            sample_id="slide-1", image_path="slide.svs", mask_path=None
+        ),
+        hook=captured.update,
+    )
+
+    tile_slide(
+        SlideSpec(sample_id="slide-1", image_path=Path("slide.svs")),
+        tiling=tiling_config,
+        segmentation=segmentation_config,
+        filtering=filter_config,
+    )
+
+    assert captured["min_tissue_fraction"] == 0.01
+
+
+def test_tiling_config_no_longer_carries_a_coverage_threshold():
+    with pytest.raises(TypeError, match="min_coverage"):
+        TilingConfig(
+            requested_spacing_um=0.5,
+            requested_tile_size_px=224,
+            tolerance=0.07,
+            overlap=0.0,
+            min_coverage={"tissue": 0.1},
+        )
 
 
 def test_tile_slide_errors_when_tissue_coverage_missing(
-    monkeypatch, segmentation_config, filter_config
+    monkeypatch, tiling_config, segmentation_config, filter_config
 ):
     """Binary tissue tiling requires ``min_coverage.tissue``: a missing entry is an error,
     not a silent ``0.0`` (which keeps every tile and disables tissue filtering). Annotation
@@ -572,15 +622,6 @@ def test_tile_slide_errors_when_tissue_coverage_missing(
             output_mode=CoordinateOutputMode.MERGED,
         ),
     )
-    tiling = TilingConfig(
-        requested_spacing_um=0.5,
-        requested_tile_size_px=224,
-        tolerance=0.07,
-        overlap=0.1,
-        min_coverage={},  # no tissue threshold
-        backend="asap",
-        mask_backend="asap",
-    )
     with pytest.raises(ValueError, match="min_coverage.tissue is required"):
         tile_slide(
             SlideSpec(
@@ -588,9 +629,11 @@ def test_tile_slide_errors_when_tissue_coverage_missing(
                 image_path=Path("slide.svs"),
                 mask_path=Path("slide-mask.png"),
             ),
-            tiling=tiling,
+            tiling=tiling_config,
             segmentation=segmentation_config,
             filtering=filter_config,
+            # The binary vocabulary with no tissue threshold.
+            masks=replace(DEFAULT_MASK_SAMPLING, min_coverage={}),
         )
 
 
@@ -615,6 +658,7 @@ def test_tile_slide_returns_named_arrays(
             mask_path=Path("slide-1-mask.png"),
         ),
         tiling=tiling_config,
+        masks=_MASKS,
         segmentation=segmentation_config,
         filtering=filter_config,
         num_workers=2,
@@ -639,7 +683,7 @@ def test_tile_slide_returns_named_arrays(
     assert result.requested_spacing_um == tiling_config.requested_spacing_um
     assert result.requested_tile_size_px == tiling_config.requested_tile_size_px
     assert result.overlap == tiling_config.overlap
-    assert result.min_tissue_fraction == (tiling_config.min_coverage.get("tissue") or 0.0)
+    assert result.min_tissue_fraction == 0.2
     assert len(result.x) == 2
 
 
@@ -668,6 +712,7 @@ def test_compute_tiling_result_uses_preprocessing_core(
             spacing_at_level_0=0.25,
         ),
         tiling=tiling_config,
+        masks=_MASKS,
         segmentation=segmentation_config,
         filtering=filter_config,
         mask_preview_path=None,
@@ -681,7 +726,7 @@ def test_compute_tiling_result_uses_preprocessing_core(
     assert captured["spacing_override"] == 0.25
     assert captured["requested_tile_size_px"] == tiling_config.requested_tile_size_px
     assert captured["requested_spacing_um"] == tiling_config.requested_spacing_um
-    assert captured["min_tissue_fraction"] == (tiling_config.min_coverage.get("tissue") or 0.0)
+    assert captured["min_tissue_fraction"] == 0.2
     assert captured["overlap"] == tiling_config.overlap
     assert captured["seg_downsample"] == segmentation_config.downsample
     assert captured["tolerance"] == tiling_config.tolerance
@@ -1046,6 +1091,7 @@ def test_tile_slides_defers_preview_writes_until_after_next_slide_compute(
         whole_slide,
         *,
         tiling,
+        masks,
         segmentation,
         resolved_mask=None,
         filtering,
@@ -1106,6 +1152,7 @@ def test_tile_slides_defers_preview_writes_until_after_next_slide_compute(
             SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
         ],
         tiling=tiling_config,
+        masks=_MASKS,
         segmentation=segmentation_config,
         filtering=filter_config,
         preview=PreviewConfig(save_tiling_preview=True),
@@ -1154,10 +1201,10 @@ def test_pooled_tile_slides_render_tiling_previews_from_saved_artifacts(tmp_path
             requested_tile_size_px=64,
             tolerance=0.05,
             overlap=0.0,
-            min_coverage={"tissue": 0.5},
             backend="pil",
             mask_backend="pil",
         ),
+        masks=_tissue_masks(0.5),
         filtering=FilterConfig(a_t=0, a_h=0),
         preview=PreviewConfig(save_tiling_preview=True, downsample=1),
         output_dir=output_dir,
@@ -1250,6 +1297,7 @@ def test_tile_slides_uses_slide_level_pool_and_preserves_input_order(
             SlideSpec(sample_id="slide-3", image_path=Path("slide-3.svs")),
         ],
         tiling=tiling_config,
+        masks=_MASKS,
         segmentation=segmentation_config,
         filtering=filter_config,
         output_dir=tmp_path,
@@ -1333,6 +1381,7 @@ def test_tile_slides_assigns_inner_workers_when_batch_is_small(
             SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
         ],
         tiling=tiling_config,
+        masks=_MASKS,
         segmentation=segmentation_config,
         filtering=filter_config,
         output_dir=tmp_path,
@@ -1377,6 +1426,7 @@ def test_tile_slides_rejects_missing_turbojpeg_before_slide_compute(
         tile_slides(
             [SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs"))],
             tiling=tiling_config,
+            masks=_MASKS,
             segmentation=segmentation_config,
             filtering=filter_config,
             output_dir=tmp_path,
@@ -1446,8 +1496,8 @@ def test_compute_request_passes_inner_workers_to_tile_extraction(
             requested_tile_size_px=224,
             tolerance=0.07,
             overlap=0.0,
-            min_coverage={"tissue": 0.1},
         ),
+        masks=_tissue_masks(0.1),
         segmentation=SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
         resolved_mask=None,
         filtering=FilterConfig(
@@ -1508,6 +1558,7 @@ def test_tile_slides_resolves_all_masks_before_computing_any_slide(
         whole_slide,
         *,
         tiling,
+        masks,
         segmentation,
         resolved_mask=None,
         filtering,
@@ -1553,6 +1604,7 @@ def test_tile_slides_resolves_all_masks_before_computing_any_slide(
             SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
         ],
         tiling=tiling_config,
+        masks=_MASKS,
         segmentation=segmentation_config,
         filtering=filter_config,
         output_dir=tmp_path,
@@ -1606,6 +1658,7 @@ def test_tile_slides_emits_tissue_progress_before_tiling_progress(
         whole_slide,
         *,
         tiling,
+        masks,
         segmentation,
         resolved_mask=None,
         filtering,
@@ -1651,6 +1704,7 @@ def test_tile_slides_emits_tissue_progress_before_tiling_progress(
             SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
         ],
         tiling=tiling_config,
+        masks=_MASKS,
         segmentation=segmentation_config,
         filtering=filter_config,
         output_dir=tmp_path,
@@ -1756,6 +1810,7 @@ def test_tile_slides_uses_process_pool_for_tissue_resolution(
             SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
         ],
         tiling=tiling_config,
+        masks=_MASKS,
         segmentation=segmentation_config,
         filtering=filter_config,
         output_dir=tmp_path,
@@ -1876,6 +1931,7 @@ def test_tile_slides_uses_spawn_pool_for_sam2_work(
             SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
         ],
         tiling=tiling_config,
+        masks=_MASKS,
         segmentation=segmentation,
         filtering=filter_config,
         output_dir=tmp_path,
@@ -1999,6 +2055,7 @@ def test_tile_slides_uses_spawn_pool_for_non_sam2_work(
             SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
         ],
         tiling=tiling_config,
+        masks=_MASKS,
         segmentation=segmentation_config,
         filtering=filter_config,
         output_dir=tmp_path,
@@ -2052,8 +2109,8 @@ def test_tile_slides_defaults_gpu_decode_to_disabled_for_saved_tiles(
             requested_tile_size_px=224,
             tolerance=0.07,
             overlap=0.1,
-            min_coverage={"tissue": 0.2},
         ),
+        masks=_MASKS,
         segmentation=segmentation_config,
         filtering=filter_config,
         output_dir=tmp_path / "run",
@@ -2139,6 +2196,7 @@ def test_tile_slide_surfaces_preprocessing_errors(
         tile_slide(
             SlideSpec(sample_id="slide-bad-tissue", image_path=Path("slide.svs")),
             tiling=tiling_config,
+            masks=_MASKS,
             segmentation=segmentation_config,
             filtering=filter_config,
         )
@@ -2152,6 +2210,7 @@ def test_tile_slide_requires_segmentation_when_mask_is_missing(
         tile_slide(
             SlideSpec(sample_id="slide-bad-tissue", image_path=Path("slide.svs")),
             tiling=tiling_config,
+            masks=_MASKS,
             filtering=filter_config,
         )
 
@@ -2170,7 +2229,6 @@ def test_validate_tiling_artifacts_rejects_mismatched_tiling_config(
         requested_tile_size_px=tiling_config.requested_tile_size_px,
         tolerance=tiling_config.tolerance,
         overlap=tiling_config.overlap,
-        min_coverage=tiling_config.min_coverage,
         backend=tiling_config.backend,
     )
 
@@ -2289,7 +2347,6 @@ def test_validate_tiling_artifacts_ignores_disabled_filter_threshold_mismatches(
         requested_tile_size_px=result.requested_tile_size_px,
         tolerance=result.tolerance,
         overlap=result.overlap,
-        min_coverage={"tissue": result.min_tissue_fraction},
         backend=result.backend,
     )
     matching_segmentation = SegmentationConfig(
@@ -2327,6 +2384,7 @@ def test_validate_tiling_artifacts_ignores_disabled_filter_threshold_mismatches(
         coordinates_meta_path=artifacts.coordinates_meta_path,
         compatibility=_artifact_compatibility(
             tiling_config=matching_tiling,
+            masks=_tissue_masks(result.min_tissue_fraction),
             segmentation_config=matching_segmentation,
             filter_config=compatibility_filter,
         ),
@@ -2347,7 +2405,6 @@ def test_validate_tiling_artifacts_ignores_tissue_method_for_precomputed_masks(
         requested_tile_size_px=result.requested_tile_size_px,
         tolerance=result.tolerance,
         overlap=result.overlap,
-        min_coverage={"tissue": result.min_tissue_fraction},
         backend=result.backend,
     )
     incompatible_segmentation = SegmentationConfig(
@@ -2385,6 +2442,7 @@ def test_validate_tiling_artifacts_ignores_tissue_method_for_precomputed_masks(
         coordinates_meta_path=artifacts.coordinates_meta_path,
         compatibility=_artifact_compatibility(
             tiling_config=matching_tiling,
+            masks=_tissue_masks(result.min_tissue_fraction),
             segmentation_config=incompatible_segmentation,
             filter_config=matching_filter,
         ),
@@ -2411,7 +2469,6 @@ def test_validate_tiling_artifacts_compares_requested_seg_downsample_not_resolve
         requested_tile_size_px=result.requested_tile_size_px,
         tolerance=result.tolerance,
         overlap=result.overlap,
-        min_coverage={"tissue": result.min_tissue_fraction},
         backend=result.backend,
     )
     requested_segmentation = SegmentationConfig(
@@ -2447,6 +2504,7 @@ def test_validate_tiling_artifacts_compares_requested_seg_downsample_not_resolve
         coordinates_meta_path=artifacts.coordinates_meta_path,
         compatibility=_artifact_compatibility(
             tiling_config=matching_tiling,
+            masks=_tissue_masks(result.min_tissue_fraction),
             segmentation_config=requested_segmentation,
             filter_config=matching_filter,
         ),
@@ -2594,7 +2652,6 @@ def test_validate_tiling_artifacts_rejects_mismatched_requested_seg_downsample(
         requested_tile_size_px=result.requested_tile_size_px,
         tolerance=result.tolerance,
         overlap=result.overlap,
-        min_coverage={"tissue": result.min_tissue_fraction},
         backend=result.backend,
     )
     incompatible_segmentation = SegmentationConfig(
@@ -2631,6 +2688,7 @@ def test_validate_tiling_artifacts_rejects_mismatched_requested_seg_downsample(
             coordinates_meta_path=artifacts.coordinates_meta_path,
             compatibility=_artifact_compatibility(
                 tiling_config=matching_tiling,
+            masks=_tissue_masks(result.min_tissue_fraction),
                 segmentation_config=incompatible_segmentation,
                 filter_config=matching_filter,
             ),
@@ -2649,7 +2707,7 @@ def test_validate_tiling_artifacts_rejects_mismatched_image_path(tmp_path: Path)
                 coordinates_npz_path=artifacts.coordinates_npz_path,
                 coordinates_meta_path=artifacts.coordinates_meta_path,
                 compatibility=_artifact_compatibility(
-                    tiling_config=TilingConfig(requested_spacing_um=0.5, requested_tile_size_px=224, tolerance=0.07, overlap=0.0, min_coverage={"tissue": 0.1}, backend="asap"),
+                    tiling_config=TilingConfig(requested_spacing_um=0.5, requested_tile_size_px=224, tolerance=0.07, overlap=0.0, backend="asap"),
                     segmentation_config=SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
                     filter_config=FilterConfig(
                         ref_tile_size=224,
@@ -2683,7 +2741,7 @@ def test_validate_tiling_artifacts_rejects_mismatched_mask_path(tmp_path: Path):
                 coordinates_npz_path=artifacts.coordinates_npz_path,
                 coordinates_meta_path=artifacts.coordinates_meta_path,
                 compatibility=_artifact_compatibility(
-                    tiling_config=TilingConfig(requested_spacing_um=0.5, requested_tile_size_px=224, tolerance=0.07, overlap=0.0, min_coverage={"tissue": 0.1}, backend="asap"),
+                    tiling_config=TilingConfig(requested_spacing_um=0.5, requested_tile_size_px=224, tolerance=0.07, overlap=0.0, backend="asap"),
                     segmentation_config=SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
                     filter_config=FilterConfig(
                         ref_tile_size=224,
@@ -2719,6 +2777,7 @@ def test_tile_slides_writes_process_list_and_can_reuse_precomputed_tiles(
     source_result = tile_slide(
         SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs")),
         tiling=tiling_config,
+        masks=_MASKS,
         segmentation=segmentation_config,
         filtering=filter_config,
     )
@@ -2736,6 +2795,7 @@ def test_tile_slides_writes_process_list_and_can_reuse_precomputed_tiles(
     artifacts = tile_slides(
         [SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs"))],
         tiling=tiling_config,
+        masks=_MASKS,
         segmentation=segmentation_config,
         filtering=filter_config,
         output_dir=tmp_path / "run",
@@ -2848,6 +2908,7 @@ def test_tile_slides_omits_tiling_preview_path_when_no_tiles(
     artifacts = tile_slides(
         [SlideSpec(sample_id="slide-0", image_path=Path("slide-0.svs"))],
         tiling=tiling_config,
+        masks=_MASKS,
         segmentation=segmentation_config,
         filtering=filter_config,
         preview=PreviewConfig(save_tiling_preview=True),
@@ -2911,6 +2972,7 @@ def test_tile_slides_writes_preview_paths_when_previews_are_saved(
         artifacts = tile_slides(
             [SlideSpec(sample_id="slide-preview", image_path=Path("slide-preview.svs"))],
             tiling=tiling_config,
+            masks=_MASKS,
             segmentation=segmentation_config,
             filtering=filter_config,
             preview=PreviewConfig(save_mask_preview=True, save_tiling_preview=True),
@@ -2985,6 +3047,7 @@ def test_tile_slides_does_not_report_checkpoint_failure_as_preview_failure(
             tile_slides(
                 [SlideSpec(sample_id="slide-preview", image_path=Path("slide-preview.svs"))],
                 tiling=tiling_config,
+                masks=_MASKS,
                 segmentation=segmentation_config,
                 filtering=filter_config,
                 preview=PreviewConfig(save_tiling_preview=True),
@@ -3035,6 +3098,7 @@ def test_tile_slides_mask_preview_uses_overlay_renderer_with_preview_style(
     artifacts = tile_slides(
         [SlideSpec(sample_id="slide-preview", image_path=Path("slide-preview.svs"))],
         tiling=tiling_config,
+        masks=_MASKS,
         segmentation=segmentation_config,
         filtering=filter_config,
         preview=PreviewConfig(
@@ -3111,6 +3175,7 @@ def test_tile_slides_resume_marks_stale_artifact_as_failed(
         reused = tile_slides(
             [SlideSpec(sample_id="slide-6", image_path=Path("requested-slide.svs"))],
             tiling=tiling_config,
+            masks=_MASKS,
             segmentation=segmentation_config,
             filtering=filter_config,
             output_dir=tmp_path / "run",
@@ -3183,6 +3248,7 @@ def test_tile_slides_resume_preserves_extra_columns_and_existing_preview_paths(
     reused = tile_slides(
         [SlideSpec(sample_id="slide-resume", image_path=Path("slide-resume.svs"))],
         tiling=tiling_config,
+        masks=_MASKS,
         segmentation=segmentation_config,
         filtering=filter_config,
         preview=PreviewConfig(save_mask_preview=True, save_tiling_preview=True),
@@ -3255,6 +3321,7 @@ def test_tile_slides_resume_matches_numeric_and_na_like_sample_ids(
     reused = tile_slides(
         [SlideSpec(sample_id=sample_id, image_path=Path("slide.svs"))],
         tiling=tiling_config,
+        masks=_MASKS,
         segmentation=segmentation_config,
         filtering=filter_config,
         preview=PreviewConfig(save_mask_preview=True, save_tiling_preview=True),
@@ -3325,6 +3392,7 @@ def test_tile_slides_resume_trusts_recorded_downstream_output_provenance(
     reused = tile_slides(
         [SlideSpec(sample_id="slide-resume", image_path=Path("slide-resume.svs"))],
         tiling=tiling_config,
+        masks=_MASKS,
         segmentation=segmentation_config,
         filtering=filter_config,
         preview=(
@@ -3367,6 +3435,7 @@ def test_tile_slides_logs_failures_in_real_time(
         artifacts = tile_slides(
             [SlideSpec(sample_id="slide-log", image_path=Path("slide-log.svs"))],
             tiling=tiling_config,
+            masks=_MASKS,
             segmentation=segmentation_config,
             filtering=filter_config,
             output_dir=tmp_path,
@@ -3411,6 +3480,7 @@ def test_tile_slides_returns_successes_and_warns_once_after_attempting_all_slide
                 SlideSpec(sample_id="slide-4", image_path=Path("slide-4.svs")),
             ],
             tiling=tiling_config,
+            masks=_MASKS,
             segmentation=segmentation_config,
             filtering=filter_config,
             output_dir=tmp_path,
@@ -3457,6 +3527,7 @@ def test_tile_slides_all_success_returns_every_artifact_without_partial_failure_
                 SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
             ],
             tiling=tiling_config,
+            masks=_MASKS,
             segmentation=segmentation_config,
             filtering=filter_config,
             output_dir=tmp_path,
@@ -3488,6 +3559,7 @@ def test_tile_slides_partial_failure_warning_supplies_reason_for_blank_exception
         artifacts = tile_slides(
             [SlideSpec(sample_id="slide-blank", image_path=Path("slide-blank.svs"))],
             tiling=tiling_config,
+            masks=_MASKS,
             segmentation=segmentation_config,
             filtering=filter_config,
             output_dir=tmp_path,
@@ -3524,6 +3596,7 @@ def test_tile_slides_resume_rejects_unsupported_process_list_schema(
         tile_slides(
             [SlideSpec(sample_id="slide-7", image_path=Path("slide-7.svs"))],
             tiling=tiling_config,
+            masks=_MASKS,
             segmentation=segmentation_config,
             filtering=filter_config,
             output_dir=run_dir,
@@ -3569,6 +3642,7 @@ def test_tile_slides_writes_process_list_incrementally(
                 SlideSpec(sample_id="slide-2", image_path=Path("slide-2.svs")),
             ],
             tiling=tiling_config,
+            masks=_MASKS,
             segmentation=segmentation_config,
             filtering=filter_config,
             output_dir=run_dir,
@@ -3793,7 +3867,6 @@ def test_process_list_checkpoint_removes_temp_file_on_failure(monkeypatch, tmp_p
                 requested_tile_size_px=224,
                 tolerance=0.07,
                 overlap=0.1,
-                min_coverage={"tissue": 0.2},
             ),
             segmentation=SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
             filtering=FilterConfig(
@@ -3886,6 +3959,7 @@ def test_tile_slides_uses_one_process_list_checkpoint(
     tile_slides(
         [SlideSpec(sample_id="slide-1", image_path=Path("slide-1.svs"))],
         tiling=tiling_config,
+        masks=_MASKS,
         segmentation=segmentation_config,
         filtering=filter_config,
         output_dir=tmp_path,
@@ -3969,7 +4043,6 @@ def test_config_dataclasses_apply_package_defaults_for_secondary_parameters():
         requested_tile_size_px=224,
         tolerance=0.07,
         overlap=0.0,
-        min_coverage={"tissue": 0.1},
     )
     segmentation = SegmentationConfig(method="hsv", downsample=64)
     filtering = FilterConfig(ref_tile_size=224, a_t=4, a_h=2)
@@ -4117,7 +4190,7 @@ def test_maybe_load_existing_artifacts_zero_tiles_meta_only(tmp_path: Path):
         ),
         read_coordinates_from=tiles_dir,
             compatibility=_artifact_compatibility(
-                tiling_config=TilingConfig(requested_spacing_um=0.5, requested_tile_size_px=224, tolerance=0.07, overlap=0.1, min_coverage={"tissue": 0.2}, backend="asap"),
+                tiling_config=TilingConfig(requested_spacing_um=0.5, requested_tile_size_px=224, tolerance=0.07, overlap=0.1, backend="asap"),
                 segmentation_config=SegmentationConfig(
                     method="hsv",
                     downsample=64,
@@ -4216,6 +4289,7 @@ def test_tile_slides_deferred_preview_failure_records_base_artifact_backends(
         artifacts = tile_slides(
             [SlideSpec(sample_id="slide-preview", image_path=Path("slide-preview.svs"))],
             tiling=tiling_config,
+            masks=_MASKS,
             segmentation=segmentation_config,
             filtering=filter_config,
             preview=PreviewConfig(save_tiling_preview=True),
@@ -4287,6 +4361,7 @@ def test_tile_slides_resume_validation_failure_records_requested_and_resolved_ba
                 )
             ],
             tiling=tiling_config,
+            masks=_MASKS,
             segmentation=segmentation_config,
             filtering=filter_config,
             output_dir=run_dir,
@@ -4331,6 +4406,7 @@ def test_tile_slides_backend_resolution_failure_records_requested_with_null_reso
                 )
             ],
             tiling=tiling_config,
+            masks=_MASKS,
             segmentation=segmentation_config,
             filtering=filter_config,
             output_dir=tmp_path,

@@ -15,12 +15,13 @@ from PIL import Image
 import hs2p.wsi.reader as reader_mod
 from hs2p.api import (
     BatchPartialFailureWarning,
+    MaskSamplingConfig,
     SlideSpec,
     TilingConfig,
     tile_slide,
     tile_slides,
 )
-from hs2p.wsi.types import CoordinateOutputMode, CoordinateSelectionStrategy, SamplingSpec
+from hs2p.wsi.types import CoordinateOutputMode, CoordinateSelectionStrategy
 
 
 def _opens_if(condition: bool) -> "reader_mod._ProbeOutcome":
@@ -115,18 +116,26 @@ def _tiling(*, mask_backend: str = "openslide") -> TilingConfig:
         requested_tile_size_px=64,
         tolerance=0.05,
         overlap=0.0,
-        min_coverage={"tissue": 0.5},
         backend="pil",
         mask_backend=mask_backend,
     )
 
 
-def _sampling() -> SamplingSpec:
-    return SamplingSpec(
+_STRATEGY_NAMES = {
+    CoordinateSelectionStrategy.JOINT_SAMPLING: "joint",
+    CoordinateSelectionStrategy.INDEPENDENT_SAMPLING: "independent",
+}
+
+
+def _masks(
+    strategy: str = CoordinateSelectionStrategy.JOINT_SAMPLING,
+    output_mode: str = CoordinateOutputMode.PER_ANNOTATION,
+) -> MaskSamplingConfig:
+    return MaskSamplingConfig(
         pixel_mapping=PIXEL_MAPPING,
-        color_mapping=None,
-        tissue_percentage={"background": None, "tumor": 0.5, "stroma": 0.5},
-        active_annotations=("tumor", "stroma"),
+        min_coverage={"tumor": 0.5, "stroma": 0.5},
+        output_mode=output_mode,
+        strategy=_STRATEGY_NAMES[strategy],
     )
 
 
@@ -151,8 +160,7 @@ def test_tile_slide_samples_each_annotation_of_a_multi_value_mask(
     results = tile_slide(
         whole_slide,
         tiling=_tiling(),
-        sampling=_sampling(),
-        selection_strategy=strategy,
+        masks=_masks(strategy),
     )
 
     assert set(results) == {"tumor", "stroma"}
@@ -182,8 +190,7 @@ def test_tile_slide_merges_annotation_coordinates_into_one_result(monkeypatch, t
     results = tile_slide(
         whole_slide,
         tiling=_tiling(),
-        sampling=_sampling(),
-        output_mode=CoordinateOutputMode.MERGED,
+        masks=_masks(output_mode=CoordinateOutputMode.MERGED),
     )
 
     assert set(results) == {None}
@@ -199,7 +206,7 @@ def test_tile_slide_accepts_a_mask_holding_a_subset_of_the_declared_ids(
     whole_slide = _slide_spec(tmp_path)
     _serve_mask(monkeypatch, reader)
 
-    results = tile_slide(whole_slide, tiling=_tiling(), sampling=_sampling())
+    results = tile_slide(whole_slide, tiling=_tiling(), masks=_masks())
 
     assert _tiles(results["tumor"]) == [(0, 0), (0, 64), (64, 0), (64, 64)]
     assert _tiles(results["stroma"]) == []
@@ -213,7 +220,7 @@ def test_tile_slide_closes_the_annotation_mask_when_its_decode_fails(
     _serve_mask(monkeypatch, reader)
 
     with pytest.raises(RuntimeError, match="codec unavailable") as excinfo:
-        tile_slide(whole_slide, tiling=_tiling(), sampling=_sampling())
+        tile_slide(whole_slide, tiling=_tiling(), masks=_masks())
 
     assert str(whole_slide.mask_path) in str(excinfo.value)
     assert "backend=openslide" in str(excinfo.value)
@@ -235,7 +242,7 @@ def test_tile_slide_opens_the_annotation_mask_with_the_preflight_backend(
     monkeypatch.setattr(reader_mod, "_probe_backend", _only_openslide_opens)
 
     results = tile_slide(
-        whole_slide, tiling=_tiling(mask_backend="auto"), sampling=_sampling()
+        whole_slide, tiling=_tiling(mask_backend="auto"), masks=_masks()
     )
 
     # One preflight probe sequence; opening the mask does not resolve ``auto`` again.
@@ -254,7 +261,7 @@ def test_tile_slides_records_annotation_mask_provenance(monkeypatch, tmp_path):
         tiling=_tiling(),
         output_dir=tmp_path / "output",
         num_workers=1,
-        sampling=_sampling(),
+        masks=_masks(),
     )
 
     assert {artifact.annotation: artifact.num_tiles for artifact in artifacts} == {
@@ -282,7 +289,7 @@ def test_tile_slides_records_a_failed_annotation_mask_read(monkeypatch, tmp_path
             tiling=_tiling(),
             output_dir=tmp_path / "output",
             num_workers=1,
-            sampling=_sampling(),
+            masks=_masks(),
         )
 
     rows = pd.read_csv(tmp_path / "output" / "process_list.csv")
@@ -302,7 +309,7 @@ def test_tile_slide_rejects_an_annotation_id_outside_the_declared_mapping(
     _serve_mask(monkeypatch, reader)
 
     with pytest.raises(ValueError, match=r"undeclared label IDs \[4\]"):
-        tile_slide(whole_slide, tiling=_tiling(), sampling=_sampling())
+        tile_slide(whole_slide, tiling=_tiling(), masks=_masks())
 
     assert reader.close_count == 1
 
@@ -316,7 +323,7 @@ def test_tile_slide_rejects_an_annotation_mask_that_does_not_cover_the_slide(
     _serve_mask(monkeypatch, reader)
 
     with pytest.raises(ValueError, match="Mask alignment failed"):
-        tile_slide(whole_slide, tiling=_tiling(), sampling=_sampling())
+        tile_slide(whole_slide, tiling=_tiling(), masks=_masks())
 
     assert reader.read_levels == []
     assert reader.close_count == 1
@@ -327,7 +334,7 @@ def test_tile_slide_samples_a_flat_png_annotation_mask_without_spacing(tmp_path)
     Image.fromarray(_annotations()).save(whole_slide.mask_path)
 
     results = tile_slide(
-        whole_slide, tiling=_tiling(mask_backend="auto"), sampling=_sampling()
+        whole_slide, tiling=_tiling(mask_backend="auto"), masks=_masks()
     )
 
     assert _tiles(results["tumor"]) == sorted(TUMOR_TILES)

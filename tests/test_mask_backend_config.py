@@ -11,7 +11,6 @@ def _tiling(**overrides):
         requested_tile_size_px=256,
         tolerance=0.05,
         overlap=0.0,
-        min_coverage={"tissue": 0.1},
     )
     params.update(overrides)
     return TilingConfig(**params)

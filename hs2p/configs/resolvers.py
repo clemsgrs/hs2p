@@ -2,29 +2,25 @@ from pathlib import Path
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-import numpy as np
-
 from hs2p.fileops import validate_annotation_name
-from hs2p.wsi.types import (
-    CoordinateOutputMode,
-    CoordinateSelectionStrategy,
-    PixelMapping,
-    SamplingSpec,
-    pixel_values,
-)
+from hs2p.wsi.types import CoordinateSelectionStrategy, SamplingSpec
 
 from .keys import reject_unknown_config_keys
-from .models import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig
-from .values import check_config_values, construct_config
+from .models import (
+    DEFAULT_MASK_SAMPLING,
+    FilterConfig,
+    MaskSamplingConfig,
+    PreviewConfig,
+    SegmentationConfig,
+    TilingConfig,
+    validate_pixel_mapping,
+)
+from .values import construct_config
 
 
 def resolve_tiling_config(cfg: Any) -> TilingConfig:
     reject_unknown_config_keys(cfg.tiling, path="tiling")
     params = _checked_section(cfg.tiling.params, path="tiling.params")
-    masks = _checked_section(cfg.tiling.masks, path="tiling.masks")
-    min_coverage = dict(
-        _merge_sampling_mapping(masks.min_coverage, field_name="min_coverage") or {}
-    )
     return construct_config(
         TilingConfig,
         {
@@ -32,8 +28,6 @@ def resolve_tiling_config(cfg: Any) -> TilingConfig:
             "tiling.params.requested_tile_size_px": params.requested_tile_size_px,
             "tiling.params.tolerance": params.tolerance,
             "tiling.params.overlap": params.overlap,
-            "tiling.masks.min_coverage": min_coverage,
-            "tiling.independent_sampling": cfg.tiling.independent_sampling,
             "tiling.backend": cfg.tiling.backend,
             "tiling.mask_backend": getattr(cfg.tiling, "mask_backend", "auto"),
         },
@@ -53,7 +47,7 @@ def _checked_section(section: Any, *, path: str) -> Any:
     return section
 
 
-def require_tissue_fraction(tiling: TilingConfig) -> float:
+def require_tissue_fraction(masks: MaskSamplingConfig) -> float:
     """Tissue-coverage threshold for the binary tissue-tiling path.
 
     Used only where binary tissue tiling actually gates on the threshold; annotation
@@ -61,7 +55,7 @@ def require_tissue_fraction(tiling: TilingConfig) -> float:
     is an error rather than a silent ``0.0`` (which would keep every tile and disable
     tissue filtering). An explicit ``0.0`` is honoured as a deliberate opt-out.
     """
-    value = tiling.min_coverage.get("tissue")
+    value = masks.min_coverage.get("tissue")
     if value is None:
         raise ValueError(
             "tiling.masks.min_coverage.tissue is required for tissue tiling. Set it (e.g. "
@@ -114,82 +108,46 @@ def resolve_read_coordinates_from(cfg: Any) -> Path | None:
     return Path(value)
 
 
-def resolve_sampling_strategy(cfg: Any) -> str:
-    """Derive selection strategy from tiling.independent_sampling."""
-    independent = check_config_values(
-        TilingConfig,
-        {
-            "tiling.independent_sampling": getattr(
-                cfg.tiling, "independent_sampling", False
-            )
-        },
-    )["independent_sampling"]
-    if independent:
-        return CoordinateSelectionStrategy.INDEPENDENT_SAMPLING
-    return CoordinateSelectionStrategy.JOINT_SAMPLING
+_SELECTION_STRATEGIES = {
+    "joint": CoordinateSelectionStrategy.JOINT_SAMPLING,
+    "independent": CoordinateSelectionStrategy.INDEPENDENT_SAMPLING,
+}
 
 
-def resolve_output_mode(cfg: Any) -> str:
-    """Derive the coordinate output mode from ``tiling.masks.output_mode``.
+def is_binary_tissue_tiling(masks: MaskSamplingConfig) -> bool:
+    """Whether ``masks`` asks for binary tissue tiling rather than annotation sampling.
 
-    ``per_annotation`` (default) writes one coordinate artifact per sampled class;
-    ``merged`` writes one merged per-slide artifact (the union of tiles passing any
-    class threshold).
+    The signal is configuration, not label names: the shipped ``{background, tissue}``
+    vocabulary sampling only ``tissue`` (or sampling nothing) is binary tissue tiling; any
+    change to the label vocabulary or the sampled set opts into multi-label annotation
+    sampling. Colors, output mode and strategy do not change the decision.
     """
-    masks_cfg = getattr(cfg.tiling, "masks", None)
-    raw = getattr(masks_cfg, "output_mode", None) if masks_cfg is not None else None
-    value = str(raw or CoordinateOutputMode.PER_ANNOTATION).lower()
-    valid = {CoordinateOutputMode.PER_ANNOTATION, CoordinateOutputMode.MERGED}
-    if value not in valid:
-        raise ValueError(
-            f"tiling.masks.output_mode must be one of {sorted(valid)}, got {value!r}"
-        )
-    return value
+    if not masks.min_coverage:
+        return True
+    return masks.pixel_mapping == DEFAULT_MASK_SAMPLING.pixel_mapping and set(
+        masks.min_coverage
+    ) == set(DEFAULT_MASK_SAMPLING.min_coverage)
 
 
 def resolve_sampling_request(
-    cfg: Any,
     *,
-    tiling: TilingConfig,
+    masks: MaskSamplingConfig,
 ) -> tuple[SamplingSpec | None, str | None, str | None]:
-    """Resolve the annotation-sampling invocation for the CLI tiling entrypoint.
+    """Resolve how ``masks`` is tiled.
 
-    Returns ``(sampling, selection_strategy, output_mode)`` when the masks config has been
-    customized away from the shipped default, else ``(None, None, None)`` so the caller takes
-    the binary tissue-tiling path. The signal is configuration, not label names: a spec equal
-    to :func:`build_default_sampling_spec` (the untouched default ``{background, tissue}``
-    setup) is binary tissue tiling; any change to the label vocabulary or the sampled set opts
-    into multi-label annotation sampling. The structural output identity ``"merged"`` is
-    reserved and rejected while resolving the sampling spec.
+    Returns ``(sampling, selection_strategy, output_mode)`` for annotation sampling, else
+    ``(None, None, None)`` so the caller takes the binary tissue-tiling path (see
+    :func:`is_binary_tissue_tiling`).
     """
-    spec = resolve_sampling_spec(cfg, tiling=tiling)
-    if not spec.active_annotations:
+    if is_binary_tissue_tiling(masks):
         return None, None, None
-    # Compare against the default skeleton's constants, not a built default spec: an
-    # annotation-only config (no ``tissue`` threshold) must not trip the tissue requirement
-    # baked into build_default_sampling_spec just to detect the untouched default.
-    is_untouched_default = dict(spec.pixel_mapping) == _DEFAULT_PIXEL_MAPPING and set(
-        spec.active_annotations
-    ) == set(_DEFAULT_ACTIVE_ANNOTATIONS)
-    if is_untouched_default:
-        return None, None, None
-    return spec, resolve_sampling_strategy(cfg), resolve_output_mode(cfg)
-
-
-_DEFAULT_PIXEL_MAPPING = {"background": 0, "tissue": 1}
-_DEFAULT_ACTIVE_ANNOTATIONS = ("tissue",)
-
-
-def build_default_sampling_spec(tiling: TilingConfig) -> SamplingSpec:
-    return SamplingSpec(
-        pixel_mapping=dict(_DEFAULT_PIXEL_MAPPING),
-        color_mapping={"background": None, "tissue": None},
-        tissue_percentage={
-            "background": None,
-            "tissue": require_tissue_fraction(tiling),
-        },
-        active_annotations=_DEFAULT_ACTIVE_ANNOTATIONS,
+    sampling = SamplingSpec(
+        pixel_mapping=dict(masks.pixel_mapping),
+        color_mapping=None if masks.colors is None else dict(masks.colors),
+        tissue_percentage=dict(masks.min_coverage),
+        active_annotations=tuple(masks.min_coverage),
     )
+    return sampling, _SELECTION_STRATEGIES[masks.strategy], masks.output_mode
 
 
 def _merge_sampling_mapping(
@@ -216,51 +174,6 @@ def _merge_sampling_mapping(
     return merged
 
 
-def validate_pixel_mapping(pixel_mapping: PixelMapping) -> None:
-    """Validate the annotation ``pixel_mapping`` up front, before any slide is opened.
-
-    ``pixel_mapping`` is the user's own label vocabulary except for ``"merged"``, which names
-    structural merged coordinate output. Each label must map to a distinct integer in the
-    preview-safe range ``[0, 255]`` so all consumers preserve it without silent wrapping, or
-    to a non-empty list of such integers merged into one class. No raw value may be claimed
-    twice, within a label or across labels.
-
-    Label *names* become on-disk path components (``output_dir/tiles/<label>/...`` for
-    per-annotation artifacts), so they must be safe single path components — no separators,
-    no ``.``/``..`` — to keep artifacts inside the run's output directory.
-    """
-    seen: dict[int, str] = {}
-    for annotation, entry in pixel_mapping.items():
-        validate_annotation_name(annotation)
-        values = pixel_values(entry)
-        if not values:
-            raise ValueError(
-                f"pixel_mapping['{annotation}'] must list at least one integer label value"
-            )
-        for value in values:
-            if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
-                raise ValueError(
-                    f"pixel_mapping['{annotation}'] must be an integer label value, "
-                    f"got {value!r}"
-                )
-            ivalue = int(value)
-            if ivalue < 0 or ivalue > 255:
-                raise ValueError(
-                    f"pixel_mapping['{annotation}']={ivalue} is outside the supported "
-                    "label range [0, 255]"
-                )
-            if seen.get(ivalue) == annotation:
-                raise ValueError(
-                    f"pixel_mapping['{annotation}'] lists {ivalue} more than once"
-                )
-            if ivalue in seen:
-                raise ValueError(
-                    "pixel_mapping values must be unique: "
-                    f"'{annotation}' and '{seen[ivalue]}' both map to {ivalue}"
-                )
-            seen[ivalue] = annotation
-
-
 def validate_sampling_spec(sampling: SamplingSpec) -> None:
     """Validate every annotation declaration accepted by direct Python sampling APIs."""
     validate_pixel_mapping(sampling.pixel_mapping)
@@ -279,55 +192,55 @@ def _validate_annotation_names(*declarations: Any) -> None:
             validate_annotation_name(annotation)
 
 
-def validate_color_mapping(
-    *,
-    pixel_mapping: PixelMapping,
-    color_mapping: dict[str, Sequence[int] | None],
-) -> None:
-    missing_annotations = sorted(set(pixel_mapping.keys()) - set(color_mapping.keys()))
-    if missing_annotations:
-        raise ValueError(
-            "color_mapping is missing annotation keys required by pixel_mapping: "
-            + ", ".join(missing_annotations)
-        )
-    unexpected_annotations = sorted(set(color_mapping.keys()) - set(pixel_mapping.keys()))
-    if unexpected_annotations:
-        raise ValueError(
-            "color_mapping has unexpected annotation keys: "
-            + ", ".join(unexpected_annotations)
-        )
+def resolve_mask_sampling_config(cfg: Any) -> MaskSamplingConfig:
+    """Build the :class:`MaskSamplingConfig` declared by ``tiling.masks``.
 
-    for annotation, color in color_mapping.items():
-        if color is None:
-            continue
-        if isinstance(color, (str, bytes)):
-            raise ValueError(
-                f"color_mapping['{annotation}'] must be None or a length-3 RGB sequence"
-            )
-        if not isinstance(color, Sequence) or len(color) != 3:
-            raise ValueError(
-                f"color_mapping['{annotation}'] must be None or a length-3 RGB sequence"
-            )
-        if any(
-            (not isinstance(c, (int, np.integer)) or c < 0 or c > 255) for c in color
-        ):
-            raise ValueError(
-                f"color_mapping['{annotation}'] must contain integers in [0, 255]"
-            )
-
-
-def resolve_sampling_spec(
-    cfg: Any,
-    *,
-    tiling: TilingConfig,
-) -> SamplingSpec:
+    The YAML spellings are resolved here: each label map may be a mapping or a list of
+    single-entry mappings, a label whose pixel value is null is dropped from every map
+    (configs deep-merge over the shipped ``{background, tissue}`` block, so this is how a
+    default label is removed), and a null coverage leaves that label unsampled. A config
+    without a ``masks`` section gets :data:`DEFAULT_MASK_SAMPLING`.
+    """
     reject_unknown_config_keys(cfg.tiling, path="tiling")
     masks_cfg = _checked_section(
         getattr(cfg.tiling, "masks", None), path="tiling.masks"
     )
     if masks_cfg is None:
-        return build_default_sampling_spec(tiling)
-    return _resolve_sampling_spec_from_masks(masks_cfg)
+        return DEFAULT_MASK_SAMPLING
+    pixel_mapping = _merge_sampling_mapping(
+        getattr(masks_cfg, "pixel_mapping", None),
+        field_name="pixel_mapping",
+    )
+    min_coverage = _merge_sampling_mapping(
+        getattr(masks_cfg, "min_coverage", None),
+        field_name="min_coverage",
+    )
+    if pixel_mapping is None:
+        raise ValueError("masks.pixel_mapping is required")
+    if min_coverage is None:
+        raise ValueError("masks.min_coverage is required")
+    colors = _merge_sampling_mapping(
+        getattr(masks_cfg, "colors", None),
+        field_name="colors",
+    )
+    _validate_annotation_names(pixel_mapping, min_coverage, colors)
+    pixel_mapping, (min_coverage, colors) = _drop_null_labels(
+        pixel_mapping, min_coverage, colors
+    )
+    values: dict[str, Any] = {
+        "tiling.masks.pixel_mapping": _plain_pixel_lists(pixel_mapping),
+        "tiling.masks.colors": colors,
+        "tiling.masks.min_coverage": {
+            label: coverage
+            for label, coverage in min_coverage.items()
+            if coverage is not None
+        },
+    }
+    for name in ("output_mode", "strategy"):
+        value = getattr(masks_cfg, name, None)
+        if value is not None:
+            values[f"tiling.masks.{name}"] = value
+    return construct_config(MaskSamplingConfig, values)
 
 
 def _drop_null_labels(
@@ -361,47 +274,3 @@ def _plain_pixel_lists(pixel_mapping: dict[str, Any]) -> dict[str, Any]:
         else value
         for name, value in pixel_mapping.items()
     }
-
-
-def _resolve_sampling_spec_from_masks(masks_cfg: Any) -> SamplingSpec:
-    pixel_mapping = _merge_sampling_mapping(
-        getattr(masks_cfg, "pixel_mapping", None),
-        field_name="pixel_mapping",
-    )
-    min_coverage = _merge_sampling_mapping(
-        getattr(masks_cfg, "min_coverage", None),
-        field_name="min_coverage",
-    )
-    if pixel_mapping is None:
-        raise ValueError("masks.pixel_mapping is required")
-    if min_coverage is None:
-        raise ValueError("masks.min_coverage is required")
-    colors = _merge_sampling_mapping(
-        getattr(masks_cfg, "colors", None),
-        field_name="colors",
-    )
-    _validate_annotation_names(pixel_mapping, min_coverage, colors)
-    pixel_mapping, (min_coverage, colors) = _drop_null_labels(
-        pixel_mapping, min_coverage, colors
-    )
-    pixel_mapping = _plain_pixel_lists(pixel_mapping)
-    validate_pixel_mapping(pixel_mapping)
-    missing_coverage_labels = sorted(set(min_coverage.keys()) - set(pixel_mapping.keys()))
-    if missing_coverage_labels:
-        raise ValueError(
-            "masks.min_coverage references unknown labels: "
-            + ", ".join(missing_coverage_labels)
-        )
-    if colors is not None:
-        validate_color_mapping(pixel_mapping=pixel_mapping, color_mapping=colors)
-
-    return SamplingSpec(
-        pixel_mapping=pixel_mapping,
-        color_mapping=colors,
-        tissue_percentage=min_coverage,
-        active_annotations=tuple(
-            annotation
-            for annotation, pct in min_coverage.items()
-            if annotation in pixel_mapping and pct is not None
-        ),
-    )

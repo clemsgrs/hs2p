@@ -5,6 +5,7 @@ A real flat PNG slide is tiled against an in-memory mask pyramid served by the
 native backend.
 """
 
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -13,7 +14,7 @@ from PIL import Image
 
 import hs2p.progress as progress
 import hs2p.wsi.reader as reader_mod
-from hs2p.api import SlideSpec, TilingConfig, tile_slide, tile_slides
+from hs2p.api import DEFAULT_MASK_SAMPLING, SlideSpec, TilingConfig, tile_slide, tile_slides
 from hs2p.preprocessing import preprocess_slide
 from tests.test_progress import RecordingReporter
 
@@ -100,10 +101,12 @@ def _tiling(*, mask_backend: str = "openslide") -> TilingConfig:
         requested_tile_size_px=64,
         tolerance=0.05,
         overlap=0.0,
-        min_coverage={"tissue": 0.5},
         backend="pil",
         mask_backend=mask_backend,
     )
+
+
+_MASKS = replace(DEFAULT_MASK_SAMPLING, min_coverage={"tissue": 0.5})
 
 
 def test_tile_slide_tiles_the_tissue_of_a_precomputed_mask(monkeypatch, tmp_path):
@@ -111,7 +114,7 @@ def test_tile_slide_tiles_the_tissue_of_a_precomputed_mask(monkeypatch, tmp_path
     whole_slide = _slide_spec(tmp_path)
     opened = _serve_mask(monkeypatch, reader)
 
-    result = tile_slide(whole_slide, tiling=_tiling())
+    result = tile_slide(whole_slide, tiling=_tiling(), masks=_MASKS)
 
     assert sorted(zip(result.x.tolist(), result.y.tolist())) == [
         (0, 0),
@@ -141,7 +144,7 @@ def test_tile_slide_rejects_a_mask_value_outside_the_declared_tissue_labels(
     _serve_mask(monkeypatch, reader)
 
     with pytest.raises(ValueError, match=r"undeclared label IDs \[255\]"):
-        tile_slide(whole_slide, tiling=_tiling())
+        tile_slide(whole_slide, tiling=_tiling(), masks=_MASKS)
 
     assert reader.close_count == 1
 
@@ -155,7 +158,7 @@ def test_tile_slide_closes_the_mask_when_its_decode_fails(monkeypatch, tmp_path)
     _serve_mask(monkeypatch, reader)
 
     with pytest.raises(RuntimeError, match="codec unavailable") as excinfo:
-        tile_slide(whole_slide, tiling=_tiling())
+        tile_slide(whole_slide, tiling=_tiling(), masks=_MASKS)
 
     assert str(whole_slide.mask_path) in str(excinfo.value)
     assert "backend=openslide" in str(excinfo.value)
@@ -174,7 +177,7 @@ def test_tile_slide_opens_the_mask_with_the_preflight_backend(monkeypatch, tmp_p
 
     monkeypatch.setattr(reader_mod, "_probe_backend", _only_openslide_opens)
 
-    result = tile_slide(whole_slide, tiling=_tiling(mask_backend="auto"))
+    result = tile_slide(whole_slide, tiling=_tiling(mask_backend="auto"), masks=_MASKS)
 
     # One preflight probe sequence; opening the mask does not resolve ``auto`` again.
     assert probed == ["cucim", "vips", "openslide"]
@@ -242,6 +245,7 @@ def test_tile_slides_reports_an_empty_precomputed_mask(monkeypatch, tmp_path, ca
         artifacts = tile_slides(
             [whole_slide],
             tiling=_tiling(),
+            masks=_MASKS,
             output_dir=tmp_path / "output",
             num_workers=1,
         )

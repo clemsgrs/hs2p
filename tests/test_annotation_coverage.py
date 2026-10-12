@@ -13,11 +13,16 @@ import hs2p.tiling.orchestration as orchmod
 import hs2p.tiling.single as singlemod
 import pandas as pd
 
-from hs2p.api import FilterConfig, SlideSpec, TilingConfig, tile_slides
+from hs2p.api import FilterConfig, MaskSamplingConfig, SlideSpec, TilingConfig, tile_slides
 from hs2p.mask import AnnotationLabels, Mask
 from hs2p.tiling.coverage import summarize_annotation_coverage
 from hs2p.tiling.mask import resolve_annotation_masks
-from hs2p.wsi.types import CoordinateOutputMode, CoordinateSelectionStrategy, SamplingSpec
+from hs2p.wsi.types import CoordinateOutputMode, CoordinateSelectionStrategy
+
+_STRATEGY_NAMES = {
+    CoordinateSelectionStrategy.JOINT_SAMPLING: "joint",
+    CoordinateSelectionStrategy.INDEPENDENT_SAMPLING: "independent",
+}
 
 BASE_SPACING = 0.5
 SLIDE_W, SLIDE_H = 400, 400
@@ -291,12 +296,13 @@ class _FakeSlide:
         return None
 
 
-def _sampling_spec():
-    return SamplingSpec(
-        pixel_mapping=PIXEL_MAPPING,
-        color_mapping=None,
-        tissue_percentage={"background": None, "tumor": 0.1, "stroma": 0.1, "necrosis": 0.1},
-        active_annotations=("tumor", "stroma", "necrosis"),
+def _masks(**overrides) -> MaskSamplingConfig:
+    return MaskSamplingConfig(
+        **{
+            "pixel_mapping": PIXEL_MAPPING,
+            "min_coverage": {"tumor": 0.1, "stroma": 0.1, "necrosis": 0.1},
+            **overrides,
+        }
     )
 
 
@@ -331,7 +337,6 @@ def _mock_tiling():
         requested_tile_size_px=64,
         tolerance=0.05,
         overlap=0.0,
-        min_coverage={"tissue": 0.0},
         backend="asap",
     )
 
@@ -346,9 +351,7 @@ def test_tile_slides_merged_emits_one_artifact_per_slide(monkeypatch, tmp_path):
         filtering=FilterConfig(a_t=0),
         output_dir=tmp_path,
         num_workers=1,
-        sampling=_sampling_spec(),
-        selection_strategy=CoordinateSelectionStrategy.JOINT_SAMPLING,
-        output_mode=CoordinateOutputMode.MERGED,
+        masks=_masks(output_mode=CoordinateOutputMode.MERGED),
     )
     assert len(artifacts) == 2  # one per slide, not per (slide, annotation)
     assert {a.sample_id for a in artifacts} == {"slide0", "slide1"}
@@ -384,7 +387,7 @@ def test_tile_slides_sampling_rejects_unsupported_combos(monkeypatch, tmp_path, 
             filtering=FilterConfig(a_t=0),
             output_dir=tmp_path,
             num_workers=1,
-            sampling=_sampling_spec(),
+            masks=_masks(),
             **kwargs,
         )
 
@@ -401,36 +404,30 @@ def test_tile_slides_rejects_invalid_label_id_before_slide_io_or_output(
             AssertionError("slide backend resolution must not run")
         ),
     )
-    sampling = SamplingSpec(
-        pixel_mapping={"background": 0, "tumor": invalid_value},
-        color_mapping=None,
-        tissue_percentage={"background": None, "tumor": 0.1},
-        active_annotations=("tumor",),
-    )
-
     with pytest.raises(ValueError, match=rf"tumor.*{invalid_value}"):
         tile_slides(
             _slides(1),
             tiling=_mock_tiling(),
             filtering=FilterConfig(a_t=0),
             output_dir=output_dir,
-            sampling=sampling,
+            masks=MaskSamplingConfig(
+                pixel_mapping={"background": 0, "tumor": invalid_value},
+                min_coverage={"tumor": 0.1},
+            ),
         )
 
     assert not output_dir.exists()
 
 
-def _sampling_spec_with_colors():
-    return SamplingSpec(
-        pixel_mapping=PIXEL_MAPPING,
-        color_mapping={
+def _masks_with_colors(**overrides) -> MaskSamplingConfig:
+    return _masks(
+        colors={
             "background": None,
             "tumor": [255, 0, 0],
             "stroma": [0, 255, 0],
             "necrosis": None,  # null color → omitted from the overlay
         },
-        tissue_percentage={"background": None, "tumor": 0.1, "stroma": 0.1, "necrosis": 0.1},
-        active_annotations=("tumor", "stroma", "necrosis"),
+        **overrides,
     )
 
 
@@ -466,9 +463,7 @@ def test_tile_slides_sampling_writes_one_mask_preview_per_slide(
         preview=PreviewConfig(save_mask_preview=True),
         output_dir=tmp_path,
         num_workers=1,
-        sampling=_sampling_spec_with_colors(),
-        selection_strategy=CoordinateSelectionStrategy.JOINT_SAMPLING,
-        output_mode=output_mode,
+        masks=_masks_with_colors(output_mode=output_mode),
     )
     # One preview file per slide at the conventional flat location.
     for sample_id in ("slide0", "slide1"):
@@ -477,7 +472,7 @@ def test_tile_slides_sampling_writes_one_mask_preview_per_slide(
     assert len(calls) == 2
     # Filled, alpha-blended, per-label colored overlay from the resolved binaries.
     for call in calls:
-        assert call["color_mapping"]["tumor"] == [255, 0, 0]
+        assert call["color_mapping"]["tumor"] == (255, 0, 0)
         assert call["color_mapping"]["necrosis"] is None  # null-color label omitted
         assert call["alpha"] == PreviewConfig().mask_overlay_alpha
         assert call["pixel_mapping"] == PIXEL_MAPPING
@@ -508,19 +503,28 @@ def _patch_tiling_preview_renderer(monkeypatch):
     return calls
 
 
-def _zero_one_label_sampling_spec():
-    """Only ``tumor`` can sample tiles; ``stroma``/``necrosis`` thresholds are impossibly high
-    so they sample zero tiles."""
-    return SamplingSpec(
-        pixel_mapping=PIXEL_MAPPING,
-        color_mapping={
+def _zero_one_label_masks() -> MaskSamplingConfig:
+    """Only ``tumor`` can sample tiles: ``stroma``/``necrosis`` are declared on values the
+    mask never holds (its raw 2 and 3 form the unsampled ``other`` label), so they sample
+    zero tiles."""
+    return MaskSamplingConfig(
+        pixel_mapping={
+            "background": 0,
+            "tumor": 1,
+            "other": [2, 3],
+            "stroma": 4,
+            "necrosis": 5,
+        },
+        colors={
             "background": None,
             "tumor": [255, 0, 0],
+            "other": None,
             "stroma": [0, 255, 0],
             "necrosis": [0, 0, 255],
         },
-        tissue_percentage={"background": None, "tumor": 0.1, "stroma": 2.0, "necrosis": 2.0},
-        active_annotations=("tumor", "stroma", "necrosis"),
+        min_coverage={"tumor": 0.1, "stroma": 0.1, "necrosis": 0.1},
+        output_mode=CoordinateOutputMode.PER_ANNOTATION,
+        strategy="joint",
     )
 
 
@@ -548,9 +552,9 @@ def test_tile_slides_merged_writes_one_merged_tiling_preview(
         preview=PreviewConfig(save_tiling_preview=True),
         output_dir=tmp_path,
         num_workers=1,
-        sampling=_sampling_spec_with_colors(),
-        selection_strategy=strategy,
-        output_mode=CoordinateOutputMode.MERGED,
+        masks=_masks_with_colors(
+            output_mode=CoordinateOutputMode.MERGED, strategy=_STRATEGY_NAMES[strategy]
+        ),
     )
     flat = tmp_path / "preview" / "tiling" / "slide0.jpg"
     assert flat.is_file()
@@ -580,9 +584,7 @@ def test_tile_slides_per_annotation_zero_tile_label_skips_tiling_preview(
         preview=PreviewConfig(save_mask_preview=True, save_tiling_preview=True),
         output_dir=tmp_path,
         num_workers=1,
-        sampling=_zero_one_label_sampling_spec(),
-        selection_strategy=CoordinateSelectionStrategy.JOINT_SAMPLING,
-        output_mode=CoordinateOutputMode.PER_ANNOTATION,
+        masks=_zero_one_label_masks(),
     )
     tiling_root = tmp_path / "preview" / "tiling"
     assert (tiling_root / "tumor" / "slide0.jpg").is_file()

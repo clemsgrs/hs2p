@@ -60,7 +60,6 @@ result = tile_slide(
         requested_tile_size_px=224,
         tolerance=0.07,
         overlap=0.0,
-        min_coverage={"tissue": 0.1},
     ),
     segmentation=SegmentationConfig(method="hsv", downsample=64),
 )
@@ -73,7 +72,7 @@ if result.x.size:
     write_tiling_preview(result=result, output_dir=Path("output"), downsample=32)
 ```
 
-`tile_slide()` returns an in-memory `TilingResult`; `tile_slides()` processes a batch and saves its results. See the [API guide](docs/api.md) for result fields, batch processing, and artifact loading.
+`tile_slide()` returns an in-memory `TilingResult`; `tile_slides()` processes a batch and saves its results. Tiles are kept when tissue covers at least 1% of them; pass `masks=` to change that threshold or to sample annotation labels. See the [API guide](docs/api.md) for result fields, mask vocabularies, batch processing, and artifact loading.
 
 ## CLI quick start
 

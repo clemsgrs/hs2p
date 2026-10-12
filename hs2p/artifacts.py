@@ -8,7 +8,12 @@ from typing import Any, Sequence
 import numpy as np
 import pandas as pd
 
-from hs2p.configs import FilterConfig, SegmentationConfig, TilingConfig
+from hs2p.configs import (
+    FilterConfig,
+    MaskSamplingConfig,
+    SegmentationConfig,
+    TilingConfig,
+)
 from hs2p.tiling.io import _load_tiling_result_from_paths, _save_tiling_result
 from hs2p.tiling.result import TilingResult
 from hs2p.wsi.geometry import resolve_tile_stride
@@ -51,6 +56,9 @@ class TilingArtifacts:
 @dataclass(frozen=True, kw_only=True)
 class CompatibilitySpec:
     tiling: TilingConfig
+    # The mask vocabulary the run tiles with; ``min_coverage["tissue"]`` is the tissue
+    # threshold a reused artifact must have been written with.
+    masks: MaskSamplingConfig
     segmentation: SegmentationConfig
     filtering: FilterConfig
     selection_strategy: str | None = None
@@ -256,7 +264,7 @@ def validate_tiling_artifacts(
             f"stride of {result.step_px_lv0} px, the current version derives "
             f"{expected_stride.step_px_lv0} px from the read-level stride"
         )
-    if result.min_tissue_fraction != (compatibility.tiling.min_coverage.get("tissue") or 0.0):
+    if result.min_tissue_fraction != (compatibility.masks.min_coverage.get("tissue") or 0.0):
         raise ValueError("precomputed tiles tissue_threshold mismatch")
     if result.tolerance != compatibility.tiling.tolerance:
         raise ValueError("precomputed tiles tolerance mismatch")

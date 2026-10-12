@@ -9,7 +9,14 @@ from hs2p.artifacts import (
     save_tiling_result,
     validate_tiling_artifacts,
 )
-from hs2p.configs import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig
+from hs2p.configs import (
+    DEFAULT_MASK_SAMPLING,
+    FilterConfig,
+    MaskSamplingConfig,
+    PreviewConfig,
+    SegmentationConfig,
+    TilingConfig,
+)
 from hs2p.tiling.coverage import summarize_annotation_coverage
 from hs2p.tiling.mask import resolve_annotation_masks
 from hs2p.tiling.result import ResolvedAnnotationMasks
@@ -23,11 +30,13 @@ from hs2p.tiling.orchestration import (
 from hs2p.wsi import CoordinateOutputMode, CoordinateSelectionStrategy, overlay_mask_on_slide
 
 __all__ = [
+    "DEFAULT_MASK_SAMPLING",
     "BatchPartialFailureWarning",
     "CompatibilitySpec",
     "CoordinateOutputMode",
     "CoordinateSelectionStrategy",
     "FilterConfig",
+    "MaskSamplingConfig",
     "PreviewConfig",
     "ResolvedAnnotationMasks",
     "SegmentationConfig",

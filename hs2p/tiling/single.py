@@ -117,7 +117,6 @@ def build_tiling_result_from_mask(
             requested_tile_size_px=requested_tile_size_px,
             tolerance=tolerance,
             overlap=overlap,
-            min_coverage={"tissue": min_tissue_fraction},
         ),
         min_tissue_fraction=min_tissue_fraction,
         segmentation=SegmentationConfig(
@@ -568,8 +567,6 @@ def build_per_annotation_tiling_results(
             requested_tile_size_px=requested_tile_size_px,
             tolerance=tolerance,
             overlap=overlap,
-            # Annotation sampling gates on the sampling spec's per-label thresholds.
-            min_coverage={},
         ),
         filtering=FilterConfig(
             ref_tile_size=ref_tile_size_px,
@@ -717,7 +714,6 @@ def preprocess_slide(
             requested_tile_size_px=requested_tile_size_px,
             tolerance=tolerance,
             overlap=overlap,
-            min_coverage={"tissue": min_tissue_fraction},
         ),
         min_tissue_fraction=min_tissue_fraction,
         segmentation=SegmentationConfig(
@@ -889,8 +885,6 @@ def preprocess_slide_per_annotation(
             requested_tile_size_px=requested_tile_size_px,
             tolerance=tolerance,
             overlap=overlap,
-            # Annotation sampling gates on the sampling spec's per-label thresholds.
-            min_coverage={},
         ),
         seg_downsample=seg_downsample,
         filtering=FilterConfig(

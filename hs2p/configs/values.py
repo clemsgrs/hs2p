@@ -100,6 +100,10 @@ def _check(annotation: Any, value: Any) -> Any:
             return Path(value)
         raise _WrongType("a path")
     origin, args = typing.get_origin(annotation), typing.get_args(annotation)
+    if origin is typing.Literal:
+        if isinstance(value, str) and value in args:
+            return value
+        raise _WrongType("one of " + ", ".join(repr(arg) for arg in args))
     if (
         origin in (types.UnionType, typing.Union)
         and len(args) == 2
@@ -128,7 +132,7 @@ def _check(annotation: Any, value: Any) -> Any:
             raise _WrongType(expected) from None
     if origin is Mapping:
         # Only the container is checked: entries are the user's open label maps, which
-        # keep their own checks (``min_coverage`` values may be None to drop a label).
+        # the owning dataclass validates itself (``MaskSamplingConfig.__post_init__``).
         if isinstance(value, Mapping):
             return value
         raise _WrongType("a mapping")

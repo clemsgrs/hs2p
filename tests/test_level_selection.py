@@ -12,7 +12,6 @@ def _tiling_config(*, spacing: float = 1.0, tolerance: float = 0.01) -> TilingCo
         requested_tile_size_px=8,
         tolerance=tolerance,
         overlap=0.0,
-        min_coverage={"tissue": 0.0},
         backend="asap",
     )
 

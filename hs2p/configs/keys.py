@@ -33,6 +33,11 @@ RETIRED_KEYS = {
         "pixel_mapping stays pixel_mapping, color_mapping becomes colors, and "
         "tissue_percentage becomes min_coverage."
     ),
+    "tiling.independent_sampling": (
+        "tiling.independent_sampling is no longer supported; set tiling.masks.strategy "
+        "instead: independent_sampling: true becomes strategy: independent, and false "
+        "becomes strategy: joint."
+    ),
 }
 
 _SCHEMA: dict[str, Any] = OmegaConf.to_container(default_config, resolve=False)

@@ -1,5 +1,6 @@
 """Previews reopen a flat slide with the spacing override preprocessing used (F4)."""
 
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -7,8 +8,15 @@ import pandas as pd
 import pytest
 from PIL import Image
 
-from hs2p.api import FilterConfig, PreviewConfig, SlideSpec, TilingConfig, tile_slides
-from hs2p.wsi.types import CoordinateOutputMode, CoordinateSelectionStrategy, SamplingSpec
+from hs2p.api import (
+    DEFAULT_MASK_SAMPLING,
+    FilterConfig,
+    MaskSamplingConfig,
+    PreviewConfig,
+    SlideSpec,
+    TilingConfig,
+    tile_slides,
+)
 
 EXPECTED_ORIGINS = [(0, 0), (0, 64), (64, 0), (64, 64)]
 
@@ -32,10 +40,12 @@ def _tiling_config() -> TilingConfig:
         requested_tile_size_px=64,
         tolerance=0.05,
         overlap=0.0,
-        min_coverage={"tissue": 0.5},
         backend="pil",
         mask_backend="pil",
     )
+
+
+_MASKS = replace(DEFAULT_MASK_SAMPLING, min_coverage={"tissue": 0.5})
 
 
 def _assert_success_row(output_dir: Path, sample_id: str) -> dict:
@@ -70,6 +80,7 @@ def test_tissue_previews_use_the_supplied_spacing_on_a_flat_slide(
             )
         ],
         tiling=_tiling_config(),
+        masks=_MASKS,
         filtering=FilterConfig(a_t=0, a_h=0),
         preview=PreviewConfig(
             save_mask_preview=save_mask_preview, save_tiling_preview=save_tiling_preview
@@ -98,6 +109,7 @@ def test_previews_from_reused_coordinates_use_the_recorded_spacing(tmp_path: Pat
     tile_slides(
         [spec],
         tiling=_tiling_config(),
+        masks=_MASKS,
         filtering=FilterConfig(a_t=0, a_h=0),
         preview=PreviewConfig(save_mask_preview=False, save_tiling_preview=False),
         output_dir=first_dir,
@@ -107,6 +119,7 @@ def test_previews_from_reused_coordinates_use_the_recorded_spacing(tmp_path: Pat
     tile_slides(
         [spec],
         tiling=_tiling_config(),
+        masks=_MASKS,
         filtering=FilterConfig(a_t=0, a_h=0),
         preview=PreviewConfig(save_mask_preview=False, save_tiling_preview=True),
         output_dir=second_dir,
@@ -120,11 +133,12 @@ def test_previews_from_reused_coordinates_use_the_recorded_spacing(tmp_path: Pat
 def test_sampling_previews_use_the_supplied_spacing_on_a_flat_slide(tmp_path: Path):
     slide_path, mask_path = _write_inputs(tmp_path)
     output_dir = tmp_path / "out"
-    sampling = SamplingSpec(
+    masks = MaskSamplingConfig(
         pixel_mapping={"background": 0, "tumor": 1},
-        color_mapping={"background": None, "tumor": [255, 0, 0]},
-        tissue_percentage={"background": None, "tumor": 0.5},
-        active_annotations=("tumor",),
+        colors={"background": None, "tumor": [255, 0, 0]},
+        min_coverage={"tumor": 0.5},
+        output_mode="per_annotation",
+        strategy="joint",
     )
 
     artifacts = tile_slides(
@@ -137,9 +151,7 @@ def test_sampling_previews_use_the_supplied_spacing_on_a_flat_slide(tmp_path: Pa
         filtering=FilterConfig(a_t=0, a_h=0),
         preview=PreviewConfig(save_mask_preview=True, save_tiling_preview=True),
         output_dir=output_dir,
-        sampling=sampling,
-        selection_strategy=CoordinateSelectionStrategy.JOINT_SAMPLING,
-        output_mode=CoordinateOutputMode.PER_ANNOTATION,
+        masks=masks,
     )
 
     assert len(artifacts) == 1

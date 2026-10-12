@@ -17,12 +17,16 @@ import pandas as pd
 import pytest
 from PIL import Image
 
-from hs2p.api import FilterConfig, PreviewConfig, SlideSpec, TilingConfig, tile_slides
-from hs2p.wsi.types import (
-    CoordinateOutputMode,
-    CoordinateSelectionStrategy,
-    SamplingSpec,
+from hs2p.api import (
+    DEFAULT_MASK_SAMPLING,
+    FilterConfig,
+    MaskSamplingConfig,
+    PreviewConfig,
+    SlideSpec,
+    TilingConfig,
+    tile_slides,
 )
+from hs2p.wsi.types import CoordinateOutputMode, CoordinateSelectionStrategy
 
 SPACING_UM = 0.5
 TILE_PX = 64
@@ -62,13 +66,17 @@ def _tiling() -> TilingConfig:
         requested_tile_size_px=TILE_PX,
         tolerance=0.05,
         overlap=0.0,
-        min_coverage={"tissue": 0.5},
         backend="pil",
         mask_backend="pil",
     )
 
 
+# Tissue tiling keeps a tile when tissue covers at least half of it.
+_TISSUE_MASKS = replace(DEFAULT_MASK_SAMPLING, min_coverage={"tissue": 0.5})
+
+
 def _run(slide: SlideSpec, output_dir: Path, **kwargs):
+    kwargs.setdefault("masks", _TISSUE_MASKS)
     return tile_slides(
         [slide],
         tiling=_tiling(),
@@ -224,14 +232,13 @@ def test_joint_sampling_rows_keep_their_labels_through_preview_finalization(
         slide,
         output_dir,
         preview=PreviewConfig(save_mask_preview=False, save_tiling_preview=True),
-        sampling=SamplingSpec(
+        masks=MaskSamplingConfig(
             pixel_mapping={"background": 0, "tumor": 1},
-            color_mapping={"background": None, "tumor": [255, 0, 0]},
-            tissue_percentage={"background": None, "tumor": 0.5},
-            active_annotations=("tumor",),
+            colors={"background": None, "tumor": [255, 0, 0]},
+            min_coverage={"tumor": 0.5},
+            output_mode=output_mode,
+            strategy="joint",
         ),
-        selection_strategy=CoordinateSelectionStrategy.JOINT_SAMPLING,
-        output_mode=output_mode,
     )
 
     assert len(artifacts) == 1

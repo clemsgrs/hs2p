@@ -8,6 +8,7 @@ import pytest
 
 import hs2p.tiling.orchestration as orchestration_mod
 from hs2p.api import (
+    DEFAULT_MASK_SAMPLING,
     CompatibilitySpec,
     FilterConfig,
     SegmentationConfig,
@@ -131,11 +132,15 @@ def test_resume_rejects_on_resolved_mask_backend_mismatch(tmp_path: Path):
     filt = FilterConfig(ref_tile_size=224, a_t=4, a_h=2, filter_white=False, filter_black=False, white_threshold=220, black_threshold=25, fraction_threshold=0.9)
     tiling = TilingConfig(
         requested_spacing_um=0.5, requested_tile_size_px=224, tolerance=0.07, overlap=0.0,
-        min_coverage={"tissue": 0.1}, backend="cucim", mask_backend="auto",
+        backend="cucim", mask_backend="auto",
     )
     # Compatible: resolved mask backend matches (openslide), requested differs (auto vs asap).
     compatible = CompatibilitySpec(
-        tiling=tiling, segmentation=seg, filtering=filt, mask_backend="openslide",
+        tiling=tiling,
+        masks=replace(DEFAULT_MASK_SAMPLING, min_coverage={"tissue": 0.1}),
+        segmentation=seg,
+        filtering=filt,
+        mask_backend="openslide",
     )
     ok = validate_tiling_artifacts(
         whole_slide=whole_slide,

@@ -1,4 +1,5 @@
 import warnings
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -301,9 +302,9 @@ def test_tile_slide_uses_resolved_backend_for_hash_and_result(monkeypatch):
             requested_tile_size_px=256,
             tolerance=0.05,
             overlap=0.0,
-            min_coverage={"tissue": 0.1},
             backend="auto",
         ),
+        masks=replace(api_mod.DEFAULT_MASK_SAMPLING, min_coverage={"tissue": 0.1}),
         segmentation=api_mod.SegmentationConfig(method="hsv", downsample=64, sthresh=8, sthresh_up=255, mthresh=7, close=4),
         filtering=api_mod.FilterConfig(
             ref_tile_size=16,
@@ -355,7 +356,6 @@ def test_effective_backend_resolution_forwards_level0_spacing_override(monkeypat
             requested_tile_size_px=256,
             tolerance=0.05,
             overlap=0.0,
-            min_coverage={"tissue": 0.1},
             backend="auto",
         ),
         emit=False,
@@ -531,10 +531,10 @@ def test_auto_mask_backend_decodes_a_single_channel_deflate_tiff(tmp_path, compr
             requested_tile_size_px=16,
             tolerance=0.01,
             overlap=0,
-            min_coverage={"tissue": 0.5},
             backend="pil",
             mask_backend="auto",
         ),
+        masks=replace(api_mod.DEFAULT_MASK_SAMPLING, min_coverage={"tissue": 0.5}),
         filtering=FilterConfig(a_t=0, a_h=0),
     )
 

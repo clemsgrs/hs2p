@@ -6,7 +6,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from hs2p.api import BatchPartialFailureWarning, SlideSpec, TilingArtifacts
+from hs2p.api import (
+    BatchPartialFailureWarning,
+    MaskSamplingConfig,
+    SlideSpec,
+    TilingArtifacts,
+)
 import hs2p.__main__ as tiling_mod
 
 
@@ -30,7 +35,6 @@ def _base_cfg(tmp_path: Path, csv_path: Path) -> SimpleNamespace:
         tiling=SimpleNamespace(
             read_coordinates_from=None,
             backend="asap",
-            independent_sampling=False,
             params=SimpleNamespace(
                 requested_spacing_um=0.5,
                 requested_tile_size_px=256,
@@ -93,7 +97,9 @@ def test_tiling_main_smoke_uses_current_schema_and_manifest(
         read_coordinates_from,
         save_tiles,
         jpeg_backend,
+        masks,
     ):
+        captured["masks"] = masks
         del tiling, segmentation, filtering, preview, num_workers, resume, read_coordinates_from
         captured["whole_slides"] = whole_slides
         captured["save_tiles"] = save_tiles
@@ -162,6 +168,11 @@ def test_tiling_main_smoke_uses_current_schema_and_manifest(
     ]
     assert captured["save_tiles"] is False
     assert captured["jpeg_backend"] == "pil"
+    # The CLI hands tile_slides the typed masks block it resolved from the config.
+    assert captured["masks"] == MaskSamplingConfig(
+        pixel_mapping={"background": 0, "tissue": 1},
+        min_coverage={"tissue": 0.01},
+    )
     process_df = pd.read_csv(Path(cfg.output_dir) / "process_list.csv")
     assert list(process_df.columns) == [
         "sample_id",

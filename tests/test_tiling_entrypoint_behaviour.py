@@ -35,6 +35,7 @@ Each entrypoint keeps its own defaults: the scalar APIs default ``a_h=0`` while
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -42,7 +43,9 @@ import pytest
 from PIL import Image
 
 from hs2p.api import (
+    DEFAULT_MASK_SAMPLING,
     FilterConfig,
+    MaskSamplingConfig,
     SegmentationConfig,
     SlideSpec,
     TilingConfig,
@@ -160,13 +163,30 @@ def _sampling() -> SamplingSpec:
     )
 
 
-def _tiling(*, tissue: float = 0.01, **kwargs) -> TilingConfig:
+_STRATEGY_NAMES = {
+    CoordinateSelectionStrategy.JOINT_SAMPLING: "joint",
+    CoordinateSelectionStrategy.INDEPENDENT_SAMPLING: "independent",
+}
+
+
+def _annotation_masks(
+    strategy: str, output_mode: str = CoordinateOutputMode.PER_ANNOTATION
+) -> MaskSamplingConfig:
+    """The ``_sampling()`` vocabulary as the public ``masks=`` config."""
+    return MaskSamplingConfig(
+        pixel_mapping={"background": 0, "tumor": 1, "stroma": 2},
+        min_coverage={"tumor": 0.5, "stroma": 0.5},
+        output_mode=output_mode,
+        strategy=_STRATEGY_NAMES[strategy],
+    )
+
+
+def _tiling(**kwargs) -> TilingConfig:
     return TilingConfig(
         requested_spacing_um=SPACING_UM,
         requested_tile_size_px=TILE_PX,
         tolerance=0.05,
         overlap=0.0,
-        min_coverage={"tissue": tissue, "tumor": 0.5, "stroma": 0.5},
         **kwargs,
     )
 
@@ -434,7 +454,8 @@ def test_segmentation_thresholds_reach_tissue_detection(
     else:
         result = tile_slide(
             _slide_spec(image_path, None),
-            tiling=_tiling(tissue=0.1),
+            tiling=_tiling(),
+            masks=replace(DEFAULT_MASK_SAMPLING, min_coverage={"tissue": 0.1}),
             segmentation=SegmentationConfig(method="threshold", sthresh=sthresh),
         )
 
@@ -498,13 +519,13 @@ def _per_annotation_from_resolved_masks(image_path, mask_path, *, strategy, **kw
 
 def _per_annotation_tile_slide(image_path, mask_path, *, strategy, **kwargs):
     filtering = kwargs.pop("filtering", FilterConfig())
+    output_mode = kwargs.pop("output_mode", CoordinateOutputMode.PER_ANNOTATION)
     return tile_slide(
         _slide_spec(image_path, mask_path),
         tiling=_tiling(),
         segmentation=CUSTOM_SEGMENTATION,
         filtering=filtering,
-        sampling=_sampling(),
-        selection_strategy=strategy,
+        masks=_annotation_masks(strategy, output_mode),
         **kwargs,
     )
 
@@ -622,8 +643,7 @@ def test_tile_slides_persists_one_artifact_per_sampled_label(tmp_path, strategy)
         segmentation=CUSTOM_SEGMENTATION,
         filtering=FilterConfig(**WHITE_QC),
         output_dir=output_dir,
-        sampling=_sampling(),
-        selection_strategy=strategy,
+        masks=_annotation_masks(strategy),
     )
 
     by_label = {artifact.annotation: _read_artifact(artifact) for artifact in artifacts}
