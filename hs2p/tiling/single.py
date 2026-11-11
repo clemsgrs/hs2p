@@ -211,6 +211,7 @@ def _build_tiling_result_from_mask(
         min_tissue_fraction=min_tissue_fraction,
         tolerance=tiling.tolerance,
         num_workers=num_workers,
+        grid=tiling.grid,
     )
     if needs_pixel_qc(filtering):
         coord_candidates = np.column_stack((tiles.x, tiles.y))

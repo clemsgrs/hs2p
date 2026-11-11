@@ -253,6 +253,8 @@ def validate_tiling_artifacts(
         raise ValueError("precomputed tiles requested_tile_size_px mismatch")
     if result.overlap != compatibility.tiling.overlap:
         raise ValueError("precomputed tiles overlap mismatch")
+    if result.grid != compatibility.tiling.grid:
+        raise ValueError("precomputed tiles grid mismatch")
     expected_stride = resolve_tile_stride(
         read_tile_size_px=result.read_tile_size_px,
         tile_size_lv0=result.tile_size_lv0,

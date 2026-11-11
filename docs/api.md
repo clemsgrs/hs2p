@@ -146,7 +146,7 @@ rejects `resume`, `read_coordinates_from`, and `save_tiles`. See the
 | Type | Purpose |
 | --- | --- |
 | `SlideSpec` | Slide identity, optional mask, and optional level-0 spacing override. |
-| `TilingConfig` | Reader selection, requested spacing and tile size, overlap, and tolerance. |
+| `TilingConfig` | Reader selection, requested spacing and tile size, overlap, tolerance, and grid. |
 | `MaskSamplingConfig` | Mask label vocabulary, per-label minimum coverage, preview colors, output mode, and sampling strategy. |
 | `SegmentationConfig` | Tissue-segmentation method and settings. |
 | `FilterConfig` | Contour filtering and optional white-space, black-space, grayspace, and blur QC. |

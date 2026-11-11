@@ -158,6 +158,8 @@ def test_generated_tiles_match_checked_in_ground_truth_outputs(
     assert generated_loaded.step_px_lv0 == generated_loaded.tile_size_lv0
     assert generated_loaded.tile_size_lv0 == golden.tile_size_lv0
     assert generated_loaded.overlap == pytest.approx(golden.overlap)
+    # The golden metadata predates the grid option and loads as the contour grid it used.
+    assert generated_loaded.grid == golden.grid == "contour"
     assert generated_loaded.min_tissue_fraction == pytest.approx(golden.min_tissue_fraction)
     assert len(generated_loaded.x) == len(golden.x) == 459
     assert artifacts.num_tiles == len(golden.x)

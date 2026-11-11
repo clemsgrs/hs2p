@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 
+from hs2p.configs.models import TILE_GRIDS, TileGrid
 from hs2p.wsi.types import PixelMapping
 
 
@@ -114,10 +115,14 @@ class TileGeometry:
     level_downsamples: list[float]
     overlap: float
     min_tissue_fraction: float
+    # The lattice the origins lie on (see ``TilingConfig.grid``).
+    grid: TileGrid = "contour"
     tile_index: np.ndarray | None = None
     tissue_mask: np.ndarray | None = None
 
     def __post_init__(self) -> None:
+        if self.grid not in TILE_GRIDS:
+            raise ValueError(f"grid must be one of {list(TILE_GRIDS)}, got {self.grid!r}")
         self.tile_index = _validate_geometry_arrays(
             self.x, self.y, self.tissue_fractions, self.tile_index,
         )

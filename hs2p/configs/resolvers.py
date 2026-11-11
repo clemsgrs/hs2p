@@ -18,20 +18,26 @@ from .models import (
 from .values import construct_config
 
 
+_ABSENT = object()
+
+
 def resolve_tiling_config(cfg: Any) -> TilingConfig:
     reject_unknown_config_keys(cfg.tiling, path="tiling")
     params = _checked_section(cfg.tiling.params, path="tiling.params")
-    return construct_config(
-        TilingConfig,
-        {
-            "tiling.params.requested_spacing_um": params.requested_spacing_um,
-            "tiling.params.requested_tile_size_px": params.requested_tile_size_px,
-            "tiling.params.tolerance": params.tolerance,
-            "tiling.params.overlap": params.overlap,
-            "tiling.backend": cfg.tiling.backend,
-            "tiling.mask_backend": getattr(cfg.tiling, "mask_backend", "auto"),
-        },
-    )
+    values = {
+        "tiling.params.requested_spacing_um": params.requested_spacing_um,
+        "tiling.params.requested_tile_size_px": params.requested_tile_size_px,
+        "tiling.params.tolerance": params.tolerance,
+        "tiling.params.overlap": params.overlap,
+        "tiling.backend": cfg.tiling.backend,
+        "tiling.mask_backend": getattr(cfg.tiling, "mask_backend", "auto"),
+    }
+    # Adapters that predate the grid option omit it and keep the contour grid; an
+    # explicit value, ``null`` included, is checked like any other.
+    grid = getattr(params, "grid", _ABSENT)
+    if grid is not _ABSENT:
+        values["tiling.params.grid"] = grid
+    return construct_config(TilingConfig, values)
 
 
 def _checked_section(section: Any, *, path: str) -> Any:
