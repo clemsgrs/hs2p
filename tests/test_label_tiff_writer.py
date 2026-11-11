@@ -97,6 +97,64 @@ def test_a_raster_that_is_not_a_multiple_of_the_tile_size_round_trips(tmp_path, 
         np.testing.assert_array_equal(array, labels[::step, ::step], err_msg=f"level {level}")
 
 
+@pytest.mark.parametrize(
+    ("dimensions", "expected_levels"),
+    [
+        ((128, 1), [(128, 1)]),
+        ((1, 128), [(1, 128)]),
+        ((128, 3), [(128, 3), (64, 2), (32, 1)]),
+    ],
+)
+def test_every_level_of_a_narrow_raster_is_discoverable(tmp_path, dimensions, expected_levels):
+    """Halving stops at a 1 px side, which a further level could not reduce."""
+    width, height = dimensions
+    labels = _random_labels(height, width)
+
+    path = write_label_tiff(
+        path=tmp_path / "labels.tif",
+        tiles=_row_order_tiles(labels, 16),
+        dimensions=dimensions,
+        tile_size=16,
+        spacing_um=0.5,
+    )
+
+    with tifffile.TiffFile(path) as tiff:
+        page_count = len(tiff.pages)
+    with TifffileReader(path) as reader:
+        assert reader.level_dimensions == expected_levels
+        assert reader.level_count == page_count
+        levels = [reader.read_level(level) for level in range(reader.level_count)]
+    for level, array in enumerate(levels):
+        step = 2**level
+        np.testing.assert_array_equal(array, labels[::step, ::step], err_msg=f"level {level}")
+
+
+def test_a_tile_buffer_the_stream_refills_is_written_as_each_tile_was_yielded(tmp_path):
+    """256 px tiles are large enough for tifffile to encode them on worker threads."""
+    labels = _random_labels(512, 768)
+    buffer = np.empty((256, 256), dtype=np.uint8)
+
+    def refilled_tiles():
+        for tile in _row_order_tiles(labels, 256):
+            buffer[...] = tile
+            yield buffer
+
+    path = write_label_tiff(
+        path=tmp_path / "labels.tif",
+        tiles=refilled_tiles(),
+        dimensions=(768, 512),
+        tile_size=256,
+        spacing_um=0.5,
+    )
+
+    with TifffileReader(path) as reader:
+        levels = [reader.read_level(level) for level in range(reader.level_count)]
+    assert len(levels) == 3
+    for level, array in enumerate(levels):
+        step = 2**level
+        np.testing.assert_array_equal(array, labels[::step, ::step], err_msg=f"level {level}")
+
+
 def _write(tmp_path, labels, *, tile_size=32, spacing_um=0.5, name="labels.tif", **kwargs):
     height, width = labels.shape
     return write_label_tiff(

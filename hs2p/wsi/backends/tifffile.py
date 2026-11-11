@@ -325,10 +325,11 @@ def write_label_tiff(
     - on the right and bottom edges, pixels past the raster are discarded.
 
     A stream with fewer or more tiles, or a tile of another dtype or shape, raises
-    ``ValueError``.
+    ``ValueError``. Each tile is copied as it is taken, so the stream may refill and
+    yield one buffer.
 
     Reduced levels halve the level below, rounding up, until one tile holds the coarsest
-    level. Each keeps every other pixel of the level below (nearest-neighbour), never an
+    level or a side is 1 px. Each keeps every other pixel of the level below (nearest-neighbour), never an
     average, so it holds only stored labels. The base level is never held whole: only the
     2x level, a quarter of its size, fills in memory while the base level streams, and
     each coarser level is then copied out of the one below.
@@ -371,7 +372,7 @@ def write_label_tiff(
         buffersize=_ENCODE_BUFFER_BYTES,
     )
     width, height = dimensions
-    # The 2x level, written only when the base level spans more than one tile.
+    # The 2x level, written only when the base level is halved.
     reduced = np.zeros((-(-height // 2), -(-width // 2)), dtype=dtype)
     # BigTIFF, like ASAP's writer: the compressed size is unknown until written, and
     # classic TIFF offsets stop at 4 GiB.
@@ -451,7 +452,9 @@ def _base_level_tiles(
         reduced[
             y // 2 : y // 2 + sampled.shape[0], x // 2 : x // 2 + sampled.shape[1]
         ] = sampled
-        yield tile
+        # tifffile encodes tiles on worker threads after taking more from the stream,
+        # which may refill this array meanwhile
+        yield tile.copy()
 
 
 @contextmanager
@@ -532,9 +535,13 @@ def _metadata_description(metadata: Mapping[str, Any]) -> str:
 def _halved_dimensions(
     *, dimensions: tuple[int, int], tile_size: int
 ) -> list[tuple[int, int]]:
-    """Level ``(width, height)``s, halving (rounding up) until one tile holds a level."""
+    """Level ``(width, height)``s, halving (rounding up) until one tile holds a level.
+
+    Halving also stops at a 1 px side: tifffile finds a level only when every side is
+    reduced from the level above.
+    """
     levels = [dimensions]
-    while max(levels[-1]) > tile_size:
+    while max(levels[-1]) > tile_size and min(levels[-1]) > 1:
         level_width, level_height = levels[-1]
         levels.append((-(-level_width // 2), -(-level_height // 2)))
     return levels

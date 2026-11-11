@@ -315,8 +315,8 @@ so the pixels they lack are written as zeros. Edge tiles may also be full-size: 
 past the raster are discarded. A stream with the wrong number of tiles, or a tile of
 another dtype or shape, raises `ValueError`.
 
-Reduced levels halve the level below until one tile holds the coarsest, keeping every
-other pixel (nearest-neighbour), never an average. Only the 2x level, a quarter of the
+Reduced levels halve the level below until one tile holds the coarsest or a side is
+1 px, keeping every other pixel (nearest-neighbour), never an average. Only the 2x level, a quarter of the
 base level's size, is held in memory while the base level streams. `spacing_um` goes
 to each level's resolution tags. `metadata` is stored as JSON in the base level's image
 description, where `json.loads(tifffile.TiffFile(path).pages[0].description)` reads it.
