@@ -360,6 +360,9 @@ def write_label_tiff(
         compression=compression,
         metadata=metadata,
     )
+    # NumPy integers pass validation, but unsigned ones wrap or turn float when negated
+    dimensions = (int(dimensions[0]), int(dimensions[1]))
+    tile_size = int(tile_size)
     description = None if metadata is None else _metadata_description(metadata)
     level_dimensions = _halved_dimensions(dimensions=dimensions, tile_size=tile_size)
     pixels_per_centimeter = _UM_PER_CENTIMETER / spacing_um

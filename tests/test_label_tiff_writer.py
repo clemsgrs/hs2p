@@ -97,6 +97,27 @@ def test_a_raster_that_is_not_a_multiple_of_the_tile_size_round_trips(tmp_path, 
         np.testing.assert_array_equal(array, labels[::step, ::step], err_msg=f"level {level}")
 
 
+@pytest.mark.parametrize("integer", [np.uint16, np.uint32, np.uint64])
+def test_unsigned_numpy_dimensions_and_tile_size_round_trip(tmp_path, integer):
+    """Unsigned NumPy integers wrap or turn float under negation, unlike Python ints."""
+    labels = _random_labels(201, 299)
+
+    path = write_label_tiff(
+        path=tmp_path / "labels.tif",
+        tiles=_row_order_tiles(labels, 64),
+        dimensions=(integer(299), integer(201)),
+        tile_size=integer(64),
+        spacing_um=0.5,
+    )
+
+    with TifffileReader(path) as reader:
+        assert reader.level_dimensions == [(299, 201), (150, 101), (75, 51), (38, 26)]
+        levels = [reader.read_level(level) for level in range(reader.level_count)]
+    for level, array in enumerate(levels):
+        step = 2**level
+        np.testing.assert_array_equal(array, labels[::step, ::step], err_msg=f"level {level}")
+
+
 @pytest.mark.parametrize(
     ("dimensions", "expected_levels"),
     [
