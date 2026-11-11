@@ -329,10 +329,10 @@ def write_label_tiff(
     yield one buffer.
 
     Reduced levels halve the level below, rounding up, until one tile holds the coarsest
-    level or a side is 1 px. Each keeps every other pixel of the level below (nearest-neighbour), never an
-    average, so it holds only stored labels. The base level is never held whole: only the
-    2x level, a quarter of its size, fills in memory while the base level streams, and
-    each coarser level is then copied out of the one below.
+    level or a side is 1 px. Each keeps every other pixel of the level below
+    (nearest-neighbour), never an average, so it holds only stored labels. The base level
+    is never held whole: only the 2x level, a quarter of its size, fills in memory while
+    the base level streams, and each coarser level is then copied out of the one below.
 
     ``spacing_um`` is the base level's spacing in um/px. Every level's resolution tags
     carry it, scaled by the level's downsample, where :class:`TifffileReader` and the
