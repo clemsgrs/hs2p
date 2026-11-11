@@ -286,6 +286,49 @@ resolver to record what was asked for; otherwise the mask's concrete backend is 
 as the request. `overlay_mask_on_slide` and `write_coordinate_preview` take the same
 open `Mask`; `draw_grid_from_coordinates` takes an `AlignedMask`.
 
+## Writing a label TIFF
+
+`write_label_tiff()` (`pip install "hs2p[tifffile]"`) writes a label map as large as a
+slide, such as a segmentation output, without holding it in memory. It takes the base
+level as a stream of tiles in row order, left to right and then top to bottom, and the
+caller is responsible for that order: tifffile cannot write tiles out of order.
+
+```python
+from hs2p import AnnotationLabels, Mask, write_label_tiff
+
+mapping = {"background": 0, "tumor": 1, "stroma": 2}
+write_label_tiff(
+    path="/data/slide-1-labels.tif",
+    tiles=predicted_tiles,  # 2-D uint8 arrays of up to 512x512 px, in row order
+    dimensions=(40_000, 30_000),  # (width, height) of the label map at 0.5 µm/px
+    tile_size=512,
+    spacing_um=0.5,
+    metadata={"labels": mapping},
+)
+with Mask(path="/data/slide-1-labels.tif", labels=AnnotationLabels(pixel_mapping=mapping)) as mask:
+    aligned = mask.align_to(reference_spacing_um=0.25, reference_dimensions=(80_000, 60_000))
+```
+
+The raster holds one unsigned-integer sample per pixel (`dtype`, `uint8` by default).
+A tile smaller than `tile_size` is zero-padded and `None` stands for a missing tile,
+so the pixels they lack are written as zeros. Edge tiles may also be full-size: pixels
+past the raster are discarded. A stream with the wrong number of tiles, or a tile of
+another dtype or shape, raises `ValueError`.
+
+Reduced levels halve the level below until one tile holds the coarsest, keeping every
+other pixel (nearest-neighbour), never an average. Only the 2x level, a quarter of the
+base level's size, is held in memory while the base level streams. `spacing_um` goes
+to each level's resolution tags. `metadata` is stored as JSON in the base level's image
+description, where `json.loads(tifffile.TiffFile(path).pages[0].description)` reads it.
+
+`compression` is `"lzw"` (the default) or `"deflate"`. The `tifffile`, `cucim`,
+`openslide` and `asap` mask readers decode LZW (`vips` is untested). `cucim` and `asap`
+do not decode deflate single-sample tiles, so a deflate label TIFF reads only through
+`tifffile` or `openslide`. The file is written under a hidden temporary name and renamed into place
+once complete, so a failed write leaves no file at `path` and keeps any earlier one.
+`tests/test_label_tiff_writer.py` writes label TIFFs and reads them back through each
+installed mask reader.
+
 ## Reader selection
 
 `TilingConfig.backend` selects the slide reader and `mask_backend` selects the
