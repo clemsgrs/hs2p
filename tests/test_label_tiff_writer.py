@@ -155,6 +155,36 @@ def test_a_tile_buffer_the_stream_refills_is_written_as_each_tile_was_yielded(tm
         np.testing.assert_array_equal(array, labels[::step, ::step], err_msg=f"level {level}")
 
 
+def test_a_tile_buffer_the_stream_clears_after_its_last_yield_is_written_as_yielded(
+    tmp_path,
+):
+    """The writer asks for one tile past the grid, which resumes the stream's cleanup."""
+    labels = _random_labels(64, 64)
+    buffer = np.empty((32, 32), dtype=np.uint8)
+
+    def refilled_then_cleared_tiles():
+        try:
+            for tile in _row_order_tiles(labels, 32):
+                buffer[...] = tile
+                yield buffer
+        finally:
+            buffer.fill(0)
+
+    path = write_label_tiff(
+        path=tmp_path / "labels.tif",
+        tiles=refilled_then_cleared_tiles(),
+        dimensions=(64, 64),
+        tile_size=32,
+        spacing_um=0.5,
+    )
+
+    with TifffileReader(path) as reader:
+        levels = [reader.read_level(level) for level in range(reader.level_count)]
+    assert len(levels) == 2
+    np.testing.assert_array_equal(levels[0], labels, err_msg="level 0")
+    np.testing.assert_array_equal(levels[1], labels[::2, ::2], err_msg="level 1")
+
+
 def _write(tmp_path, labels, *, tile_size=32, spacing_um=0.5, name="labels.tif", **kwargs):
     height, width = labels.shape
     return write_label_tiff(

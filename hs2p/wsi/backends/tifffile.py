@@ -427,16 +427,19 @@ def _base_level_tiles(
     # A missing tile is written as encoded zeros rather than as an empty segment, which
     # not every native reader decodes as zeros.
     zero_tile = np.zeros((tile_size, tile_size), dtype=dtype)
+    # Each tile is copied, in its own dtype, as it is taken: resuming the stream may
+    # refill or clear the caller's array, and tifffile encodes tiles on worker threads
+    # after taking more of them.
+    owned = (None if tile is None else np.array(tile) for tile in stream)
     for index in range(tile_count):
-        tile = next(stream, _STREAM_END)
+        tile = next(owned, _STREAM_END)
         if tile is _STREAM_END:
             raise ValueError(f"tile stream ended after {index} of {grid}")
-        if index == tile_count - 1 and next(stream, _STREAM_END) is not _STREAM_END:
+        if index == tile_count - 1 and next(owned, _STREAM_END) is not _STREAM_END:
             raise ValueError(f"tile stream yielded more than {grid}")
         if tile is None:
             yield zero_tile
             continue
-        tile = np.asarray(tile)
         # tifffile casts every tile to the page dtype, which would wrap labels silently
         if tile.dtype != dtype:
             raise ValueError(f"tile {index} has dtype {tile.dtype}, expected {dtype}")
@@ -452,9 +455,7 @@ def _base_level_tiles(
         reduced[
             y // 2 : y // 2 + sampled.shape[0], x // 2 : x // 2 + sampled.shape[1]
         ] = sampled
-        # tifffile encodes tiles on worker threads after taking more from the stream,
-        # which may refill this array meanwhile
-        yield tile.copy()
+        yield tile
 
 
 @contextmanager
