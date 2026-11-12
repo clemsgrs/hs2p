@@ -641,7 +641,10 @@ def test_manifest_pins_full_revisions_suites_and_requirements_in_one_place():
         for exclusion in project.get("import_exclusions", []):
             assert exclusion["reason"].strip()
     assert projects["slide2vec"]["suites"] == ["tests/test_hs2p5_integration.py"]
-    assert projects["soma"]["suites"] == ["tests/test_hs2p_4_tiling_cache.py", "tests/test_supplied_coordinates.py"]
+    assert projects["soma"]["suites"] == [
+        "tests/extract/test_hs2p_4_tiling_cache.py",
+        "tests/extract/test_supplied_coordinates.py",
+    ]
     environment = manifest["environment"]
     assert environment["torch_index_url"].endswith("/whl/cpu")
     assert "openslide" in environment["hs2p_extras"]

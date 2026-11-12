@@ -17,8 +17,8 @@ from hs2p import MaskSamplingConfig, SlideSpec, TilingConfig, tile_slides
 from PIL import Image
 from slide2vec import progress as slide2vec_progress
 
-from soma.dense.reader import read_image_at_spacing, read_image_region_at_spacing
-from soma.extraction.reporters import _forward_tiling_progress_ctx
+from soma.extract.dense.reader import read_image_at_spacing, read_image_region_at_spacing
+from soma.extract.reporters import _forward_tiling_progress_ctx
 
 # The candidate checkout's own pyramidal fixture (hs2p is installed editable from it).
 FIXTURE_WSI = Path(hs2p.__file__).resolve().parents[1] / "tests" / "fixtures" / "input" / "test-wsi.tif"

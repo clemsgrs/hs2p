@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from hs2p import SlideSpec
+from hs2p import FilterConfig, PreviewConfig, SegmentationConfig, SlideSpec, TilingConfig
 from PIL import Image
 
 from slide2vec import progress as slide2vec_progress
@@ -43,14 +43,18 @@ def _flat_slide(tmp_path: Path) -> SlideSpec:
     return SlideSpec(sample_id="slide", image_path=image_path, mask_path=mask_path, spacing_at_level_0=0.5)
 
 
-def _preprocessing(**kwargs) -> PreprocessingConfig:
+def _preprocessing(*, requested_spacing_um: float = 0.5, **kwargs) -> PreprocessingConfig:
     params = dict(
-        backend="auto",
-        requested_spacing_um=0.5,
-        requested_tile_size_px=32,
-        segmentation={"downsample": 1},
-        filtering={"a_t": 0, "a_h": 0},
-        preview={"save_mask_preview": False, "save_tiling_preview": False},
+        tiling=TilingConfig(
+            requested_spacing_um=requested_spacing_um,
+            requested_tile_size_px=32,
+            tolerance=0.05,
+            overlap=0.0,
+            backend="auto",
+        ),
+        segmentation=SegmentationConfig(method="hsv", downsample=1),
+        filter=FilterConfig(a_t=0, a_h=0),
+        preview=PreviewConfig(save_mask_preview=False, save_tiling_preview=False),
     )
     params.update(kwargs)
     return PreprocessingConfig(**params)
