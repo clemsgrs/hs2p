@@ -6,10 +6,16 @@ from dataclasses import replace
 import cv2
 import numpy as np
 
+from hs2p.configs.models import TILE_GRIDS, TileGrid
 from hs2p.tiling.contours import _normalize_level_downsamples
 from hs2p.tiling.coverage import _compute_tile_coverage
 from hs2p.tiling.result import ContourResult, TileGeometry, TilingResult
-from hs2p.wsi.geometry import plan_spacing_read, resolve_tile_stride, tile_size_lv0_from_plan
+from hs2p.wsi.geometry import (
+    plan_spacing_read,
+    project_discrete_grid_origins,
+    resolve_tile_stride,
+    tile_size_lv0_from_plan,
+)
 
 
 def canonicalize_tiling_result(tiles: TileGeometry) -> TileGeometry:
@@ -52,7 +58,19 @@ def generate_tiles(
     min_tissue_fraction: float = 0.5,
     tolerance: float = 0.05,
     num_workers: int = 1,
+    grid: TileGrid = "contour",
 ) -> TileGeometry:
+    """Lay tiles over ``contours`` and keep those the tissue mask covers enough.
+
+    ``grid`` picks where origins lie. ``"contour"`` anchors one grid at each contour's
+    bounding box. ``"slide"`` lays one lattice over the whole slide: origins at every
+    multiple of the stride from ``(0, 0)`` that falls inside the slide, kept when the
+    contours' tissue covers at least ``min_tissue_fraction`` of the whole tile. A
+    background-only tile is never kept, so a ``0.0`` threshold keeps every tile the tissue
+    touches rather than the whole slide.
+    """
+    if grid not in TILE_GRIDS:
+        raise ValueError(f"grid must be one of {list(TILE_GRIDS)}, got {grid!r}")
     normalized_downsamples = _normalize_level_downsamples(level_downsamples)
     level_sel = plan_spacing_read(
         requested_spacing_um=requested_spacing_um,
@@ -89,6 +107,7 @@ def generate_tiles(
             level_downsamples=list(normalized_downsamples),
             overlap=overlap,
             min_tissue_fraction=min_tissue_fraction,
+            grid=grid,
         )
 
     if len(contours.contours) == 0:
@@ -106,7 +125,18 @@ def generate_tiles(
             min_tissue_fraction=min_tissue_fraction,
         )
 
-    if num_workers > 1 and len(contours.contours) > 1:
+    if grid == "slide":
+        results = [
+            _tiles_on_slide_grid(
+                contours=contours,
+                slide_dimensions=slide_dimensions,
+                tile_size_lv0=tile_size_lv0,
+                step_lv0=step_lv0,
+                min_tissue_fraction=min_tissue_fraction,
+                num_workers=num_workers,
+            )
+        ]
+    elif num_workers > 1 and len(contours.contours) > 1:
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
             results = list(executor.map(_process_contour, range(len(contours.contours))))
     else:
@@ -142,6 +172,7 @@ def generate_tiles(
             level_downsamples=list(normalized_downsamples),
             overlap=overlap,
             min_tissue_fraction=min_tissue_fraction,
+            grid=grid,
         )
     )
 
@@ -174,13 +205,9 @@ def _tiles_for_contour(
     grid_x, grid_y = np.meshgrid(xs, ys, indexing="ij")
     candidates = np.stack([grid_x.ravel(), grid_y.ravel()], axis=1)
     mask_h, mask_w = tissue_mask.shape[:2]
-    scale_x, scale_y = mask_w / slide_w, mask_h / slide_h
-    # Round on the full mask grid before cropping. The inclusive contour extrema
-    # bound every filled pixel, so other canvas pixels never need an integral.
-    mask_x0 = min(mask_w, max(0, round(x_cont * scale_x)))
-    mask_y0 = min(mask_h, max(0, round(y_cont * scale_y)))
-    mask_x1 = min(mask_w, max(0, round((x_cont + w_cont - 1) * scale_x) + 1))
-    mask_y1 = min(mask_h, max(0, round((y_cont + h_cont - 1) * scale_y) + 1))
+    mask_x0, mask_y0, mask_x1, mask_y1 = _contour_mask_box(
+        contour, slide_dimensions=slide_dimensions, mask_dimensions=(mask_w, mask_h)
+    )
     contour_mask = _build_contour_tissue_mask(
         contour=contour,
         contour_holes=contour_holes,
@@ -198,6 +225,121 @@ def _tiles_for_contour(
     )
     keep = fractions >= min_tissue_fraction
     return candidates[keep], fractions[keep]
+
+
+def _contour_mask_box(
+    contour: np.ndarray,
+    *,
+    slide_dimensions: tuple[int, int],
+    mask_dimensions: tuple[int, int],
+) -> tuple[int, int, int, int]:
+    """The ``(x0, y0, x1, y1)`` box on the mask grid that holds every pixel ``contour``
+    fills.
+
+    Rounds on the full mask grid before any crop. The inclusive contour extrema bound every
+    filled pixel, so pixels outside the box never need an integral.
+    """
+    slide_w, slide_h = slide_dimensions
+    mask_w, mask_h = mask_dimensions
+    scale_x, scale_y = mask_w / slide_w, mask_h / slide_h
+    x_cont, y_cont, w_cont, h_cont = cv2.boundingRect(contour)
+    return (
+        min(mask_w, max(0, round(x_cont * scale_x))),
+        min(mask_h, max(0, round(y_cont * scale_y))),
+        min(mask_w, max(0, round((x_cont + w_cont - 1) * scale_x) + 1)),
+        min(mask_h, max(0, round((y_cont + h_cont - 1) * scale_y) + 1)),
+    )
+
+
+def _tiles_on_slide_grid(
+    *,
+    contours: ContourResult,
+    slide_dimensions: tuple[int, int],
+    tile_size_lv0: int,
+    step_lv0: int,
+    min_tissue_fraction: float,
+    num_workers: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Tiles on one lattice from the slide's top-left corner, measured only near tissue.
+
+    Coverage is measured on the union of the contours' tissue, so a tile spanning two
+    contours counts both. Only lattice cells whose footprint meets some contour's mask box
+    are measured: every other cell covers no tissue and could never be kept, so the result
+    is the one measuring the whole lattice would give, at a cost that scales with tissue.
+    """
+    slide_w, slide_h = slide_dimensions
+    tissue_mask = contours.mask
+    mask_h, mask_w = tissue_mask.shape[:2]
+    scale_x, scale_y = mask_w / slide_w, mask_h / slide_h
+    boxes = [
+        _contour_mask_box(
+            contour, slide_dimensions=slide_dimensions, mask_dimensions=(mask_w, mask_h)
+        )
+        for contour in contours.contours
+    ]
+
+    def _draw(idx: int) -> np.ndarray:
+        return _build_contour_tissue_mask(
+            contour=contours.contours[idx],
+            contour_holes=contours.holes[idx],
+            tissue_mask=tissue_mask,
+            slide_dimensions=slide_dimensions,
+            mask_bounds=boxes[idx],
+        )
+
+    # The lattice one axis at a time: level-0 origins, and where each lands on the mask
+    # grid, projected and sized as the coverage measurement does it.
+    xs = np.arange(0, slide_w, step_lv0, dtype=np.int64)
+    ys = np.arange(0, slide_h, step_lv0, dtype=np.int64)
+    mask_xs = project_discrete_grid_origins(
+        np.column_stack((xs, np.zeros_like(xs))), scale_x=scale_x, scale_y=scale_y
+    )[:, 0]
+    mask_ys = project_discrete_grid_origins(
+        np.column_stack((np.zeros_like(ys), ys)), scale_x=scale_x, scale_y=scale_y
+    )[:, 1]
+    tile_w_mask = max(1, round(tile_size_lv0 * scale_x))
+    tile_h_mask = max(1, round(tile_size_lv0 * scale_y))
+    union = np.zeros((mask_h, mask_w), dtype=np.uint8)
+
+    def _measure(box: tuple[int, int, int, int]) -> tuple[np.ndarray, np.ndarray]:
+        x0, y0, x1, y1 = box
+        cols = np.flatnonzero((mask_xs < x1) & (mask_xs + tile_w_mask > x0))
+        rows = np.flatnonzero((mask_ys < y1) & (mask_ys + tile_h_mask > y0))
+        if cols.size == 0 or rows.size == 0:
+            return np.empty((0, 2), dtype=np.int64), np.empty(0, dtype=np.float32)
+        grid_x, grid_y = np.meshgrid(xs[cols], ys[rows], indexing="ij")
+        candidates = np.stack([grid_x.ravel(), grid_y.ravel()], axis=1)
+        # The union crop that holds every measured footprint whole.
+        crop_x0, crop_y0 = int(mask_xs[cols[0]]), int(mask_ys[rows[0]])
+        crop_x1 = min(mask_w, int(mask_xs[cols[-1]]) + tile_w_mask)
+        crop_y1 = min(mask_h, int(mask_ys[rows[-1]]) + tile_h_mask)
+        fractions = _compute_tile_coverage(
+            candidates=candidates,
+            binary_mask=union[crop_y0:crop_y1, crop_x0:crop_x1],
+            tile_size_lv0=tile_size_lv0,
+            slide_dimensions=slide_dimensions,
+            mask_dimensions=(mask_w, mask_h),
+            mask_origin=(crop_x0, crop_y0),
+        )
+        keep = (fractions > 0) & (fractions >= min_tissue_fraction)
+        return candidates[keep], fractions[keep]
+
+    indices = range(len(contours.contours))
+    if num_workers > 1 and len(boxes) > 1:
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            drawn = list(executor.map(_draw, indices))
+            for (x0, y0, x1, y1), contour_mask in zip(boxes, drawn):
+                union[y0:y1, x0:x1] |= contour_mask
+            measured = list(executor.map(_measure, boxes))
+    else:
+        for idx in indices:
+            x0, y0, x1, y1 = boxes[idx]
+            union[y0:y1, x0:x1] |= _draw(idx)
+        measured = [_measure(box) for box in boxes]
+    return (
+        np.concatenate([coords for coords, _ in measured], axis=0),
+        np.concatenate([fracs for _, fracs in measured], axis=0),
+    )
 
 
 def _build_contour_tissue_mask(

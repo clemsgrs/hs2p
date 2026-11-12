@@ -79,6 +79,10 @@ backend values are `null` when no source mask was used.
 - `tolerance`
 - `step_px_lv0`
 - `overlap`
+- `grid`
+  - where tile origins lie: `contour` (one grid per tissue contour, anchored at its
+    bounding box) or `slide` (one grid over the whole slide from its top-left corner);
+    metadata written before this key existed loads as `contour`, the only grid it had
 - `min_tissue_fraction`
 - `is_within_tolerance`
 - `n_tiles`
@@ -181,7 +185,7 @@ Existing artifacts are validated against their structured metadata:
 - explicit level-0 spacing override presence and value
 - resolved slide backend and, when a source mask exists, resolved mask backend
 - requested spacing and tile size
-- overlap and minimum tissue fraction
+- overlap, grid, and minimum tissue fraction
 - segmentation and filtering settings
 - SAM2 checkpoint and model-config paths for SAM2 segmentation
 - sampling selection/output metadata when relevant

@@ -164,7 +164,7 @@ The [default config](../hs2p/configs/default.yaml) lists all settings and defaul
 
 | Config area | Controls |
 | --- | --- |
-| `tiling.params` | Requested spacing, tile size, spacing tolerance, and overlap as a fraction. |
+| `tiling.params` | Requested spacing, tile size, spacing tolerance, overlap as a fraction, and `grid`: `contour` (default) lays one grid per tissue contour from its bounding box, `slide` one grid over the whole slide from its top-left corner so tiles stitch without gaps or double coverage. |
 | `tiling.masks.min_coverage.tissue` | Minimum tissue fraction for binary tissue tiling. |
 | `tiling.seg_params` | Tissue segmentation method and thumbnail resolution. |
 | `tiling.filter_params` | Contour area filtering and optional tile-pixel QC. |

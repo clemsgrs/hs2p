@@ -17,6 +17,7 @@ tiling:
     tolerance: 0.05 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)
     requested_tile_size_px: 256 # size of the tiles to extract, in pixels
     overlap: 0.0 # fraction of overlap between consecutive tiles
+    grid: "contour" # where tile origins lie: contour anchors one grid at each tissue contour's bounding box; slide lays one grid over the whole slide from its top-left corner, so tiles share one lattice and stitch without gaps or double coverage
   seg_params:
     method: "hsv" # tissue segmentation method: hsv, otsu, threshold, or sam2
     # Larger downsamples select coarser thumbnails and reduce segmentation work;

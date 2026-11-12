@@ -1,3 +1,4 @@
+import typing
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -40,6 +41,13 @@ _DEFAULT_FILTERING = _DEFAULT_TILING.filter_params
 _DEFAULT_PREVIEW = _DEFAULT_TILING.preview
 _DEFAULT_MASKS = _DEFAULT_TILING.masks
 
+#: Where tile origins are laid. ``contour`` anchors one grid at each tissue contour's
+#: bounding box; ``slide`` lays one fixed grid over the whole slide from its top-left
+#: corner, so the tiles of every contour share one lattice and stitch without gaps or
+#: double coverage.
+TileGrid = Literal["contour", "slide"]
+TILE_GRIDS: tuple[str, ...] = typing.get_args(TileGrid)
+
 
 @dataclass(frozen=True, kw_only=True)
 class TilingConfig:
@@ -49,6 +57,7 @@ class TilingConfig:
     requested_tile_size_px: int
     tolerance: float
     overlap: float
+    grid: TileGrid = "contour"
     backend: str = AUTO_BACKEND
     mask_backend: str = AUTO_BACKEND
     # Provenance: the backends originally requested in config, preserved verbatim across the

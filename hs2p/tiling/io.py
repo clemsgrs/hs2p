@@ -48,6 +48,7 @@ _TILING_KEYS = {
     "tolerance",
     "step_px_lv0",
     "overlap",
+    "grid",
     "min_tissue_fraction",
     "is_within_tolerance",
     "n_tiles",
@@ -92,6 +93,9 @@ _ARTIFACT_KEYS = {
     "selection_strategy",
     "output_mode",
 }
+#: Keys that artifacts written before they existed lack, each with the only value such an
+#: artifact can hold: before ``tiling.grid`` there was only the contour grid.
+_LEGACY_VALUES: dict[str, dict[str, Any]] = {"tiling": {"grid": "contour"}}
 
 
 def _build_tiling_metadata(result: TilingResult) -> dict[str, Any]:
@@ -121,6 +125,7 @@ def _build_tiling_metadata(result: TilingResult) -> dict[str, Any]:
         "tolerance": result.tolerance,
         "step_px_lv0": result.step_px_lv0,
         "overlap": result.overlap,
+        "grid": result.grid,
         "min_tissue_fraction": result.min_tissue_fraction,
         "is_within_tolerance": result.is_within_tolerance,
         "n_tiles": n_tiles,
@@ -221,7 +226,7 @@ def _validate_metadata_schema(meta: dict[str, Any]) -> None:
         if not isinstance(section, dict):
             raise ValueError(f"Invalid tiling metadata in {section_name}: expected object")
         section_keys = set(section)
-        missing = expected_keys - section_keys
+        missing = expected_keys - section_keys - set(_LEGACY_VALUES.get(section_name, {}))
         extra = section_keys - expected_keys
         if missing or extra:
             _raise_key_error(section_name, missing, extra)
@@ -361,7 +366,7 @@ def _load_tiling_result(*, npz_path: "Path | None", meta: dict[str, Any]) -> Til
         tile_index = _validate_tile_index(np.asarray(data["tile_index"]), len(x))
     provenance = meta["provenance"]
     slide = meta["slide"]
-    tiling = meta["tiling"]
+    tiling = {**_LEGACY_VALUES["tiling"], **meta["tiling"]}
     segmentation = meta["segmentation"]
     filtering = meta["filtering"]
     artifact = meta["artifact"]
@@ -387,6 +392,7 @@ def _load_tiling_result(*, npz_path: "Path | None", meta: dict[str, Any]) -> Til
         level_downsamples=slide["level_downsamples"],
         overlap=tiling["overlap"],
         min_tissue_fraction=tiling["min_tissue_fraction"],
+        grid=tiling["grid"],
     )
     return TilingResult(
         tiles=tiles,
