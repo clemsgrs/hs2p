@@ -11,6 +11,7 @@ from hs2p.tiling.coverage import _compute_tile_coverage, compute_tile_coverage
 from hs2p.tiling.generate import _tiles_for_contour
 from hs2p.utils.setup import write_config
 from hs2p.wsi.backends.common import make_white_canvas, paste_region
+from hs2p.wsi.backends.tifffile import write_label_tiff
 from hs2p.wsi.preview import draw_grid, draw_grid_from_coordinates, overlay_mask_on_tile
 from hs2p.wsi.visualization import overlay_mask_on_slide
 from hs2p.wsi.wsi import WSI
@@ -39,6 +40,11 @@ POSITIONAL_CALL_CASES = [
     pytest.param(write_config, ({}, Path("out"), "config.yaml", False), id="write_config"),
     pytest.param(make_white_canvas, (4, 4), id="make_white_canvas"),
     pytest.param(paste_region, (_CANVAS, _CANVAS), id="paste_region"),
+    pytest.param(
+        write_label_tiff,
+        (Path("labels.tif"), iter([]), (16, 16), 16, 0.5),
+        id="write_label_tiff",
+    ),
     pytest.param(
         overlay_mask_on_tile, (None, None, None, {"tumor": 1}, {}, 0.5), id="overlay_mask_on_tile"
     ),

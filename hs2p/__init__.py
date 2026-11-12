@@ -24,5 +24,6 @@ from hs2p.preprocessing import (
     generate_tiles,
     preprocess_slide,
 )
+from hs2p.wsi.backends.tifffile import write_label_tiff
 
 __version__ = "6.1.0"
