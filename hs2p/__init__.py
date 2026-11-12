@@ -26,4 +26,4 @@ from hs2p.preprocessing import (
 )
 from hs2p.wsi.backends.tifffile import write_label_tiff
 
-__version__ = "6.1.0"
+__version__ = "6.1.1"
