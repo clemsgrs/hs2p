@@ -18,6 +18,7 @@ import os
 import tempfile
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
+from fractions import Fraction
 from pathlib import Path
 from threading import RLock
 from typing import IO, Any, Literal
@@ -40,6 +41,8 @@ _RESUNIT_INCH = 2
 _RESUNIT_CENTIMETER = 3
 _UM_PER_INCH = 25400.0
 _UM_PER_CENTIMETER = 10000.0
+# A TIFF RATIONAL, such as a resolution tag, stores two uint32 terms.
+_RATIONAL_TERM_MAX = 2**32 - 1
 # The lossless codecs a label TIFF may use, by the name the writer accepts.
 _LABEL_TIFF_COMPRESSIONS = {"lzw": "lzw", "deflate": "zlib"}
 _STREAM_END = object()
@@ -336,9 +339,10 @@ def write_label_tiff(
 
     ``spacing_um`` is the base level's spacing in um/px. Every level's resolution tags
     carry it, scaled by the level's downsample, where :class:`TifffileReader` and the
-    native readers find it. ``metadata``, such as the caller's value-to-class mapping, is
-    stored as JSON in the base level's image description:
-    ``json.loads(tifffile.TiffFile(path).pages[0].description)`` returns it.
+    native readers find it. They store it as the closest px/cm rational a TIFF tag holds,
+    so the value read back does not depend on the installed tifffile. ``metadata``, such
+    as the caller's value-to-class mapping, is stored as JSON in the base level's image
+    description: ``json.loads(tifffile.TiffFile(path).pages[0].description)`` returns it.
 
     ``compression`` is ``"lzw"``, the default, or ``"deflate"``. The tifffile, cuCIM,
     OpenSlide and ASAP backends decode LZW; cuCIM and ASAP do not decode deflate
@@ -365,7 +369,10 @@ def write_label_tiff(
     tile_size = int(tile_size)
     description = None if metadata is None else _metadata_description(metadata)
     level_dimensions = _halved_dimensions(dimensions=dimensions, tile_size=tile_size)
-    pixels_per_centimeter = _UM_PER_CENTIMETER / spacing_um
+    level_resolutions = [
+        _pixels_per_centimeter(float(spacing_um) * 2**level)
+        for level in range(len(level_dimensions))
+    ]
     page_options: dict[str, Any] = dict(
         tile=(tile_size, tile_size),
         photometric="minisblack",
@@ -392,7 +399,7 @@ def write_label_tiff(
             ),
             shape=(height, width),
             dtype=dtype,
-            resolution=(pixels_per_centimeter, pixels_per_centimeter),
+            resolution=(level_resolutions[0], level_resolutions[0]),
             description=description,
             **page_options,
         )
@@ -400,11 +407,10 @@ def write_label_tiff(
             if level > 1:
                 # rebinding frees the level below once this one is copied out of it
                 reduced = np.ascontiguousarray(reduced[::2, ::2])
-            level_resolution = pixels_per_centimeter / 2**level
             writer.write(
                 reduced,
                 subfiletype=1,
-                resolution=(level_resolution, level_resolution),
+                resolution=(level_resolutions[level], level_resolutions[level]),
                 **page_options,
             )
     return path
@@ -534,6 +540,24 @@ def _metadata_description(metadata: Mapping[str, Any]) -> str:
     JSON; inside strings, quotes are escaped, so ``"shape":`` cannot occur there either.
     """
     return json.dumps(dict(metadata), separators=(", ", " : "))
+
+
+def _pixels_per_centimeter(spacing_um: float) -> tuple[int, int]:
+    """``spacing_um`` as px/cm: the closest rational whose terms a TIFF RATIONAL holds.
+
+    tifffile converts a float resolution itself, differently across versions: 2025.5.10
+    stores 0.2425 um/px as 4294967295/104153 px/cm, read back as 0.24250010 um/px. The
+    writer passes this rational instead, which every version stores as given.
+    """
+    pixels_per_centimeter = Fraction(_UM_PER_CENTIMETER) / Fraction(spacing_um)
+    # a denominator up to max / value keeps the numerator within max as well
+    max_denominator = min(_RATIONAL_TERM_MAX, _RATIONAL_TERM_MAX // pixels_per_centimeter)
+    rational = pixels_per_centimeter.limit_denominator(max(max_denominator, 1))
+    if not 0 < rational.numerator <= _RATIONAL_TERM_MAX:
+        raise ValueError(
+            f"a spacing of {spacing_um!r} um/px is outside the range of TIFF resolution tags"
+        )
+    return rational.numerator, rational.denominator
 
 
 def _halved_dimensions(

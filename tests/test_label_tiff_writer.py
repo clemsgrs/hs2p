@@ -2,6 +2,7 @@
 
 import json
 import tracemalloc
+from fractions import Fraction
 
 import numpy as np
 import pytest
@@ -229,7 +230,15 @@ def test_the_reader_reports_the_written_spacing_at_every_level(tmp_path, spacing
         # each reduced level carries its own resolution tags, so readers that take the
         # spacing per level agree with the base level
         page_spacings = [10000.0 / page.resolution[0] for page in tiff.pages]
+        x_resolutions = [page.tags["XResolution"].value for page in tiff.pages]
+        y_resolutions = [page.tags["YResolution"].value for page in tiff.pages]
     assert page_spacings == pytest.approx([spacing_um, 2 * spacing_um, 4 * spacing_um])
+    # the px/cm rationals are exact whichever tifffile is installed; from a float,
+    # tifffile 2025.5.10 stored 0.2425 um/px as 4294967295/104153
+    exact = [Fraction(10000) / (Fraction(str(spacing_um)) * 2**level) for level in range(3)]
+    expected = [(value.numerator, value.denominator) for value in exact]
+    assert x_resolutions == expected
+    assert y_resolutions == expected
 
 
 @pytest.mark.parametrize(
@@ -488,6 +497,7 @@ def test_a_written_label_map_reads_back_as_a_mask_aligned_to_its_slide(tmp_path,
         ("dimensions", (128, 0), ValueError, r"dimensions must be two positive .*\(128, 0\)"),
         ("spacing_um", 0.0, ValueError, "spacing_um must be finite and positive, got 0.0"),
         ("spacing_um", float("nan"), ValueError, "spacing_um must be finite and positive"),
+        ("spacing_um", 1e-7, ValueError, "outside the range of TIFF resolution tags"),
         ("dtype", np.int16, ValueError, "dtype must be an unsigned integer type, got int16"),
         ("dtype", np.float32, ValueError, "dtype must be an unsigned integer type, got float32"),
         ("compression", "jpeg", ValueError, r"compression must be one of \['lzw', 'deflate'\]"),
