@@ -17,12 +17,21 @@ from hs2p.wsi.backends.common import (
 from hs2p.wsi.geometry import compute_level_spacings
 
 
+# Read once, as of hs2p's import: a program may set it later for its child processes,
+# which does not turn faulthandler on in this one. A value set before hs2p is imported is
+# still taken for a startup option.
+_PYTHONFAULTHANDLER_AT_IMPORT = os.environ.get("PYTHONFAULTHANDLER")
+
+
 def _faulthandler_enabled_at_startup() -> bool:
-    """Whether the interpreter's options turn faulthandler on at startup, on fd 2."""
+    """Whether the interpreter's options turn faulthandler on at startup, on fd 2.
+
+    ``PYTHONFAULTHANDLER`` is read as of hs2p's import, not from the live environment.
+    """
     return bool(
         sys.flags.dev_mode
         or "faulthandler" in sys._xoptions
-        or (not sys.flags.ignore_environment and os.environ.get("PYTHONFAULTHANDLER"))
+        or (not sys.flags.ignore_environment and _PYTHONFAULTHANDLER_AT_IMPORT)
     )
 
 
@@ -42,8 +51,9 @@ class _suppress_native_stderr:
     - off: while fd 2 is redirected, it writes to a duplicate of the real
       stderr, which names a fatal signal with the Python traceback; it is
       turned off again on exit;
-    - on at startup (``-X faulthandler``, ``PYTHONFAULTHANDLER``, development
-      mode), which aims it at fd 2: the same, then it is put back on fd 2;
+    - on at startup (``-X faulthandler``, ``PYTHONFAULTHANDLER`` as of hs2p's
+      import, development mode), which aims it at fd 2: the same, then it is
+      put back on fd 2;
     - on in any other way (pytest's plugin, an application's crash log): it
       is left alone. If it writes to fd 2, a dump in here goes to
       ``/dev/null``.
@@ -186,17 +196,20 @@ class CuCIMReader:
         # import, the only one in hs2p. It is process-wide (see CUFILE_CONFIG_PATH).
         sets_cufile_config = "CUFILE_ENV_PATH_JSON" not in os.environ
         os.environ.setdefault("CUFILE_ENV_PATH_JSON", str(CUFILE_CONFIG_PATH))
+        cu_image = None
         with _suppress_native_stderr():
             try:
                 # cuCIM's __init__ swallows a native load failure; it resurfaces here.
                 cu_image = importlib.import_module("cucim").CuImage
             except ImportError as exc:
-                if sets_cufile_config:  # no cuCIM, so no cuFile: take the config back
-                    os.environ.pop("CUFILE_ENV_PATH_JSON", None)
                 raise ImportError(
                     "cucim is required for the cucim backend. "
                     "Install it with: pip install cucim-cuXX"
                 ) from exc
+            finally:
+                if cu_image is None and sets_cufile_config:
+                    # No CuImage class, whatever was raised: take the config back.
+                    os.environ.pop("CUFILE_ENV_PATH_JSON", None)
             self._slide = cu_image(str(path))
         self._gpu_decode = bool(gpu_decode)
         self._metadata = getattr(self._slide, "metadata", {}) or {}

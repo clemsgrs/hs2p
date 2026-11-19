@@ -178,6 +178,34 @@ def test_a_failed_cucim_import_keeps_a_cufile_config_the_user_set(
     assert os.environ[CUFILE_ENV] == user_config
 
 
+# cuCIM 26.06 guards its ``import cupy`` with ``except ImportError`` only, so another
+# error there, such as a NumPy ABI mismatch, escapes ``import cucim``.
+@pytest.mark.parametrize("user_set", [False, True], ids=["unset", "user-set"])
+def test_a_cucim_import_failing_with_another_error_raises_it_unchanged(
+    monkeypatch, tmp_path, user_set
+):
+    user_config = str(tmp_path / "my-cufile.json")
+    if user_set:
+        monkeypatch.setenv(CUFILE_ENV, user_config)
+    else:
+        monkeypatch.delenv(CUFILE_ENV, raising=False)
+    abi_mismatch = ValueError("numpy.dtype size changed, may indicate binary incompatibility")
+    original_import_module = cucim_reader_mod.importlib.import_module
+
+    def _import_module(name):
+        if name != "cucim":
+            return original_import_module(name)
+        raise abi_mismatch
+
+    monkeypatch.setattr(cucim_reader_mod.importlib, "import_module", _import_module)
+
+    with pytest.raises(ValueError) as raised:
+        cucim_reader_mod.CuCIMReader("fake.svs")
+
+    assert raised.value is abi_mismatch
+    assert os.environ.get(CUFILE_ENV) == (user_config if user_set else None)
+
+
 @pytest.mark.parametrize(
     ("interpreter_flags", "child_env"),
     [
@@ -204,7 +232,8 @@ def test_a_native_crash_inside_suppressed_stderr_names_the_signal_on_stderr(
 
 
 # A caller that aimed faulthandler at its own file, as pytest's plugin and an application's
-# crash log do, dies of a signal inside a suppression or after one has ended.
+# crash log do, dies of a signal inside a suppression or after one has ended. Started with
+# no faulthandler option, it may set PYTHONFAULTHANDLER afterwards for its child processes.
 CRASH_WITH_OWN_FAULTHANDLER = """
 import faulthandler
 import os
@@ -215,6 +244,8 @@ from hs2p.wsi.backends.cucim import _suppress_native_stderr
 
 crash_log = open(sys.argv[1], "w")
 faulthandler.enable(file=crash_log)
+if sys.argv[3] == "sets PYTHONFAULTHANDLER":
+    os.environ["PYTHONFAULTHANDLER"] = "1"
 with _suppress_native_stderr():
     if sys.argv[2] == "inside":
         os.kill(os.getpid(), signal.SIGSEGV)
@@ -222,11 +253,14 @@ os.kill(os.getpid(), signal.SIGSEGV)
 """
 
 
+@pytest.mark.parametrize("environment", ["leaves the environment", "sets PYTHONFAULTHANDLER"])
 @pytest.mark.parametrize("crash", ["inside", "after"])
-def test_a_native_crash_is_dumped_where_the_caller_aimed_faulthandler(crash, tmp_path):
+def test_a_native_crash_is_dumped_where_the_caller_aimed_faulthandler(
+    crash, environment, tmp_path
+):
     crash_log = tmp_path / "crash.log"
 
-    result = _run_child(CRASH_WITH_OWN_FAULTHANDLER, str(crash_log), crash)
+    result = _run_child(CRASH_WITH_OWN_FAULTHANDLER, str(crash_log), crash, environment)
 
     assert result.returncode == -signal.SIGSEGV
     assert "Fatal Python error: Segmentation fault" in crash_log.read_text()
