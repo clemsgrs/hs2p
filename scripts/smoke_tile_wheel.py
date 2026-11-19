@@ -6,6 +6,7 @@ import csv
 import importlib.metadata
 import importlib.util
 import io
+import json
 import tarfile
 import tempfile
 from pathlib import Path
@@ -18,6 +19,7 @@ from PIL import Image
 import hs2p
 from hs2p.api import extract_tiles_to_tar
 from hs2p.configs import default_config
+from hs2p.wsi.backends.cucim import CUFILE_CONFIG_PATH
 
 
 def main() -> None:
@@ -38,6 +40,10 @@ def main() -> None:
         requirement.startswith("PyTurboJPEG") and 'extra == "all"' in requirement
         for requirement in requirements
     )
+    # The cuFile config CuCIMReader points CUFILE_ENV_PATH_JSON at ships in the wheel.
+    assert json.loads(CUFILE_CONFIG_PATH.read_text()) == {
+        "execution": {"max_io_threads": 0}
+    }
 
     tile = np.empty((8, 8, 3), dtype=np.uint8)
     tile[:] = (12, 34, 56)

@@ -1,5 +1,7 @@
+import faulthandler
 import importlib
 import os
+import threading
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -21,22 +23,63 @@ class _suppress_native_stderr:
     ``cuFile initialization failed`` directly to file-descriptor 2.  No
     Python-level logging filter can catch these, so we temporarily point
     fd 2 at ``/dev/null`` and restore it on exit.
+
+    A process that dies of a signal in here, as cuFile's assertion aborts it,
+    would leave nothing on stderr, faulthandler output included (#278). So
+    while fd 2 is redirected, faulthandler writes to a duplicate of the real
+    stderr: a fatal signal is named there, with the Python traceback. The
+    native message itself still goes to ``/dev/null``.
+
+    Contexts nest (the batched streaming reads wrap the reader's own) and may
+    overlap across threads, so the redirect is shared: the outermost context
+    saves the real stderr and the last one to exit restores it. An inner
+    context never takes ``/dev/null`` for the real stderr.
     """
 
+    _lock = threading.Lock()
+    _depth = 0
+    _stderr_fd = -1
+    _devnull_fd = -1
+    _faulthandler_was_enabled = False
+
     def __enter__(self):
-        self._devnull_fd = os.open(os.devnull, os.O_WRONLY)
-        self._original_fd = os.dup(2)
-        os.dup2(self._devnull_fd, 2)
+        cls = _suppress_native_stderr
+        with cls._lock:
+            if cls._depth == 0:
+                cls._faulthandler_was_enabled = faulthandler.is_enabled()
+                cls._devnull_fd = os.open(os.devnull, os.O_WRONLY)
+                cls._stderr_fd = os.dup(2)
+                faulthandler.enable(file=cls._stderr_fd, all_threads=True)
+                os.dup2(cls._devnull_fd, 2)
+            cls._depth += 1
         return self
 
     def __exit__(self, *exc):
-        os.dup2(self._original_fd, 2)
-        os.close(self._original_fd)
-        os.close(self._devnull_fd)
+        cls = _suppress_native_stderr
+        with cls._lock:
+            cls._depth -= 1
+            if cls._depth == 0:
+                os.dup2(cls._stderr_fd, 2)
+                if cls._faulthandler_was_enabled:
+                    # faulthandler cannot report the file it was enabled on: put it
+                    # back on fd 2, where ``python -X faulthandler`` enables it.
+                    faulthandler.enable(file=2, all_threads=True)
+                else:
+                    faulthandler.disable()
+                os.close(cls._stderr_fd)
+                os.close(cls._devnull_fd)
         return False
 
 
 CUCIM_SUPPORTED_SUFFIXES = {".svs", ".tif", ".tiff"}
+
+# Importing cuCIM loads NVIDIA cuFile, which starts a thread pool for each visible GPU and
+# aborts the process (``CUFileThreadPoolWorker::run(): Assertion `0' failed``) when one GPU
+# is too full for a worker to get a CUDA context (#278). Slide reads never go through
+# cuFile: cuCIM's TIFF reader uses ``pread``. The shipped config holds one key,
+# ``{"execution": {"max_io_threads": 0}}``, which turns the pool off; cuFile applies a
+# partial config over its defaults. A ``CUFILE_ENV_PATH_JSON`` the user set is kept.
+CUFILE_CONFIG_PATH = Path(__file__).with_name("cufile.json")
 
 
 def supports_cucim_path(path: str | Path) -> bool:
@@ -110,6 +153,9 @@ class CuCIMReader:
     ):
         if gpu_decode:
             os.environ["ENABLE_CUSLIDE2"] = "1"
+        # cuFile reads the variable once, when cuCIM's library loads: set it before the
+        # import, the only one in hs2p. It is process-wide (see CUFILE_CONFIG_PATH).
+        os.environ.setdefault("CUFILE_ENV_PATH_JSON", str(CUFILE_CONFIG_PATH))
         with _suppress_native_stderr():
             try:
                 cucim = importlib.import_module("cucim")

@@ -99,7 +99,7 @@ zip-safe = false
 include = ["hs2p*"]
 
 [tool.setuptools.package-data]
-hs2p = ["py.typed", "configs/*.yaml"]
+hs2p = ["py.typed", "configs/*.yaml", "wsi/backends/cufile.json"]
 
 [tool.pytest.ini_options]
 addopts = "--cov=hs2p -m 'not integration and not script'"

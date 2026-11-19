@@ -1,0 +1,252 @@
+"""cuCIM's native faults: the cuFile config hs2p sets, and crashes that stay visible (#278).
+
+None of these tests needs cuCIM or a GPU: cuCIM is replaced by a fake module.
+"""
+
+import json
+import os
+import signal
+import subprocess
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+
+import hs2p
+import hs2p.wsi.backends.cucim as cucim_reader_mod
+
+CUFILE_ENV = "CUFILE_ENV_PATH_JSON"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+FIXTURE_SLIDE = REPO_ROOT / "tests" / "fixtures" / "input" / "test-wsi.tif"
+
+# fake_crash.py from #278, verbatim: the cuCIM opener dies inside
+# ``_suppress_native_stderr`` as cuCIM's native crashes do.
+FAKE_CRASH = """
+import os
+import signal
+import sys
+
+from hs2p.wsi import reader
+from hs2p.wsi.backends.cucim import _suppress_native_stderr
+
+
+def failing_opener(*args, **kwargs):
+    if sys.argv[2] == "raise":
+        raise RuntimeError("cuCIM cannot open this slide")
+    with _suppress_native_stderr():  # CuCIMReader wraps its import and reads like this
+        os.write(2, b"native assertion failed\\n")
+        os.kill(os.getpid(), signal.SIGSEGV)
+
+
+cucim = reader._BACKENDS["cucim"]
+reader._BACKENDS["cucim"] = reader._BackendSpec(failing_opener, cucim.supports_path)
+with reader.open_slide(sys.argv[1], backend="auto") as slide:
+    print("selected", slide.backend_name)
+"""
+
+
+def _run_child(script: str, *args: str, interpreter_flags: tuple[str, ...] = ()):
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONFAULTHANDLER"}
+    return subprocess.run(
+        [sys.executable, *interpreter_flags, "-c", script, *args],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _open_reader_on_fake_cucim(monkeypatch) -> str | None:
+    """Open a ``CuCIMReader`` on a fake cuCIM; return ``CUFILE_ENV_PATH_JSON`` as its import saw it."""
+    slide = SimpleNamespace(
+        metadata={
+            "openslide": {"MPP": 0.5},
+            "cucim": {
+                "resolutions": {
+                    "level_dimensions": [[64, 64]],
+                    "level_downsamples": [1.0],
+                }
+            },
+        }
+    )
+    fake_cucim = SimpleNamespace(CuImage=MagicMock(return_value=slide))
+    seen_at_import: dict[str, str | None] = {}
+    original_import_module = cucim_reader_mod.importlib.import_module
+
+    def _import_module(name):
+        if name != "cucim":
+            return original_import_module(name)
+        seen_at_import["value"] = os.environ.get(CUFILE_ENV)
+        return fake_cucim
+
+    monkeypatch.setattr(cucim_reader_mod.importlib, "import_module", _import_module)
+    cucim_reader_mod.CuCIMReader("fake.svs")
+    return seen_at_import["value"]
+
+
+def test_cucim_import_sees_the_shipped_cufile_config_when_the_variable_is_unset(
+    monkeypatch,
+):
+    monkeypatch.delenv(CUFILE_ENV, raising=False)
+
+    seen = _open_reader_on_fake_cucim(monkeypatch)
+
+    assert seen is not None
+    config_path = Path(seen)
+    assert config_path.is_file()
+    assert config_path.resolve().is_relative_to(Path(hs2p.__file__).parent.resolve())
+    assert json.loads(config_path.read_text()) == {"execution": {"max_io_threads": 0}}
+
+
+def test_cucim_import_keeps_a_cufile_config_the_user_set(monkeypatch, tmp_path):
+    user_config = str(tmp_path / "my-cufile.json")
+    monkeypatch.setenv(CUFILE_ENV, user_config)
+
+    seen = _open_reader_on_fake_cucim(monkeypatch)
+
+    assert seen == user_config
+    assert os.environ[CUFILE_ENV] == user_config
+
+
+@pytest.mark.parametrize(
+    "interpreter_flags",
+    [(), ("-X", "faulthandler")],
+    ids=["faulthandler-off", "faulthandler-on"],
+)
+def test_a_native_crash_inside_suppressed_stderr_names_the_signal_on_stderr(
+    interpreter_flags,
+):
+    result = _run_child(
+        FAKE_CRASH, str(FIXTURE_SLIDE), "crash", interpreter_flags=interpreter_flags
+    )
+
+    assert result.returncode == -signal.SIGSEGV
+    assert "Segmentation fault" in result.stderr
+
+
+# A fake cuCIM whose import aborts the way cuFile's assertion does, opened through either
+# entry point that imports cuCIM: ``open_slide`` and the batched streaming reads, which
+# wrap the reader's own suppressed import in a second suppression.
+ABORTING_CUCIM_IMPORT = """
+import os
+import sys
+from pathlib import Path
+
+import hs2p.wsi.backends.cucim as m
+
+
+def _import_module(name, _original=m.importlib.import_module):
+    if name != "cucim":
+        return _original(name)
+    os.write(2, b"cufile_worker_thread.h:57: Assertion `0' failed.\\n")
+    os.abort()
+
+
+m.importlib.import_module = _import_module
+if sys.argv[1] == "open_slide":
+    from hs2p.wsi.reader import open_slide
+
+    open_slide("fake.svs", backend="cucim")
+else:
+    from hs2p.wsi.streaming.batched import (
+        BatchedReadRequest,
+        iter_cucim_batched_read_regions,
+    )
+
+    iter_cucim_batched_read_regions(
+        image_path=Path("fake.svs"),
+        requests=[BatchedReadRequest(location=(0, 0), size=(16, 16))],
+        level=0,
+        num_workers=1,
+    )
+"""
+
+
+@pytest.mark.parametrize("entry_point", ["open_slide", "batched_reads"])
+def test_an_abort_at_cucim_import_names_the_signal_on_stderr(entry_point):
+    result = _run_child(ABORTING_CUCIM_IMPORT, entry_point)
+
+    assert result.returncode == -signal.SIGABRT
+    assert "Aborted" in result.stderr
+
+
+# Batched streaming reads on a fake cuCIM that prints cuInit/cuFile noise at import, at
+# open, at the read call and while its batch is iterated, which happens after the
+# reader's own suppression has ended but inside the batched reads' outer one.
+NOISY_BATCHED_READS = """
+import faulthandler
+import os
+from pathlib import Path
+
+import numpy as np
+
+import hs2p.wsi.backends.cucim as m
+from hs2p.wsi.streaming.batched import BatchedReadRequest, iter_cucim_batched_read_regions
+
+NOISE = b"cuInit Failed, error CUDA_ERROR_NO_DEVICE\\ncuFile initialization failed\\n"
+
+
+class FakeCuImage:
+    metadata = {
+        "openslide": {"MPP": 0.5},
+        "cucim": {"resolutions": {"level_dimensions": [[64, 64]], "level_downsamples": [1.0]}},
+    }
+
+    def __init__(self, path):
+        os.write(2, NOISE)
+
+    def read_region(self, *, location, size, level, num_workers, device):
+        os.write(2, NOISE)
+
+        def _decode():  # cuCIM decodes a batch as it is iterated
+            for _ in location:
+                os.write(2, NOISE)
+                yield np.zeros((size[1], size[0], 3), dtype=np.uint8)
+
+        return _decode()
+
+
+class FakeCuCIM:
+    CuImage = FakeCuImage
+
+
+def _import_module(name, _original=m.importlib.import_module):
+    if name != "cucim":
+        return _original(name)
+    os.write(2, NOISE)
+    return FakeCuCIM
+
+
+m.importlib.import_module = _import_module
+regions = list(
+    iter_cucim_batched_read_regions(
+        image_path=Path("fake.svs"),
+        requests=[
+            BatchedReadRequest(location=(0, 0), size=(16, 16)),
+            BatchedReadRequest(location=(16, 0), size=(16, 16)),
+        ],
+        level=0,
+        num_workers=2,
+    )
+)
+print(len(regions), faulthandler.is_enabled())
+os.write(2, b"stderr is back\\n")
+"""
+
+
+@pytest.mark.parametrize(
+    ("interpreter_flags", "faulthandler_enabled"),
+    [((), False), (("-X", "faulthandler"), True)],
+    ids=["faulthandler-off", "faulthandler-on"],
+)
+def test_batched_reads_hide_cuinit_and_cufile_noise_and_restore_stderr(
+    interpreter_flags, faulthandler_enabled
+):
+    result = _run_child(NOISY_BATCHED_READS, interpreter_flags=interpreter_flags)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == f"2 {faulthandler_enabled}\n"
+    assert result.stderr == "stderr is back\n"

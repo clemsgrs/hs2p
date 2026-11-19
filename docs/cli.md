@@ -134,6 +134,16 @@ Selection does not inspect mask labels or retry after a later decode failure: a 
 
 Requested and resolved readers are saved separately as provenance. Resume compares resolved readers, including the mask reader when a source mask exists. Pin explicit readers to keep decoder choice stable across environments or backend-priority changes. See [artifact validation](artifacts.md#resume-and-validation) for compatibility rules, including older metadata without mask-backend fields.
 
+### cuCIM and `CUFILE_ENV_PATH_JSON`
+
+Importing cuCIM loads NVIDIA cuFile, which starts a thread pool for each visible GPU. When one visible GPU is nearly out of memory (about 200 MiB free or less when measured), a worker cannot get a CUDA context and cuFile aborts the process with `CUFileThreadPoolWorker::run(): Assertion '0' failed`. This hits `cucim`, and `auto`, which tries cuCIM first. hs2p's slide reads never go through cuFile, so before its cuCIM import hs2p sets `CUFILE_ENV_PATH_JSON` to a config it ships (`hs2p.wsi.backends.cucim.CUFILE_CONFIG_PATH`). That config holds only `{"execution": {"max_io_threads": 0}}`, which turns the pool off.
+
+- The variable is process-wide, and child processes inherit it. Any other cuFile user in the process, such as kvikio or DALI, gets the same setting, and NVIDIA does not support cuFile's stream APIs when `max_io_threads` is 0.
+- To keep cuFile's thread pool, set `CUFILE_ENV_PATH_JSON` yourself, for example to `/etc/cufile.json`, before hs2p opens a slide with cuCIM. hs2p never changes a value that is already set.
+- cuFile reads the variable once, when cuCIM's library loads. If cuCIM was imported before hs2p opened a slide with it, cuFile keeps its stock config.
+
+hs2p redirects native stderr to `/dev/null` while it imports cuCIM and reads with it, to hide cuInit and cuFile warnings. If the process dies of a signal there, Python's faulthandler still writes `Fatal Python error: ...` and the Python traceback to the real stderr. The native message itself is lost.
+
 ### JPEG encoder
 
 `speed.jpeg_backend` controls saved-tile encoding independently of the input readers. `pil` is the default and works with the base install. For TurboJPEG:
