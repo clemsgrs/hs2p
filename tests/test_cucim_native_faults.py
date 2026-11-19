@@ -8,6 +8,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -70,8 +71,7 @@ def _run_child(
     )
 
 
-def _open_reader_on_fake_cucim(monkeypatch) -> str | None:
-    """Open a ``CuCIMReader`` on a fake cuCIM; return ``CUFILE_ENV_PATH_JSON`` as its import saw it."""
+def _fake_cucim() -> SimpleNamespace:
     slide = SimpleNamespace(
         metadata={
             "openslide": {"MPP": 0.5},
@@ -83,7 +83,12 @@ def _open_reader_on_fake_cucim(monkeypatch) -> str | None:
             },
         }
     )
-    fake_cucim = SimpleNamespace(CuImage=MagicMock(return_value=slide))
+    return SimpleNamespace(CuImage=MagicMock(return_value=slide))
+
+
+def _open_reader_on_fake_cucim(monkeypatch) -> str | None:
+    """Open a ``CuCIMReader`` on a fake cuCIM; return ``CUFILE_ENV_PATH_JSON`` as its import saw it."""
+    fake_cucim = _fake_cucim()
     seen_at_import: dict[str, str | None] = {}
     original_import_module = cucim_reader_mod.importlib.import_module
 
@@ -204,6 +209,67 @@ def test_a_cucim_import_failing_with_another_error_raises_it_unchanged(
 
     assert raised.value is abi_mismatch
     assert os.environ.get(CUFILE_ENV) == (user_config if user_set else None)
+
+
+# Two threads open their first reader at once. Thread A set the variable; thread B came in
+# while A was importing cuCIM. A's import then dies of a failure that does not repeat.
+def test_a_cucim_import_failing_in_another_thread_leaves_this_one_the_cufile_config(
+    monkeypatch,
+):
+    timeout = 10.0
+    a_in_import = threading.Event()
+    b_in_import = threading.Event()
+    a_raised = threading.Event()
+    raised: dict[str, BaseException] = {}
+    seen_by_b: dict[str, str | None] = {}
+    fake_cucim = _fake_cucim()
+    original_import_module = cucim_reader_mod.importlib.import_module
+
+    def _import_module(name):
+        if name != "cucim":
+            return original_import_module(name)
+        if threading.current_thread() is thread_a:
+            a_in_import.set()
+            b_in_import.wait(0.5)  # B gets here only if nothing keeps it out
+            raise MemoryError
+        b_in_import.set()
+        a_raised.wait(timeout)
+        seen_by_b["value"] = os.environ.get(CUFILE_ENV)
+        return fake_cucim
+
+    def _open(name: str) -> None:
+        try:
+            cucim_reader_mod.CuCIMReader(f"{name}.svs")
+        except BaseException as exc:
+            raised[name] = exc
+
+    def _open_a() -> None:
+        _open("a")
+        a_raised.set()
+
+    def _open_b() -> None:
+        a_in_import.wait(timeout)
+        _open("b")
+
+    monkeypatch.setattr(cucim_reader_mod.importlib, "import_module", _import_module)
+    found = os.environ.pop(CUFILE_ENV, None)
+    try:
+        thread_a = threading.Thread(target=_open_a, daemon=True)
+        thread_b = threading.Thread(target=_open_b, daemon=True)
+        thread_a.start()
+        thread_b.start()
+        thread_a.join(timeout)
+        thread_b.join(timeout)
+    finally:
+        if found is None:
+            os.environ.pop(CUFILE_ENV, None)
+        else:
+            os.environ[CUFILE_ENV] = found
+
+    assert not thread_a.is_alive() and not thread_b.is_alive()
+    assert isinstance(raised.pop("a", None), MemoryError)
+    assert raised == {}
+    assert seen_by_b == {"value": str(cucim_reader_mod.CUFILE_CONFIG_PATH)}
 
 
 @pytest.mark.parametrize(

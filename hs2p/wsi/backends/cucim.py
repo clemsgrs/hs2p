@@ -119,6 +119,11 @@ CUCIM_SUPPORTED_SUFFIXES = {".svs", ".tif", ".tiff"}
 # ``{"execution": {"max_io_threads": 0}}``, which turns the pool off; cuFile applies a
 # partial config over its defaults. A ``CUFILE_ENV_PATH_JSON`` the user set is kept.
 CUFILE_CONFIG_PATH = Path(__file__).with_name("cufile.json")
+# Held from the check of ``CUFILE_ENV_PATH_JSON`` to its rollback, around the cuCIM import:
+# otherwise a thread whose import fails takes the variable back while another thread, which
+# found it set, imports cuCIM without it. Reentrant, so code that runs mid-import on the same
+# thread (a signal handler, a finalizer) and opens a reader cannot deadlock on it.
+_CUFILE_CONFIG_LOCK = threading.RLock()
 
 
 def supports_cucim_path(path: str | Path) -> bool:
@@ -192,24 +197,25 @@ class CuCIMReader:
     ):
         if gpu_decode:
             os.environ["ENABLE_CUSLIDE2"] = "1"
-        # cuFile reads the variable once, when cuCIM's library loads: set it before the
-        # import, the only one in hs2p. It is process-wide (see CUFILE_CONFIG_PATH).
-        sets_cufile_config = "CUFILE_ENV_PATH_JSON" not in os.environ
-        os.environ.setdefault("CUFILE_ENV_PATH_JSON", str(CUFILE_CONFIG_PATH))
         cu_image = None
         with _suppress_native_stderr():
-            try:
-                # cuCIM's __init__ swallows a native load failure; it resurfaces here.
-                cu_image = importlib.import_module("cucim").CuImage
-            except ImportError as exc:
-                raise ImportError(
-                    "cucim is required for the cucim backend. "
-                    "Install it with: pip install cucim-cuXX"
-                ) from exc
-            finally:
-                if cu_image is None and sets_cufile_config:
-                    # No CuImage class, whatever was raised: take the config back.
-                    os.environ.pop("CUFILE_ENV_PATH_JSON", None)
+            # cuFile reads the variable once, when cuCIM's library loads: set it before the
+            # import, the only one in hs2p. It is process-wide (see CUFILE_CONFIG_PATH).
+            with _CUFILE_CONFIG_LOCK:
+                sets_cufile_config = "CUFILE_ENV_PATH_JSON" not in os.environ
+                os.environ.setdefault("CUFILE_ENV_PATH_JSON", str(CUFILE_CONFIG_PATH))
+                try:
+                    # cuCIM's __init__ swallows a native load failure; it resurfaces here.
+                    cu_image = importlib.import_module("cucim").CuImage
+                except ImportError as exc:
+                    raise ImportError(
+                        "cucim is required for the cucim backend. "
+                        "Install it with: pip install cucim-cuXX"
+                    ) from exc
+                finally:
+                    if cu_image is None and sets_cufile_config:
+                        # No CuImage class, whatever was raised: take the config back.
+                        os.environ.pop("CUFILE_ENV_PATH_JSON", None)
             self._slide = cu_image(str(path))
         self._gpu_decode = bool(gpu_decode)
         self._metadata = getattr(self._slide, "metadata", {}) or {}
