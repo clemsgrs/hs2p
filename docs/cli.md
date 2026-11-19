@@ -142,7 +142,13 @@ Importing cuCIM loads NVIDIA cuFile, which starts a thread pool for each visible
 - To keep cuFile's thread pool, set `CUFILE_ENV_PATH_JSON` yourself, for example to `/etc/cufile.json`, before hs2p opens a slide with cuCIM. hs2p never changes a value that is already set.
 - cuFile reads the variable once, when cuCIM's library loads. If cuCIM was imported before hs2p opened a slide with it, cuFile keeps its stock config.
 
-hs2p redirects native stderr to `/dev/null` while it imports cuCIM and reads with it, to hide cuInit and cuFile warnings. If the process dies of a signal there, Python's faulthandler still writes `Fatal Python error: ...` and the Python traceback to the real stderr. The native message itself is lost.
+hs2p redirects native stderr to `/dev/null` while it imports cuCIM and reads with it, to hide cuInit and cuFile warnings. If the process dies of a signal there, the native message is lost, but Python's faulthandler can still write `Fatal Python error: ...` and the Python traceback. Python cannot report the file faulthandler writes to, so hs2p acts on how it was turned on:
+
+- Off: hs2p turns it on, aimed at the real stderr, while stderr is redirected, and off again afterwards.
+- On at startup, by `-X faulthandler`, `PYTHONFAULTHANDLER` or development mode, which aim it at fd 2: hs2p aims it at the real stderr while stderr is redirected, and back at fd 2 afterwards.
+- On in any other way, as pytest's plugin or an application's crash log does: hs2p leaves it alone, and dumps go where it was aimed. If that is fd 2 (`faulthandler.enable()` called with no file), a dump while stderr is redirected goes to `/dev/null`.
+
+hs2p tells the last two apart by the interpreter's options only. A tool that re-aims faulthandler in a process started with one of them, such as pytest run with `-X faulthandler`, is taken for the startup case, and its own file is replaced: during a cuCIM call by the stderr hs2p found, and after it by fd 2. Under pytest's default capture, such a dump is lost.
 
 ### JPEG encoder
 

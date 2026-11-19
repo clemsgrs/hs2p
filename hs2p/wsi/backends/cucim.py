@@ -1,6 +1,7 @@
 import faulthandler
 import importlib
 import os
+import sys
 import threading
 from pathlib import Path
 from typing import Any, Iterable
@@ -16,6 +17,15 @@ from hs2p.wsi.backends.common import (
 from hs2p.wsi.geometry import compute_level_spacings
 
 
+def _faulthandler_enabled_at_startup() -> bool:
+    """Whether the interpreter's options turn faulthandler on at startup, on fd 2."""
+    return bool(
+        sys.flags.dev_mode
+        or "faulthandler" in sys._xoptions
+        or (not sys.flags.ignore_environment and os.environ.get("PYTHONFAULTHANDLER"))
+    )
+
+
 class _suppress_native_stderr:
     """Context manager that silences native (C/C++) stderr output.
 
@@ -25,10 +35,23 @@ class _suppress_native_stderr:
     fd 2 at ``/dev/null`` and restore it on exit.
 
     A process that dies of a signal in here, as cuFile's assertion aborts it,
-    would leave nothing on stderr, faulthandler output included (#278). So
-    while fd 2 is redirected, faulthandler writes to a duplicate of the real
-    stderr: a fatal signal is named there, with the Python traceback. The
-    native message itself still goes to ``/dev/null``.
+    would leave nothing on stderr, faulthandler output included (#278). Python
+    cannot report the file faulthandler writes to, so what happens to it
+    depends on how it was turned on:
+
+    - off: while fd 2 is redirected, it writes to a duplicate of the real
+      stderr, which names a fatal signal with the Python traceback; it is
+      turned off again on exit;
+    - on at startup (``-X faulthandler``, ``PYTHONFAULTHANDLER``, development
+      mode), which aims it at fd 2: the same, then it is put back on fd 2;
+    - on in any other way (pytest's plugin, an application's crash log): it
+      is left alone. If it writes to fd 2, a dump in here goes to
+      ``/dev/null``.
+
+    A tool that re-aims faulthandler in a process started with one of those
+    options is taken for the startup case, and its file is replaced: in here
+    by the stderr found on entry, and after the last exit by fd 2. The native
+    message itself always goes to ``/dev/null``.
 
     Contexts nest (the batched streaming reads wrap the reader's own) and may
     overlap across threads, so the redirect is shared: the outermost context
@@ -41,15 +64,21 @@ class _suppress_native_stderr:
     _stderr_fd = -1
     _devnull_fd = -1
     _faulthandler_was_enabled = False
+    _reaims_faulthandler = False
 
     def __enter__(self):
         cls = _suppress_native_stderr
         with cls._lock:
             if cls._depth == 0:
                 cls._faulthandler_was_enabled = faulthandler.is_enabled()
+                cls._reaims_faulthandler = (
+                    not cls._faulthandler_was_enabled
+                    or _faulthandler_enabled_at_startup()
+                )
                 cls._devnull_fd = os.open(os.devnull, os.O_WRONLY)
                 cls._stderr_fd = os.dup(2)
-                faulthandler.enable(file=cls._stderr_fd, all_threads=True)
+                if cls._reaims_faulthandler:
+                    faulthandler.enable(file=cls._stderr_fd, all_threads=True)
                 os.dup2(cls._devnull_fd, 2)
             cls._depth += 1
         return self
@@ -60,12 +89,12 @@ class _suppress_native_stderr:
             cls._depth -= 1
             if cls._depth == 0:
                 os.dup2(cls._stderr_fd, 2)
-                if cls._faulthandler_was_enabled:
-                    # faulthandler cannot report the file it was enabled on: put it
-                    # back on fd 2, where ``python -X faulthandler`` enables it.
-                    faulthandler.enable(file=2, all_threads=True)
-                else:
-                    faulthandler.disable()
+                if cls._reaims_faulthandler:
+                    if cls._faulthandler_was_enabled:
+                        # Back on fd 2, where the interpreter enabled it at startup.
+                        faulthandler.enable(file=2, all_threads=True)
+                    else:
+                        faulthandler.disable()
                 os.close(cls._stderr_fd)
                 os.close(cls._devnull_fd)
         return False

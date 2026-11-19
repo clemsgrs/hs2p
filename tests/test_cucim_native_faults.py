@@ -47,13 +47,19 @@ with reader.open_slide(sys.argv[1], backend="auto") as slide:
 """
 
 
-def _run_child(script: str, *args: str, interpreter_flags: tuple[str, ...] = ()):
+def _run_child(
+    script: str,
+    *args: str,
+    interpreter_flags: tuple[str, ...] = (),
+    child_env: dict[str, str] | None = None,
+):
     # Either variable turns faulthandler on in the child (dev mode does), whatever the test asks.
     env = {
         k: v
         for k, v in os.environ.items()
         if k not in {"PYTHONFAULTHANDLER", "PYTHONDEVMODE"}
     }
+    env.update(child_env or {})
     return subprocess.run(
         [sys.executable, *interpreter_flags, "-c", script, *args],
         cwd=REPO_ROOT,
@@ -151,19 +157,57 @@ def test_a_failed_cucim_import_keeps_a_cufile_config_the_user_set(
 
 
 @pytest.mark.parametrize(
-    "interpreter_flags",
-    [(), ("-X", "faulthandler")],
-    ids=["faulthandler-off", "faulthandler-on"],
+    ("interpreter_flags", "child_env"),
+    [
+        ((), {}),
+        (("-X", "faulthandler"), {}),
+        ((), {"PYTHONFAULTHANDLER": "1"}),
+        (("-X", "dev"), {}),
+    ],
+    ids=["faulthandler-off", "faulthandler-on", "PYTHONFAULTHANDLER", "dev-mode"],
 )
 def test_a_native_crash_inside_suppressed_stderr_names_the_signal_on_stderr(
-    interpreter_flags,
+    interpreter_flags, child_env
 ):
     result = _run_child(
-        FAKE_CRASH, str(FIXTURE_SLIDE), "crash", interpreter_flags=interpreter_flags
+        FAKE_CRASH,
+        str(FIXTURE_SLIDE),
+        "crash",
+        interpreter_flags=interpreter_flags,
+        child_env=child_env,
     )
 
     assert result.returncode == -signal.SIGSEGV
     assert "Segmentation fault" in result.stderr
+
+
+# A caller that aimed faulthandler at its own file, as pytest's plugin and an application's
+# crash log do, dies of a signal inside a suppression or after one has ended.
+CRASH_WITH_OWN_FAULTHANDLER = """
+import faulthandler
+import os
+import signal
+import sys
+
+from hs2p.wsi.backends.cucim import _suppress_native_stderr
+
+crash_log = open(sys.argv[1], "w")
+faulthandler.enable(file=crash_log)
+with _suppress_native_stderr():
+    if sys.argv[2] == "inside":
+        os.kill(os.getpid(), signal.SIGSEGV)
+os.kill(os.getpid(), signal.SIGSEGV)
+"""
+
+
+@pytest.mark.parametrize("crash", ["inside", "after"])
+def test_a_native_crash_is_dumped_where_the_caller_aimed_faulthandler(crash, tmp_path):
+    crash_log = tmp_path / "crash.log"
+
+    result = _run_child(CRASH_WITH_OWN_FAULTHANDLER, str(crash_log), crash)
+
+    assert result.returncode == -signal.SIGSEGV
+    assert "Fatal Python error: Segmentation fault" in crash_log.read_text()
 
 
 # A fake cuCIM whose import aborts the way cuFile's assertion does, opened through either
