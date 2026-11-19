@@ -126,6 +126,23 @@ CUFILE_CONFIG_PATH = Path(__file__).with_name("cufile.json")
 _CUFILE_CONFIG_LOCK = threading.RLock()
 
 
+def _replace_locks_after_fork() -> None:
+    """In a forked child, replace both locks, which a thread absent from it may hold.
+
+    The suppression's depth and saved fds are kept: the forking thread's open contexts
+    still exit in the child and need them, and one shared count cannot tell those from
+    another thread's, which never exit there. A child forked while another thread is in a
+    suppressed call keeps fd 2 on ``/dev/null``.
+    """
+    global _CUFILE_CONFIG_LOCK
+    _CUFILE_CONFIG_LOCK = threading.RLock()
+    _suppress_native_stderr._lock = threading.Lock()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_replace_locks_after_fork)
+
+
 def supports_cucim_path(path: str | Path) -> bool:
     return Path(path).suffix.lower() in CUCIM_SUPPORTED_SUFFIXES
 

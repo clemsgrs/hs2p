@@ -272,6 +272,87 @@ def test_a_cucim_import_failing_in_another_thread_leaves_this_one_the_cufile_con
     assert seen_by_b == {"value": str(cucim_reader_mod.CUFILE_CONFIG_PATH)}
 
 
+# A thread holds one of the reader's two locks while the main thread forks. The forked
+# child, where that thread does not exist, opens a reader on a fake cuCIM and reads.
+FORK_WHILE_A_THREAD_HOLDS_A_LOCK = """
+import os
+import signal
+import sys
+import threading
+import time
+from types import SimpleNamespace
+
+import numpy as np
+
+import hs2p.wsi.backends.cucim as m
+
+TIMEOUT = 10.0
+
+
+class FakeCuImage:
+    metadata = {
+        "openslide": {"MPP": 0.5},
+        "cucim": {"resolutions": {"level_dimensions": [[64, 64]], "level_downsamples": [1.0]}},
+    }
+
+    def __init__(self, path):
+        pass
+
+    def read_region(self, *, location, size, level, num_workers, device):
+        return np.zeros((size[1], size[0], 3), dtype=np.uint8)
+
+
+def _import_module(name, _original=m.importlib.import_module):
+    if name != "cucim":
+        return _original(name)
+    return SimpleNamespace(CuImage=FakeCuImage)
+
+
+m.importlib.import_module = _import_module
+lock = {
+    "cufile config": m._CUFILE_CONFIG_LOCK,
+    "stderr suppression": m._suppress_native_stderr._lock,
+}[sys.argv[1]]
+held, forked = threading.Event(), threading.Event()
+
+
+def _hold():
+    with lock:
+        held.set()
+        forked.wait(TIMEOUT)
+
+
+threading.Thread(target=_hold, daemon=True).start()
+assert held.wait(TIMEOUT)
+pid = os.fork()
+if pid == 0:
+    m.CuCIMReader("fake.svs").read_region((0, 0), 0, (16, 16))
+    os._exit(0)
+forked.set()
+deadline = time.monotonic() + TIMEOUT
+while not (waited := os.waitpid(pid, os.WNOHANG))[0] and time.monotonic() < deadline:
+    time.sleep(0.01)
+if waited[0]:
+    print("child exited", os.waitstatus_to_exitcode(waited[1]))
+else:
+    os.kill(pid, signal.SIGKILL)
+    os.waitpid(pid, 0)
+    print("child hung")
+"""
+
+
+@pytest.mark.skipif(
+    not hasattr(os, "fork") or not hasattr(os, "register_at_fork"),
+    reason="needs os.fork and os.register_at_fork",
+)
+@pytest.mark.parametrize("lock", ["cufile config", "stderr suppression"])
+def test_a_child_forked_while_another_thread_holds_a_reader_lock_opens_and_reads(lock):
+    result = _run_child(FORK_WHILE_A_THREAD_HOLDS_A_LOCK, lock)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "child exited 0\n", result.stderr
+
+
 @pytest.mark.parametrize(
     ("interpreter_flags", "child_env"),
     [
