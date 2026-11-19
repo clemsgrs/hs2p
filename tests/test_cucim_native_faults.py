@@ -413,6 +413,46 @@ def test_a_native_crash_is_dumped_where_the_caller_aimed_faulthandler(
     assert "Fatal Python error: Segmentation fault" in crash_log.read_text()
 
 
+# Another thread aims faulthandler at its own crash log while a suppression is open, and the
+# process dies of a signal after the suppression has ended.
+CRASH_LOG_ENABLED_DURING_A_SUPPRESSION = """
+import faulthandler
+import os
+import signal
+import sys
+import threading
+
+from hs2p.wsi.backends.cucim import _suppress_native_stderr
+
+crash_log = open(sys.argv[1], "w")
+with _suppress_native_stderr():
+    thread = threading.Thread(target=faulthandler.enable, kwargs={"file": crash_log})
+    thread.start()
+    thread.join()
+os.kill(os.getpid(), signal.SIGSEGV)
+"""
+
+
+@pytest.mark.parametrize(
+    "interpreter_flags",
+    [(), ("-X", "faulthandler")],
+    ids=["faulthandler-off", "faulthandler-on"],
+)
+def test_a_crash_log_enabled_during_a_suppression_gets_the_dump_after_it(
+    interpreter_flags, tmp_path
+):
+    crash_log = tmp_path / "crash.log"
+
+    result = _run_child(
+        CRASH_LOG_ENABLED_DURING_A_SUPPRESSION,
+        str(crash_log),
+        interpreter_flags=interpreter_flags,
+    )
+
+    assert result.returncode == -signal.SIGSEGV
+    assert "Fatal Python error: Segmentation fault" in crash_log.read_text()
+
+
 # A fake cuCIM whose import aborts the way cuFile's assertion does, opened through either
 # entry point that imports cuCIM: ``open_slide`` and the batched streaming reads, which
 # wrap the reader's own suppressed import in a second suppression.

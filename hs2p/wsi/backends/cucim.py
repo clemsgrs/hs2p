@@ -3,6 +3,7 @@ import importlib
 import os
 import sys
 import threading
+import weakref
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -35,6 +36,22 @@ def _faulthandler_enabled_at_startup() -> bool:
     )
 
 
+class _FaulthandlerFile:
+    """The duplicate of stderr as a file object, so that a weak reference can watch it.
+
+    ``faulthandler.enable`` calls its ``fileno()`` and ``flush()``, and nothing else.
+    """
+
+    def __init__(self, fd: int):
+        self._fd = fd
+
+    def fileno(self) -> int:
+        return self._fd
+
+    def flush(self) -> None:
+        pass
+
+
 class _suppress_native_stderr:
     """Context manager that silences native (C/C++) stderr output.
 
@@ -58,10 +75,20 @@ class _suppress_native_stderr:
       is left alone. If it writes to fd 2, a dump in here goes to
       ``/dev/null``.
 
-    A tool that re-aims faulthandler in a process started with one of those
-    options is taken for the startup case, and its file is replaced: in here
-    by the stderr found on entry, and after the last exit by fd 2. The native
-    message itself always goes to ``/dev/null``.
+    A tool that re-aimed faulthandler before the outermost context, in a
+    process started with one of those options, is taken for the startup case,
+    and its file is replaced: in here by the stderr found on entry, and after
+    the last exit by fd 2. The native message itself always goes to
+    ``/dev/null``.
+
+    A change made to faulthandler while a context is open, such as another
+    thread enabling it on its own crash log, is kept: the last exit undoes
+    hs2p's handler only while it is still the one installed. faulthandler
+    holds the only reference to the file object it was last enabled on and
+    drops it at the next ``enable`` or ``disable``, so a weak reference to
+    hs2p's ``_FaulthandlerFile`` tells. Code that checks
+    ``faulthandler.is_enabled()`` in here still sees hs2p's handler, so an
+    ``if not faulthandler.is_enabled(): faulthandler.enable()`` is skipped.
 
     Contexts nest (the batched streaming reads wrap the reader's own) and may
     overlap across threads, so the redirect is shared: the outermost context
@@ -75,6 +102,7 @@ class _suppress_native_stderr:
     _devnull_fd = -1
     _faulthandler_was_enabled = False
     _reaims_faulthandler = False
+    _faulthandler_file = None  # weak reference to the _FaulthandlerFile hs2p enabled
 
     def __enter__(self):
         cls = _suppress_native_stderr
@@ -88,7 +116,10 @@ class _suppress_native_stderr:
                 cls._devnull_fd = os.open(os.devnull, os.O_WRONLY)
                 cls._stderr_fd = os.dup(2)
                 if cls._reaims_faulthandler:
-                    faulthandler.enable(file=cls._stderr_fd, all_threads=True)
+                    faulthandler_file = _FaulthandlerFile(cls._stderr_fd)
+                    faulthandler.enable(file=faulthandler_file, all_threads=True)
+                    cls._faulthandler_file = weakref.ref(faulthandler_file)
+                    del faulthandler_file  # faulthandler now holds the only reference
                 os.dup2(cls._devnull_fd, 2)
             cls._depth += 1
         return self
@@ -99,12 +130,15 @@ class _suppress_native_stderr:
             cls._depth -= 1
             if cls._depth == 0:
                 os.dup2(cls._stderr_fd, 2)
-                if cls._reaims_faulthandler:
+                # Undo hs2p's handler only while it is still installed: a dead reference
+                # means something else enabled or disabled faulthandler in the meantime.
+                if cls._reaims_faulthandler and cls._faulthandler_file() is not None:
                     if cls._faulthandler_was_enabled:
                         # Back on fd 2, where the interpreter enabled it at startup.
                         faulthandler.enable(file=2, all_threads=True)
                     else:
                         faulthandler.disable()
+                # Either way, faulthandler no longer writes to the duplicate.
                 os.close(cls._stderr_fd)
                 os.close(cls._devnull_fd)
         return False

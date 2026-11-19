@@ -148,7 +148,9 @@ hs2p redirects native stderr to `/dev/null` while it imports cuCIM and reads wit
 - On at startup, by `-X faulthandler`, `PYTHONFAULTHANDLER` or development mode, which aim it at fd 2: hs2p aims it at the real stderr while stderr is redirected, and back at fd 2 afterwards.
 - On in any other way, as pytest's plugin or an application's crash log does: hs2p leaves it alone, and dumps go where it was aimed. If that is fd 2 (`faulthandler.enable()` called with no file), a dump while stderr is redirected goes to `/dev/null`.
 
-hs2p tells the last two apart by the interpreter's options only, and reads `PYTHONFAULTHANDLER` as of hs2p's import: a program that sets it later, for its child processes, is not taken for the startup case. One that sets it before importing hs2p is. A tool that re-aims faulthandler in a process started with one of them, such as pytest run with `-X faulthandler`, is taken for the startup case, and its own file is replaced: during a cuCIM call by the stderr hs2p found, and after it by fd 2. Under pytest's default capture, such a dump is lost.
+hs2p tells the last two apart by the interpreter's options only, and reads `PYTHONFAULTHANDLER` as of hs2p's import: a program that sets it later, for its child processes, is not taken for the startup case. One that sets it before importing hs2p is. A tool that re-aims faulthandler before a cuCIM call, in a process started with one of them, such as pytest run with `-X faulthandler`, is taken for the startup case, and its own file is replaced: during a cuCIM call by the stderr hs2p found, and after it by fd 2. Under pytest's default capture, such a dump is lost.
+
+A change made to faulthandler during a cuCIM call, such as another thread aiming it at its own crash log, is kept: afterwards, hs2p turns its own handler off or back to fd 2 only while that handler is still the one installed.
 
 ### JPEG encoder
 
