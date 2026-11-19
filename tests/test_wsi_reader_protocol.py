@@ -645,7 +645,8 @@ import sys
 
 sys.path.insert(0, sys.argv[1])
 try:
-    import cucim  # noqa: F401
+    # Not ``import cucim``: it succeeds even when the native binding cannot load.
+    from cucim import CuImage  # noqa: F401
 except ImportError:
     sys.exit({_CUCIM_UNAVAILABLE_EXIT})
 
@@ -676,8 +677,8 @@ def test_cucim_reader_survives_repeated_reads_after_auto_selects_it(tmp_path):
 
     ``auto`` probes each of the nine levels once, then 20 single and 20 batched reads
     go through the reader. It runs in a child process because the fault kills the
-    interpreter; the child also checks that cuCIM imports, so the pytest process never
-    loads it. GPUs are hidden from the child: every read decodes on the CPU, and a cuCIM
+    interpreter; the child also checks that ``cucim.CuImage`` imports, so the pytest
+    process never loads cuCIM. GPUs are hidden from the child: every read decodes on the CPU, and a cuCIM
     import that fails to initialise a busy GPU is a different fault (#278).
     """
     repo_root = Path(__file__).resolve().parents[1]
@@ -694,7 +695,7 @@ def test_cucim_reader_survives_repeated_reads_after_auto_selects_it(tmp_path):
     )
 
     if result.returncode == _CUCIM_UNAVAILABLE_EXIT:
-        pytest.skip("cuCIM cannot be imported")
+        pytest.skip("cucim.CuImage cannot be imported")
     outcome = (
         f"was killed by {signal.Signals(-result.returncode).name}"
         if result.returncode < 0
