@@ -193,18 +193,20 @@ class CuCIMReader:
     def level_downsamples(self) -> list[tuple[float, float]]:
         return list(self._level_downsamples)
 
+    # Both calls into ``CuImage.read_region`` name every argument as an explicit keyword
+    # and never expand a dict: with cuCIM 26.06 on Python 3.11.0rc1, a
+    # ``read_region(**kwargs)`` call segfaults the process on its eighth single read or
+    # its second or third batched read (#281). An argument hs2p does not set gets
+    # cuCIM's own default, ``num_workers=0`` and ``device="cpu"``.
     def _read_region(self, location, size, *, level: int, num_workers: int = 1):
-        kwargs: dict[str, Any] = {
-            "location": (int(location[0]), int(location[1])),
-            "size": (int(size[0]), int(size[1])),
-            "level": int(level),
-        }
-        if num_workers > 1:
-            kwargs["num_workers"] = max(1, int(num_workers))
-        if self._gpu_decode:
-            kwargs["device"] = "cuda"
         with _suppress_native_stderr():
-            return self._slide.read_region(**kwargs)
+            return self._slide.read_region(
+                location=(int(location[0]), int(location[1])),
+                size=(int(size[0]), int(size[1])),
+                level=int(level),
+                num_workers=int(num_workers) if num_workers > 1 else 0,
+                device="cuda" if self._gpu_decode else "cpu",
+            )
 
     def read_level(self, level: int) -> np.ndarray:
         dims = self._level_dimensions[level]
@@ -259,16 +261,14 @@ class CuCIMReader:
                 yield self.read_region(location, level, requested_size)
             return
 
-        kwargs: dict[str, Any] = {
-            "location": [(int(x), int(y)) for x, y in locations],
-            "size": requested_size,
-            "level": int(level),
-            "num_workers": max(1, int(num_workers or 1)),
-        }
-        if self._gpu_decode:
-            kwargs["device"] = "cuda"
         with _suppress_native_stderr():
-            regions = self._slide.read_region(**kwargs)
+            regions = self._slide.read_region(
+                location=[(int(x), int(y)) for x, y in locations],
+                size=requested_size,
+                level=int(level),
+                num_workers=max(1, int(num_workers or 1)),
+                device="cuda" if self._gpu_decode else "cpu",
+            )
         for bounds, region in zip(bounds_per_location, regions):
             arr = _as_rgb_uint8(region)
             yield paste_region(

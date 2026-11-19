@@ -1,3 +1,5 @@
+import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -398,7 +400,12 @@ def test_vips_reader_reads_spacing_from_tiff_resolution_tag(tmp_path):
 
 
 class _FakeNativeCuImage:
-    """Stand-in for ``cucim.CuImage`` that records every ``read_region`` call."""
+    """Stand-in for ``cucim.CuImage`` that records every ``read_region`` call.
+
+    Its ``read_region`` has the defaults of ``cucim.CuImage.read_region`` (cuCIM 26.06:
+    ``num_workers=0``, ``device=cpu``), so ``calls`` holds the values cuCIM reads with,
+    whether hs2p passes them or leaves them to cuCIM's defaults.
+    """
 
     def __init__(self, read_region):
         self.metadata = {
@@ -413,9 +420,19 @@ class _FakeNativeCuImage:
         self.calls: list[dict] = []
         self._read_region = read_region
 
-    def read_region(self, **kwargs):
-        self.calls.append(dict(kwargs))
-        return self._read_region(**kwargs)
+    def read_region(
+        self, location=(), size=(), level=0, num_workers=0, device="cpu", **kwargs
+    ):
+        call = {
+            "location": location,
+            "size": size,
+            "level": level,
+            "num_workers": num_workers,
+            "device": device,
+            **kwargs,
+        }
+        self.calls.append(call)
+        return self._read_region(**call)
 
 
 def _make_cucim_reader_over(monkeypatch, native, *, gpu_decode: bool):
@@ -535,3 +552,157 @@ def test_cucim_successful_gpu_requests_keep_cuda_device_and_decoded_pixels(
     assert [int(tile[0, 0, 0]) for tile in batched] == [10, 11]
     assert [call.get("device") for call in native.calls] == ["cuda", "cuda"]
     assert native.calls[1]["num_workers"] == 3
+
+
+def _blank_pixels(**kwargs):
+    width, height = kwargs["size"]
+    if isinstance(kwargs["location"], list):
+        return [np.zeros((height, width, 3), dtype=np.uint8) for _ in kwargs["location"]]
+    return np.zeros((height, width, 3), dtype=np.uint8)
+
+
+@pytest.mark.parametrize(("gpu_decode", "device"), [(False, "cpu"), (True, "cuda")])
+def test_cucim_reads_reach_native_read_region_with_unchanged_values(
+    monkeypatch, gpu_decode, device
+):
+    """The values cuCIM reads with, as hs2p 6.1.1 sent them: a single read leaves the
+    worker count at cuCIM's default of 0, a batched read asks for at least one worker,
+    and only ``gpu_decode`` moves the device off the CPU."""
+    native = _FakeNativeCuImage(_blank_pixels)
+    reader = _make_cucim_reader_over(monkeypatch, native, gpu_decode=gpu_decode)
+    locations = [(0, 0), (16, 0)]
+
+    reader.read_region((8, 4), 0, (16, 16))
+    reader.read_level(0)
+    list(reader.read_regions(locations, 0, (16, 16)))
+    list(reader.read_regions(locations, 0, (16, 16), num_workers=1))
+    list(reader.read_regions(locations, 0, (16, 16), num_workers=4))
+
+    single = {"level": 0, "num_workers": 0, "device": device}
+    batched = {"location": [(0, 0), (16, 0)], "size": (16, 16), "level": 0, "device": device}
+    assert native.calls == [
+        {"location": (8, 4), "size": (16, 16), **single},
+        {"location": (0, 0), "size": (400, 200), **single},
+        {**batched, "num_workers": 1},
+        {**batched, "num_workers": 1},
+        {**batched, "num_workers": 4},
+    ]
+
+
+def test_cucim_reader_never_expands_a_dict_into_native_read_region():
+    """No ``self._slide.read_region`` call expands a dict with ``**``, the form that
+    segfaults cuCIM (#281). The child-process test below skips where cuCIM is not
+    installed, as in CI; this check runs everywhere."""
+    import ast
+
+    import hs2p.wsi.backends.cucim as cucim_reader_mod
+
+    tree = ast.parse(Path(cucim_reader_mod.__file__).read_text())
+    native_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "read_region"
+        and ast.unparse(node.func.value) == "self._slide"
+    ]
+
+    assert native_calls
+    expanded = [
+        ast.unparse(call)
+        for call in native_calls
+        if any(keyword.arg is None for keyword in call.keywords)
+    ]
+    assert expanded == []
+
+
+def _write_nine_level_tiff(path: Path) -> Path:
+    """A 512 px RGB pyramid halved eight times down to 2 x 2 px, at 0.25 um/px.
+
+    Tiled and uncompressed, so writing it needs no codec.
+    """
+    tifffile = pytest.importorskip("tifffile")
+    level0 = np.full((512, 512, 3), 200, dtype=np.uint8)
+    pixels_per_cm = 1e4 / 0.25
+    with tifffile.TiffWriter(path) as writer:
+        for level in range(9):
+            step = 2**level
+            writer.write(
+                level0[::step, ::step],
+                tile=(16, 16),
+                photometric="rgb",
+                subfiletype=0 if level == 0 else 1,
+                resolution=(pixels_per_cm / step, pixels_per_cm / step),
+                resolutionunit="CENTIMETER",
+            )
+    return path
+
+
+_CUCIM_UNAVAILABLE_EXIT = 77
+
+_REPEATED_CUCIM_READS = f"""
+import sys
+
+sys.path.insert(0, sys.argv[1])
+try:
+    import cucim  # noqa: F401
+except ImportError:
+    sys.exit({_CUCIM_UNAVAILABLE_EXIT})
+
+from hs2p.wsi.reader import open_slide
+
+print("progress: auto probe", flush=True)
+reader = open_slide(sys.argv[2], backend="auto")
+print("progress: auto selected", reader.backend_name, flush=True)
+assert reader.backend_name == "cucim"
+assert reader.level_count == 9
+for read in range(1, 21):
+    level = read % reader.level_count
+    tile = reader.read_region((0, 0), level, (16, 16))
+    assert tile.shape == (16, 16, 3) and (tile[0, 0] == 200).all(), (read, level)
+    print("progress: single read", read, flush=True)
+locations = [(0, 0), (16, 0), (0, 16)]
+for read in range(1, 21):
+    num_workers = 1 if read % 2 else 4
+    tiles = list(reader.read_regions(locations, 0, (16, 16), num_workers=num_workers))
+    assert len(tiles) == 3 and all((tile == 200).all() for tile in tiles), read
+    print("progress: batched read", read, flush=True)
+"""
+
+
+def test_cucim_reader_survives_repeated_reads_after_auto_selects_it(tmp_path):
+    """cuCIM 26.06 on Python 3.11.0rc1 segfaults on the eighth ``read_region`` call
+    made as ``read_region(**kwargs)``, and on the second or third batched one (#281).
+
+    ``auto`` probes each of the nine levels once, then 20 single and 20 batched reads
+    go through the reader. It runs in a child process because the fault kills the
+    interpreter; the child also checks that cuCIM imports, so the pytest process never
+    loads it. GPUs are hidden from the child: every read decodes on the CPU, and a cuCIM
+    import that fails to initialise a busy GPU is a different fault (#278).
+    """
+    repo_root = Path(__file__).resolve().parents[1]
+    slide_path = _write_nine_level_tiff(tmp_path / "nine-levels.tif")
+
+    result = subprocess.run(
+        [sys.executable, "-c", _REPEATED_CUCIM_READS, str(repo_root), str(slide_path)],
+        cwd=repo_root,
+        env={**os.environ, "CUDA_VISIBLE_DEVICES": ""},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    if result.returncode == _CUCIM_UNAVAILABLE_EXIT:
+        pytest.skip("cuCIM cannot be imported")
+    outcome = (
+        f"was killed by {signal.Signals(-result.returncode).name}"
+        if result.returncode < 0
+        else f"exited with {result.returncode}"
+    )
+    # cuCIM prints its own CUDA warnings to stdout, between the child's progress lines.
+    progress = [line for line in result.stdout.splitlines() if line.startswith("progress:")]
+    assert result.returncode == 0, (
+        f"the child {outcome} after {(progress or ['no progress'])[-1]!r}\n"
+        f"{result.stderr[-2000:]}"
+    )

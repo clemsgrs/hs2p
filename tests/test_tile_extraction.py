@@ -578,6 +578,7 @@ class TestExtractTilesToTar:
             "size": (128, 128),
             "level": 3,
             "num_workers": 5,
+            "device": "cpu",
         }
         mock_open_slide.assert_not_called()
 
@@ -609,6 +610,7 @@ class TestExtractTilesToTar:
             "size": (256, 256),
             "level": 0,
             "num_workers": 2,
+            "device": "cpu",
         }
         mock_open_slide.assert_not_called()
 
@@ -688,12 +690,14 @@ class TestExtractTilesToTar:
             "size": (32, 32),
             "level": 0,
             "num_workers": 3,
+            "device": "cpu",
         }
         assert mock_cu_image.read_region.call_args_list[1].kwargs == {
             "location": [(300, 0)],
             "size": (16, 16),
             "level": 0,
             "num_workers": 3,
+            "device": "cpu",
         }
 
     def test_reader_iterator_uses_stride_based_group_size_when_tiles_overlap(self):
