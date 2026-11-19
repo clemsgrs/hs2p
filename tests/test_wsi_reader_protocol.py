@@ -679,7 +679,8 @@ def test_cucim_reader_survives_repeated_reads_after_auto_selects_it(tmp_path):
     go through the reader. It runs in a child process because the fault kills the
     interpreter; the child also checks that ``cucim.CuImage`` imports, so the pytest
     process never loads cuCIM. GPUs are hidden from the child: every read decodes on the CPU, and a cuCIM
-    import that fails to initialise a busy GPU is a different fault (#278).
+    import that fails to initialise a busy GPU is a different fault (#278). The cuSlide2
+    plugin is turned off, because it cannot open the file with GPUs hidden.
     """
     repo_root = Path(__file__).resolve().parents[1]
     slide_path = _write_nine_level_tiff(tmp_path / "nine-levels.tif")
@@ -687,7 +688,7 @@ def test_cucim_reader_survives_repeated_reads_after_auto_selects_it(tmp_path):
     result = subprocess.run(
         [sys.executable, "-c", _REPEATED_CUCIM_READS, str(repo_root), str(slide_path)],
         cwd=repo_root,
-        env={**os.environ, "CUDA_VISIBLE_DEVICES": ""},
+        env={**os.environ, "CUDA_VISIBLE_DEVICES": "", "ENABLE_CUSLIDE2": "0"},
         capture_output=True,
         text=True,
         check=False,
