@@ -48,7 +48,12 @@ with reader.open_slide(sys.argv[1], backend="auto") as slide:
 
 
 def _run_child(script: str, *args: str, interpreter_flags: tuple[str, ...] = ()):
-    env = {k: v for k, v in os.environ.items() if k != "PYTHONFAULTHANDLER"}
+    # Either variable turns faulthandler on in the child (dev mode does), whatever the test asks.
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in {"PYTHONFAULTHANDLER", "PYTHONDEVMODE"}
+    }
     return subprocess.run(
         [sys.executable, *interpreter_flags, "-c", script, *args],
         cwd=REPO_ROOT,
@@ -108,6 +113,40 @@ def test_cucim_import_keeps_a_cufile_config_the_user_set(monkeypatch, tmp_path):
     seen = _open_reader_on_fake_cucim(monkeypatch)
 
     assert seen == user_config
+    assert os.environ[CUFILE_ENV] == user_config
+
+
+def _fail_cucim_import(monkeypatch) -> None:
+    original_import_module = cucim_reader_mod.importlib.import_module
+
+    def _import_module(name):
+        if name != "cucim":
+            return original_import_module(name)
+        raise ImportError("No module named 'cucim'")
+
+    monkeypatch.setattr(cucim_reader_mod.importlib, "import_module", _import_module)
+
+
+def test_a_failed_cucim_import_unsets_the_cufile_config_hs2p_set(monkeypatch):
+    monkeypatch.delenv(CUFILE_ENV, raising=False)
+    _fail_cucim_import(monkeypatch)
+
+    with pytest.raises(ImportError, match="cucim is required"):
+        cucim_reader_mod.CuCIMReader("fake.svs")
+
+    assert CUFILE_ENV not in os.environ
+
+
+def test_a_failed_cucim_import_keeps_a_cufile_config_the_user_set(
+    monkeypatch, tmp_path
+):
+    user_config = str(tmp_path / "my-cufile.json")
+    monkeypatch.setenv(CUFILE_ENV, user_config)
+    _fail_cucim_import(monkeypatch)
+
+    with pytest.raises(ImportError, match="cucim is required"):
+        cucim_reader_mod.CuCIMReader("fake.svs")
+
     assert os.environ[CUFILE_ENV] == user_config
 
 

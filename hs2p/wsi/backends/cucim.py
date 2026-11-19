@@ -155,11 +155,14 @@ class CuCIMReader:
             os.environ["ENABLE_CUSLIDE2"] = "1"
         # cuFile reads the variable once, when cuCIM's library loads: set it before the
         # import, the only one in hs2p. It is process-wide (see CUFILE_CONFIG_PATH).
+        sets_cufile_config = "CUFILE_ENV_PATH_JSON" not in os.environ
         os.environ.setdefault("CUFILE_ENV_PATH_JSON", str(CUFILE_CONFIG_PATH))
         with _suppress_native_stderr():
             try:
                 cucim = importlib.import_module("cucim")
             except ImportError as exc:
+                if sets_cufile_config:  # no cuCIM, so no cuFile: take the config back
+                    os.environ.pop("CUFILE_ENV_PATH_JSON", None)
                 raise ImportError(
                     "cucim is required for the cucim backend. "
                     "Install it with: pip install cucim-cuXX"
