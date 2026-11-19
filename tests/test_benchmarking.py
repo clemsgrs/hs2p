@@ -144,9 +144,10 @@ def test_benchmark_cucim_batch_mode_reports_region_and_tile_progress(monkeypatch
         def __init__(self, *_args, **_kwargs):
             pass
 
-        def read_region(self, location, size, level, num_workers):
+        def read_region(self, location, size, level, num_workers, device):
             assert level == 0
             assert num_workers == 2
+            assert device == "cpu"
             return [
                 np.zeros((int(size[0]), int(size[1]), 3), dtype=np.uint8)
                 for _ in location
