@@ -188,7 +188,8 @@ class CuCIMReader:
         os.environ.setdefault("CUFILE_ENV_PATH_JSON", str(CUFILE_CONFIG_PATH))
         with _suppress_native_stderr():
             try:
-                cucim = importlib.import_module("cucim")
+                # cuCIM's __init__ swallows a native load failure; it resurfaces here.
+                cu_image = importlib.import_module("cucim").CuImage
             except ImportError as exc:
                 if sets_cufile_config:  # no cuCIM, so no cuFile: take the config back
                     os.environ.pop("CUFILE_ENV_PATH_JSON", None)
@@ -196,7 +197,7 @@ class CuCIMReader:
                     "cucim is required for the cucim backend. "
                     "Install it with: pip install cucim-cuXX"
                 ) from exc
-            self._slide = cucim.CuImage(str(path))
+            self._slide = cu_image(str(path))
         self._gpu_decode = bool(gpu_decode)
         self._metadata = getattr(self._slide, "metadata", {}) or {}
         cucim_meta = (

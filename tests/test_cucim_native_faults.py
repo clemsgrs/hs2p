@@ -122,20 +122,41 @@ def test_cucim_import_keeps_a_cufile_config_the_user_set(monkeypatch, tmp_path):
     assert os.environ[CUFILE_ENV] == user_config
 
 
-def _fail_cucim_import(monkeypatch) -> None:
+class _CucimWithoutClara:
+    """cuCIM 26.06 whose native ``clara`` module failed to load.
+
+    Its ``__init__`` swallows that ``ImportError``, so ``import cucim`` succeeds and
+    the error resurfaces when ``cucim.CuImage`` is looked up.
+    """
+
+    def __getattr__(self, name):
+        raise ImportError("libcucim.so.26: cannot open shared object file")
+
+
+def _fail_cucim_import(monkeypatch, failure: str) -> None:
     original_import_module = cucim_reader_mod.importlib.import_module
 
     def _import_module(name):
         if name != "cucim":
             return original_import_module(name)
+        if failure == "at CuImage lookup":
+            return _CucimWithoutClara()
         raise ImportError("No module named 'cucim'")
 
     monkeypatch.setattr(cucim_reader_mod.importlib, "import_module", _import_module)
 
 
-def test_a_failed_cucim_import_unsets_the_cufile_config_hs2p_set(monkeypatch):
+CUCIM_IMPORT_FAILURES = pytest.mark.parametrize(
+    "failure", ["at import", "at CuImage lookup"]
+)
+
+
+@CUCIM_IMPORT_FAILURES
+def test_a_failed_cucim_import_unsets_the_cufile_config_hs2p_set(
+    monkeypatch, failure
+):
     monkeypatch.delenv(CUFILE_ENV, raising=False)
-    _fail_cucim_import(monkeypatch)
+    _fail_cucim_import(monkeypatch, failure)
 
     with pytest.raises(ImportError, match="cucim is required"):
         cucim_reader_mod.CuCIMReader("fake.svs")
@@ -143,12 +164,13 @@ def test_a_failed_cucim_import_unsets_the_cufile_config_hs2p_set(monkeypatch):
     assert CUFILE_ENV not in os.environ
 
 
+@CUCIM_IMPORT_FAILURES
 def test_a_failed_cucim_import_keeps_a_cufile_config_the_user_set(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, failure
 ):
     user_config = str(tmp_path / "my-cufile.json")
     monkeypatch.setenv(CUFILE_ENV, user_config)
-    _fail_cucim_import(monkeypatch)
+    _fail_cucim_import(monkeypatch, failure)
 
     with pytest.raises(ImportError, match="cucim is required"):
         cucim_reader_mod.CuCIMReader("fake.svs")
