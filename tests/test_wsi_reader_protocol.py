@@ -592,7 +592,7 @@ def test_cucim_reads_reach_native_read_region_with_unchanged_values(
 def test_cucim_reader_never_expands_a_dict_into_native_read_region():
     """No ``self._slide.read_region`` call expands a dict with ``**``, the form that
     segfaults cuCIM (#281). The child-process test below skips where cuCIM is not
-    installed, as in CI; this check runs everywhere."""
+    installed; this check runs everywhere."""
     import ast
 
     import hs2p.wsi.backends.cucim as cucim_reader_mod
