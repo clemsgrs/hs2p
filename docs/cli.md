@@ -134,6 +134,24 @@ Selection does not inspect mask labels or retry after a later decode failure: a 
 
 Requested and resolved readers are saved separately as provenance. Resume compares resolved readers, including the mask reader when a source mask exists. Pin explicit readers to keep decoder choice stable across environments or backend-priority changes. See [artifact validation](artifacts.md#resume-and-validation) for compatibility rules, including older metadata without mask-backend fields.
 
+### cuCIM and `CUFILE_ENV_PATH_JSON`
+
+Importing cuCIM loads NVIDIA cuFile, which starts a thread pool for each visible GPU. When one visible GPU is nearly out of memory (about 200 MiB free or less when measured), a worker cannot get a CUDA context and cuFile aborts the process with `CUFileThreadPoolWorker::run(): Assertion '0' failed`. This hits `cucim`, and `auto`, which tries cuCIM first. hs2p's slide reads never go through cuFile, so before its cuCIM import hs2p sets `CUFILE_ENV_PATH_JSON` to a config it ships (`hs2p.wsi.backends.cucim.CUFILE_CONFIG_PATH`). That config holds only `{"execution": {"max_io_threads": 0}}`, which turns the pool off.
+
+- The variable is process-wide, and child processes inherit it. Any other cuFile user in the process, such as kvikio or DALI, gets the same setting, and NVIDIA does not support cuFile's stream APIs when `max_io_threads` is 0.
+- To keep cuFile's thread pool, set `CUFILE_ENV_PATH_JSON` yourself, for example to `/etc/cufile.json`, before hs2p opens a slide with cuCIM. hs2p never changes a value that is already set.
+- cuFile reads the variable once, when cuCIM's library loads. If cuCIM was imported before hs2p opened a slide with it, cuFile keeps its stock config.
+
+hs2p redirects native stderr to `/dev/null` while it imports cuCIM and reads with it, to hide cuInit and cuFile warnings. If the process dies of a signal there, the native message is lost, but Python's faulthandler can still write `Fatal Python error: ...` and the Python traceback. Python cannot report the file faulthandler writes to, so hs2p acts on how it was turned on:
+
+- Off: hs2p turns it on, aimed at the real stderr, while stderr is redirected, and off again afterwards.
+- On at startup, by `-X faulthandler`, `PYTHONFAULTHANDLER` or development mode, which aim it at fd 2: hs2p aims it at the real stderr while stderr is redirected, and back at fd 2 afterwards.
+- On in any other way, as pytest's plugin or an application's crash log does: hs2p leaves it alone, and dumps go where it was aimed. If that is fd 2 (`faulthandler.enable()` called with no file), a dump while stderr is redirected goes to `/dev/null`.
+
+hs2p tells the last two apart by the interpreter's options only, and reads `PYTHONFAULTHANDLER` as of hs2p's import: a program that sets it later, for its child processes, is not taken for the startup case. One that sets it before importing hs2p is. A tool that re-aims faulthandler before a cuCIM call, in a process started with one of them, such as pytest run with `-X faulthandler`, is taken for the startup case, and its own file is replaced: during a cuCIM call by the stderr hs2p found, and after it by fd 2. Under pytest's default capture, such a dump is lost.
+
+A change made to faulthandler during a cuCIM call, such as another thread aiming it at its own crash log, is kept: afterwards, hs2p turns its own handler off or back to fd 2 only while that handler is still the one installed.
+
 ### JPEG encoder
 
 `speed.jpeg_backend` controls saved-tile encoding independently of the input readers. `pil` is the default and works with the base install. For TurboJPEG:

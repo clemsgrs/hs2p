@@ -1,5 +1,9 @@
+import faulthandler
 import importlib
 import os
+import sys
+import threading
+import weakref
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -14,6 +18,40 @@ from hs2p.wsi.backends.common import (
 from hs2p.wsi.geometry import compute_level_spacings
 
 
+# Read once, as of hs2p's import: a program may set it later for its child processes,
+# which does not turn faulthandler on in this one. A value set before hs2p is imported is
+# still taken for a startup option.
+_PYTHONFAULTHANDLER_AT_IMPORT = os.environ.get("PYTHONFAULTHANDLER")
+
+
+def _faulthandler_enabled_at_startup() -> bool:
+    """Whether the interpreter's options turn faulthandler on at startup, on fd 2.
+
+    ``PYTHONFAULTHANDLER`` is read as of hs2p's import, not from the live environment.
+    """
+    return bool(
+        sys.flags.dev_mode
+        or "faulthandler" in sys._xoptions
+        or (not sys.flags.ignore_environment and _PYTHONFAULTHANDLER_AT_IMPORT)
+    )
+
+
+class _FaulthandlerFile:
+    """The duplicate of stderr as a file object, so that a weak reference can watch it.
+
+    ``faulthandler.enable`` calls its ``fileno()`` and ``flush()``, and nothing else.
+    """
+
+    def __init__(self, fd: int):
+        self._fd = fd
+
+    def fileno(self) -> int:
+        return self._fd
+
+    def flush(self) -> None:
+        pass
+
+
 class _suppress_native_stderr:
     """Context manager that silences native (C/C++) stderr output.
 
@@ -21,22 +59,122 @@ class _suppress_native_stderr:
     ``cuFile initialization failed`` directly to file-descriptor 2.  No
     Python-level logging filter can catch these, so we temporarily point
     fd 2 at ``/dev/null`` and restore it on exit.
+
+    A process that dies of a signal in here, as cuFile's assertion aborts it,
+    would leave nothing on stderr, faulthandler output included (#278). Python
+    cannot report the file faulthandler writes to, so what happens to it
+    depends on how it was turned on:
+
+    - off: while fd 2 is redirected, it writes to a duplicate of the real
+      stderr, which names a fatal signal with the Python traceback; it is
+      turned off again on exit;
+    - on at startup (``-X faulthandler``, ``PYTHONFAULTHANDLER`` as of hs2p's
+      import, development mode), which aims it at fd 2: the same, then it is
+      put back on fd 2;
+    - on in any other way (pytest's plugin, an application's crash log): it
+      is left alone. If it writes to fd 2, a dump in here goes to
+      ``/dev/null``.
+
+    A tool that re-aimed faulthandler before the outermost context, in a
+    process started with one of those options, is taken for the startup case,
+    and its file is replaced: in here by the stderr found on entry, and after
+    the last exit by fd 2. The native message itself always goes to
+    ``/dev/null``.
+
+    A change made to faulthandler while a context is open, such as another
+    thread enabling it on its own crash log, is kept: the last exit undoes
+    hs2p's handler only while it is still the one installed. faulthandler
+    holds the only reference to the file object it was last enabled on and
+    drops it at the next ``enable`` or ``disable``, so a weak reference to
+    hs2p's ``_FaulthandlerFile`` tells. Code that checks
+    ``faulthandler.is_enabled()`` in here still sees hs2p's handler, so an
+    ``if not faulthandler.is_enabled(): faulthandler.enable()`` is skipped.
+
+    Contexts nest (the batched streaming reads wrap the reader's own) and may
+    overlap across threads, so the redirect is shared: the outermost context
+    saves the real stderr and the last one to exit restores it. An inner
+    context never takes ``/dev/null`` for the real stderr.
     """
 
+    _lock = threading.Lock()
+    _depth = 0
+    _stderr_fd = -1
+    _devnull_fd = -1
+    _faulthandler_was_enabled = False
+    _reaims_faulthandler = False
+    _faulthandler_file = None  # weak reference to the _FaulthandlerFile hs2p enabled
+
     def __enter__(self):
-        self._devnull_fd = os.open(os.devnull, os.O_WRONLY)
-        self._original_fd = os.dup(2)
-        os.dup2(self._devnull_fd, 2)
+        cls = _suppress_native_stderr
+        with cls._lock:
+            if cls._depth == 0:
+                cls._faulthandler_was_enabled = faulthandler.is_enabled()
+                cls._reaims_faulthandler = (
+                    not cls._faulthandler_was_enabled
+                    or _faulthandler_enabled_at_startup()
+                )
+                cls._devnull_fd = os.open(os.devnull, os.O_WRONLY)
+                cls._stderr_fd = os.dup(2)
+                if cls._reaims_faulthandler:
+                    faulthandler_file = _FaulthandlerFile(cls._stderr_fd)
+                    faulthandler.enable(file=faulthandler_file, all_threads=True)
+                    cls._faulthandler_file = weakref.ref(faulthandler_file)
+                    del faulthandler_file  # faulthandler now holds the only reference
+                os.dup2(cls._devnull_fd, 2)
+            cls._depth += 1
         return self
 
     def __exit__(self, *exc):
-        os.dup2(self._original_fd, 2)
-        os.close(self._original_fd)
-        os.close(self._devnull_fd)
+        cls = _suppress_native_stderr
+        with cls._lock:
+            cls._depth -= 1
+            if cls._depth == 0:
+                os.dup2(cls._stderr_fd, 2)
+                # Undo hs2p's handler only while it is still installed: a dead reference
+                # means something else enabled or disabled faulthandler in the meantime.
+                if cls._reaims_faulthandler and cls._faulthandler_file() is not None:
+                    if cls._faulthandler_was_enabled:
+                        # Back on fd 2, where the interpreter enabled it at startup.
+                        faulthandler.enable(file=2, all_threads=True)
+                    else:
+                        faulthandler.disable()
+                # Either way, faulthandler no longer writes to the duplicate.
+                os.close(cls._stderr_fd)
+                os.close(cls._devnull_fd)
         return False
 
 
 CUCIM_SUPPORTED_SUFFIXES = {".svs", ".tif", ".tiff"}
+
+# Importing cuCIM loads NVIDIA cuFile, which starts a thread pool for each visible GPU and
+# aborts the process (``CUFileThreadPoolWorker::run(): Assertion `0' failed``) when one GPU
+# is too full for a worker to get a CUDA context (#278). Slide reads never go through
+# cuFile: cuCIM's TIFF reader uses ``pread``. The shipped config holds one key,
+# ``{"execution": {"max_io_threads": 0}}``, which turns the pool off; cuFile applies a
+# partial config over its defaults. A ``CUFILE_ENV_PATH_JSON`` the user set is kept.
+CUFILE_CONFIG_PATH = Path(__file__).with_name("cufile.json")
+# Held from the check of ``CUFILE_ENV_PATH_JSON`` to its rollback, around the cuCIM import:
+# otherwise a thread whose import fails takes the variable back while another thread, which
+# found it set, imports cuCIM without it. Reentrant, so code that runs mid-import on the same
+# thread (a signal handler, a finalizer) and opens a reader cannot deadlock on it.
+_CUFILE_CONFIG_LOCK = threading.RLock()
+
+
+def _replace_locks_after_fork() -> None:
+    """In a forked child, replace both locks, which a thread absent from it may hold.
+
+    The suppression's depth and saved fds are kept: the forking thread's open contexts
+    still exit in the child and need them, and one shared count cannot tell those from
+    another thread's, which never exit there. A child forked while another thread is in a
+    suppressed call keeps fd 2 on ``/dev/null``.
+    """
+    global _CUFILE_CONFIG_LOCK
+    _CUFILE_CONFIG_LOCK = threading.RLock()
+    _suppress_native_stderr._lock = threading.Lock()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_replace_locks_after_fork)
 
 
 def supports_cucim_path(path: str | Path) -> bool:
@@ -110,15 +248,26 @@ class CuCIMReader:
     ):
         if gpu_decode:
             os.environ["ENABLE_CUSLIDE2"] = "1"
+        cu_image = None
         with _suppress_native_stderr():
-            try:
-                cucim = importlib.import_module("cucim")
-            except ImportError as exc:
-                raise ImportError(
-                    "cucim is required for the cucim backend. "
-                    "Install it with: pip install cucim-cuXX"
-                ) from exc
-            self._slide = cucim.CuImage(str(path))
+            # cuFile reads the variable once, when cuCIM's library loads: set it before the
+            # import, the only one in hs2p. It is process-wide (see CUFILE_CONFIG_PATH).
+            with _CUFILE_CONFIG_LOCK:
+                sets_cufile_config = "CUFILE_ENV_PATH_JSON" not in os.environ
+                os.environ.setdefault("CUFILE_ENV_PATH_JSON", str(CUFILE_CONFIG_PATH))
+                try:
+                    # cuCIM's __init__ swallows a native load failure; it resurfaces here.
+                    cu_image = importlib.import_module("cucim").CuImage
+                except ImportError as exc:
+                    raise ImportError(
+                        "cucim is required for the cucim backend. "
+                        "Install it with: pip install cucim-cuXX"
+                    ) from exc
+                finally:
+                    if cu_image is None and sets_cufile_config:
+                        # No CuImage class, whatever was raised: take the config back.
+                        os.environ.pop("CUFILE_ENV_PATH_JSON", None)
+            self._slide = cu_image(str(path))
         self._gpu_decode = bool(gpu_decode)
         self._metadata = getattr(self._slide, "metadata", {}) or {}
         cucim_meta = (

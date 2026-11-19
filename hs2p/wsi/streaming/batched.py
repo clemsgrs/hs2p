@@ -1,6 +1,4 @@
 
-import contextlib
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
@@ -23,19 +21,6 @@ def group_batched_read_requests_by_size(
     return grouped
 
 
-@contextlib.contextmanager
-def _suppress_native_stderr():
-    devnull_fd = os.open(os.devnull, os.O_WRONLY)
-    saved_fd = os.dup(2)
-    try:
-        os.dup2(devnull_fd, 2)
-        yield
-    finally:
-        os.dup2(saved_fd, 2)
-        os.close(saved_fd)
-        os.close(devnull_fd)
-
-
 def iter_cucim_batched_read_regions(
     *,
     image_path: Path,
@@ -45,7 +30,8 @@ def iter_cucim_batched_read_regions(
     spacing_override: float | None = None,
     gpu_decode: bool = False,
 ):
-    from hs2p.wsi.backends.cucim import CuCIMReader
+    # The reader's own suppression nests in these; it must be the same, shared one.
+    from hs2p.wsi.backends.cucim import CuCIMReader, _suppress_native_stderr
 
     with _suppress_native_stderr():
         reader = CuCIMReader(
